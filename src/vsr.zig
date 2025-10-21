@@ -1077,16 +1077,16 @@ test parse_addresses {
 
 test "parse_addresses: fuzz" {
     const test_count = 1024;
-    const len_max = 32;
+    const input_size_max = 32;
     const alphabet = " \t\n,:[]0123456789abcdefgABCDEFGXx";
 
     var prng = stdx.PRNG.from_seed_testing();
 
-    var input_max: [len_max]u8 = @splat(0);
+    var input_bufer: [input_size_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
-        const len = prng.int_inclusive(usize, len_max);
-        const input = input_max[0..len];
+        const input_size = prng.int_inclusive(usize, input_size_max);
+        const input = input_bufer[0..input_size];
         for (input) |*c| {
             c.* = alphabet[prng.index(alphabet)];
         }

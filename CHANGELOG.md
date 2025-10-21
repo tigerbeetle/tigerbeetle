@@ -3,6 +3,128 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.62
+
+Released: 2025-10-17
+
+### Safety And Performance
+
+- [#3304](https://github.com/tigerbeetle/tigerbeetle/pull/3304)
+
+  Enable VOPR to detect when the message limit is exceeded.
+
+- [#3307](https://github.com/tigerbeetle/tigerbeetle/pull/3307)
+
+  Enable unit tests for deprecated operations.
+
+- [#3309](https://github.com/tigerbeetle/tigerbeetle/pull/3309)
+
+  Improve the release process by publishing to npm via trusted publishers.
+
+### Features
+
+- [#3299](https://github.com/tigerbeetle/tigerbeetle/pull/3299)
+
+  Rephrase the "debits first" explanation in documentation.
+
+### Internals
+
+- [#3300](https://github.com/tigerbeetle/tigerbeetle/pull/3300)
+
+  Refactor the message bus to save memory and tighten explicit `SendQueue` limits.
+
+- [#3296](https://github.com/tigerbeetle/tigerbeetle/pull/3296)
+
+  Implement `BoundedArray` from scratch.
+
+- [#3292](https://github.com/tigerbeetle/tigerbeetle/pull/3292)
+
+  Remove needless use of bounded array from REPL.
+
+- [#3308](https://github.com/tigerbeetle/tigerbeetle/pull/3308)
+
+  Refactor and cleanup Vortex.
+
+### TigerTracks 🎧
+
+- [no goodbye](https://www.youtube.com/watch?v=oWDzTvjoDn4)
+
+## TigerBeetle (unreleased)
+
+Released: 2025-10-10
+
+### Features
+
+- [#3299](https://github.com/tigerbeetle/tigerbeetle/pull/3299)
+
+  Rephrase the "debits first" explanation in documentation.
+
+### Internals
+
+- [#3296](https://github.com/tigerbeetle/tigerbeetle/pull/3296)
+
+  Implement `BoundedArray` from scratch.
+
+- [#3292](https://github.com/tigerbeetle/tigerbeetle/pull/3292)
+
+  Remove needless use of bounded array from REPL.
+
+### TigerTracks 🎧
+
+- [voyager](https://www.youtube.com/watch?v=BLVI-RS9srI)
+
+## TigerBeetle 0.16.61
+
+Released: 2025-10-03
+
+### Safety And Performance
+
+- [#3263](https://github.com/tigerbeetle/tigerbeetle/pull/3263)
+
+  Speed up cluster repair by adapting the pace and distribution of repair requests according to
+  observed network conditions.
+
+- [#3282](https://github.com/tigerbeetle/tigerbeetle/pull/3282)
+
+  Speed up cluster repair by not delaying execution of committed prepares until the log is fully
+  repaired.
+
+- [#3249](https://github.com/tigerbeetle/tigerbeetle/pull/3249),
+  [#3293](https://github.com/tigerbeetle/tigerbeetle/pull/3293),
+  [#3289](https://github.com/tigerbeetle/tigerbeetle/pull/3289)
+
+  Add a dedicated fuzzer for `MessageBus`.
+
+### Features
+
+- [#3212](https://github.com/tigerbeetle/tigerbeetle/pull/3212)
+
+  Add `--log-trace` for extra verbose logging.
+
+- [#3286](https://github.com/tigerbeetle/tigerbeetle/pull/3286)
+
+  After successfully adding a test that tests tests in
+  [#3136](https://github.com/tigerbeetle/tigerbeetle/pull/3136), we doubled down on this strategy
+  and are adding a metric for tracking metrics.
+
+### Internals
+
+- [#3115](https://github.com/tigerbeetle/tigerbeetle/pull/3115)
+
+  Use ISO4217 three-letter codes when writing about currencies (so, `USD` over `$`).
+
+- [#3284](https://github.com/tigerbeetle/tigerbeetle/pull/3284)
+
+  Clean up Adaptive Replication Routing implementation.
+
+- [#3287](https://github.com/tigerbeetle/tigerbeetle/pull/3287)
+
+  Speed up `zig build test` by removing false build-time dependencies.
+
+### TigerTracks 🎧
+
+- [Сколько тебя](https://open.spotify.com/track/480AuAqeCkgwY46HocIbXk?si=510095bd23c74336)
+
 ## TigerBeetle 0.16.60
 
 Released: 2025-09-26

@@ -1001,6 +1001,49 @@ pub const Duration = struct {
     ) !void {
         try std.fmt.fmtDuration(duration.ns).format(fmt, options, writer);
     }
+
+    pub fn parse_flag_value(string: []const u8) union(enum) { ok: Duration, err: []const u8 } {
+        if (string.len == 0) return .{ .err = "expected a duration, but found nothing" };
+
+        var duration_ns: u64 = 0;
+
+        var string_remaining = string;
+        while (string_remaining.len > 0) {
+            const value_size = for (string_remaining, 0..) |character, i| {
+                if (!std.ascii.isDigit(character)) break i;
+            } else return .{ .err = "missing unit; must be one of: d/h/m/s/ms/us/ns" };
+            if (value_size == 0) return .{ .err = "missing value" };
+
+            const value = std.fmt.parseInt(u64, string_remaining[0..value_size], 10) catch |err| {
+                switch (err) {
+                    error.Overflow => return .{ .err = "integer overflow" },
+                    error.InvalidCharacter => unreachable,
+                }
+            };
+
+            for ([_]struct { ns: u64, label: []const u8 }{
+                .{ .ns = 1, .label = "ns" },
+                .{ .ns = std.time.ns_per_us, .label = "us" },
+                .{ .ns = std.time.ns_per_ms, .label = "ms" },
+                .{ .ns = std.time.ns_per_s, .label = "s" },
+                .{ .ns = std.time.ns_per_min, .label = "m" },
+                .{ .ns = std.time.ns_per_hour, .label = "h" },
+                .{ .ns = std.time.ns_per_day, .label = "d" },
+            }) |unit| {
+                if (cut_prefix(string_remaining[value_size..], unit.label)) |suffix| {
+                    duration_ns +|= unit.ns *| value;
+                    string_remaining = suffix;
+                    break;
+                }
+            } else {
+                return .{ .err = "unknown unit; must be one of: d/h/m/s/ms/us/ns" };
+            }
+        }
+        if (duration_ns >= 1_000 * std.time.ns_per_day) {
+            return .{ .err = "duration too large" };
+        }
+        return .{ .ok = .{ .ns = duration_ns } };
+    }
 };
 
 test "Instant/Duration" {
@@ -1017,6 +1060,64 @@ test "Instant/Duration" {
     assert(Duration.ms(1).ns == std.time.ns_per_ms);
     assert(Duration.seconds(1).ns == std.time.ns_per_s);
     assert(Duration.minutes(1).ns == std.time.ns_per_min);
+}
+
+test "Duration.parse_flag_value" {
+    for ([_]struct { []const u8, u64 }{
+        .{ "1h", std.time.ns_per_hour },
+        .{ "1m", std.time.ns_per_min },
+        .{ "1h2m", std.time.ns_per_hour + 2 * std.time.ns_per_min },
+        .{ "1ms2us3ns", std.time.ns_per_ms + 2 * std.time.ns_per_us + 3 },
+    }) |pair| {
+        try std.testing.expectEqual(Duration.parse_flag_value(pair.@"0").ok.ns, pair.@"1");
+    }
+
+    for ([_][]const u8{
+        "",
+        "h",
+        "1",
+        "h1",
+        "1H",
+        "1h2x",
+        "1h 2m",
+        "18446744073709551616ns",
+        "1844674407370955161s",
+    }) |string| {
+        try std.testing.expect(Duration.parse_flag_value(string) == .err);
+    }
+}
+
+test "Duration.parse_flag_value fuzz" {
+    const test_count = 1024;
+    const input_size_max = 32;
+    const alphabet = " \t\n.-e[]0123456789abcdhmuns";
+
+    var prng = PRNG.from_seed_testing();
+
+    var input_buffer: [input_size_max]u8 = @splat(0);
+    for (0..test_count) |_| {
+        const input_size = prng.int_inclusive(usize, input_size_max);
+        const input = input_buffer[0..input_size];
+        for (input) |*c| {
+            c.* = alphabet[prng.index(alphabet)];
+        }
+
+        const result = Duration.parse_flag_value(input);
+        switch (result) {
+            .ok => |duration| {
+                var buffer: [64]u8 = undefined;
+                const formatted = std.fmt.bufPrint(&buffer, "{}", .{duration}) catch unreachable;
+                const result_round_trip = Duration.parse_flag_value(formatted);
+                switch (result_round_trip) {
+                    .ok => |duration_b| {
+                        assert(duration.ns == duration_b.ns);
+                    },
+                    .err => {}, // Formatting can use floating point notation.
+                }
+            },
+            .err => {},
+        }
+    }
 }
 
 /// DateTime in UTC, intended primarily for logging.

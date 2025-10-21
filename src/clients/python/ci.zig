@@ -121,3 +121,11 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     );
     try shell.exec("{tmp_dir}/bin/python3 main.py", .{ .tmp_dir = tmp_dir });
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    const output = try shell.exec_stdout("python3 -m pip index versions tigerbeetle", .{});
+    const version_start = std.mem.indexOf(u8, output, "(").? + 1;
+    const version_end = std.mem.indexOf(u8, output, ")").?;
+
+    return output[version_start..version_end];
+}

@@ -53,6 +53,46 @@ pub const TestContext = struct {
 
     pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
+    pub const Operation = enum {
+        create_accounts,
+        create_transfers,
+        lookup_accounts,
+        lookup_transfers,
+        get_account_transfers,
+        get_account_balances,
+        query_accounts,
+        query_transfers,
+        get_change_events,
+
+        const VersionMap = std.EnumArray(Operation, StateMachine.Operation);
+        /// Variations of operations supported by the state machine,
+        /// including deprecated ones used by old clients.
+        const versions: []const VersionMap = &.{
+            .init(.{
+                .create_accounts = .create_accounts,
+                .create_transfers = .create_transfers,
+                .lookup_accounts = .lookup_accounts,
+                .lookup_transfers = .lookup_transfers,
+                .get_account_transfers = .get_account_transfers,
+                .get_account_balances = .get_account_balances,
+                .query_accounts = .query_accounts,
+                .query_transfers = .query_transfers,
+                .get_change_events = .get_change_events,
+            }),
+            .init(.{
+                .create_accounts = .deprecated_create_accounts_unbatched,
+                .create_transfers = .deprecated_create_transfers_unbatched,
+                .lookup_accounts = .deprecated_lookup_accounts_unbatched,
+                .lookup_transfers = .deprecated_lookup_transfers_unbatched,
+                .get_account_transfers = .deprecated_get_account_transfers_unbatched,
+                .get_account_balances = .deprecated_get_account_balances_unbatched,
+                .query_accounts = .deprecated_query_accounts_unbatched,
+                .query_transfers = .deprecated_query_transfers_unbatched,
+                .get_change_events = .get_change_events,
+            }),
+        };
+    };
+
     storage: Storage,
     time_sim: TimeSim,
     trace: Tracer,
@@ -265,7 +305,7 @@ const TestAction = union(enum) {
         unit: enum { nanoseconds, seconds },
     },
 
-    commit: TestContext.StateMachine.Operation,
+    commit: TestContext.Operation,
     account: TestCreateAccount,
     transfer: TestCreateTransfer,
 
@@ -564,6 +604,22 @@ const TestQueryTransfers = TestQueryFilter;
 
 fn check(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
+    const test_actions = parse_table(TestAction, test_table);
+
+    // Runs the same test for each variation of supported operations,
+    // simulating different client versions.
+    for (TestContext.Operation.versions) |*version_map| {
+        try check_version(
+            test_actions.const_slice(),
+            version_map,
+        );
+    }
+}
+
+fn check_version(
+    test_actions: []const TestAction,
+    version_map: *const TestContext.Operation.VersionMap,
+) !void {
     const allocator = std.testing.allocator;
 
     var context: TestContext = undefined;
@@ -583,10 +639,8 @@ fn check(test_table: []const u8) !void {
     var reply = std.ArrayListAligned(u8, 16).init(allocator);
     defer reply.deinit();
 
-    var operation: ?TestContext.StateMachine.Operation = null;
-
-    const test_actions = parse_table(TestAction, test_table);
-    for (test_actions.const_slice()) |test_action| {
+    var operation: ?TestContext.Operation = null;
+    for (test_actions) |test_action| {
         switch (test_action) {
             .setup => |b| {
                 assert(operation == null);
@@ -894,17 +948,7 @@ fn check(test_table: []const u8) !void {
                 try reply.appendSlice(std.mem.asBytes(t));
             },
             .commit => |commit_operation| {
-                assert(operation == null or operation.? == switch (commit_operation) {
-                    .deprecated_create_accounts => .create_accounts,
-                    .deprecated_create_transfers => .create_transfers,
-                    .deprecated_lookup_accounts => .lookup_accounts,
-                    .deprecated_lookup_transfers => .lookup_transfers,
-                    .deprecated_get_account_transfers => .get_account_transfers,
-                    .deprecated_get_account_balances => .get_account_balances,
-                    .deprecated_query_accounts => .query_accounts,
-                    .deprecated_query_transfers => .query_transfers,
-                    else => commit_operation,
-                });
+                assert(operation == null or operation.? == commit_operation);
                 assert(!context.busy);
 
                 const reply_actual_buffer = try allocator.alignedAlloc(
@@ -916,17 +960,18 @@ fn check(test_table: []const u8) !void {
                 const payload_size: u32 = @intCast(request.items.len);
                 request.expandToCapacity();
 
+                const operation_actual = version_map.get(commit_operation);
                 const reply_actual = context.submit(
-                    commit_operation,
+                    operation_actual,
                     request.items,
                     payload_size,
                     reply_actual_buffer[0..TestContext.message_body_size_max],
                 );
 
-                switch (commit_operation) {
-                    inline else => |commit_operation_comptime| {
+                switch (operation_actual) {
+                    inline else => |operation_actual_comptime| {
                         const Result = TestContext.StateMachine.ResultType(
-                            commit_operation_comptime,
+                            operation_actual_comptime,
                         );
                         try testing.expectEqualSlices(
                             Result,
@@ -2783,60 +2828,6 @@ test "get_change_events" {
     );
 }
 
-test "deprecated operations" {
-    try check(
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ HIST _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C2   _   _   _ _    _ _ _ _ ok
-        \\ commit deprecated_create_accounts
-        \\
-        \\ transfer T1 A1 A2 1   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _ _ _ _ ok
-        \\ transfer T2 A2 A1 2   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
-        \\ transfer T3 A1 A2 3   _  _  _  _    _ L1 C3   _   _   _   _   _   _ _  _ _ _ _ ok
-        \\ transfer T4 A1 A2 0   _  _  _  _    _ L2 C4   _   _   _   _   _   _ _  _ _ _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ commit deprecated_create_transfers
-        \\
-        \\ lookup_account A1 0  4  0  2  _
-        \\ lookup_account A2 0  2  0  4  _
-        \\ commit deprecated_lookup_accounts
-        \\
-        \\ lookup_transfer T1 exists true
-        \\ lookup_transfer T2 exists true
-        \\ lookup_transfer T3 exists true
-        \\ lookup_transfer T4 exists false
-        \\ lookup_transfer -0 exists false
-        \\ commit deprecated_lookup_transfers
-        \\
-        \\ get_account_transfers A1 _ _ _ _ _  _ L-0 DR CR  _
-        \\ get_account_transfers_result T1
-        \\ get_account_transfers_result T2
-        \\ get_account_transfers_result T3
-        \\ commit deprecated_get_account_transfers
-        \\
-        \\ get_account_balances A1 _ _ _ _  _  _ L-0 DR CR  _
-        \\ get_account_balances_result T1 0 1 0 0
-        \\ get_account_balances_result T2 0 1 0 2
-        \\ get_account_balances_result T3 0 4 0 2
-        \\ commit deprecated_get_account_balances
-        \\
-        \\ query_accounts U0 U0 U0 L1 C0 _ _ L-0 _
-        \\ query_accounts_result A1 0  4  0  2  _
-        \\ query_accounts_result A2 0  2  0  4  _
-        \\ commit deprecated_query_accounts
-        \\
-        \\ query_transfers U0 U0 U0 L1 C0 _ _ L-0 _
-        \\ query_transfers_result T1
-        \\ query_transfers_result T2
-        \\ query_transfers_result T3
-        \\ commit deprecated_query_transfers
-        \\
-        // Zero-sized body:
-        \\ commit deprecated_create_accounts
-        \\ commit deprecated_create_transfers
-        \\ commit deprecated_lookup_accounts
-        \\ commit deprecated_lookup_transfers
-    );
-}
-
 // Sanity test to check the maximum batch size on a 1MiB message.
 // For a comprehensive test of all operations, see the `input_valid` test.
 test "StateMachine: batch_elements_max" {
@@ -2857,19 +2848,19 @@ test "StateMachine: batch_elements_max" {
 
     // No multi-batch encode.
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_create_accounts,
+        .deprecated_create_accounts_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_lookup_accounts,
+        .deprecated_lookup_accounts_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_create_transfers,
+        .deprecated_create_transfers_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_lookup_transfers,
+        .deprecated_lookup_transfers_unbatched,
         message_body_size_max,
     ));
 

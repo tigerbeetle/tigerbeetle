@@ -11,6 +11,9 @@ jobs:
     permissions:
       packages: write
       contents: write
+      # Required for OIDC.
+      # See: https://docs.npmjs.com/trusted-publishers
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +46,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '18.x'
+          node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
 
       - uses: actions/setup-python@v4
@@ -60,7 +63,6 @@ jobs:
           MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
-          NODE_AUTH_TOKEN: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
           TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}

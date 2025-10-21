@@ -197,12 +197,16 @@ pub const main =
     if (@import("root") != @This()) {} else struct {
         fn main() !void {
             while (true) {
-                _ = try std.io.getStdErr().write("yep\n");
+                try std.io.getStdOut().writeAll("yep\n");
             }
         }
     }.main;
 
 test "LoggedProcess: starts and stops" {
+    if (builtin.os.tag != .linux) {
+        return error.SkipZigTest;
+    }
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer assert(gpa.deinit() == .ok);
@@ -256,34 +260,9 @@ test "LoggedProcess: starts and stops" {
 
     const argv: []const []const u8 = &.{test_exe};
 
-    var process = try LoggedProcess.spawn(allocator, argv);
+    var process = try LoggedProcess.spawn(allocator, argv, .{});
     defer process.destroy(allocator);
 
     std.time.sleep(10 * std.time.ns_per_ms);
     _ = try process.terminate();
-}
-
-/// Formats the ports as comma-separated. Caller owns slice after successful return.
-pub fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
-    assert(ports.len > 0);
-
-    var out = std.ArrayList(u8).init(allocator);
-    errdefer out.deinit();
-
-    const writer = out.writer();
-
-    try std.fmt.format(writer, "{d}", .{ports[0]});
-    for (ports[1..]) |port| {
-        try writer.writeByte(',');
-        try std.fmt.format(writer, "{d}", .{port});
-    }
-
-    return out.toOwnedSlice();
-}
-
-test comma_separate_ports {
-    const formatted = try comma_separate_ports(std.testing.allocator, &.{ 3000, 3001, 3002 });
-    defer std.testing.allocator.free(formatted);
-
-    try std.testing.expectEqualStrings("3000,3001,3002", formatted);
 }

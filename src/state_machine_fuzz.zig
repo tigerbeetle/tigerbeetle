@@ -128,16 +128,18 @@ fn build_batch(
         .get_change_events => build_get_change_events_filter(prng, buffer),
 
         // No payload, `create_*` require compaction to be hooked up.
-        .deprecated_create_accounts, .deprecated_create_transfers => 0,
+        .deprecated_create_accounts_unbatched,
+        .deprecated_create_transfers_unbatched,
+        => 0,
 
-        .deprecated_lookup_accounts,
-        .deprecated_lookup_transfers,
+        .deprecated_lookup_accounts_unbatched,
+        .deprecated_lookup_transfers_unbatched,
         => build_lookup(prng, buffer),
-        .deprecated_get_account_transfers,
-        .deprecated_get_account_balances,
+        .deprecated_get_account_transfers_unbatched,
+        .deprecated_get_account_balances_unbatched,
         => build_account_filter(prng, buffer),
-        .deprecated_query_accounts,
-        .deprecated_query_transfers,
+        .deprecated_query_accounts_unbatched,
+        .deprecated_query_transfers_unbatched,
         => build_query_filter(prng, buffer),
     };
 }

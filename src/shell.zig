@@ -916,45 +916,100 @@ pub const HttpOptions = struct {
         }
     };
 
-    content_type: ?ContentType,
-    authorization: ?[]const u8,
+    content_type: ?ContentType = null,
+    authorization: ?[]const u8 = null,
+
+    response_body_size_max: u32 = 512 * stdx.KiB,
 };
 
-/// Issues an HTTP POST request with the given `body` to the given `url`.
+pub fn http_get(shell: *Shell, url: []const u8, options: HttpOptions) ![]const u8 {
+    return shell.http_request(.get, url, options);
+}
+
+pub fn http_post(
+    shell: *Shell,
+    url: []const u8,
+    body: []const u8,
+    options: HttpOptions,
+) ![]const u8 {
+    return shell.http_request(.{ .post = body }, url, options);
+}
+
+/// Issues an HTTP request to the given `url` and returns the response.
 ///
+/// The returned body is owned by the shell arena and doesn't need to be freed.
 /// If the response is not 200 OK, the response body is logged and an error is returned.
-pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: HttpOptions) !void {
-    errdefer |err| log.err("failed to HTTP post to \"{s}\": {s}", .{ url, @errorName(err) });
+fn http_request(
+    shell: *Shell,
+    method: union(enum) { get, post: []const u8 },
+    url: []const u8,
+    options: HttpOptions,
+) ![]const u8 {
+    errdefer |err| log.err("failed to HTTP {s} to \"{s}\": {s}", .{
+        @tagName(method),
+        url,
+        @errorName(err),
+    });
 
     var client = std.http.Client{ .allocator = shell.gpa };
     defer client.deinit();
 
     const uri = try std.Uri.parse(url);
-    var header_buffer: [4 << 10]u8 = undefined;
-    var request = try client.open(.POST, uri, .{ .server_header_buffer = &header_buffer });
+    var header_buffer: [4 * stdx.KiB]u8 = undefined;
+    var request = try client.open(
+        switch (method) {
+            .post => .POST,
+            .get => .GET,
+        },
+        uri,
+        .{ .server_header_buffer = &header_buffer },
+    );
     defer request.deinit();
 
     if (options.content_type) |content_type| {
         request.headers.content_type = .{ .override = content_type.string() };
     }
+
     if (options.authorization) |authorization| {
         request.headers.authorization = .{ .override = authorization };
     }
-    request.transfer_encoding = .{ .content_length = body.len };
+
+    if (method == .post) {
+        request.transfer_encoding = .{ .content_length = method.post.len };
+    }
 
     try request.send();
-    try request.writeAll(body);
+    if (method == .post) {
+        try request.writeAll(method.post);
+    }
     try request.finish();
     try request.wait();
 
-    if (request.response.status != std.http.Status.ok) {
-        const response_body_size_max = 512 << 10;
-        var response_body_buffer: [response_body_size_max]u8 = undefined;
-        const response_body_len = try request.readAll(&response_body_buffer);
-        const response_body = response_body_buffer[0..response_body_len];
-        log.err("response: {s}", .{response_body});
-        return error.WrongStatusResponse;
+    const response_body_buffer_size = request.response.content_length orelse
+        options.response_body_size_max;
+
+    if (response_body_buffer_size > options.response_body_size_max) {
+        return error.ResponseTooLarge;
     }
+
+    const response_body_buffer = try shell.arena.allocator().alloc(
+        u8,
+        response_body_buffer_size,
+    );
+    const response_body_size = try request.readAll(response_body_buffer);
+    assert(response_body_size <= options.response_body_size_max);
+    const response_body = response_body_buffer[0..response_body_size];
+
+    if (request.response.content_length) |response_content_length| {
+        assert(response_content_length == response_body_size);
+    }
+
+    if (request.response.status != std.http.Status.ok) {
+        log.err("response: {s}", .{response_body});
+        return error.ResponseWrongStatus;
+    }
+
+    return response_body;
 }
 
 /// Converts an ISO8601 timestamp into seconds from the epoch by shelling out to the `date` util.
@@ -1098,4 +1153,33 @@ pub fn zip_executable(
         .comment_len = 0,
     };
     try zip_file_writer.writer().writeStructEndian(end_record, .little);
+}
+
+pub fn sha256sum(shell: *Shell, file_path: []const u8) !u256 {
+    const buffer = try shell.gpa.alloc(u8, 512 * stdx.KiB);
+    defer shell.gpa.free(buffer);
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+
+    const file = try shell.cwd.openFile(file_path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    var bytes_read_total: u64 = 0;
+    while (bytes_read_total < stat.size) {
+        const bytes_read = try file.readAll(buffer);
+        if (bytes_read == 0) {
+            break;
+        }
+
+        bytes_read_total += bytes_read;
+        hasher.update(buffer[0..bytes_read]);
+    }
+
+    assert(stat.size == bytes_read_total);
+
+    var output: u256 = undefined;
+    hasher.final(std.mem.asBytes(&output));
+
+    return output;
 }

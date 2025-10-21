@@ -157,3 +157,34 @@ fn mvn_update(shell: *Shell) !union(enum) { ok, retry: anyerror } {
         return err;
     }
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    const url = "https://central.sonatype.com/api/internal/browse/component/versions?" ++
+        "sortField=normalizedVersion&sortDirection=desc&page=0&size=1&" ++
+        "filter=namespace%3Acom.tigerbeetle%2Cname%3Atigerbeetle-java";
+
+    const response_body = try shell.http_get(url, .{});
+
+    const MavenSearch = struct {
+        const Component = struct {
+            namespace: []const u8,
+            name: []const u8,
+            version: []const u8,
+        };
+        components: []Component,
+    };
+
+    const maven_search_results = try std.json.parseFromSliceLeaky(
+        MavenSearch,
+        shell.arena.allocator(),
+        response_body,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    assert(maven_search_results.components.len == 1);
+
+    assert(std.mem.eql(u8, maven_search_results.components[0].namespace, "com.tigerbeetle"));
+    assert(std.mem.eql(u8, maven_search_results.components[0].name, "tigerbeetle-java"));
+
+    return maven_search_results.components[0].version;
+}

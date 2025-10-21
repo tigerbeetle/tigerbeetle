@@ -14,8 +14,8 @@ The data file is divided into several zones, with the main ones being:
 - superblock
 - grid
 
-The grid forms the bulk of the data file (up to several terabytes). It is an elastic array of 64KiB
-blocks:
+The grid forms the bulk of the data file (up to several terabytes). It is an elastic array of 
+512KiB blocks:
 
 ```zig
 pub const Block = [constants.block_size]u8;

@@ -251,6 +251,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 pool.* = try MessagePool.init(allocator, .{ .replica = .{
                     .members_count = options.cluster.replica_count + options.cluster.standby_count,
                     .pipeline_requests_limit = pipeline_requests_limit,
+                    .message_bus = .testing,
                 } });
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);

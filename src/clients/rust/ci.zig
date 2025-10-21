@@ -60,3 +60,8 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     );
     try shell.exec("cargo run", .{});
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    _ = shell;
+    return "unimplemented";
+}

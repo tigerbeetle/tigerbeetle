@@ -188,15 +188,30 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         query_transfers = @intFromEnum(Operation.query_transfers),
         get_change_events = @intFromEnum(Operation.get_change_events),
 
-        deprecated_create_accounts = @intFromEnum(Operation.deprecated_create_accounts),
-        deprecated_create_transfers = @intFromEnum(Operation.deprecated_create_transfers),
-        deprecated_lookup_accounts = @intFromEnum(Operation.deprecated_lookup_accounts),
-        deprecated_lookup_transfers = @intFromEnum(Operation.deprecated_lookup_transfers),
-        deprecated_get_account_transfers = @intFromEnum(Operation
-            .deprecated_get_account_transfers),
-        deprecated_get_account_balances = @intFromEnum(Operation.deprecated_get_account_balances),
-        deprecated_query_accounts = @intFromEnum(Operation.deprecated_query_accounts),
-        deprecated_query_transfers = @intFromEnum(Operation.deprecated_query_transfers),
+        deprecated_create_accounts_unbatched = @intFromEnum(
+            Operation.deprecated_create_accounts_unbatched,
+        ),
+        deprecated_create_transfers_unbatched = @intFromEnum(
+            Operation.deprecated_create_transfers_unbatched,
+        ),
+        deprecated_lookup_accounts_unbatched = @intFromEnum(
+            Operation.deprecated_lookup_accounts_unbatched,
+        ),
+        deprecated_lookup_transfers_unbatched = @intFromEnum(
+            Operation.deprecated_lookup_transfers_unbatched,
+        ),
+        deprecated_get_account_transfers_unbatched = @intFromEnum(
+            Operation.deprecated_get_account_transfers_unbatched,
+        ),
+        deprecated_get_account_balances_unbatched = @intFromEnum(
+            Operation.deprecated_get_account_balances_unbatched,
+        ),
+        deprecated_query_accounts_unbatched = @intFromEnum(
+            Operation.deprecated_query_accounts_unbatched,
+        ),
+        deprecated_query_transfers_unbatched = @intFromEnum(
+            Operation.deprecated_query_transfers_unbatched,
+        ),
     };
 
     const Lookup = enum {
@@ -473,27 +488,27 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                     const count = switch (action_comptime) {
                         .create_accounts,
-                        .deprecated_create_accounts,
+                        .deprecated_create_accounts_unbatched,
                         => self.build_create_accounts(
                             client_index,
                             batchable,
                         ),
                         .create_transfers,
-                        .deprecated_create_transfers,
+                        .deprecated_create_transfers_unbatched,
                         => self.build_create_transfers(
                             client_index,
                             batchable,
                         ),
                         .lookup_accounts,
-                        .deprecated_lookup_accounts,
+                        .deprecated_lookup_accounts_unbatched,
                         => self.build_lookup_accounts(batchable),
                         .lookup_transfers,
-                        .deprecated_lookup_transfers,
+                        .deprecated_lookup_transfers_unbatched,
                         => self.build_lookup_transfers(batchable),
                         .get_account_transfers,
                         .get_account_balances,
-                        .deprecated_get_account_transfers,
-                        .deprecated_get_account_balances,
+                        .deprecated_get_account_transfers_unbatched,
+                        .deprecated_get_account_balances_unbatched,
                         => self.build_get_account_filter(
                             client_index,
                             action_comptime,
@@ -501,8 +516,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         ),
                         .query_accounts,
                         .query_transfers,
-                        .deprecated_query_accounts,
-                        .deprecated_query_transfers,
+                        .deprecated_query_accounts_unbatched,
+                        .deprecated_query_transfers_unbatched,
                         => self.build_query_filter(
                             client_index,
                             action_comptime,
@@ -617,7 +632,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             switch (operation) {
                 .create_accounts,
-                .deprecated_create_accounts,
+                .deprecated_create_accounts_unbatched,
                 => self.auditor.on_create_accounts(
                     client_index,
                     timestamp,
@@ -625,7 +640,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.CreateAccountsResult, reply_body),
                 ),
                 .create_transfers,
-                .deprecated_create_transfers,
+                .deprecated_create_transfers_unbatched,
                 => self.on_create_transfers(
                     client_index,
                     timestamp,
@@ -633,7 +648,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.CreateTransfersResult, reply_body),
                 ),
                 .lookup_accounts,
-                .deprecated_lookup_accounts,
+                .deprecated_lookup_accounts_unbatched,
                 => self.auditor.on_lookup_accounts(
                     client_index,
                     timestamp,
@@ -641,7 +656,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.Account, reply_body),
                 ),
                 .lookup_transfers,
-                .deprecated_lookup_transfers,
+                .deprecated_lookup_transfers_unbatched,
                 => self.on_lookup_transfers(
                     client_index,
                     timestamp,
@@ -649,7 +664,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.Transfer, reply_body),
                 ),
                 inline .get_account_transfers,
-                .deprecated_get_account_transfers,
+                .deprecated_get_account_transfers_unbatched,
                 => |operation_comptime| self.on_get_account_transfers(
                     operation_comptime,
                     timestamp,
@@ -657,7 +672,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.Transfer, reply_body),
                 ),
                 inline .get_account_balances,
-                .deprecated_get_account_balances,
+                .deprecated_get_account_balances_unbatched,
                 => |operation_comptime| self.on_get_account_balances(
                     operation_comptime,
                     timestamp,
@@ -665,7 +680,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.AccountBalance, reply_body),
                 ),
                 inline .query_accounts,
-                .deprecated_query_accounts,
+                .deprecated_query_accounts_unbatched,
                 => |operation_comptime| self.on_query(
                     operation_comptime,
                     timestamp,
@@ -673,7 +688,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.Account, reply_body),
                 ),
                 inline .query_transfers,
-                .deprecated_query_transfers,
+                .deprecated_query_transfers_unbatched,
                 => |operation_comptime| self.on_query(
                     operation_comptime,
                     timestamp,
@@ -913,8 +928,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             _ = client_index;
             comptime assert(action == .get_account_transfers or
                 action == .get_account_balances or
-                action == .deprecated_get_account_transfers or
-                action == .deprecated_get_account_balances);
+                action == .deprecated_get_account_transfers_unbatched or
+                action == .deprecated_get_account_balances_unbatched);
             assert(body.len == 1);
             const account_filter = &body[0];
             account_filter.* = tb.AccountFilter{
@@ -1008,8 +1023,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             _ = client_index;
             comptime assert(action == .query_accounts or
                 action == .query_transfers or
-                action == .deprecated_query_accounts or
-                action == .deprecated_query_transfers);
+                action == .deprecated_query_accounts_unbatched or
+                action == .deprecated_query_transfers_unbatched);
             assert(body.len == 1);
             const query_filter = &body[0];
 
@@ -1068,10 +1083,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 // Maybe filter by timestamp:
                 const state = switch (action) {
                     .query_accounts,
-                    .deprecated_query_accounts,
+                    .deprecated_query_accounts_unbatched,
                     => &query_intersection.accounts,
                     .query_transfers,
-                    .deprecated_query_transfers,
+                    .deprecated_query_transfers_unbatched,
                     => &query_intersection.transfers,
                     else => unreachable,
                 };
@@ -1301,44 +1316,44 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const batch_min = switch (action) {
                 .create_accounts,
                 .lookup_accounts,
-                .deprecated_create_accounts,
-                .deprecated_lookup_accounts,
+                .deprecated_create_accounts_unbatched,
+                .deprecated_lookup_accounts_unbatched,
                 => self.options.accounts_batch_size_min,
                 .create_transfers,
                 .lookup_transfers,
-                .deprecated_create_transfers,
-                .deprecated_lookup_transfers,
+                .deprecated_create_transfers_unbatched,
+                .deprecated_lookup_transfers_unbatched,
                 => self.options.transfers_batch_size_min,
                 .get_account_transfers,
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
-                .deprecated_get_account_transfers,
-                .deprecated_get_account_balances,
-                .deprecated_query_accounts,
-                .deprecated_query_transfers,
+                .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                .deprecated_query_accounts_unbatched,
+                .deprecated_query_transfers_unbatched,
                 .get_change_events,
                 => 1,
             };
             const batch_span = switch (action) {
                 .create_accounts,
                 .lookup_accounts,
-                .deprecated_create_accounts,
-                .deprecated_lookup_accounts,
+                .deprecated_create_accounts_unbatched,
+                .deprecated_lookup_accounts_unbatched,
                 => self.options.accounts_batch_size_span,
                 .create_transfers,
                 .lookup_transfers,
-                .deprecated_create_transfers,
-                .deprecated_lookup_transfers,
+                .deprecated_create_transfers_unbatched,
+                .deprecated_lookup_transfers_unbatched,
                 => self.options.transfers_batch_size_span,
                 .get_account_transfers,
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
-                .deprecated_get_account_transfers,
-                .deprecated_get_account_balances,
-                .deprecated_query_accounts,
-                .deprecated_query_transfers,
+                .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                .deprecated_query_accounts_unbatched,
+                .deprecated_query_transfers_unbatched,
                 .get_change_events,
                 => 0,
             };
@@ -1511,7 +1526,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             _ = timestamp;
             comptime assert(operation == .get_account_transfers or
-                operation == .deprecated_get_account_transfers);
+                operation == .deprecated_get_account_transfers_unbatched);
             assert(body.len == 1);
 
             const batch_result_max = AccountingStateMachine.operation_result_max(
@@ -1619,7 +1634,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             _ = timestamp;
             comptime assert(operation == .get_account_balances or
-                operation == .deprecated_get_account_balances);
+                operation == .deprecated_get_account_balances_unbatched);
             assert(body.len == 1);
 
             const batch_result_max = AccountingStateMachine.operation_result_max(
@@ -1684,8 +1699,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             comptime assert(operation == .get_account_transfers or
                 operation == .get_account_balances or
-                operation == .deprecated_get_account_transfers or
-                operation == .deprecated_get_account_balances);
+                operation == .deprecated_get_account_transfers_unbatched or
+                operation == .deprecated_get_account_balances_unbatched);
             maybe(account_filter.limit == 0);
 
             const batch_result_max = AccountingStateMachine.operation_result_max(
@@ -1735,8 +1750,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             _ = timestamp;
             comptime assert(operation == .query_accounts or
                 operation == .query_transfers or
-                operation == .deprecated_query_accounts or
-                operation == .deprecated_query_transfers);
+                operation == .deprecated_query_accounts_unbatched or
+                operation == .deprecated_query_transfers_unbatched);
             assert(body.len == 1);
 
             const batch_result_max: u32 = AccountingStateMachine.operation_result_max(
@@ -1764,10 +1779,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const query_intersection = self.auditor.query_intersections[query_intersection_index];
             const state = switch (operation) {
                 .query_accounts,
-                .deprecated_query_accounts,
+                .deprecated_query_accounts_unbatched,
                 => &query_intersection.accounts,
                 .query_transfers,
-                .deprecated_query_transfers,
+                .deprecated_query_transfers_unbatched,
                 => &query_intersection.transfers,
                 else => unreachable,
             };
@@ -1816,7 +1831,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 assert(result.code == filter.code);
 
                 if (operation == .query_transfers or
-                    operation == .deprecated_query_transfers)
+                    operation == .deprecated_query_transfers_unbatched)
                 {
                     validate_transfer_checksum(result);
                 }
@@ -1985,7 +2000,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     options.batch_size_limit,
                 ),
                 StateMachine.operation_event_max(
-                    .deprecated_create_accounts,
+                    .deprecated_create_accounts_unbatched,
                     options.batch_size_limit,
                 ),
             );
@@ -1999,7 +2014,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     options.batch_size_limit,
                 ),
                 StateMachine.operation_event_max(
-                    .deprecated_create_transfers,
+                    .deprecated_create_transfers_unbatched,
                     options.batch_size_limit,
                 ),
             );
@@ -2025,7 +2040,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                             options.batch_size_limit,
                         ),
                         StateMachine.operation_event_max(
-                            .deprecated_create_transfers,
+                            .deprecated_create_transfers_unbatched,
                             options.batch_size_limit,
                         ),
                     ),
@@ -2042,14 +2057,14 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     .query_transfers = prng.range_inclusive(u64, 1, 20),
                     .get_change_events = prng.range_inclusive(u64, 1, 20),
 
-                    .deprecated_create_accounts = prng.range_inclusive(u64, 1, 10),
-                    .deprecated_create_transfers = prng.range_inclusive(u64, 1, 100),
-                    .deprecated_lookup_accounts = prng.range_inclusive(u64, 1, 20),
-                    .deprecated_lookup_transfers = prng.range_inclusive(u64, 1, 20),
-                    .deprecated_get_account_transfers = prng.range_inclusive(u64, 1, 20),
-                    .deprecated_get_account_balances = prng.range_inclusive(u64, 1, 20),
-                    .deprecated_query_accounts = prng.range_inclusive(u64, 1, 20),
-                    .deprecated_query_transfers = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_create_accounts_unbatched = prng.range_inclusive(u64, 1, 10),
+                    .deprecated_create_transfers_unbatched = prng.range_inclusive(u64, 1, 100),
+                    .deprecated_lookup_accounts_unbatched = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_lookup_transfers_unbatched = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_get_account_transfers_unbatched = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_get_account_balances_unbatched = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_query_accounts_unbatched = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_query_transfers_unbatched = prng.range_inclusive(u64, 1, 20),
                 },
                 .create_account_invalid_probability = ratio(1, 100),
                 .create_transfer_invalid_probability = ratio(1, 100),

@@ -900,13 +900,6 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
 
     assert(try shell.dir_exists("zig-out/dist/node"));
 
-    // `NODE_AUTH_TOKEN` env var doesn't have a special meaning in npm. It does have special meaning
-    // in GitHub Actions, which adds a literal
-    //
-    //    //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
-    //
-    // to the .npmrc file (that is, node config file itself supports env variables).
-    _ = try shell.env_get("NODE_AUTH_TOKEN");
     try shell.exec("npm publish {package}", .{
         .package = try shell.fmt("zig-out/dist/node/tigerbeetle-node-{s}.tgz", .{
             info.tag,

@@ -95,3 +95,15 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.env.put("CC", zig_cc);
     try shell.exec("go run main.go", .{});
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    // Example output:
+    //  github.com/tigerbeetle/tigerbeetle-go v0.9.149 v0.13.56 v0.13.57
+    const output = try shell.exec_stdout(
+        "go list -m -versions github.com/tigerbeetle/tigerbeetle-go",
+        .{},
+    );
+    const last_version = std.mem.lastIndexOf(u8, output, " v").?;
+
+    return output[last_version + 2 ..];
+}

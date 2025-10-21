@@ -173,3 +173,31 @@ fn nuget_install(shell: *Shell, options: struct {
         return err;
     }
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    const DotnetSearch = struct {
+        const SearchResult = struct {
+            const Packages = struct {
+                id: []const u8,
+                latestVersion: []const u8,
+            };
+            packages: []Packages,
+        };
+        searchResult: []SearchResult,
+    };
+
+    const output = try shell.exec_stdout("dotnet package search tigerbeetle --format json", .{});
+    const dotnet_search_results = try std.json.parseFromSliceLeaky(
+        DotnetSearch,
+        shell.arena.allocator(),
+        output,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    assert(dotnet_search_results.searchResult.len == 1);
+    assert(dotnet_search_results.searchResult[0].packages.len == 1);
+
+    assert(std.mem.eql(u8, dotnet_search_results.searchResult[0].packages[0].id, "tigerbeetle"));
+
+    return dotnet_search_results.searchResult[0].packages[0].latestVersion;
+}
