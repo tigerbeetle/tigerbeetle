@@ -60,7 +60,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
 
         pub inline fn key_from_value(value: *const CompositeKey) Key {
-            if (constants.verify) assert(value.padding == 0);
+            assert(value.padding == 0);
             if (Field == void) {
                 comptime assert(Key == u64);
                 return value.timestamp & ~tombstone_bit;
@@ -75,7 +75,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
 
         pub inline fn tombstone(value: *const CompositeKey) bool {
-            if (constants.verify) assert(value.padding == 0);
+            assert(value.padding == 0);
             return (value.timestamp & tombstone_bit) != 0;
         }
 

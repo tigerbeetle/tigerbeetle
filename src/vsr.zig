@@ -1292,7 +1292,7 @@ pub const Headers = struct {
     pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
 
-        if (constants.verify) assert(header.valid_checksum());
+        assert(header.valid_checksum());
         assert(header.command == .prepare);
         assert(header.operation != .reserved);
         assert(header.invalid() == null);

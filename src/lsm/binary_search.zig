@@ -43,7 +43,7 @@ pub fn binary_search_values_upsert_index(
     var offset: usize = 0;
     var length: usize = values.len;
     while (length > 1) {
-        if (constants.verify) {
+        {
             assert(offset == 0 or switch (comptime config.mode) {
                 .lower_bound => key_from_value(&values[offset - 1]) < key,
                 .upper_bound => key_from_value(&values[offset - 1]) <= key,
@@ -114,7 +114,7 @@ pub fn binary_search_values_upsert_index(
         length -= half;
     }
 
-    if (constants.verify) {
+    {
         assert(length == 1);
 
         assert(offset == 0 or switch (comptime config.mode) {
@@ -130,7 +130,7 @@ pub fn binary_search_values_upsert_index(
 
     offset += @intFromBool(key_from_value(&values[offset]) < key);
 
-    if (constants.verify) {
+    {
         assert(offset == 0 or switch (config.mode) {
             .lower_bound => key_from_value(&values[offset - 1]) < key,
             .upper_bound => key_from_value(&values[offset - 1]) <= key,
@@ -191,9 +191,7 @@ pub inline fn binary_search_values(
 
     if (exact) {
         const value = &values[index];
-        if (constants.verify) {
-            assert(key == key_from_value(value));
-        }
+        assert(key == key_from_value(value));
         return value;
     } else {
         // TODO: Figure out how to fuzz this without causing asymptotic

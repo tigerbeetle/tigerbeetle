@@ -174,7 +174,7 @@ pub fn CacheMapType(
                     switch (result.updated) {
                         .update => {
                             assert(key_from_value(evicted) == key);
-                            if (constants.verify) assert(!self.stash.contains(value.*));
+                            assert(!self.stash.contains(value.*));
 
                             // There was an eviction because an item was updated,
                             // the evicted item is always its previous version.

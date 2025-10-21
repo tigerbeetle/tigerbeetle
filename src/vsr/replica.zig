@@ -11848,7 +11848,7 @@ fn message_body_as_prepare_headers(message: *const Message) []const Header.Prepa
     const headers = message_body_as_headers_unchecked(message);
     var child: ?*const Header.Prepare = null;
     for (headers) |*header| {
-        if (constants.verify) assert(header.valid_checksum());
+        assert(header.valid_checksum());
         assert(header.command == .prepare);
         assert(header.cluster == message.header.cluster);
         assert(header.view <= message.header.view);

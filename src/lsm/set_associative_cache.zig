@@ -7,7 +7,6 @@ const mem = std.mem;
 const meta = std.meta;
 
 const constants = @import("../constants.zig");
-const verify = constants.verify;
 
 const stdx = @import("stdx");
 
