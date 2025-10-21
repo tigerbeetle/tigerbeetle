@@ -1089,15 +1089,15 @@ test "Duration.parse_flag_value" {
 
 test "Duration.parse_flag_value fuzz" {
     const test_count = 1024;
-    const len_max = 32;
+    const input_size_max = 32;
     const alphabet = " \t\n.-e[]0123456789abcdhmuns";
 
     var prng = PRNG.from_seed_testing();
 
-    var input_max: [len_max]u8 = @splat(0);
+    var input_buffer: [input_size_max]u8 = @splat(0);
     for (0..test_count) |_| {
-        const len = prng.int_inclusive(usize, len_max);
-        const input = input_max[0..len];
+        const input_size = prng.int_inclusive(usize, input_size_max);
+        const input = input_buffer[0..input_size];
         for (input) |*c| {
             c.* = alphabet[prng.index(alphabet)];
         }
