@@ -6,8 +6,6 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
-const constants = @import("../constants.zig");
-
 const stdx = @import("stdx");
 
 const div_ceil = stdx.div_ceil;

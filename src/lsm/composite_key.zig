@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const stdx = @import("stdx");
-const constants = @import("../constants.zig");
 
 /// Combines a field (the key prefix) with a timestamp (the primary key).
 /// - To keep alignment, it supports either `u64` or `u128` prefixes (which can be truncated

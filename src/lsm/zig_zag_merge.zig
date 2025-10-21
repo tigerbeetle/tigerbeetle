@@ -4,7 +4,6 @@ const math = std.math;
 const mem = std.mem;
 
 const stdx = @import("stdx");
-const constants = @import("../constants.zig");
 
 const Direction = @import("../direction.zig").Direction;
 

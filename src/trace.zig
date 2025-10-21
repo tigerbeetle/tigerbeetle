@@ -99,7 +99,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
-const constants = @import("constants.zig");
 const stdx = @import("stdx");
 const KiB = stdx.KiB;
 const Duration = stdx.Duration;
