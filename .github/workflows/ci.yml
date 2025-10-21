@@ -70,7 +70,6 @@ jobs:
 
           - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
           - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
-          - { os: 'windows-latest', language: 'rust',    language_version: 'stable' }
           - { os: 'windows-latest', language: 'java',    language_version: '11'    }
           - { os: 'windows-latest', language: 'java',    language_version: '21'    }
           - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
