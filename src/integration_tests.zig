@@ -237,7 +237,7 @@ test "repl integration" {
     ));
 }
 
-test "benchmark/scrub/inspect smoke" {
+test "benchmark/inspect smoke" {
     const data_file = data_file: {
         var random_bytes: [4]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
@@ -267,11 +267,6 @@ test "benchmark/scrub/inspect smoke" {
         },
     );
 
-    try shell.exec("{tigerbeetle} scrub {data_file}", .{
-        .tigerbeetle = tigerbeetle,
-        .data_file = data_file,
-    });
-
     inline for (.{
         "{tigerbeetle} inspect constants",
         "{tigerbeetle} inspect metrics",
@@ -288,6 +283,7 @@ test "benchmark/scrub/inspect smoke" {
         "{tigerbeetle} inspect grid                    {path}",
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
+        "{tigerbeetle} inspect consistency             {path}",
     }) |command| {
         log.debug("{s}", .{command});
 
@@ -296,6 +292,33 @@ test "benchmark/scrub/inspect smoke" {
             .{ .tigerbeetle = tigerbeetle, .path = data_file },
         );
     }
+
+    // Corrupt the data file, and ensure the consistency check fails. Due to how it works, the
+    // corruption has to be in a spot that's actually used. Take the first offset from
+    // `tigerbeetle inspect tables --tree=transfers`.
+    const tables_output = try shell.exec_stdout(
+        "{tigerbeetle} inspect tables --tree=transfers {path}",
+        .{ .tigerbeetle = tigerbeetle, .path = data_file },
+    );
+
+    const offset = try std.fmt.parseInt(
+        u64,
+        stdx.cut(tables_output, "O=").?[1],
+        10,
+    );
+
+    {
+        const file = try std.fs.cwd().openFile(data_file, .{ .mode = .read_write });
+        defer file.close();
+        try file.pwriteAll(&.{ 0, 0, 0, 0 }, offset);
+    }
+
+    const output = shell.exec("{tigerbeetle} inspect consistency {data_file}", .{
+        .tigerbeetle = tigerbeetle,
+        .data_file = data_file,
+    });
+
+    try std.testing.expectError(error.ExecFailed, output);
 }
 
 test "help/version smoke" {

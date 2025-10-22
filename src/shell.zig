@@ -513,11 +513,11 @@ fn exec_inner(
     defer if (poller) |*p| p.deinit();
 
     errdefer |err| {
-        log.err("process failed with {s}: {s}", .{ @errorName(err), argv_formatted });
+        log.info("process failed with {s}: {s}", .{ @errorName(err), argv_formatted });
         if (poller) |*p| {
             inline for (comptime std.enums.values(Streams)) |stream| {
                 if (p.fifo(stream).count > 0) {
-                    log.err("{s}:\n++++\n{s}++++\n", .{
+                    log.info("{s}:\n++++\n{s}++++\n", .{
                         @tagName(stream),
                         p.fifo(stream).readableSlice(0),
                     });

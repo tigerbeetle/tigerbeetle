@@ -1610,11 +1610,12 @@ fn print_table_info(
         try output.print(" S={}..{}", .{ table.snapshot_min, table.snapshot_max });
     }
 
-    try output.print(" V={:_>6}/{} C={x:0>32} A={}\n", .{
+    try output.print(" V={:_>6}/{} C={x:0>32} A={} O={}\n", .{
         table.value_count,
         tree_info.Tree.Table.value_count_max,
         table.checksum,
         table.address,
+        vsr.Zone.offset(.grid, (table.address - 1) * constants.block_size),
     });
 }
 
