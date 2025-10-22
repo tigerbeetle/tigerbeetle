@@ -4206,6 +4206,7 @@ pub fn StateMachineType(
             });
 
             if (expires_at) |expiry| {
+                assert(expiry > timestamp);
                 // Removing the pending `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .field = expiry,
@@ -4214,7 +4215,7 @@ pub fn StateMachineType(
 
                 // In case the pending transfer's timeout is exactly the one we are using
                 // as flag, we need to zero the value to run the next `pulse`.
-                if (self.expire_pending_transfers.pulse_next_timestamp == timestamp) {
+                if (self.expire_pending_transfers.pulse_next_timestamp == expiry) {
                     self.expire_pending_transfers.pulse_next_timestamp =
                         TimestampRange.timestamp_min;
                 }
