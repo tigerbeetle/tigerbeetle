@@ -54,29 +54,32 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
             block_type: schema.BlockType,
         };
 
+        pub const BlockStatus = enum {
+            /// If `read.done`: The scrub failed – the block must be repaired.
+            /// If `!read.done`: The scrub is still in progress. (This is the initial state).
+            repair,
+            /// The scrub succeeded.
+            /// Don't repair the block.
+            ok,
+            /// The scrub was aborted (the replica is about to state-sync).
+            /// Don't repair the block.
+            canceled,
+            /// The block was freed by a checkpoint in the time that the read was in progress.
+            /// Don't repair the block.
+            ///
+            /// (At checkpoint, the FreeSet frees blocks released during the preceding
+            /// checkpoint. We can scrub released blocks, but not free blocks. Setting this flag
+            /// ensures that GridScrubber doesn't require a read-barrier at checkpoint.)
+            released,
+        };
+
         const Read = struct {
             scrubber: *GridScrubber,
             read: Grid.Read = undefined,
             block_type: schema.BlockType,
 
-            status: enum {
-                /// If `read.done`: The scrub failed – the block must be repaired.
-                /// If `!read.done`: The scrub is still in progress. (This is the initial state).
-                repair,
-                /// The scrub succeeded.
-                /// Don't repair the block.
-                ok,
-                /// The scrub was aborted (the replica is about to state-sync).
-                /// Don't repair the block.
-                canceled,
-                /// The block was freed by a checkpoint in the time that the read was in progress.
-                /// Don't repair the block.
-                ///
-                /// (At checkpoint, the FreeSet frees blocks released during the preceding
-                /// checkpoint. We can scrub released blocks, but not free blocks. Setting this flag
-                /// ensures that GridScrubber doesn't require a read-barrier at checkpoint.)
-                released,
-            },
+            status: BlockStatus,
+
             /// Whether the read is ready to be released.
             done: bool,
 
@@ -364,10 +367,9 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
             scrubber.reads_done.push(read);
         }
 
-        /// Like read_fault, but returns information on all reads not just repairs.
-        pub fn read_result_next(scrubber: *GridScrubber) ?union(enum) {
-            ok: u64,
-            repair: u64,
+        pub fn read_result_next(scrubber: *GridScrubber) ?struct {
+            block: BlockId,
+            status: BlockStatus,
         } {
             assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
                 scrubber.reads.executing());
@@ -378,32 +380,12 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
             defer scrubber.reads.release(read);
             assert(read.done);
 
-            return switch (read.status) {
-                .ok => .{ .ok = read.read.address },
-                .repair => .{ .repair = read.read.address },
-                else => unreachable,
+            const block: BlockId = .{
+                .block_address = read.read.address,
+                .block_checksum = read.read.checksum,
+                .block_type = read.block_type,
             };
-        }
-
-        pub fn read_fault(scrubber: *GridScrubber) ?BlockId {
-            assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
-                scrubber.reads.executing());
-            defer assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
-                scrubber.reads.executing());
-
-            while (scrubber.reads_done.pop()) |read| {
-                defer scrubber.reads.release(read);
-                assert(read.done);
-
-                if (read.status == .repair) {
-                    return .{
-                        .block_address = read.read.address,
-                        .block_checksum = read.read.checksum,
-                        .block_type = read.block_type,
-                    };
-                }
-            }
-            return null;
+            return .{ .block = block, .status = read.status };
         }
 
         fn tour_next(scrubber: *GridScrubber) ?BlockId {
@@ -555,7 +537,6 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                 scrubber.tour_blocks_scrubbed_count,
             });
 
-            // Wrap around to the next cycle.
             assert(tour.* == .done);
             return null;
         }

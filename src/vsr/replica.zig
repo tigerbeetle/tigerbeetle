@@ -3747,7 +3747,13 @@ pub fn ReplicaType(
             );
 
             while (self.grid.blocks_missing.repair_blocks_available() > 0) {
-                const fault = self.grid_scrubber.read_fault() orelse break;
+                const fault = blk: {
+                    while (self.grid_scrubber.read_result_next()) |result| {
+                        if (result.status == .repair) {
+                            break :blk result.block;
+                        }
+                    } else break;
+                };
                 assert(!self.grid.free_set.is_free(fault.block_address));
 
                 log.debug("{}: on_grid_scrub_timeout: fault found: " ++

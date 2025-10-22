@@ -30,8 +30,7 @@ pub fn command_scrub(
     var scrub: Scrub = undefined;
     var scrubbed_bytes: u64 = 0;
 
-    // The superblock is checked as part of initalizing the scrubber - it cannot be skipped.
-    const scrubbed_bytes_superblock = try Scrub.init(
+    try Scrub.init(
         &scrub,
         gpa,
         io,
@@ -41,9 +40,10 @@ pub fn command_scrub(
     );
     defer scrub.deinit(gpa);
 
+    // The superblock is checked as part of initializing and opening the scrubber - it cannot be
+    // skipped. A fully corrupt superblock stops any further scrubbing.
+    const scrubbed_bytes_superblock = try scrub.open();
     scrubbed_bytes += scrubbed_bytes_superblock;
-
-    try scrub.open();
 
     if (!args.skip_wal) {
         const scrubbed_bytes_wal = try scrub.scrub_wal();
@@ -122,7 +122,7 @@ client_sessions_checkpoint: CheckpointTrailer,
 grid: Grid,
 forest: Forest,
 grid_scrubber: GridScrubber,
-grid_blocks_scrubbed: std.AutoArrayHashMapUnmanaged(u64, void),
+grid_blocks_scrubbed: std.bit_set.DynamicBitSetUnmanaged,
 
 buffer_headers: []u8,
 buffer_prepare: []u8,
@@ -134,9 +134,7 @@ fn init(
     tracer: *Tracer,
     path: []const u8,
     lsm_forest_node_count: u32,
-) !u64 {
-    var scrubbed_bytes: u64 = 0;
-
+) !void {
     scrub.io = io;
 
     scrub.storage = try Storage.init(io, tracer, .{
@@ -173,9 +171,6 @@ fn init(
     // Unlike the other zones, the superblock has redundant copies internally. Consider the
     // superblock to be valid if it's valid as a whole, even if an individual copy might be corrupt.
     scrub.superblock.working.vsr_state.assert_internally_consistent();
-    for (scrub.superblock.reading) |_| {
-        scrubbed_bytes += vsr.superblock.superblock_copy_size;
-    }
     log.info("superblock opened and scrubbed", .{});
 
     scrub.client_sessions_checkpoint = try CheckpointTrailer.init(
@@ -225,9 +220,7 @@ fn init(
     );
     errdefer scrub.grid_scrubber.deinit(gpa);
 
-    scrub.grid_blocks_scrubbed = .{};
-
-    try scrub.grid_blocks_scrubbed.ensureTotalCapacity(
+    scrub.grid_blocks_scrubbed = try .initEmpty(
         gpa,
         // Safe estimation for the maximum number of grid blocks based on file size. Using
         // storage_size_limit_max would increase the memory usage dramatically for small data files.
@@ -248,11 +241,17 @@ fn init(
         constants.message_size_max,
     );
     errdefer gpa.free(scrub.buffer_prepare);
-
-    return scrubbed_bytes;
 }
 
-fn open(scrub: *Scrub) !void {
+fn open(scrub: *Scrub) !u64 {
+    var scrubbed_bytes: u64 = 0;
+
+    assert(scrub.superblock.opened);
+    scrub.superblock.working.vsr_state.assert_internally_consistent();
+    for (scrub.superblock.reading) |_| {
+        scrubbed_bytes += vsr.superblock.superblock_copy_size;
+    }
+
     scrub.client_sessions_checkpoint.open(
         &scrub.grid,
         scrub.superblock.working.client_sessions_reference(),
@@ -280,6 +279,8 @@ fn open(scrub: *Scrub) !void {
         try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("forest opened", .{});
+
+    return scrubbed_bytes;
 }
 
 fn deinit(scrub: *Scrub, gpa: std.mem.Allocator) void {
@@ -329,7 +330,8 @@ fn scrub_wal(scrub: *Scrub) !u64 {
                 scrub.buffer_prepare[@sizeOf(vsr.Header)..wal_prepare.size],
             );
 
-        assert(wal_header.valid_checksum() and wal_prepare_body_valid);
+        assert(wal_header.valid_checksum());
+        assert(wal_prepare_body_valid);
         assert(wal_header.checksum == wal_prepare.checksum);
         scrubbed_bytes += bytes_read;
     }
@@ -406,16 +408,17 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
             if (!scrub.grid_scrubber.read_next()) break;
         }
 
-        while (scrub.grid_scrubber.read_result_next()) |read| {
-            assert(read == .ok);
+        while (scrub.grid_scrubber.read_result_next()) |result| {
+            assert(result.status == .ok);
 
             // `read_result_next` returns addresses, starting from 1, but the free sets and such
             // are zero indexed.
-            const gop = scrub.grid_blocks_scrubbed.getOrPutAssumeCapacity(read.ok - 1);
+            const block_set = scrub.grid_blocks_scrubbed.isSet(result.block.block_address - 1);
 
             // Only completeOne() if no existing entry was found, as the grid scrubber will
             // run through index blocks multiple times.
-            if (!gop.found_existing) {
+            if (!block_set) {
+                scrub.grid_blocks_scrubbed.set(result.block.block_address - 1);
                 scrubbed_bytes += constants.block_size;
                 parent_progress_node.completeOne();
             }
@@ -442,14 +445,14 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
             continue;
         }
 
-        assert(scrub.grid_blocks_scrubbed.get(block) != null);
+        assert(scrub.grid_blocks_scrubbed.isSet(block));
     }
 
     // Check in reverse, too, that all the blocks we visited are listed in the free set.
-    var visisted_iterator = scrub.grid_blocks_scrubbed.iterator();
+    var visisted_iterator = scrub.grid_blocks_scrubbed.iterator(.{});
     while (visisted_iterator.next()) |entry| {
-        const in_free_set = grid.free_set.blocks_acquired.isSet(entry.key_ptr.*) and
-            !grid.free_set.blocks_released.isSet(entry.key_ptr.*);
+        const in_free_set = grid.free_set.blocks_acquired.isSet(entry) and
+            !grid.free_set.blocks_released.isSet(entry);
 
         assert(in_free_set);
     }
@@ -498,7 +501,7 @@ fn sync_read_all(scrub: *Scrub, buffer: []u8, offset: u64) !u64 {
         );
 
         while (context.bytes_read == null) {
-            try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try scrub.io.run();
         }
 
         if (context.bytes_read.? == 0) break;
