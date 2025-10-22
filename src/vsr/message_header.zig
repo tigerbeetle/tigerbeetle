@@ -1214,7 +1214,7 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
             const body_size = self.size - @sizeOf(Header);
-            if (body_size <= @sizeOf(vsr.CheckpointState)) return "headers missing";
+            if (body_size <= @sizeOf(vsr.CheckpointState)) return "checkpointstate missing";
             const headers_size = body_size - @sizeOf(vsr.CheckpointState);
             if (headers_size % @sizeOf(Header) != 0) {
                 return "headers size multiple invalid";
@@ -1430,6 +1430,9 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
             if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
+            if ((self.size - @sizeOf(Header)) % @sizeOf(Header) != 0) {
+                return "size multiple invalid";
+            }
             if (self.release.value != 0) return "release != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
