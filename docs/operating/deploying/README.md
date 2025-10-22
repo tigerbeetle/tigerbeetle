@@ -21,7 +21,7 @@ curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip 
 ./tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 ./0_2.tigerbeetle &
 ```
 
-Here what the arguments mean:
+Here's what the arguments mean:
 
 * `--cluster` specifies a globally unique 128 bit cluster ID. It is recommended to use a random
   number for a cluster id, cluster ID `0` is reserved for testing.
