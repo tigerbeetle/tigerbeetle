@@ -1011,7 +1011,7 @@ fn build_test_jni(
             // the stack size and causes a SEGV that is handled by Zig's panic handler.
             // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
             //
-            // The workaround is run the tests boolReleaseFast" mode.
+            // The workaround is to run the tests in "ReleaseFast" mode.
             .optimize = if (builtin.os.tag == .windows) .ReleaseFast else options.mode,
         }),
     });
