@@ -413,7 +413,9 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
 
             // `read_result_next` returns addresses, starting from 1, but the free sets and such
             // are zero indexed.
-            const block_set = consistency.grid_blocks_scrubbed.isSet(result.block.block_address - 1);
+            const block_set = consistency.grid_blocks_scrubbed.isSet(
+                result.block.block_address - 1,
+            );
 
             // Only completeOne() if no existing entry was found, as the grid scrubber will
             // run through index blocks multiple times.
@@ -425,7 +427,9 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
         }
 
         // When the .tour is .done, there might still be reads executing. Wait for those, too.
-        if (consistency.grid_scrubber.tour == .done and consistency.grid_scrubber.reads.executing() == 0) {
+        if (consistency.grid_scrubber.tour == .done and
+            consistency.grid_scrubber.reads.executing() == 0)
+        {
             break;
         }
 
@@ -433,7 +437,8 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
     }
     const grid_duration_ms = stdx.div_ceil(timer.read(), std.time.ns_per_ms);
 
-    assert(consistency.grid_scrubber.tour == .done and consistency.grid_scrubber.reads.executing() == 0);
+    assert(consistency.grid_scrubber.tour == .done and
+        consistency.grid_scrubber.reads.executing() == 0);
 
     // Verify that the blocks checked from the grid scrubber and the free set itself are
     // identical.
