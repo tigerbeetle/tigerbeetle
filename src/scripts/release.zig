@@ -547,66 +547,6 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     );
 }
 
-fn build_rust(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    var section = try shell.open_section("build rust");
-    defer section.close();
-
-    try shell.pushd("./src/clients/rust");
-    defer shell.popd();
-
-    const cargo_version = shell.exec_stdout("cargo --version", .{}) catch {
-        return error.NoRust;
-    };
-    log.info("{s}", .{cargo_version});
-
-    // `cargo check` will put all pre-compiled assets are in place.
-    // It will call `zig build clients:rust` itself.
-    // Do this before `cargo package`.
-    try shell.exec("cargo check", .{});
-
-    try backup_create(shell.cwd, "Cargo.toml");
-    defer backup_restore(shell.cwd, "Cargo.toml");
-    // Changeng the version will modify the lockfile.
-    try backup_create(shell.cwd, "Cargo.lock");
-    defer backup_restore(shell.cwd, "Cargo.lock");
-
-    const cargo_toml = try shell.cwd.readFileAlloc(
-        shell.arena.allocator(),
-        "Cargo.toml",
-        1 * MiB,
-    );
-    const version_line = try shell.fmt(
-        "version = \"{s}\"",
-        .{info.tag},
-    );
-    const cargo_toml_updated = try std.mem.replaceOwned(
-        u8,
-        shell.arena.allocator(),
-        cargo_toml,
-        "version = \"0.1.0\"",
-        version_line,
-    );
-    assert(std.mem.indexOf(u8, cargo_toml_updated, version_line) != null);
-
-    try shell.cwd.writeFile(.{
-        .sub_path = "Cargo.toml",
-        .data = cargo_toml_updated,
-    });
-
-    // --allow-dirty is needed because the rust crate is packaging
-    // static libraries that are not committed to git, and because
-    // the lockfile is dirty from changing the crate version.
-    try shell.exec("cargo package --allow-dirty", .{});
-
-    // This isn't used by publish_rust but we do it anyway as a smoke test.
-    try Shell.copy_path(
-        shell.cwd,
-        try shell.fmt("target/package/tigerbeetle-{s}.crate", .{info.tag}),
-        dist_dir,
-        try shell.fmt("tigerbeetle-{s}.crate", .{info.tag}),
-    );
-}
-
 fn publish(
     shell: *Shell,
     languages: LanguageSet,
