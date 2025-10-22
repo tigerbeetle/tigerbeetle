@@ -190,6 +190,18 @@ const CLIArgs = union(enum) {
             level: ?u6 = null,
             positional: struct { path: []const u8 },
         },
+        consistency: struct {
+            log_debug: bool = false,
+            seed: ?[]const u8 = null,
+            memory_lsm_manifest: ?ByteSize = null,
+            skip_wal: bool = false,
+            skip_client_replies: bool = false,
+            skip_grid: bool = false,
+
+            positional: struct {
+                path: [:0]const u8,
+            },
+        },
 
         pub const help =
             \\Usage:
@@ -213,6 +225,11 @@ const CLIArgs = union(enum) {
             \\  tigerbeetle inspect manifest <path>
             \\
             \\  tigerbeetle inspect tables --tree=<name|id> [--level=<integer>] <path>
+            \\
+            \\  tigerbeetle inspect consistency [--log-debug] [--seed=<seed>]
+            \\                                  [--memory-lsm-manifest=<size>]
+            \\                                  [--skip-wal] [--skip-client-replies] [--skip-grid]
+            \\                                  <path>
             \\
             \\Options:
             \\
@@ -259,6 +276,10 @@ const CLIArgs = union(enum) {
             \\        List the tables matching the given tree/level.
             \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
             \\
+            \\  consistency
+            \\        Scans the data file and checks all internal checksums to verify internal
+            \\        consistency.
+            \\
         ;
     };
 
@@ -287,20 +308,6 @@ const CLIArgs = union(enum) {
         verbose: bool = false,
     };
 
-    // Experimental: the interface is subject to change.
-    const Scrub = struct {
-        log_debug: bool = false,
-        seed: ?[]const u8 = null,
-        memory_lsm_manifest: ?ByteSize = null,
-        skip_wal: bool = false,
-        skip_client_replies: bool = false,
-        skip_grid: bool = false,
-
-        positional: struct {
-            path: [:0]const u8,
-        },
-    };
-
     format: Format,
     recover: Recover,
     start: Start,
@@ -310,7 +317,6 @@ const CLIArgs = union(enum) {
     inspect: Inspect,
     multiversion: Multiversion,
     amqp: AMQP,
-    scrub: Scrub,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -585,6 +591,7 @@ pub const Command = union(enum) {
         metrics,
         op: u64,
         data_file: DataFile,
+        consistency: Consistency,
 
         pub const DataFile = struct {
             path: []const u8,
@@ -611,6 +618,16 @@ pub const Command = union(enum) {
                 },
             },
         };
+
+        pub const Consistency = struct {
+            log_debug: bool,
+            seed: ?[]const u8,
+            lsm_forest_node_count: u32,
+            skip_wal: bool,
+            skip_client_replies: bool,
+            skip_grid: bool,
+            path: [:0]const u8,
+        };
     };
 
     pub const Multiversion = struct {
@@ -634,16 +651,6 @@ pub const Command = union(enum) {
         log_debug: bool,
     };
 
-    pub const Scrub = struct {
-        log_debug: bool,
-        seed: ?[]const u8,
-        lsm_forest_node_count: u32,
-        skip_wal: bool,
-        skip_client_replies: bool,
-        skip_grid: bool,
-        path: [:0]const u8,
-    };
-
     format: Format,
     recover: Recover,
     start: Start,
@@ -653,7 +660,6 @@ pub const Command = union(enum) {
     inspect: Inspect,
     multiversion: Multiversion,
     amqp: AMQP,
-    scrub: Scrub,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -671,7 +677,6 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
         .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
-        .scrub => |scrub| .{ .scrub = parse_args_scrub(scrub) },
     };
 }
 
@@ -1145,11 +1150,62 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     };
 }
 
+fn parse_args_inspect_consistency(args: CLIArgs.Inspect) Command.Inspect.Consistency {
+    const consistency = args.consistency;
+
+    const scrub_memory_lsm_manifest: ByteSize = consistency.memory_lsm_manifest orelse
+        .{ .value = constants.lsm_manifest_memory_size_default };
+
+    const lsm_manifest_memory = scrub_memory_lsm_manifest.bytes();
+    const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
+    const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
+    const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
+    if (lsm_manifest_memory > lsm_manifest_memory_max) {
+        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
+            scrub_memory_lsm_manifest.value,
+            scrub_memory_lsm_manifest.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
+        });
+    }
+    if (lsm_manifest_memory < lsm_manifest_memory_min) {
+        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
+            scrub_memory_lsm_manifest.value,
+            scrub_memory_lsm_manifest.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
+        });
+    }
+    if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
+        vsr.fatal(
+            .cli,
+            "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
+            .{
+                scrub_memory_lsm_manifest.value,
+                scrub_memory_lsm_manifest.suffix(),
+                vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
+            },
+        );
+    }
+
+    const lsm_forest_node_count: u32 =
+        @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
+
+    return .{
+        .path = consistency.positional.path,
+        .log_debug = consistency.log_debug,
+        .seed = consistency.seed,
+        .skip_wal = consistency.skip_wal,
+        .skip_client_replies = consistency.skip_client_replies,
+        .skip_grid = consistency.skip_grid,
+        .lsm_forest_node_count = lsm_forest_node_count,
+    };
+}
+
 fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         .constants => return .constants,
         .metrics => return .metrics,
         .op => |args| return .{ .op = args.positional.op },
+        .consistency => return .{ .consistency = parse_args_inspect_consistency(inspect) },
         inline else => |args| args.positional.path,
     };
 
@@ -1159,6 +1215,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
             .constants,
             .metrics,
             .op,
+            .consistency,
             => unreachable,
             .superblock => .superblock,
             .wal => |args| .{ .wal = .{ .slot = args.slot } },
@@ -1229,54 +1286,6 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         .requests_per_second_limit = amqp.requests_per_second_limit,
         .timestamp_last = amqp.timestamp_last,
         .log_debug = amqp.verbose,
-    };
-}
-
-fn parse_args_scrub(scrub: CLIArgs.Scrub) Command.Scrub {
-    const scrub_memory_lsm_manifest: ByteSize = scrub.memory_lsm_manifest orelse
-        .{ .value = constants.lsm_manifest_memory_size_default };
-
-    const lsm_manifest_memory = scrub_memory_lsm_manifest.bytes();
-    const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
-    const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
-    const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
-    if (lsm_manifest_memory > lsm_manifest_memory_max) {
-        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
-            scrub_memory_lsm_manifest.value,
-            scrub_memory_lsm_manifest.suffix(),
-            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
-        });
-    }
-    if (lsm_manifest_memory < lsm_manifest_memory_min) {
-        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
-            scrub_memory_lsm_manifest.value,
-            scrub_memory_lsm_manifest.suffix(),
-            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
-        });
-    }
-    if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
-        vsr.fatal(
-            .cli,
-            "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
-            .{
-                scrub_memory_lsm_manifest.value,
-                scrub_memory_lsm_manifest.suffix(),
-                vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
-            },
-        );
-    }
-
-    const lsm_forest_node_count: u32 =
-        @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
-
-    return .{
-        .path = scrub.positional.path,
-        .log_debug = scrub.log_debug,
-        .seed = scrub.seed,
-        .skip_wal = scrub.skip_wal,
-        .skip_client_replies = scrub.skip_client_replies,
-        .skip_grid = scrub.skip_grid,
-        .lsm_forest_node_count = lsm_forest_node_count,
     };
 }
 

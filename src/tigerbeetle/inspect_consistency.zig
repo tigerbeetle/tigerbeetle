@@ -1,7 +1,7 @@
 const std = @import("std");
 const stdx = vsr.stdx;
 const assert = std.debug.assert;
-const log = std.log.scoped(.scrub);
+const log = std.log.scoped(.consistency);
 
 const cli = @import("cli.zig");
 const vsr = @import("vsr");
@@ -21,50 +21,50 @@ const SuperBlock = Replica.SuperBlock;
 /// constants.grid_scrubber_reads_max.
 const GridScrubber = vsr.GridScrubberType(Forest, constants.grid_iops_read_max);
 
-pub fn command_scrub(
+pub fn command_inspect_consistency(
     gpa: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
-    args: *const cli.Command.Scrub,
+    args: *const cli.Command.Inspect.Consistency,
 ) !void {
-    var scrub: Scrub = undefined;
-    var scrubbed_bytes: u64 = 0;
+    var consistency: Consistency = undefined;
+    var checked_bytes: u64 = 0;
 
-    try Scrub.init(
-        &scrub,
+    try Consistency.init(
+        &consistency,
         gpa,
         io,
         tracer,
         args.path,
         args.lsm_forest_node_count,
     );
-    defer scrub.deinit(gpa);
+    defer consistency.deinit(gpa);
 
-    // The superblock is checked as part of initializing and opening the scrubber - it cannot be
+    // The superblock is checked as part of initializing and opening the checker - it cannot be
     // skipped. A fully corrupt superblock stops any further scrubbing.
-    const scrubbed_bytes_superblock = try scrub.open();
-    scrubbed_bytes += scrubbed_bytes_superblock;
+    const checked_bytes_superblock = try consistency.open();
+    checked_bytes += checked_bytes_superblock;
 
     if (!args.skip_wal) {
-        const scrubbed_bytes_wal = try scrub.scrub_wal();
+        const checked_bytes_wal = try consistency.check_wal();
         assert(
-            scrubbed_bytes_wal == vsr.Zone.wal_headers.size().? + vsr.Zone.wal_prepares.size().?,
+            checked_bytes_wal == vsr.Zone.wal_headers.size().? + vsr.Zone.wal_prepares.size().?,
         );
 
-        scrubbed_bytes += scrubbed_bytes_wal;
+        checked_bytes += checked_bytes_wal;
     }
 
     if (!args.skip_client_replies) {
-        const scrubbed_bytes_client_replies = try scrub.scrub_client_replies();
-        assert(scrubbed_bytes_client_replies == vsr.Zone.client_replies.size().?);
+        const checked_bytes_client_replies = try consistency.check_client_replies();
+        assert(checked_bytes_client_replies == vsr.Zone.client_replies.size().?);
 
-        scrubbed_bytes += scrubbed_bytes_client_replies;
+        checked_bytes += checked_bytes_client_replies;
     }
 
     const grid_blocks_expected_count =
-        (scrub.grid.free_set.count_acquired() - scrub.grid.free_set.count_released()) +
-        scrub.grid.free_set_checkpoint_blocks_acquired.block_count() +
-        scrub.grid.free_set_checkpoint_blocks_released.block_count();
+        (consistency.grid.free_set.count_acquired() - consistency.grid.free_set.count_released()) +
+        consistency.grid.free_set_checkpoint_blocks_acquired.block_count() +
+        consistency.grid.free_set_checkpoint_blocks_released.block_count();
 
     if (!args.skip_grid) {
         // If no seed was given, use a random seed for better coverage.
@@ -74,45 +74,45 @@ pub fn command_scrub(
             break :seed_from_arg vsr.testing.parse_seed(seed_argument);
         };
 
-        const scrubbed_bytes_grid = try scrub.scrub_grid(seed);
-        assert(scrubbed_bytes_grid == grid_blocks_expected_count * constants.block_size);
+        const checked_bytes_grid = try consistency.check_grid(seed);
+        assert(checked_bytes_grid == grid_blocks_expected_count * constants.block_size);
 
-        scrubbed_bytes += scrubbed_bytes_grid;
+        checked_bytes += checked_bytes_grid;
     }
 
-    const scrubbed_bytes_target: u64 = blk: {
-        var scrubbed_bytes_target: u64 = 0;
+    const checked_bytes_target: u64 = blk: {
+        var checked_bytes_target: u64 = 0;
 
         for (std.enums.values(vsr.Zone)) |zone| {
             if (vsr.Zone.size(zone)) |size| {
-                scrubbed_bytes_target += size;
+                checked_bytes_target += size;
             }
         }
-        scrubbed_bytes_target += grid_blocks_expected_count * constants.block_size;
-        scrubbed_bytes_target -= vsr.Zone.grid_padding.size().?;
+        checked_bytes_target += grid_blocks_expected_count * constants.block_size;
+        checked_bytes_target -= vsr.Zone.grid_padding.size().?;
 
-        // At this point, scrubbed_bytes_target is the highest it will ever be if everything were
-        // scrubbed. Then, subtract off the skipped items explicitly.
+        // At this point, checked_bytes_target is the highest it will ever be if everything were
+        // checked. Then, subtract off the skipped items explicitly.
 
         if (args.skip_wal) {
-            scrubbed_bytes_target -= vsr.Zone.wal_headers.size().? + vsr.Zone.wal_prepares.size().?;
+            checked_bytes_target -= vsr.Zone.wal_headers.size().? + vsr.Zone.wal_prepares.size().?;
         }
 
         if (args.skip_client_replies) {
-            scrubbed_bytes_target -= vsr.Zone.client_replies.size().?;
+            checked_bytes_target -= vsr.Zone.client_replies.size().?;
         }
 
         if (args.skip_grid) {
-            scrubbed_bytes_target -= grid_blocks_expected_count * constants.block_size;
+            checked_bytes_target -= grid_blocks_expected_count * constants.block_size;
         }
 
-        break :blk scrubbed_bytes_target;
+        break :blk checked_bytes_target;
     };
 
-    assert(scrubbed_bytes == scrubbed_bytes_target);
+    assert(checked_bytes == checked_bytes_target);
 }
 
-const Scrub = @This();
+const Consistency = @This();
 
 io: *IO,
 storage: Storage,
@@ -128,28 +128,28 @@ buffer_headers: []u8,
 buffer_prepare: []u8,
 
 fn init(
-    scrub: *Scrub,
+    consistency: *Consistency,
     gpa: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
     path: []const u8,
     lsm_forest_node_count: u32,
 ) !void {
-    scrub.io = io;
+    consistency.io = io;
 
-    scrub.storage = try Storage.init(io, tracer, .{
+    consistency.storage = try Storage.init(io, tracer, .{
         .path = path,
         .size_min = vsr.superblock.data_file_size_min,
         .purpose = .inspect,
         .direct_io = .direct_io_optional,
     });
-    errdefer scrub.storage.deinit();
+    errdefer consistency.storage.deinit();
 
-    const data_file_stat = try (std.fs.File{ .handle = scrub.storage.fd }).stat();
+    const data_file_stat = try (std.fs.File{ .handle = consistency.storage.fd }).stat();
 
-    scrub.superblock = try SuperBlock.init(
+    consistency.superblock = try SuperBlock.init(
         gpa,
-        &scrub.storage,
+        &consistency.storage,
         .{
             .storage_size_limit = std.mem.alignForward(
                 u64,
@@ -158,30 +158,30 @@ fn init(
             ),
         },
     );
-    errdefer scrub.superblock.deinit(gpa);
+    errdefer consistency.superblock.deinit(gpa);
 
     // Opening the forest requires an open superblock, so this is done explicitly here and not in
     // open() like the others.
     var superblock_context: SuperBlock.Context = undefined;
-    scrub.superblock.open(struct {
+    consistency.superblock.open(struct {
         fn superblock_open_callback(_: *SuperBlock.Context) void {}
     }.superblock_open_callback, &superblock_context);
-    while (!scrub.superblock.opened) scrub.superblock.storage.run();
+    while (!consistency.superblock.opened) consistency.superblock.storage.run();
 
     // Unlike the other zones, the superblock has redundant copies internally. Consider the
     // superblock to be valid if it's valid as a whole, even if an individual copy might be corrupt.
-    scrub.superblock.working.vsr_state.assert_internally_consistent();
-    log.info("superblock opened and scrubbed", .{});
+    consistency.superblock.working.vsr_state.assert_internally_consistent();
+    log.info("superblock opened and checked", .{});
 
-    scrub.client_sessions_checkpoint = try CheckpointTrailer.init(
+    consistency.client_sessions_checkpoint = try CheckpointTrailer.init(
         gpa,
         .client_sessions,
         vsr.ClientSessions.encode_size,
     );
-    errdefer scrub.client_sessions_checkpoint.deinit(gpa);
+    errdefer consistency.client_sessions_checkpoint.deinit(gpa);
 
-    scrub.grid = try Grid.init(gpa, .{
-        .superblock = &scrub.superblock,
+    consistency.grid = try Grid.init(gpa, .{
+        .superblock = &consistency.superblock,
         .trace = tracer,
         .cache_blocks_count = Grid.Cache.value_count_max_multiple,
         .missing_blocks_max = constants.grid_missing_blocks_max,
@@ -190,11 +190,11 @@ fn init(
             .compaction_blocks_released_per_pipeline_max() +
             vsr.checkpoint_trailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size),
     });
-    errdefer scrub.grid.deinit(gpa);
+    errdefer consistency.grid.deinit(gpa);
 
-    try scrub.forest.init(
+    try consistency.forest.init(
         gpa,
-        &scrub.grid,
+        &consistency.grid,
         .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = lsm_forest_node_count,
@@ -211,172 +211,172 @@ fn init(
             .log_trace = false,
         }),
     );
-    errdefer scrub.forest.deinit(gpa);
+    errdefer consistency.forest.deinit(gpa);
 
-    scrub.grid_scrubber = try GridScrubber.init(
+    consistency.grid_scrubber = try GridScrubber.init(
         gpa,
-        &scrub.forest,
-        &scrub.client_sessions_checkpoint,
+        &consistency.forest,
+        &consistency.client_sessions_checkpoint,
     );
-    errdefer scrub.grid_scrubber.deinit(gpa);
+    errdefer consistency.grid_scrubber.deinit(gpa);
 
-    scrub.grid_blocks_scrubbed = try .initEmpty(
+    consistency.grid_blocks_scrubbed = try .initEmpty(
         gpa,
         // Safe estimation for the maximum number of grid blocks based on file size. Using
         // storage_size_limit_max would increase the memory usage dramatically for small data files.
         @divFloor(data_file_stat.size, constants.block_size),
     );
-    errdefer scrub.grid_blocks_scrubbed.deinit(gpa);
+    errdefer consistency.grid_blocks_scrubbed.deinit(gpa);
 
-    scrub.buffer_headers = try gpa.alignedAlloc(
+    consistency.buffer_headers = try gpa.alignedAlloc(
         u8,
         constants.sector_size,
         constants.journal_size_headers,
     );
-    errdefer gpa.free(scrub.buffer_headers);
+    errdefer gpa.free(consistency.buffer_headers);
 
-    scrub.buffer_prepare = try gpa.alignedAlloc(
+    consistency.buffer_prepare = try gpa.alignedAlloc(
         u8,
         constants.sector_size,
         constants.message_size_max,
     );
-    errdefer gpa.free(scrub.buffer_prepare);
+    errdefer gpa.free(consistency.buffer_prepare);
 }
 
-fn open(scrub: *Scrub) !u64 {
-    var scrubbed_bytes: u64 = 0;
+fn open(consistency: *Consistency) !u64 {
+    var checked_bytes: u64 = 0;
 
-    assert(scrub.superblock.opened);
-    scrub.superblock.working.vsr_state.assert_internally_consistent();
-    for (scrub.superblock.reading) |_| {
-        scrubbed_bytes += vsr.superblock.superblock_copy_size;
+    assert(consistency.superblock.opened);
+    consistency.superblock.working.vsr_state.assert_internally_consistent();
+    for (consistency.superblock.reading) |_| {
+        checked_bytes += vsr.superblock.superblock_copy_size;
     }
 
-    scrub.client_sessions_checkpoint.open(
-        &scrub.grid,
-        scrub.superblock.working.client_sessions_reference(),
+    consistency.client_sessions_checkpoint.open(
+        &consistency.grid,
+        consistency.superblock.working.client_sessions_reference(),
         struct {
             fn client_sessions_checkpoint_callback(_: *CheckpointTrailer) void {}
         }.client_sessions_checkpoint_callback,
     );
-    while (scrub.client_sessions_checkpoint.callback != .none) {
-        try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    while (consistency.client_sessions_checkpoint.callback != .none) {
+        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("client sessions checkpoint opened", .{});
 
-    scrub.grid.open(struct {
+    consistency.grid.open(struct {
         fn grid_open_callback(_: *Grid) void {}
     }.grid_open_callback);
-    while (scrub.grid.callback != .none) {
-        try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    while (consistency.grid.callback != .none) {
+        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("grid opened", .{});
 
-    scrub.forest.open(struct {
+    consistency.forest.open(struct {
         fn forest_open_callback(_: *Forest) void {}
     }.forest_open_callback);
-    while (scrub.forest.progress != null) {
-        try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    while (consistency.forest.progress != null) {
+        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("forest opened", .{});
 
-    return scrubbed_bytes;
+    return checked_bytes;
 }
 
-fn deinit(scrub: *Scrub, gpa: std.mem.Allocator) void {
-    gpa.free(scrub.buffer_headers);
-    gpa.free(scrub.buffer_prepare);
+fn deinit(consistency: *Consistency, gpa: std.mem.Allocator) void {
+    gpa.free(consistency.buffer_headers);
+    gpa.free(consistency.buffer_prepare);
 
-    scrub.grid_blocks_scrubbed.deinit(gpa);
-    scrub.grid_scrubber.deinit(gpa);
-    scrub.forest.deinit(gpa);
-    scrub.grid.deinit(gpa);
-    scrub.client_sessions_checkpoint.deinit(gpa);
-    scrub.superblock.deinit(gpa);
-    scrub.storage.deinit();
+    consistency.grid_blocks_scrubbed.deinit(gpa);
+    consistency.grid_scrubber.deinit(gpa);
+    consistency.forest.deinit(gpa);
+    consistency.grid.deinit(gpa);
+    consistency.client_sessions_checkpoint.deinit(gpa);
+    consistency.superblock.deinit(gpa);
+    consistency.storage.deinit();
 }
 
-/// Scrubs the WAL headers and prepares, using sync IO.
-fn scrub_wal(scrub: *Scrub) !u64 {
-    var scrubbed_bytes: u64 = 0;
+/// Checks the WAL headers and prepares, using sync IO.
+fn check_wal(consistency: *Consistency) !u64 {
+    var checked_bytes: u64 = 0;
 
-    const headers_bytes_read = try scrub.sync_read_all(
-        scrub.buffer_headers,
+    const headers_bytes_read = try consistency.sync_read_all(
+        consistency.buffer_headers,
         vsr.Zone.wal_headers.start(),
     );
-    assert(headers_bytes_read == scrub.buffer_headers.len);
+    assert(headers_bytes_read == consistency.buffer_headers.len);
 
     const wal_headers: []vsr.Header.Prepare align(16) = @alignCast(
-        std.mem.bytesAsSlice(vsr.Header.Prepare, scrub.buffer_headers),
+        std.mem.bytesAsSlice(vsr.Header.Prepare, consistency.buffer_headers),
     );
 
     for (wal_headers, 0..) |*wal_header, slot| {
         const offset = slot * constants.message_size_max;
 
-        const bytes_read = try scrub.sync_read_all(
-            scrub.buffer_prepare,
+        const bytes_read = try consistency.sync_read_all(
+            consistency.buffer_prepare,
             vsr.Zone.wal_prepares.start() + offset,
         );
-        assert(bytes_read == scrub.buffer_prepare.len);
+        assert(bytes_read == consistency.buffer_prepare.len);
 
         const wal_prepare: *align(16) vsr.Header.Prepare = @alignCast(std.mem.bytesAsValue(
             vsr.Header.Prepare,
-            scrub.buffer_prepare[0..@sizeOf(vsr.Header)],
+            consistency.buffer_prepare[0..@sizeOf(vsr.Header)],
         ));
 
         const wal_prepare_body_valid =
             wal_prepare.valid_checksum() and
             wal_prepare.valid_checksum_body(
-                scrub.buffer_prepare[@sizeOf(vsr.Header)..wal_prepare.size],
+                consistency.buffer_prepare[@sizeOf(vsr.Header)..wal_prepare.size],
             );
 
         assert(wal_header.valid_checksum());
         assert(wal_prepare_body_valid);
         assert(wal_header.checksum == wal_prepare.checksum);
-        scrubbed_bytes += bytes_read;
+        checked_bytes += bytes_read;
     }
 
     assert(wal_headers.len == constants.journal_slot_count);
-    scrubbed_bytes += headers_bytes_read;
+    checked_bytes += headers_bytes_read;
 
-    log.info("successfully scrubbed {} wal headers and prepares", .{wal_headers.len});
-    return scrubbed_bytes;
+    log.info("successfully checked {} wal headers and prepares", .{wal_headers.len});
+    return checked_bytes;
 }
 
-/// Scrubs the client replies, using sync IO.
-fn scrub_client_replies(scrub: *Scrub) !u64 {
-    var scrubbed_bytes: u64 = 0;
+/// Checks the client replies, using sync IO.
+fn check_client_replies(consistency: *Consistency) !u64 {
+    var checked_bytes: u64 = 0;
 
     for (0..constants.clients_max) |slot| {
         const offset = slot * constants.message_size_max;
 
-        const bytes_read = try scrub.sync_read_all(
-            scrub.buffer_prepare,
+        const bytes_read = try consistency.sync_read_all(
+            consistency.buffer_prepare,
             vsr.Zone.client_replies.start() + offset,
         );
-        assert(bytes_read == scrub.buffer_prepare.len);
+        assert(bytes_read == consistency.buffer_prepare.len);
 
         const reply: *align(16) vsr.Header.Reply = @alignCast(std.mem.bytesAsValue(
             vsr.Header.Reply,
-            scrub.buffer_prepare[0..@sizeOf(vsr.Header)],
+            consistency.buffer_prepare[0..@sizeOf(vsr.Header)],
         ));
 
         const reply_empty = reply.checksum == 0 and reply.checksum_body == 0;
         const reply_valid = reply.valid_checksum() and
-            reply.valid_checksum_body(scrub.buffer_prepare[@sizeOf(vsr.Header)..reply.size]);
+            reply.valid_checksum_body(consistency.buffer_prepare[@sizeOf(vsr.Header)..reply.size]);
         assert(reply_empty or reply_valid);
 
-        scrubbed_bytes += bytes_read;
+        checked_bytes += bytes_read;
     }
 
-    log.info("successfully scrubbed {} client replies", .{constants.clients_max});
-    return scrubbed_bytes;
+    log.info("successfully checked {} client replies", .{constants.clients_max});
+    return checked_bytes;
 }
 
-/// Scrubs the grid, using the grid scrubber.
-fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
-    var scrubbed_bytes: u64 = 0;
-    const grid = &scrub.grid;
+/// Checks the grid, using the grid scrubber.
+fn check_grid(consistency: *Consistency, seed: u64) !u64 {
+    var checked_bytes: u64 = 0;
+    const grid = &consistency.grid;
 
     // The free set isn't included in the grid's acquired count, but is scrubbed.
     // Ensure this is accounted for.
@@ -385,16 +385,16 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
         grid.free_set_checkpoint_blocks_acquired.block_count() +
         grid.free_set_checkpoint_blocks_released.block_count();
 
-    log.info("grid scrubber starting on {} blocks with seed {}...", .{
+    log.info("checking {} grid blocks with seed {}...", .{
         blocks_expected_count,
         seed,
     });
 
     var prng = stdx.PRNG.from_seed(seed);
-    scrub.grid_scrubber.open(&prng);
+    consistency.grid_scrubber.open(&prng);
 
     const parent_progress_node = std.Progress.start(.{
-        .root_name = "scrubbing grid blocks",
+        .root_name = "checking grid blocks",
         .estimated_total_items = blocks_expected_count,
     });
     defer parent_progress_node.end();
@@ -403,41 +403,41 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
     timer.reset();
 
     while (true) {
-        for (0..scrub.grid_scrubber.reads.available() + 1) |_| {
-            if (scrub.grid_scrubber.tour == .done) break;
-            if (!scrub.grid_scrubber.read_next()) break;
+        for (0..consistency.grid_scrubber.reads.available() + 1) |_| {
+            if (consistency.grid_scrubber.tour == .done) break;
+            if (!consistency.grid_scrubber.read_next()) break;
         }
 
-        while (scrub.grid_scrubber.read_result_next()) |result| {
+        while (consistency.grid_scrubber.read_result_next()) |result| {
             assert(result.status == .ok);
 
             // `read_result_next` returns addresses, starting from 1, but the free sets and such
             // are zero indexed.
-            const block_set = scrub.grid_blocks_scrubbed.isSet(result.block.block_address - 1);
+            const block_set = consistency.grid_blocks_scrubbed.isSet(result.block.block_address - 1);
 
             // Only completeOne() if no existing entry was found, as the grid scrubber will
             // run through index blocks multiple times.
             if (!block_set) {
-                scrub.grid_blocks_scrubbed.set(result.block.block_address - 1);
-                scrubbed_bytes += constants.block_size;
+                consistency.grid_blocks_scrubbed.set(result.block.block_address - 1);
+                checked_bytes += constants.block_size;
                 parent_progress_node.completeOne();
             }
         }
 
         // When the .tour is .done, there might still be reads executing. Wait for those, too.
-        if (scrub.grid_scrubber.tour == .done and scrub.grid_scrubber.reads.executing() == 0) {
+        if (consistency.grid_scrubber.tour == .done and consistency.grid_scrubber.reads.executing() == 0) {
             break;
         }
 
-        try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
-    const scrub_duration_ms = stdx.div_ceil(timer.read(), std.time.ns_per_ms);
+    const grid_duration_ms = stdx.div_ceil(timer.read(), std.time.ns_per_ms);
 
-    assert(scrub.grid_scrubber.tour == .done and scrub.grid_scrubber.reads.executing() == 0);
+    assert(consistency.grid_scrubber.tour == .done and consistency.grid_scrubber.reads.executing() == 0);
 
-    // Verify that the blocks scrubbed from the grid scrubber and the free set itself are
+    // Verify that the blocks checked from the grid scrubber and the free set itself are
     // identical.
-    assert(scrub.grid_blocks_scrubbed.count() == blocks_expected_count);
+    assert(consistency.grid_blocks_scrubbed.count() == blocks_expected_count);
 
     var acquired_iterator = grid.free_set.blocks_acquired.iterator(.{});
     while (acquired_iterator.next()) |block| {
@@ -445,11 +445,11 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
             continue;
         }
 
-        assert(scrub.grid_blocks_scrubbed.isSet(block));
+        assert(consistency.grid_blocks_scrubbed.isSet(block));
     }
 
     // Check in reverse, too, that all the blocks we visited are listed in the free set.
-    var visisted_iterator = scrub.grid_blocks_scrubbed.iterator(.{});
+    var visisted_iterator = consistency.grid_blocks_scrubbed.iterator(.{});
     while (visisted_iterator.next()) |entry| {
         const in_free_set = grid.free_set.blocks_acquired.isSet(entry) and
             !grid.free_set.blocks_released.isSet(entry);
@@ -459,20 +459,20 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
 
     const throughput = @divFloor(@divFloor(
         blocks_expected_count * constants.block_size,
-        stdx.div_ceil(scrub_duration_ms, std.time.ms_per_s),
+        stdx.div_ceil(grid_duration_ms, std.time.ms_per_s),
     ), 1024 * 1024);
 
-    log.info("successfully scrubbed {} grid blocks in {}ms. ({}MiB/s)", .{
+    log.info("successfully checked {} grid blocks in {}ms. ({}MiB/s)", .{
         blocks_expected_count,
-        scrub_duration_ms,
+        grid_duration_ms,
         throughput,
     });
 
-    return scrubbed_bytes;
+    return checked_bytes;
 }
 
 /// Windows doesn't support using sync IO functions like preadAll on the handles IO opens.
-fn sync_read_all(scrub: *Scrub, buffer: []u8, offset: u64) !u64 {
+fn sync_read_all(consistency: *Consistency, buffer: []u8, offset: u64) !u64 {
     var completion: IO.Completion = undefined;
 
     const Context = struct {
@@ -490,18 +490,18 @@ fn sync_read_all(scrub: *Scrub, buffer: []u8, offset: u64) !u64 {
     var bytes_read: u64 = 0;
 
     while (bytes_read < buffer.len) {
-        scrub.io.read(
+        consistency.io.read(
             *Context,
             &context,
             Context.read_callback,
             &completion,
-            scrub.storage.fd,
+            consistency.storage.fd,
             buffer[bytes_read..],
             offset,
         );
 
         while (context.bytes_read == null) {
-            try scrub.io.run();
+            try consistency.io.run();
         }
 
         if (context.bytes_read.? == 0) break;

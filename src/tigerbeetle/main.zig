@@ -14,7 +14,6 @@ const config = constants.config;
 const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
 const inspect = @import("inspect.zig");
-const command_scrub = @import("scrub.zig").command_scrub;
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
@@ -173,7 +172,6 @@ pub fn main() !void {
             try stdout_buffer.flush();
         },
         .amqp => |*args| try command_amqp(gpa, time, args),
-        .scrub => |*args| try command_scrub(gpa, &io, &tracer, args),
     }
 }
 

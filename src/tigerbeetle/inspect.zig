@@ -33,6 +33,7 @@ const EventMetric = vsr.trace.EventMetric;
 const EventMetricAggregate = vsr.trace.EventMetricAggregate;
 const EventTiming = vsr.trace.EventTiming;
 const EventTimingAggregate = vsr.trace.EventTimingAggregate;
+const command_inspect_consistency = @import("inspect_consistency.zig").command_inspect_consistency;
 
 pub fn command_inspect(
     allocator: std.mem.Allocator,
@@ -66,6 +67,7 @@ fn run_inspect(
         .constants => return try inspect_constants(stdout),
         .metrics => return try inspect_metrics(stdout),
         .op => |op| return try inspect_op(stdout, op),
+        .consistency => |*args| return try command_inspect_consistency(allocator, io, tracer, args),
         .data_file => |data_file| data_file,
     };
 
