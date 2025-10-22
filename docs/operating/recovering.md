@@ -5,7 +5,7 @@ must be reformatted to restore the cluster.
 
 The `tigerbeetle format` command must **not** be used for this purpose. The issue is that
 `tigerbeetle format` would create a replica that believes that any operation that it hasn't seen can
-be safely nack'd -- unaware of the promises it made which were lost with the old data file This
+be safely nack'd -- unaware of the promises it made which were lost with the old data file. This
 could cause the cluster to lose committed data.
 
 Instead of `tigerbeetle format`, use the `tigerbeetle recover` command (see below).
