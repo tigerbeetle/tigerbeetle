@@ -180,17 +180,17 @@ accountsRes, err := client.CreateAccounts([]Account{account0, account1})
 
 ### Response and Errors
 
-The response is an array containing the _result code_ and the _timestamp_ of
+The response is an array containing the _status code_ and the _timestamp_ of
 each account in the request batch:
-- Successfully created accounts with the result
-  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+- Successfully created accounts with the status
+  [`created`](https://docs.tigerbeetle.com/reference/requests/create_accounts#created)
   return the timestamp assigned to the `Account` object.
 - Already existing accounts with the result
   [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
   return the timestamp of the original existing object.
-- Failed accounts return the error code along with the timestamp when the validation
+- Failed accounts return the status code along with the timestamp when the validation
   occurred. See all error conditions in the
-  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts#status).
 
 ```go
 account0 := Account{
@@ -218,14 +218,14 @@ if err != nil {
 	return
 }
 
-for i, item := range accountsRes {
-	switch item.Result {
-	case AccountOK:
-		log.Printf("Batch account at %d successfully created with timestamp %d.", i, item.Timestamp)
+for i, result := range accountsRes {
+	switch result.Status {
+	case AccountCreated:
+		log.Printf("Batch account at %d successfully created with timestamp %d.", i, result.Timestamp)
 	case AccountExists:
-		log.Printf("Batch account at %d already exists with timestamp %d.", i, item.Timestamp)
+		log.Printf("Batch account at %d already exists with timestamp %d.", i, result.Timestamp)
 	default:
-		log.Printf("Batch account at %d failed to create: %s", i, item.Timestamp)
+		log.Printf("Batch account at %d failed to create: %s", i, result.Status)
 	}
 }
 ```
@@ -278,17 +278,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an array containing the _result code_ and the _timestamp_ of
+The response is an array containing the _status code_ and the _timestamp_ of
 each transfer in the request batch:
 - Successfully created transfers with the result
-  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  [`created`](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
   return the timestamp assigned to the `Transfer` object.
 - Already existing transfers with the result
   [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
   return the timestamp of the original existing object.
-- Failed transfers return the error code along with the timestamp when the validation
+- Failed transfers return the status code along with the timestamp when the validation
   occurred. See all error conditions in the
-  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers#status).
 
 ```go
 transfers := []Transfer{{
@@ -323,14 +323,14 @@ if err != nil {
 	return
 }
 
-for i, item := range transfersRes {
-	switch item.Result {
-	case TransferOK:
-		log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, item.Timestamp)
+for i, result := range transfersRes {
+	switch result.Status {
+	case TransferCreated:
+		log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, result.Timestamp)
 	case TransferExists:
-		log.Printf("Batch transfer at %d already exists with timestamp %d.", i, item.Timestamp)
+		log.Printf("Batch transfer at %d already exists with timestamp %d.", i, result.Timestamp)
 	default:
-		log.Printf("Batch transfer at %d failed to create: %s", i, item.Result)
+		log.Printf("Batch transfer at %d failed to create: %s", i, result.Status)
 	}
 }
 ```

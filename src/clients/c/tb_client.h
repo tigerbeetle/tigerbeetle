@@ -69,7 +69,7 @@ typedef struct tb_transfer_t {
     uint64_t timestamp;
 } tb_transfer_t;
 
-typedef enum TB_CREATE_ACCOUNT_RESULT {
+typedef enum TB_CREATE_ACCOUNT_STATUS {
     TB_CREATE_ACCOUNT_CREATED = 0,
     TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED = 1,
     TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN = 2,
@@ -97,9 +97,9 @@ typedef enum TB_CREATE_ACCOUNT_RESULT {
     TB_CREATE_ACCOUNT_LEDGER_MUST_NOT_BE_ZERO = 13,
     TB_CREATE_ACCOUNT_CODE_MUST_NOT_BE_ZERO = 14,
     TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS = 26,
-} TB_CREATE_ACCOUNT_RESULT;
+} TB_CREATE_ACCOUNT_STATUS;
 
-typedef enum TB_CREATE_TRANSFER_RESULT {
+typedef enum TB_CREATE_TRANSFER_STATUS {
     TB_CREATE_TRANSFER_CREATED = 0,
     TB_CREATE_TRANSFER_LINKED_EVENT_FAILED = 1,
     TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN = 2,
@@ -168,19 +168,19 @@ typedef enum TB_CREATE_TRANSFER_RESULT {
     TB_CREATE_TRANSFER_OVERFLOWS_TIMEOUT = 53,
     TB_CREATE_TRANSFER_EXCEEDS_CREDITS = 54,
     TB_CREATE_TRANSFER_EXCEEDS_DEBITS = 55,
-} TB_CREATE_TRANSFER_RESULT;
+} TB_CREATE_TRANSFER_STATUS;
 
-typedef struct tb_create_accounts_result_t {
+typedef struct tb_create_account_result_t {
     uint64_t timestamp;
     uint32_t status;
     uint32_t reserved;
-} tb_create_accounts_result_t;
+} tb_create_account_result_t;
 
-typedef struct tb_create_transfers_result_t {
+typedef struct tb_create_transfer_result_t {
     uint64_t timestamp;
     uint32_t status;
     uint32_t reserved;
-} tb_create_transfers_result_t;
+} tb_create_transfer_result_t;
 
 typedef struct tb_account_filter_t {
     tb_uint128_t account_id;

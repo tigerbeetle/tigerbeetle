@@ -123,7 +123,7 @@ fn round_trip_test<RustType, CType>(
 #[test]
 fn round_trip_create_account_result() {
     round_trip_test::<tb::CreateAccountStatus, u32>(
-        "TB_CREATE_ACCOUNT_RESULT",
+        "TB_CREATE_ACCOUNT_STATUS",
         &[],
         |c_value| tb::CreateAccountStatus::from(c_value),
         |rust_value| u32::from(rust_value),
@@ -133,7 +133,7 @@ fn round_trip_create_account_result() {
 #[test]
 fn round_trip_create_transfer_result() {
     round_trip_test::<tb::CreateTransferStatus, u32>(
-        "TB_CREATE_TRANSFER_RESULT",
+        "TB_CREATE_TRANSFER_STATUS",
         &[],
         |c_value| tb::CreateTransferStatus::from(c_value),
         |rust_value| u32::from(rust_value),

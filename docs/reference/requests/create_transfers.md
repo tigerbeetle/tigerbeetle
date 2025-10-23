@@ -9,13 +9,13 @@ amount fields of its [debit](../transfer.md#debit_account_id) and
 A batch of transfers to create.
 See [`Transfer`](../transfer.md) for constraints.
 
-## Results
+## Result
 
 An array containing the result for each transfer in the events batch.
 
 ### `timestamp`
 
-- For [successful transfers](#ok), it is the [`timestamp`](../transfer.md#timestamp)
+- For [successful transfers](#created), it is the [`timestamp`](../transfer.md#timestamp)
   assigned to the transfer object.
 - For [existing transfers](#exists), it is the [`timestamp`](../transfer.md#timestamp)
   of the original object.
@@ -27,17 +27,17 @@ An array containing the result for each transfer in the events batch.
 Create results are sparse, containing only failed events and the `index`
 of the transfer within the events batch.
 
-The network protocol does not include an [`ok`](#ok) result for successfully
+The network protocol does not include an [`created`](#created) result for successfully
 created transfers.
 
 </details>
 
-### `result`
+### `status`
 
-Results are listed in this section in order of descending precedence — that is, if more than one
-error is applicable to the transfer being created, only the result listed first is returned.
+Status codes are listed in this section in order of descending precedence — that is, if more than
+one error is applicable to the transfer being created, only the result listed first is returned.
 
-#### `ok`
+#### `created`
 
 The transfer was successfully created; did not previously exist.
 
@@ -48,8 +48,8 @@ The transfer was not created. One or more of the other transfers in the
 
 #### `linked_event_chain_open`
 
-The transfer was not created. The [`Transfer.flags.linked`](../transfer.md#flagslinked) flag was set
-on the last event in the batch, which is not legal. (`flags.linked` indicates that the chain
+The transfer was not created. The [`Transfer.flags.linked`](../transfer.md#flagslinked) flag was
+set on the last event in the batch, which is not legal. (`flags.linked` indicates that the chain
 continues to the next operation).
 
 #### `imported_event_expected`
@@ -186,7 +186,7 @@ Otherwise, with the possible exception of the `timestamp` field, the existing tr
 to the transfer in the request.
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
-many applications should handle `exists` exactly as [`ok`](#ok).
+many applications should handle `exists` exactly as [`created`](#created).
 
 #### `id_already_failed`
 

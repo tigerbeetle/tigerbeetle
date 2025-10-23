@@ -7,13 +7,13 @@ Create one or more [`Account`](../account.md)s.
 A batch of accounts to create.
 See [`Account`](../account.md) for constraints.
 
-## Results
+## Result
 
 An array containing the result for each account in the event batch.
 
 ### `timestamp`
 
-- For [successful accounts](#ok), it is the [`timestamp`](../account.md#timestamp)
+- For [successful accounts](#created), it is the [`timestamp`](../account.md#timestamp)
   assigned to the account object.
 - For [existing accounts](#exists), it is the [`timestamp`](../account.md#timestamp)
   of the original object.
@@ -25,17 +25,17 @@ An array containing the result for each account in the event batch.
 Create results are sparse, containing only failed events and the `index`
 of the account within the events batch.
 
-The network protocol does not include an [`ok`](#ok) result for successfully
+The network protocol does not include an [`created`](#created) result for successfully
 created accounts.
 
 </details>
 
-### `result`
+### `status`
 
-Results are listed in this section in order of descending precedence — that is, if more than one
-error is applicable to the account being created, only the result listed first is returned.
+Status codes are listed in this section in order of descending precedence — that is, if more than
+one error is applicable to the account being created, only the result listed first is returned.
 
-#### `ok`
+#### `created`
 
 The account was successfully created; it did not previously exist.
 
@@ -145,7 +145,7 @@ account in the request:
 - `credits_posted`
 
 To correctly [recover from application crashes](../../coding/reliable-transaction-submission.md),
-many applications should handle `exists` exactly as [`ok`](#ok).
+many applications should handle `exists` exactly as [`created`](#created).
 
 #### `flags_are_mutually_exclusive`
 

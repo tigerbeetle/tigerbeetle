@@ -165,17 +165,17 @@ var accountsResults = client.CreateAccounts(new[] { account0, account1 });
 
 ### Response and Errors
 
-The response is an array containing the _result code_ and the _timestamp_ of
+The response is an array containing the _status code_ and the _timestamp_ of
 each account in the request batch:
-- Successfully created accounts with the result
-  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+- Successfully created accounts with the status
+  [`created`](https://docs.tigerbeetle.com/reference/requests/create_accounts#created)
   return the timestamp assigned to the `Account` object.
 - Already existing accounts with the result
   [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
   return the timestamp of the original existing object.
-- Failed accounts return the error code along with the timestamp when the validation
+- Failed accounts return the status code along with the timestamp when the validation
   occurred. See all error conditions in the
-  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts#status).
 
 ```cs
 var account0 = new Account
@@ -203,16 +203,16 @@ var account2 = new Account
 var accountsResults = client.CreateAccounts(new[] { account0, account1, account2 });
 for (int i = 0; i < accountsResults.Length; i++)
 {
-    switch (accountsResults[i].Result)
+    switch (accountsResults[i].Status)
     {
-        case CreateAccountResult.Ok:
+        case CreateAccountStatus.Created:
             Console.WriteLine($"Batch account at {i} successfully created with timestamp {accountsResults[i].Timestamp}.");
             break;
-        case CreateAccountResult.Exists:
+        case CreateAccountStatus.Exists:
             Console.WriteLine($"Batch account at {i} already exists with timestamp {accountsResults[i].Timestamp}.");
             break;
         default:
-            Console.WriteLine($"Batch account at {i} failed to create: {accountsResults[i].Result}");
+            Console.WriteLine($"Batch account at {i} failed to create: {accountsResults[i].Status}");
             break;
     }
 }
@@ -268,17 +268,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an array containing the _result code_ and the _timestamp_ of
+The response is an array containing the _status code_ and the _timestamp_ of
 each transfer in the request batch:
 - Successfully created transfers with the result
-  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  [`created`](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
   return the timestamp assigned to the `Transfer` object.
 - Already existing transfers with the result
   [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
   return the timestamp of the original existing object.
-- Failed transfers return the error code along with the timestamp when the validation
+- Failed transfers return the status code along with the timestamp when the validation
   occurred. See all error conditions in the
-  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers#status).
 
 ```cs
 var transfers = new[] {
@@ -317,16 +317,16 @@ var transfers = new[] {
 var transfersResults = client.CreateTransfers(transfers);
 for (int i = 0; i < transfersResults.Length; i++)
 {
-    switch (transfersResults[i].Result)
+    switch (transfersResults[i].Status)
     {
-        case CreateTransferResult.Ok:
+        case CreateTransferStatus.Created:
             Console.WriteLine($"Batch transfer at {i} successfully created with timestamp {transfersResults[i].Timestamp}.");
             break;
-        case CreateTransferResult.Exists:
+        case CreateTransferStatus.Exists:
             Console.WriteLine($"Batch transfer at {i} already exists with timestamp {transfersResults[i].Timestamp}.");
             break;
         default:
-            Console.WriteLine($"Batch transfer at {i} failed to create: {transfersResults[i].Result}");
+            Console.WriteLine($"Batch transfer at {i} failed to create: {transfersResults[i].Status}");
             break;
     }
 }
