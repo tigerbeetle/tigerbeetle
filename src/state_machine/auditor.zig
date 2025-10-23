@@ -531,7 +531,7 @@ pub const AccountingAuditor = struct {
         }
     }
 
-    pub fn on_create_accounts_with_results(
+    pub fn on_create_accounts(
         self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
@@ -554,12 +554,12 @@ pub const AccountingAuditor = struct {
             const account_timestamp = timestamp - accounts.len + i + 1;
 
             if (!results_expect[i].contains(outcome.result)) {
-                log.err("on_create_accounts_with_results: account={} expect={} result={}", .{
+                log.err("on_create_accounts: account={} expect={} result={}", .{
                     account.*,
                     results_expect[i],
                     outcome,
                 });
-                @panic("on_create_accounts_with_results: unexpected result");
+                @panic("on_create_accounts: unexpected result");
             }
 
             switch (outcome.result) {
@@ -636,7 +636,7 @@ pub const AccountingAuditor = struct {
         }
     }
 
-    pub fn on_create_transfers_with_results(
+    pub fn on_create_transfers(
         self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
@@ -658,12 +658,12 @@ pub const AccountingAuditor = struct {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
 
             if (!results_expect[i].contains(outcome.result.to_ordered())) {
-                log.err("on_create_transfers_with_results: transfer={} expect={} result={}", .{
+                log.err("on_create_transfers: transfer={} expect={} result={}", .{
                     transfer.*,
                     results_expect[i],
                     outcome,
                 });
-                @panic("on_create_transfers_with_results: unexpected result");
+                @panic("on_create_transfers: unexpected result");
             }
 
             assert(outcome.timestamp > 0);

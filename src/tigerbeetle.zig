@@ -688,10 +688,8 @@ pub const Operation = enum(u8) {
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
 
-    // TODO: Remove the `with_results` suffix.
-    // These are only temporary to make renaming and refactoring easier.
-    create_accounts_with_results = constants.vsr_operations_reserved + 18,
-    create_transfers_with_results = constants.vsr_operations_reserved + 19,
+    create_accounts = constants.vsr_operations_reserved + 18,
+    create_transfers = constants.vsr_operations_reserved + 19,
 };
 
 comptime {

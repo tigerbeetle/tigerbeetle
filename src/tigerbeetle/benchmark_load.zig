@@ -387,7 +387,7 @@ const Benchmark = struct {
             &b.client_requests[client_index],
         )[0..account_count];
         b.build_accounts(accounts);
-        b.request(client_index, .create_accounts_with_results, .{
+        b.request(client_index, .create_accounts, .{
             .batch_count = account_count,
             .event_size = @sizeOf(tb.Account),
         });
@@ -431,7 +431,7 @@ const Benchmark = struct {
             &b.client_requests[client_index],
         )[0..transfer_count];
         b.build_transfers(transfers);
-        b.request(client_index, .create_transfers_with_results, .{
+        b.request(client_index, .create_transfers, .{
             .batch_count = transfer_count,
             .event_size = @sizeOf(tb.Transfer),
         });
@@ -827,8 +827,8 @@ const Benchmark = struct {
         };
 
         switch (operation) {
-            .create_accounts_with_results => b.create_accounts_callback(client, input),
-            .create_transfers_with_results => b.create_transfers_callback(client, input),
+            .create_accounts => b.create_accounts_callback(client, input),
+            .create_transfers => b.create_transfers_callback(client, input),
             .lookup_accounts => b.validate_accounts_callback(client, input),
             .lookup_transfers => b.validate_transfers_callback(client, input),
             .get_account_transfers => b.get_account_transfers_callback(client, input),

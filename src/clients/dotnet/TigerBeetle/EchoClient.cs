@@ -15,22 +15,22 @@ internal sealed class EchoClient : IDisposable
 
     public Account[] Echo(ReadOnlySpan<Account> batch)
     {
-        return nativeClient.CallRequest<Account, Account>(TBOperation.CreateAccountsWithResults, batch);
+        return nativeClient.CallRequest<Account, Account>(TBOperation.CreateAccounts, batch);
     }
 
     public Task<Account[]> EchoAsync(ReadOnlyMemory<Account> batch)
     {
-        return nativeClient.CallRequestAsync<Account, Account>(TBOperation.CreateAccountsWithResults, batch);
+        return nativeClient.CallRequestAsync<Account, Account>(TBOperation.CreateAccounts, batch);
     }
 
     public Transfer[] Echo(ReadOnlySpan<Transfer> batch)
     {
-        return nativeClient.CallRequest<Transfer, Transfer>(TBOperation.CreateTransfersWithResults, batch);
+        return nativeClient.CallRequest<Transfer, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
     public Task<Transfer[]> EchoAsync(ReadOnlyMemory<Transfer> batch)
     {
-        return nativeClient.CallRequestAsync<Transfer, Transfer>(TBOperation.CreateTransfersWithResults, batch);
+        return nativeClient.CallRequestAsync<Transfer, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
     public void Dispose()

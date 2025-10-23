@@ -150,8 +150,8 @@ fn execute(command: Command, driver: *const DriverStdio) !?Result {
 /// enum values from command to operation.
 fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
     return switch (tag) {
-        .create_accounts => .create_accounts_with_results,
-        .create_transfers => .create_transfers_with_results,
+        .create_accounts => .create_accounts,
+        .create_transfers => .create_transfers,
         .lookup_all_accounts => .lookup_accounts,
         .lookup_latest_transfers => .lookup_transfers,
     };

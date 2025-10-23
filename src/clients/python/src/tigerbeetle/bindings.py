@@ -32,8 +32,8 @@ class Operation(enum.IntEnum):
     GET_ACCOUNT_BALANCES = 143
     QUERY_ACCOUNTS = 144
     QUERY_TRANSFERS = 145
-    CREATE_ACCOUNTS_WITH_RESULTS = 146
-    CREATE_TRANSFERS_WITH_RESULTS = 147
+    CREATE_ACCOUNTS = 146
+    CREATE_TRANSFERS = 147
 
 
 class PacketStatus(enum.IntEnum):
@@ -698,7 +698,7 @@ class AsyncStateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     async def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
         return await self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_ACCOUNTS_WITH_RESULTS,
+            Operation.CREATE_ACCOUNTS,
             accounts,
             CAccount,
             CCreateAccountsResult,
@@ -706,7 +706,7 @@ class AsyncStateMachineMixin:
 
     async def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
         return await self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_TRANSFERS_WITH_RESULTS,
+            Operation.CREATE_TRANSFERS,
             transfers,
             CTransfer,
             CCreateTransfersResult,
@@ -766,7 +766,7 @@ class StateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
         return self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_ACCOUNTS_WITH_RESULTS,
+            Operation.CREATE_ACCOUNTS,
             accounts,
             CAccount,
             CCreateAccountsResult,
@@ -774,7 +774,7 @@ class StateMachineMixin:
 
     def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
         return self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_TRANSFERS_WITH_RESULTS,
+            Operation.CREATE_TRANSFERS,
             transfers,
             CTransfer,
             CCreateTransfersResult,

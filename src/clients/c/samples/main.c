@@ -105,11 +105,11 @@ int main(int argc, char **argv) {
     accounts[1].code = 2;
     accounts[1].ledger = 777;
 
-    packet.operation = TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS; // The operation to execute.
-    packet.data = accounts;                                       // The data to be sent.
-    packet.data_size = ACCOUNTS_SIZE;                             //
-    packet.user_data = &ctx;                                      // User-defined context.
-    packet.status = TB_PACKET_OK;                                 // Set when the reply arrives.
+    packet.operation = TB_OPERATION_CREATE_ACCOUNTS; // The operation to execute.
+    packet.data = accounts;                          // The data to be sent.
+    packet.data_size = ACCOUNTS_SIZE;                //
+    packet.user_data = &ctx;                         // User-defined context.
+    packet.status = TB_PACKET_OK;                    // Set when the reply arrives.
 
     printf("Creating accounts...\n");
 
@@ -161,9 +161,9 @@ int main(int argc, char **argv) {
             transfers[j].amount = 1;
         }
 
-        packet.operation = TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS; // The operation to execute.
-        packet.data = transfers;                                       // The data to be sent.
-        packet.data_size = TRANSFERS_SIZE;                             //
+        packet.operation = TB_OPERATION_CREATE_TRANSFERS; // The operation to execute.
+        packet.data = transfers;                          // The data to be sent.
+        packet.data_size = TRANSFERS_SIZE;                //
         packet.user_data = &ctx;                                       // User-defined context.
         packet.status = TB_PACKET_OK;                                  // Set when the reply arrives.
 

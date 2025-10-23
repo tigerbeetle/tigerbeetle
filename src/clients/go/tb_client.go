@@ -124,9 +124,9 @@ func (c *c_client) Close() {
 
 func getEventSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
-	case C.TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS:
+	case C.TB_OPERATION_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		fallthrough
@@ -149,9 +149,9 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS:
 		return unsafe.Sizeof(types.CreateAccountsResult{})
-	case C.TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS:
+	case C.TB_OPERATION_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.CreateTransfersResult{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
@@ -289,7 +289,7 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.CreateAccou
 	}
 
 	reply, err := c.doRequest(
-		C.TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS,
+		C.TB_OPERATION_CREATE_ACCOUNTS,
 		count,
 		dataPtr,
 	)
@@ -317,7 +317,7 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.CreateTr
 	}
 
 	reply, err := c.doRequest(
-		C.TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS,
+		C.TB_OPERATION_CREATE_TRANSFERS,
 		count,
 		dataPtr,
 	)

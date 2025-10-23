@@ -556,8 +556,8 @@ pub fn main() !void {
         , .{prefix_class});
 
         const operations: []const StateMachine.Operation = &.{
-            .create_accounts_with_results,
-            .create_transfers_with_results,
+            .create_accounts,
+            .create_transfers,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
@@ -580,8 +580,8 @@ pub fn main() !void {
 /// Inline function so that `operation` can be known at comptime.
 fn event_name(comptime operation: StateMachine.Operation) []const u8 {
     return switch (operation) {
-        .create_accounts_with_results => "accounts",
-        .create_transfers_with_results => "transfers",
+        .create_accounts => "accounts",
+        .create_transfers => "transfers",
         .lookup_accounts => "accounts",
         .lookup_transfers => "transfers",
         .get_account_transfers => "filter",
@@ -594,8 +594,8 @@ fn event_name(comptime operation: StateMachine.Operation) []const u8 {
 
 fn function_name(comptime operation: StateMachine.Operation) []const u8 {
     return switch (operation) {
-        .create_accounts_with_results => "create_accounts",
-        .create_transfers_with_results => "create_transfers",
+        .create_accounts => "create_accounts",
+        .create_transfers => "create_transfers",
         .lookup_accounts => "lookup_accounts",
         .lookup_transfers => "lookup_transfers",
         .get_account_transfers => "get_account_transfers",
