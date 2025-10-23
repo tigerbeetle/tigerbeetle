@@ -126,8 +126,8 @@ int main(int argc, char **argv) {
     }
 
     // Checking for errors creating the accounts:
-    tb_create_accounts_result_t *create_accounts_result = (tb_create_accounts_result_t*)ctx.reply;
-    int results_len = ctx.size / sizeof(tb_create_accounts_result_t);
+    tb_create_account_result_t *create_accounts_result = (tb_create_account_result_t*)ctx.reply;
+    int results_len = ctx.size / sizeof(tb_create_account_result_t);
     printf("create_account results:\n");
     for(int i=0;i<results_len;i++) {
         printf("timestamp=%lu, ret=%d\n", create_accounts_result[i].timestamp, create_accounts_result[i].status);
@@ -186,8 +186,8 @@ int main(int argc, char **argv) {
         }
 
         // Checking for errors creating transfers:
-        tb_create_transfers_result_t *create_transfers_result = (tb_create_transfers_result_t*)ctx.reply;
-        int results_len = ctx.size / sizeof(tb_create_transfers_result_t);
+        tb_create_transfer_result_t *create_transfers_result = (tb_create_transfer_result_t*)ctx.reply;
+        int results_len = ctx.size / sizeof(tb_create_transfer_result_t);
         printf("create_transfers results:\n");
         for(int i=0;i<results_len;i++) {
             printf("timestamp=%lu, ret=%d\n", create_transfers_result[i].timestamp, create_transfers_result[i].status);

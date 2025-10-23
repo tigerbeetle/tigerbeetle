@@ -37,7 +37,7 @@ use the same `id` each time the transfer is resent.
 If the transfer was already created before and then retried, TigerBeetle will return the
 [`exists`](../reference/requests/create_transfers.md#exists) response code. If the transfer had
 not already been created, it will be created and return the
-[`ok`](../reference/requests/create_transfers.md#ok).
+[`created`](../reference/requests/create_transfers.md#created).
 
 ### Handling Client Software Restarts
 
@@ -49,6 +49,6 @@ transfer**. When the app or web page reloads, it should resubmit the transfer us
 
 This ensures that the operation can be safely retried even if the client app or browser restarts
 before receiving the response to the operation. Similar to the case of a network failure,
-TigerBeetle will respond with the [`ok`](../reference/requests/create_transfers.md#ok) if a
+TigerBeetle will respond with the [`created`](../reference/requests/create_transfers.md#created) if a
 transfer is newly created and [`exists`](../reference/requests/create_transfers.md#exists) if an
 object with the same `id` was already created.

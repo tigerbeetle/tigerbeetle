@@ -35,7 +35,7 @@ Each request has a corresponding _event_ and _result_ type:
 | Request Type            | Event                                                                 | Result                                                                              |
 | ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `create_accounts`       | [`Account`](../reference/requests/create_accounts.md#event)           | [`CreateAccountResult`](../reference/requests/create_accounts.md#result)            |
-| `create_transfers`      | [`Transfer`](../reference/requests/create_transfers.md#event)         | [`CreateTransferResult`](../reference/requests/create_transfers.md#result)          |
+| `create_transfers`      | [`Transfer`](../reference/requests/create_transfers.md#event)         | [`CreateAccountResult`](../reference/requests/create_transfers.md#result)           |
 | `lookup_accounts`       | [`Account.id`](../reference/requests/lookup_accounts.md#event)        | [`Account`](../reference/requests/lookup_accounts.md#result) or nothing             |
 | `lookup_transfers`      | [`Transfer.id`](../reference/requests/lookup_transfers.md#event)      | [`Transfer`](../reference/requests/lookup_transfers.md#result) or nothing           |
 | `get_account_transfers` | [`AccountFilter`](../reference/account-filter.md)                     | [`Transfer`](../reference/requests/get_account_transfers.md#result) or nothing      |
@@ -75,13 +75,13 @@ In the default configuration, the maximum batch sizes for each request type are:
 
 ### Automatic Batching
 
-TigerBeetle clients automatically batch operations. There may be instances where your application logic 
-makes it hard to fill up the batches that you send to TigerBeetle, for example a multi-threaded web 
-server where each HTTP request is handled on a different thread. 
+TigerBeetle clients automatically batch operations. There may be instances where your application logic
+makes it hard to fill up the batches that you send to TigerBeetle, for example a multi-threaded web
+server where each HTTP request is handled on a different thread.
 
-The TigerBeetle client should be shared across threads (or tasks, depending on your paradigm), since 
-it automatically groups together batches of small sizes into one request. Since  TigerBeetle clients 
-can have [**at most one in-flight request**](../reference/sessions.md), the client 
+The TigerBeetle client should be shared across threads (or tasks, depending on your paradigm), since
+it automatically groups together batches of small sizes into one request. Since  TigerBeetle clients
+can have [**at most one in-flight request**](../reference/sessions.md), the client
 accumulates smaller batches together while waiting for a reply to the last request.
 
 

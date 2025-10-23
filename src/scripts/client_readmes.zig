@@ -274,7 +274,7 @@ fn readme_root(ctx: *Context) !void {
 
         ctx.header(3, "Response and Errors");
         ctx.paragraph(
-            \\The response is an array containing the status code_ and the _timestamp_ of
+            \\The response is an array containing the _status code_ and the _timestamp_ of
             \\each transfer in the request batch:
             \\- Successfully created transfers with the result
             \\  [`created`](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
