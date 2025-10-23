@@ -3847,7 +3847,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             self.account_event(.{
-                .event_timestamp = timestamp_actual,
+                .timestamp_event = timestamp_actual,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
                 .transfer_flags = t.flags,
@@ -4088,18 +4088,19 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .amount = amount_actual,
             });
 
-            if (expires_at) |expiry| {
+            if (expires_at) |timestamp_expiry| {
                 assert(!t.flags.imported);
-                assert(expiry > timestamp_event);
+                assert(timestamp_actual == timestamp_event);
+                assert(timestamp_expiry > timestamp_event);
                 // Removing the pending `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .field = expiry,
+                    .field = timestamp_expiry,
                     .timestamp = p.timestamp,
                 });
 
                 // In case the pending transfer's timeout is exactly the one we are using
                 // as flag, we need to zero the value to run the next `pulse`.
-                if (self.expire_pending_transfers.pulse_next_timestamp == expiry) {
+                if (self.expire_pending_transfers.pulse_next_timestamp == timestamp_expiry) {
                     self.expire_pending_transfers.pulse_next_timestamp =
                         TimestampRange.timestamp_min;
                 }
@@ -4158,7 +4159,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             self.account_event(.{
-                .event_timestamp = timestamp_actual,
+                .timestamp_event = timestamp_actual,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
                 .transfer_flags = t.flags,
@@ -4259,7 +4260,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn account_event(
             self: *StateMachine,
             args: struct {
-                event_timestamp: u64,
+                timestamp_event: u64,
                 dr_account: *const Account,
                 cr_account: *const Account,
                 transfer_flags: ?TransferFlags,
@@ -4273,7 +4274,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 amount: u128,
             },
         ) void {
-            assert(args.event_timestamp > 0);
+            assert(args.timestamp_event > 0);
             switch (args.transfer_pending_status) {
                 .none, .pending => {
                     assert(args.transfer_flags != null);
@@ -4291,7 +4292,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // For CDC we always insert the history regardless `Account.flags.history`.
             self.forest.grooves.account_events.insert(&.{
-                .timestamp = args.event_timestamp,
+                .timestamp = args.timestamp_event,
 
                 .dr_account_id = args.dr_account.id,
                 .dr_account_timestamp = args.dr_account.timestamp,
@@ -4326,14 +4327,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (args.dr_account.flags.history) {
                 // Indexing the debit account.
                 self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
-                    .timestamp = args.event_timestamp,
+                    .timestamp = args.timestamp_event,
                     .field = args.dr_account.timestamp,
                 });
             }
             if (args.cr_account.flags.history) {
                 // Indexing the credit account.
                 self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
-                    .timestamp = args.event_timestamp,
+                    .timestamp = args.timestamp_event,
                     .field = args.cr_account.timestamp,
                 });
             }
@@ -4419,13 +4420,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(p.flags.pending);
                 assert(p.timeout > 0);
 
-                const event_timestamp = timestamp - transfers_pending.len + index + 1;
-                assert(TimestampRange.valid(event_timestamp));
-                assert(self.commit_timestamp < event_timestamp);
-                defer self.commit_timestamp = event_timestamp;
+                const timestamp_event = timestamp - transfers_pending.len + index + 1;
+                assert(TimestampRange.valid(timestamp_event));
+                assert(self.commit_timestamp < timestamp_event);
+                defer self.commit_timestamp = timestamp_event;
 
                 const expires_at = p.timestamp + p.timeout_ns();
-                assert(expires_at <= event_timestamp);
+                assert(expires_at <= timestamp_event);
 
                 const dr_account = self.get_account(
                     p.debit_account_id,
@@ -4485,7 +4486,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 });
 
                 self.account_event(.{
-                    .event_timestamp = event_timestamp,
+                    .timestamp_event = timestamp_event,
                     .dr_account = &dr_account_new,
                     .cr_account = &cr_account_new,
                     .transfer_flags = null,
