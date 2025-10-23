@@ -550,6 +550,7 @@ pub const AccountingAuditor = struct {
             *outcome,
             i,
         | {
+            assert(outcome.reserved == 0);
             const account_timestamp = timestamp - accounts.len + i + 1;
 
             if (!results_expect[i].contains(outcome.result)) {

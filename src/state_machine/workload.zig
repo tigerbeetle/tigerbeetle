@@ -1515,6 +1515,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
 
             for (transfers, results) |*transfer, *outcome| {
+                assert(outcome.reserved == 0);
                 if (transfer.flags.pending and outcome.result != .exists) {
                     self.transfers_pending_in_flight -= 1;
                 }
