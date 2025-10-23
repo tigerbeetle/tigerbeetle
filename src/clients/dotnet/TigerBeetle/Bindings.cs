@@ -1222,9 +1222,9 @@ internal enum TBOperation : byte
 
     QueryTransfers = 145,
 
-    CreateAccountsWithResults = 146,
+    CreateAccounts = 146,
 
-    CreateTransfersWithResults = 147,
+    CreateTransfers = 147,
 
 }
 

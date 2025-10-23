@@ -120,8 +120,8 @@ fn build_batch(
         .pulse => 0,
 
         // No payload, `create_*` require compaction to be hooked up.
-        .create_accounts_with_results,
-        .create_transfers_with_results,
+        .create_accounts,
+        .create_transfers,
         => 0,
         .deprecated_create_accounts_sparse,
         .deprecated_create_transfers_sparse,

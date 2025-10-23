@@ -136,8 +136,8 @@ export function createClient (args: ClientInitArgs): Client {
   }
 
   return {
-    createAccounts(batch) { return request(Operation.create_accounts_with_results, batch) },
-    createTransfers(batch) { return request(Operation.create_transfers_with_results, batch) },
+    createAccounts(batch) { return request(Operation.create_accounts, batch) },
+    createTransfers(batch) { return request(Operation.create_transfers, batch) },
     lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
     lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
     getAccountTransfers(filter) { return request(Operation.get_account_transfers, [filter]) },

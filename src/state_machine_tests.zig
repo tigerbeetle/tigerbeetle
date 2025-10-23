@@ -69,8 +69,8 @@ pub const TestContext = struct {
         /// including deprecated ones used by old clients.
         const versions: []const VersionMap = &.{
             .init(.{
-                .create_accounts = .create_accounts_with_results,
-                .create_transfers = .create_transfers_with_results,
+                .create_accounts = .create_accounts,
+                .create_transfers = .create_transfers,
                 .lookup_accounts = .lookup_accounts,
                 .lookup_transfers = .lookup_transfers,
                 .get_account_transfers = .get_account_transfers,
@@ -717,7 +717,7 @@ fn check_version(
                 }
 
                 switch (version_map.get(.create_accounts)) {
-                    .create_accounts_with_results => {
+                    .create_accounts => {
                         const result = CreateAccountsResult{
                             .timestamp = timestamp_expected: {
                                 if (a.result == .ok or a.result == .linked_event_failed) {
@@ -791,7 +791,7 @@ fn check_version(
                 }
 
                 switch (version_map.get(.create_transfers)) {
-                    .create_transfers_with_results => {
+                    .create_transfers => {
                         const result: CreateTransfersResult = .{
                             .timestamp = timestamp_expected: {
                                 if (t.result == .ok or t.result == .linked_event_failed) {

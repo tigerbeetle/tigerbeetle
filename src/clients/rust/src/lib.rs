@@ -478,7 +478,7 @@ impl Client {
         events: &[Account],
     ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> {
         let (packet, rx) = create_packet::<Account>(
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS,
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS,
             events,
         );
 
@@ -584,7 +584,7 @@ impl Client {
         events: &[Transfer],
     ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> {
         let (packet, rx) = create_packet::<Transfer>(
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS,
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS,
             events,
         );
 

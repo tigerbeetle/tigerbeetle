@@ -824,15 +824,15 @@ pub fn ReplType(comptime MessageBus: type) type {
             arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
             const operation_type = switch (operation) {
-                .create_accounts_with_results, .create_transfers_with_results => "create",
+                .create_accounts, .create_transfers => "create",
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
                 .query_accounts, .query_transfers => "query",
                 else => unreachable,
             };
             const object_type = switch (operation) {
-                .create_accounts_with_results, .lookup_accounts, .query_accounts => "accounts",
-                .create_transfers_with_results, .lookup_transfers, .query_transfers => "transfers",
+                .create_accounts, .lookup_accounts, .query_accounts => "accounts",
+                .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
                 else => unreachable,
@@ -936,7 +936,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
 
             switch (operation) {
-                .create_accounts_with_results => {
+                .create_accounts => {
                     const create_account_results = stdx.bytes_as_slice(
                         .exact,
                         tb.CreateAccountsResult,
@@ -964,7 +964,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
-                .create_transfers_with_results => {
+                .create_transfers => {
                     const create_transfer_results = stdx.bytes_as_slice(
                         .exact,
                         tb.CreateTransfersResult,

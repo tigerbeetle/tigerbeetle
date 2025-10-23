@@ -415,8 +415,8 @@ pub fn AOFType(comptime IO: type) type {
                 if (header.operation.vsr_reserved()) return false;
                 const state_machine_operation = header.operation.cast(StateMachine);
                 switch (state_machine_operation) {
-                    .create_accounts_with_results,
-                    .create_transfers_with_results,
+                    .create_accounts,
+                    .create_transfers,
                     .deprecated_create_accounts_sparse,
                     .deprecated_create_transfers_sparse,
                     .deprecated_create_accounts_unbatched,

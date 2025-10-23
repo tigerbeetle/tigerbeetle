@@ -30,22 +30,22 @@ public sealed class Client : IDisposable
 
     public CreateAccountsResult[] CreateAccounts(ReadOnlySpan<Account> batch)
     {
-        return nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccountsWithResults, batch);
+        return nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
     public Task<CreateAccountsResult[]> CreateAccountsAsync(ReadOnlyMemory<Account> batch)
     {
-        return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccountsWithResults, batch);
+        return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
     public CreateTransfersResult[] CreateTransfers(ReadOnlySpan<Transfer> batch)
     {
-        return nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfersWithResults, batch);
+        return nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
     public Task<CreateTransfersResult[]> CreateTransfersAsync(ReadOnlyMemory<Transfer> batch)
     {
-        return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfersWithResults, batch);
+        return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
     public Account[] LookupAccounts(ReadOnlySpan<UInt128> batch)

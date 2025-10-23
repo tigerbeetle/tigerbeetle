@@ -113,7 +113,7 @@ pub fn StateMachineType(
             pub const batch_max = struct {
                 pub const create_accounts: u32 = @max(
                     operation_event_max(
-                        .create_accounts_with_results,
+                        .create_accounts,
                         message_body_size_max,
                     ),
                     operation_event_max(
@@ -127,7 +127,7 @@ pub fn StateMachineType(
                 );
                 pub const create_transfers: u32 = @max(
                     operation_event_max(
-                        .create_transfers_with_results,
+                        .create_transfers,
                         message_body_size_max,
                     ),
                     operation_event_max(
@@ -546,8 +546,8 @@ pub fn StateMachineType(
         pub fn EventType(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
-                .create_accounts_with_results => Account,
-                .create_transfers_with_results => Transfer,
+                .create_accounts => Account,
+                .create_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
@@ -573,8 +573,8 @@ pub fn StateMachineType(
         pub fn ResultType(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
-                .create_accounts_with_results => CreateAccountsResult,
-                .create_transfers_with_results => CreateTransfersResult,
+                .create_accounts => CreateAccountsResult,
+                .create_transfers => CreateTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
@@ -618,8 +618,8 @@ pub fn StateMachineType(
                 // Pulse does not take any input.
                 .pulse => false,
                 // Operations that take multiple events as input:
-                .create_accounts_with_results => true,
-                .create_transfers_with_results => true,
+                .create_accounts => true,
+                .create_transfers => true,
                 .lookup_accounts => true,
                 .lookup_transfers => true,
                 // Operations that take a single event as input:
@@ -648,8 +648,8 @@ pub fn StateMachineType(
         pub inline fn operation_is_multi_batch(operation: Operation) bool {
             return switch (operation) {
                 .pulse => false,
-                .create_accounts_with_results,
-                .create_transfers_with_results,
+                .create_accounts,
+                .create_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
                 .get_account_transfers,
@@ -770,8 +770,8 @@ pub fn StateMachineType(
         ) u32 {
             return switch (operation) {
                 .pulse => 0,
-                inline .create_accounts_with_results,
-                .create_transfers_with_results,
+                inline .create_accounts,
+                .create_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
 
@@ -987,12 +987,12 @@ pub fn StateMachineType(
 
             fn from_operation(comptime operation: Operation) MetricEnum {
                 return switch (operation) {
-                    .create_accounts_with_results,
+                    .create_accounts,
                     .deprecated_create_accounts_sparse,
                     .deprecated_create_accounts_unbatched,
                     => .create_accounts,
 
-                    .create_transfers_with_results,
+                    .create_transfers,
                     .deprecated_create_transfers_sparse,
                     .deprecated_create_transfers_unbatched,
                     => .create_transfers,
@@ -1341,8 +1341,8 @@ pub fn StateMachineType(
             assert(batch.len <= self.batch_size_limit);
             return switch (operation) {
                 .pulse => machine_constants.batch_max.create_transfers, // Max transfers to expire.
-                .create_accounts_with_results => @divExact(batch.len, @sizeOf(Account)),
-                .create_transfers_with_results => @divExact(batch.len, @sizeOf(Transfer)),
+                .create_accounts => @divExact(batch.len, @sizeOf(Account)),
+                .create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
@@ -1424,8 +1424,8 @@ pub fn StateMachineType(
 
             switch (operation) {
                 .pulse => self.prefetch_expire_pending_transfers(),
-                .create_accounts_with_results => self.prefetch_create_accounts(),
-                .create_transfers_with_results => self.prefetch_create_transfers(),
+                .create_accounts => self.prefetch_create_accounts(),
+                .create_transfers => self.prefetch_create_transfers(),
                 .lookup_accounts => self.prefetch_lookup_accounts(),
                 .lookup_transfers => self.prefetch_lookup_transfers(),
                 .get_account_transfers => self.prefetch_get_account_transfers(),
@@ -1468,7 +1468,7 @@ pub fn StateMachineType(
 
         fn prefetch_create_accounts(self: *StateMachine) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_accounts_with_results or
+            assert(self.prefetch_operation == .create_accounts or
                 self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
@@ -1492,7 +1492,7 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_accounts_with_results or
+            assert(self.prefetch_operation == .create_accounts or
                 self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
@@ -1524,7 +1524,7 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_accounts_with_results or
+            assert(self.prefetch_operation == .create_accounts or
                 self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
@@ -1534,7 +1534,7 @@ pub fn StateMachineType(
 
         fn prefetch_create_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers_with_results or
+            assert(self.prefetch_operation == .create_transfers or
                 self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
@@ -1562,7 +1562,7 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers_with_results or
+            assert(self.prefetch_operation == .create_transfers or
                 self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
@@ -1610,7 +1610,7 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers_with_results or
+            assert(self.prefetch_operation == .create_transfers or
                 self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
@@ -1626,7 +1626,7 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers_pending, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers_with_results or
+            assert(self.prefetch_operation == .create_transfers or
                 self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
@@ -2658,7 +2658,7 @@ pub fn StateMachineType(
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
                 operation_event_max(
-                    .create_transfers_with_results,
+                    .create_transfers,
                     self.batch_size_limit,
                 ),
                 operation_event_max(
@@ -2730,7 +2730,7 @@ pub fn StateMachineType(
 
             const result_max: u32 = @max(
                 operation_event_max(
-                    .create_transfers_with_results,
+                    .create_transfers,
                     self.batch_size_limit,
                 ),
                 operation_event_max(
@@ -2818,8 +2818,8 @@ pub fn StateMachineType(
 
             const result: usize = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
-                inline .create_accounts_with_results,
-                .create_transfers_with_results,
+                inline .create_accounts,
+                .create_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
                 .deprecated_create_accounts_sparse,
@@ -2963,8 +2963,8 @@ pub fn StateMachineType(
                     batch, // The batch's body.
                 );
                 const bytes_written: usize = switch (operation) {
-                    .create_accounts_with_results,
-                    .create_transfers_with_results,
+                    .create_accounts,
+                    .create_transfers,
                     .deprecated_create_accounts_sparse,
                     .deprecated_create_transfers_sparse,
                     => self.execute_create(
@@ -3188,13 +3188,13 @@ pub fn StateMachineType(
 
         fn scope_open(self: *StateMachine, operation: Operation) void {
             switch (operation) {
-                .create_accounts_with_results,
+                .create_accounts,
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_open();
                 },
-                .create_transfers_with_results,
+                .create_transfers,
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => {
@@ -3209,13 +3209,13 @@ pub fn StateMachineType(
 
         fn scope_close(self: *StateMachine, operation: Operation, mode: ScopeCloseMode) void {
             switch (operation) {
-                .create_accounts_with_results,
+                .create_accounts,
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_close(mode);
                 },
-                .create_transfers_with_results,
+                .create_transfers,
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => {
@@ -3235,8 +3235,8 @@ pub fn StateMachineType(
             batch: []const u8,
             output_buffer: []u8,
         ) usize {
-            comptime assert(operation == .create_accounts_with_results or
-                operation == .create_transfers_with_results or
+            comptime assert(operation == .create_accounts or
+                operation == .create_transfers or
                 operation == .deprecated_create_accounts_sparse or
                 operation == .deprecated_create_transfers_sparse or
                 operation == .deprecated_create_accounts_unbatched or
@@ -3313,11 +3313,11 @@ pub fn StateMachineType(
                     }
 
                     const create_result = switch (operation) {
-                        .create_accounts_with_results,
+                        .create_accounts,
                         .deprecated_create_accounts_sparse,
                         .deprecated_create_accounts_unbatched,
                         => self.create_account(timestamp_event, event),
-                        .create_transfers_with_results,
+                        .create_transfers,
                         .deprecated_create_transfers_sparse,
                         .deprecated_create_transfers_unbatched,
                         => self.create_transfer(timestamp_event, event),
@@ -3353,8 +3353,8 @@ pub fn StateMachineType(
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
                                 switch (operation) {
-                                    .create_accounts_with_results,
-                                    .create_transfers_with_results,
+                                    .create_accounts,
+                                    .create_transfers,
                                     => {
                                         results[chain_index].result = .linked_event_failed;
                                     },
@@ -3390,8 +3390,8 @@ pub fn StateMachineType(
                             };
                             count += 1;
                         },
-                        .create_accounts_with_results,
-                        .create_transfers_with_results,
+                        .create_accounts,
+                        .create_transfers,
                         => {
                             // The result is always added to the results buffer,
                             // it will be handled below.
@@ -3402,8 +3402,8 @@ pub fn StateMachineType(
                 }
 
                 switch (operation) {
-                    .create_accounts_with_results,
-                    .create_transfers_with_results,
+                    .create_accounts,
+                    .create_transfers,
                     => {
                         results[count] = .{
                             .timestamp = timestamp_actual,
@@ -3446,11 +3446,11 @@ pub fn StateMachineType(
             comptime operation: Operation,
             id: u128,
             result_code: switch (operation) {
-                .create_accounts_with_results,
+                .create_accounts,
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 => CreateAccountResult,
-                .create_transfers_with_results,
+                .create_transfers,
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => CreateTransferResult,
@@ -3461,7 +3461,7 @@ pub fn StateMachineType(
 
             switch (operation) {
                 // The `create_accounts` error codes do not depend on transient system status.
-                .create_accounts_with_results,
+                .create_accounts,
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 => return,
@@ -3470,7 +3470,7 @@ pub fn StateMachineType(
                 // ensuring strong idempotency guarantees.
                 // Once a transfer fails with a transient error, it must be retried
                 // with a different `id`.
-                .create_transfers_with_results,
+                .create_transfers,
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => if (result_code.transient()) {
@@ -4718,7 +4718,7 @@ pub fn StateMachineType(
 
             const result_max: u32 = @max(
                 operation_event_max(
-                    .create_transfers_with_results,
+                    .create_transfers,
                     self.batch_size_limit,
                 ),
                 operation_event_max(
@@ -4831,7 +4831,7 @@ pub fn StateMachineType(
         pub fn forest_options(options: Options) Forest.GroovesOptions {
             const prefetch_create_accounts_limit: u32 = @max(
                 operation_event_max(
-                    .create_accounts_with_results,
+                    .create_accounts,
                     options.batch_size_limit,
                 ),
                 operation_event_max(
@@ -4859,7 +4859,7 @@ pub fn StateMachineType(
 
             const prefetch_create_transfers_limit: u32 = @max(
                 operation_event_max(
-                    .create_transfers_with_results,
+                    .create_transfers,
                     options.batch_size_limit,
                 ),
                 operation_event_max(
@@ -5034,7 +5034,7 @@ pub fn StateMachineType(
 
             const batch_create_accounts: u32 = @max(
                 operation_event_max(
-                    .create_accounts_with_results,
+                    .create_accounts,
                     batch_size_limit,
                 ),
                 operation_event_max(
@@ -5051,7 +5051,7 @@ pub fn StateMachineType(
 
             const batch_create_transfers: u32 = @max(
                 operation_event_max(
-                    .create_transfers_with_results,
+                    .create_transfers,
                     batch_size_limit,
                 ),
                 operation_event_max(
