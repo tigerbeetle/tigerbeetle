@@ -1,7 +1,7 @@
 const std = @import("std");
 const stdx = vsr.stdx;
 const assert = std.debug.assert;
-const log = std.log.scoped(.consistency);
+const log = std.log.scoped(.integrity);
 
 const cli = @import("cli.zig");
 const vsr = @import("vsr");
@@ -21,32 +21,32 @@ const SuperBlock = Replica.SuperBlock;
 /// constants.grid_scrubber_reads_max.
 const GridScrubber = vsr.GridScrubberType(Forest, constants.grid_iops_read_max);
 
-pub fn command_inspect_consistency(
+pub fn command_inspect_integrity(
     gpa: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
-    args: *const cli.Command.Inspect.Consistency,
+    args: *const cli.Command.Inspect.Integrity,
 ) !void {
-    var consistency: Consistency = undefined;
+    var integrity: Integrity = undefined;
     var checked_bytes: u64 = 0;
 
-    try Consistency.init(
-        &consistency,
+    try Integrity.init(
+        &integrity,
         gpa,
         io,
         tracer,
         args.path,
         args.lsm_forest_node_count,
     );
-    defer consistency.deinit(gpa);
+    defer integrity.deinit(gpa);
 
     // The superblock is checked as part of initializing and opening the checker - it cannot be
     // skipped. A fully corrupt superblock stops any further scrubbing.
-    const checked_bytes_superblock = try consistency.open();
+    const checked_bytes_superblock = try integrity.open();
     checked_bytes += checked_bytes_superblock;
 
     if (!args.skip_wal) {
-        const checked_bytes_wal = try consistency.check_wal();
+        const checked_bytes_wal = try integrity.check_wal();
         assert(
             checked_bytes_wal == vsr.Zone.wal_headers.size().? + vsr.Zone.wal_prepares.size().?,
         );
@@ -55,16 +55,16 @@ pub fn command_inspect_consistency(
     }
 
     if (!args.skip_client_replies) {
-        const checked_bytes_client_replies = try consistency.check_client_replies();
+        const checked_bytes_client_replies = try integrity.check_client_replies();
         assert(checked_bytes_client_replies == vsr.Zone.client_replies.size().?);
 
         checked_bytes += checked_bytes_client_replies;
     }
 
     const grid_blocks_expected_count =
-        (consistency.grid.free_set.count_acquired() - consistency.grid.free_set.count_released()) +
-        consistency.grid.free_set_checkpoint_blocks_acquired.block_count() +
-        consistency.grid.free_set_checkpoint_blocks_released.block_count();
+        (integrity.grid.free_set.count_acquired() - integrity.grid.free_set.count_released()) +
+        integrity.grid.free_set_checkpoint_blocks_acquired.block_count() +
+        integrity.grid.free_set_checkpoint_blocks_released.block_count();
 
     if (!args.skip_grid) {
         // If no seed was given, use a random seed for better coverage.
@@ -74,7 +74,7 @@ pub fn command_inspect_consistency(
             break :seed_from_arg vsr.testing.parse_seed(seed_argument);
         };
 
-        const checked_bytes_grid = try consistency.check_grid(seed);
+        const checked_bytes_grid = try integrity.check_grid(seed);
         assert(checked_bytes_grid == grid_blocks_expected_count * constants.block_size);
 
         checked_bytes += checked_bytes_grid;
@@ -112,7 +112,7 @@ pub fn command_inspect_consistency(
     assert(checked_bytes == checked_bytes_target);
 }
 
-const Consistency = @This();
+const Integrity = @This();
 
 io: *IO,
 storage: Storage,
@@ -128,28 +128,28 @@ buffer_headers: []u8,
 buffer_prepare: []u8,
 
 fn init(
-    consistency: *Consistency,
+    integrity: *Integrity,
     gpa: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
     path: []const u8,
     lsm_forest_node_count: u32,
 ) !void {
-    consistency.io = io;
+    integrity.io = io;
 
-    consistency.storage = try Storage.init(io, tracer, .{
+    integrity.storage = try Storage.init(io, tracer, .{
         .path = path,
         .size_min = vsr.superblock.data_file_size_min,
         .purpose = .inspect,
         .direct_io = .direct_io_optional,
     });
-    errdefer consistency.storage.deinit();
+    errdefer integrity.storage.deinit();
 
-    const data_file_stat = try (std.fs.File{ .handle = consistency.storage.fd }).stat();
+    const data_file_stat = try (std.fs.File{ .handle = integrity.storage.fd }).stat();
 
-    consistency.superblock = try SuperBlock.init(
+    integrity.superblock = try SuperBlock.init(
         gpa,
-        &consistency.storage,
+        &integrity.storage,
         .{
             .storage_size_limit = std.mem.alignForward(
                 u64,
@@ -158,30 +158,30 @@ fn init(
             ),
         },
     );
-    errdefer consistency.superblock.deinit(gpa);
+    errdefer integrity.superblock.deinit(gpa);
 
     // Opening the forest requires an open superblock, so this is done explicitly here and not in
     // open() like the others.
     var superblock_context: SuperBlock.Context = undefined;
-    consistency.superblock.open(struct {
+    integrity.superblock.open(struct {
         fn superblock_open_callback(_: *SuperBlock.Context) void {}
     }.superblock_open_callback, &superblock_context);
-    while (!consistency.superblock.opened) consistency.superblock.storage.run();
+    while (!integrity.superblock.opened) integrity.superblock.storage.run();
 
     // Unlike the other zones, the superblock has redundant copies internally. Consider the
     // superblock to be valid if it's valid as a whole, even if an individual copy might be corrupt.
-    consistency.superblock.working.vsr_state.assert_internally_consistent();
+    integrity.superblock.working.vsr_state.assert_internally_consistent();
     log.info("superblock opened and checked", .{});
 
-    consistency.client_sessions_checkpoint = try CheckpointTrailer.init(
+    integrity.client_sessions_checkpoint = try CheckpointTrailer.init(
         gpa,
         .client_sessions,
         vsr.ClientSessions.encode_size,
     );
-    errdefer consistency.client_sessions_checkpoint.deinit(gpa);
+    errdefer integrity.client_sessions_checkpoint.deinit(gpa);
 
-    consistency.grid = try Grid.init(gpa, .{
-        .superblock = &consistency.superblock,
+    integrity.grid = try Grid.init(gpa, .{
+        .superblock = &integrity.superblock,
         .trace = tracer,
         .cache_blocks_count = Grid.Cache.value_count_max_multiple,
         .missing_blocks_max = constants.grid_missing_blocks_max,
@@ -190,11 +190,11 @@ fn init(
             .compaction_blocks_released_per_pipeline_max() +
             vsr.checkpoint_trailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size),
     });
-    errdefer consistency.grid.deinit(gpa);
+    errdefer integrity.grid.deinit(gpa);
 
-    try consistency.forest.init(
+    try integrity.forest.init(
         gpa,
-        &consistency.grid,
+        &integrity.grid,
         .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = lsm_forest_node_count,
@@ -211,123 +211,123 @@ fn init(
             .log_trace = false,
         }),
     );
-    errdefer consistency.forest.deinit(gpa);
+    errdefer integrity.forest.deinit(gpa);
 
-    consistency.grid_scrubber = try GridScrubber.init(
+    integrity.grid_scrubber = try GridScrubber.init(
         gpa,
-        &consistency.forest,
-        &consistency.client_sessions_checkpoint,
+        &integrity.forest,
+        &integrity.client_sessions_checkpoint,
     );
-    errdefer consistency.grid_scrubber.deinit(gpa);
+    errdefer integrity.grid_scrubber.deinit(gpa);
 
-    consistency.grid_blocks_scrubbed = try .initEmpty(
+    integrity.grid_blocks_scrubbed = try .initEmpty(
         gpa,
         // Safe estimation for the maximum number of grid blocks based on file size. Using
         // storage_size_limit_max would increase the memory usage dramatically for small data files.
         @divFloor(data_file_stat.size, constants.block_size),
     );
-    errdefer consistency.grid_blocks_scrubbed.deinit(gpa);
+    errdefer integrity.grid_blocks_scrubbed.deinit(gpa);
 
-    consistency.buffer_headers = try gpa.alignedAlloc(
+    integrity.buffer_headers = try gpa.alignedAlloc(
         u8,
         constants.sector_size,
         constants.journal_size_headers,
     );
-    errdefer gpa.free(consistency.buffer_headers);
+    errdefer gpa.free(integrity.buffer_headers);
 
-    consistency.buffer_prepare = try gpa.alignedAlloc(
+    integrity.buffer_prepare = try gpa.alignedAlloc(
         u8,
         constants.sector_size,
         constants.message_size_max,
     );
-    errdefer gpa.free(consistency.buffer_prepare);
+    errdefer gpa.free(integrity.buffer_prepare);
 }
 
-fn open(consistency: *Consistency) !u64 {
+fn open(integrity: *Integrity) !u64 {
     var checked_bytes: u64 = 0;
 
-    assert(consistency.superblock.opened);
-    consistency.superblock.working.vsr_state.assert_internally_consistent();
-    for (consistency.superblock.reading) |_| {
+    assert(integrity.superblock.opened);
+    integrity.superblock.working.vsr_state.assert_internally_consistent();
+    for (integrity.superblock.reading) |_| {
         checked_bytes += vsr.superblock.superblock_copy_size;
     }
 
-    consistency.client_sessions_checkpoint.open(
-        &consistency.grid,
-        consistency.superblock.working.client_sessions_reference(),
+    integrity.client_sessions_checkpoint.open(
+        &integrity.grid,
+        integrity.superblock.working.client_sessions_reference(),
         struct {
             fn client_sessions_checkpoint_callback(_: *CheckpointTrailer) void {}
         }.client_sessions_checkpoint_callback,
     );
-    while (consistency.client_sessions_checkpoint.callback != .none) {
-        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    while (integrity.client_sessions_checkpoint.callback != .none) {
+        try integrity.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("client sessions checkpoint opened", .{});
 
-    consistency.grid.open(struct {
+    integrity.grid.open(struct {
         fn grid_open_callback(_: *Grid) void {}
     }.grid_open_callback);
-    while (consistency.grid.callback != .none) {
-        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    while (integrity.grid.callback != .none) {
+        try integrity.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("grid opened", .{});
 
-    consistency.forest.open(struct {
+    integrity.forest.open(struct {
         fn forest_open_callback(_: *Forest) void {}
     }.forest_open_callback);
-    while (consistency.forest.progress != null) {
-        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+    while (integrity.forest.progress != null) {
+        try integrity.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     log.debug("forest opened", .{});
 
     return checked_bytes;
 }
 
-fn deinit(consistency: *Consistency, gpa: std.mem.Allocator) void {
-    gpa.free(consistency.buffer_headers);
-    gpa.free(consistency.buffer_prepare);
+fn deinit(integrity: *Integrity, gpa: std.mem.Allocator) void {
+    gpa.free(integrity.buffer_headers);
+    gpa.free(integrity.buffer_prepare);
 
-    consistency.grid_blocks_scrubbed.deinit(gpa);
-    consistency.grid_scrubber.deinit(gpa);
-    consistency.forest.deinit(gpa);
-    consistency.grid.deinit(gpa);
-    consistency.client_sessions_checkpoint.deinit(gpa);
-    consistency.superblock.deinit(gpa);
-    consistency.storage.deinit();
+    integrity.grid_blocks_scrubbed.deinit(gpa);
+    integrity.grid_scrubber.deinit(gpa);
+    integrity.forest.deinit(gpa);
+    integrity.grid.deinit(gpa);
+    integrity.client_sessions_checkpoint.deinit(gpa);
+    integrity.superblock.deinit(gpa);
+    integrity.storage.deinit();
 }
 
 /// Checks the WAL headers and prepares, using sync IO.
-fn check_wal(consistency: *Consistency) !u64 {
+fn check_wal(integrity: *Integrity) !u64 {
     var checked_bytes: u64 = 0;
 
-    const headers_bytes_read = try consistency.sync_read_all(
-        consistency.buffer_headers,
+    const headers_bytes_read = try integrity.sync_read_all(
+        integrity.buffer_headers,
         vsr.Zone.wal_headers.start(),
     );
-    assert(headers_bytes_read == consistency.buffer_headers.len);
+    assert(headers_bytes_read == integrity.buffer_headers.len);
 
     const wal_headers: []vsr.Header.Prepare align(16) = @alignCast(
-        std.mem.bytesAsSlice(vsr.Header.Prepare, consistency.buffer_headers),
+        std.mem.bytesAsSlice(vsr.Header.Prepare, integrity.buffer_headers),
     );
 
     for (wal_headers, 0..) |*wal_header, slot| {
         const offset = slot * constants.message_size_max;
 
-        const bytes_read = try consistency.sync_read_all(
-            consistency.buffer_prepare,
+        const bytes_read = try integrity.sync_read_all(
+            integrity.buffer_prepare,
             vsr.Zone.wal_prepares.start() + offset,
         );
-        assert(bytes_read == consistency.buffer_prepare.len);
+        assert(bytes_read == integrity.buffer_prepare.len);
 
         const wal_prepare: *align(16) vsr.Header.Prepare = @alignCast(std.mem.bytesAsValue(
             vsr.Header.Prepare,
-            consistency.buffer_prepare[0..@sizeOf(vsr.Header)],
+            integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
         ));
 
         const wal_prepare_body_valid =
             wal_prepare.valid_checksum() and
             wal_prepare.valid_checksum_body(
-                consistency.buffer_prepare[@sizeOf(vsr.Header)..wal_prepare.size],
+                integrity.buffer_prepare[@sizeOf(vsr.Header)..wal_prepare.size],
             );
 
         assert(wal_header.valid_checksum());
@@ -344,26 +344,26 @@ fn check_wal(consistency: *Consistency) !u64 {
 }
 
 /// Checks the client replies, using sync IO.
-fn check_client_replies(consistency: *Consistency) !u64 {
+fn check_client_replies(integrity: *Integrity) !u64 {
     var checked_bytes: u64 = 0;
 
     for (0..constants.clients_max) |slot| {
         const offset = slot * constants.message_size_max;
 
-        const bytes_read = try consistency.sync_read_all(
-            consistency.buffer_prepare,
+        const bytes_read = try integrity.sync_read_all(
+            integrity.buffer_prepare,
             vsr.Zone.client_replies.start() + offset,
         );
-        assert(bytes_read == consistency.buffer_prepare.len);
+        assert(bytes_read == integrity.buffer_prepare.len);
 
         const reply: *align(16) vsr.Header.Reply = @alignCast(std.mem.bytesAsValue(
             vsr.Header.Reply,
-            consistency.buffer_prepare[0..@sizeOf(vsr.Header)],
+            integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
         ));
 
         const reply_empty = reply.checksum == 0 and reply.checksum_body == 0;
         const reply_valid = reply.valid_checksum() and
-            reply.valid_checksum_body(consistency.buffer_prepare[@sizeOf(vsr.Header)..reply.size]);
+            reply.valid_checksum_body(integrity.buffer_prepare[@sizeOf(vsr.Header)..reply.size]);
         assert(reply_empty or reply_valid);
 
         checked_bytes += bytes_read;
@@ -374,9 +374,9 @@ fn check_client_replies(consistency: *Consistency) !u64 {
 }
 
 /// Checks the grid, using the grid scrubber.
-fn check_grid(consistency: *Consistency, seed: u64) !u64 {
+fn check_grid(integrity: *Integrity, seed: u64) !u64 {
     var checked_bytes: u64 = 0;
-    const grid = &consistency.grid;
+    const grid = &integrity.grid;
 
     // The free set isn't included in the grid's acquired count, but is scrubbed.
     // Ensure this is accounted for.
@@ -391,7 +391,7 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
     });
 
     var prng = stdx.PRNG.from_seed(seed);
-    consistency.grid_scrubber.open(&prng);
+    integrity.grid_scrubber.open(&prng);
 
     const parent_progress_node = std.Progress.start(.{
         .root_name = "checking grid blocks",
@@ -403,46 +403,46 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
     timer.reset();
 
     while (true) {
-        for (0..consistency.grid_scrubber.reads.available() + 1) |_| {
-            if (consistency.grid_scrubber.tour == .done) break;
-            if (!consistency.grid_scrubber.read_next()) break;
+        for (0..integrity.grid_scrubber.reads.available() + 1) |_| {
+            if (integrity.grid_scrubber.tour == .done) break;
+            if (!integrity.grid_scrubber.read_next()) break;
         }
 
-        while (consistency.grid_scrubber.read_result_next()) |result| {
+        while (integrity.grid_scrubber.read_result_next()) |result| {
             assert(result.status == .ok);
 
             // `read_result_next` returns addresses, starting from 1, but the free sets and such
             // are zero indexed.
-            const block_set = consistency.grid_blocks_scrubbed.isSet(
+            const block_set = integrity.grid_blocks_scrubbed.isSet(
                 result.block.block_address - 1,
             );
 
             // Only completeOne() if no existing entry was found, as the grid scrubber will
             // run through index blocks multiple times.
             if (!block_set) {
-                consistency.grid_blocks_scrubbed.set(result.block.block_address - 1);
+                integrity.grid_blocks_scrubbed.set(result.block.block_address - 1);
                 checked_bytes += constants.block_size;
                 parent_progress_node.completeOne();
             }
         }
 
         // When the .tour is .done, there might still be reads executing. Wait for those, too.
-        if (consistency.grid_scrubber.tour == .done and
-            consistency.grid_scrubber.reads.executing() == 0)
+        if (integrity.grid_scrubber.tour == .done and
+            integrity.grid_scrubber.reads.executing() == 0)
         {
             break;
         }
 
-        try consistency.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        try integrity.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
     const grid_duration_ms = stdx.div_ceil(timer.read(), std.time.ns_per_ms);
 
-    assert(consistency.grid_scrubber.tour == .done and
-        consistency.grid_scrubber.reads.executing() == 0);
+    assert(integrity.grid_scrubber.tour == .done and
+        integrity.grid_scrubber.reads.executing() == 0);
 
     // Verify that the blocks checked from the grid scrubber and the free set itself are
     // identical.
-    assert(consistency.grid_blocks_scrubbed.count() == blocks_expected_count);
+    assert(integrity.grid_blocks_scrubbed.count() == blocks_expected_count);
 
     var acquired_iterator = grid.free_set.blocks_acquired.iterator(.{});
     while (acquired_iterator.next()) |block| {
@@ -450,11 +450,11 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
             continue;
         }
 
-        assert(consistency.grid_blocks_scrubbed.isSet(block));
+        assert(integrity.grid_blocks_scrubbed.isSet(block));
     }
 
     // Check in reverse, too, that all the blocks we visited are listed in the free set.
-    var visisted_iterator = consistency.grid_blocks_scrubbed.iterator(.{});
+    var visisted_iterator = integrity.grid_blocks_scrubbed.iterator(.{});
     while (visisted_iterator.next()) |entry| {
         const in_free_set = grid.free_set.blocks_acquired.isSet(entry) and
             !grid.free_set.blocks_released.isSet(entry);
@@ -477,7 +477,7 @@ fn check_grid(consistency: *Consistency, seed: u64) !u64 {
 }
 
 /// Windows doesn't support using sync IO functions like preadAll on the handles IO opens.
-fn sync_read_all(consistency: *Consistency, buffer: []u8, offset: u64) !u64 {
+fn sync_read_all(integrity: *Integrity, buffer: []u8, offset: u64) !u64 {
     var completion: IO.Completion = undefined;
 
     const Context = struct {
@@ -495,18 +495,18 @@ fn sync_read_all(consistency: *Consistency, buffer: []u8, offset: u64) !u64 {
     var bytes_read: u64 = 0;
 
     while (bytes_read < buffer.len) {
-        consistency.io.read(
+        integrity.io.read(
             *Context,
             &context,
             Context.read_callback,
             &completion,
-            consistency.storage.fd,
+            integrity.storage.fd,
             buffer[bytes_read..],
             offset,
         );
 
         while (context.bytes_read == null) {
-            try consistency.io.run();
+            try integrity.io.run();
         }
 
         if (context.bytes_read.? == 0) break;

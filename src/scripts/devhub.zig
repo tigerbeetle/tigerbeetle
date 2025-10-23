@@ -155,7 +155,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         timer.reset();
 
         try shell.exec(
-            "./tigerbeetle inspect consistency datafile-devhub",
+            "./tigerbeetle inspect integrity datafile-devhub",
             .{},
         );
 
@@ -333,7 +333,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },
             .{ .name = "stats count", .value = stats_count, .unit = "count" },
             .{ .name = "repl single command", .value = repl_single_command_ms, .unit = "ms" },
-            .{ .name = "inspect consistency time", .value = consistency_time_ms, .unit = "ms" },
+            .{ .name = "inspect integrity time", .value = consistency_time_ms, .unit = "ms" },
         },
     };
 

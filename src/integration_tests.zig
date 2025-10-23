@@ -283,7 +283,7 @@ test "benchmark/inspect smoke" {
         "{tigerbeetle} inspect grid                    {path}",
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
-        "{tigerbeetle} inspect consistency             {path}",
+        "{tigerbeetle} inspect integrity             {path}",
     }) |command| {
         log.debug("{s}", .{command});
 
@@ -293,7 +293,7 @@ test "benchmark/inspect smoke" {
         );
     }
 
-    // Corrupt the data file, and ensure the consistency check fails. Due to how it works, the
+    // Corrupt the data file, and ensure the integrity check fails. Due to how it works, the
     // corruption has to be in a spot that's actually used. Take the first offset from
     // `tigerbeetle inspect tables --tree=transfers`.
     const tables_output = try shell.exec_stdout(
@@ -321,7 +321,7 @@ test "benchmark/inspect smoke" {
     // `shell.exec` assumes that success is a zero exit code; but in this case the test expects
     // corruption to be found and wants to assert a non-zero exit code.
     var child = std.process.Child.init(
-        &.{ tigerbeetle, "inspect", "consistency", data_file },
+        &.{ tigerbeetle, "inspect", "integrity", data_file },
         std.testing.allocator,
     );
     child.stdout_behavior = .Ignore;

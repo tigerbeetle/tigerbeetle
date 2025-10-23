@@ -190,7 +190,7 @@ const CLIArgs = union(enum) {
             level: ?u6 = null,
             positional: struct { path: []const u8 },
         },
-        consistency: struct {
+        integrity: struct {
             log_debug: bool = false,
             seed: ?[]const u8 = null,
             memory_lsm_manifest: ?ByteSize = null,
@@ -226,10 +226,10 @@ const CLIArgs = union(enum) {
             \\
             \\  tigerbeetle inspect tables --tree=<name|id> [--level=<integer>] <path>
             \\
-            \\  tigerbeetle inspect consistency [--log-debug] [--seed=<seed>]
-            \\                                  [--memory-lsm-manifest=<size>]
-            \\                                  [--skip-wal] [--skip-client-replies] [--skip-grid]
-            \\                                  <path>
+            \\  tigerbeetle inspect integrity [--log-debug] [--seed=<seed>]
+            \\                                [--memory-lsm-manifest=<size>]
+            \\                                [--skip-wal] [--skip-client-replies] [--skip-grid]
+            \\                                <path>
             \\
             \\Options:
             \\
@@ -276,9 +276,9 @@ const CLIArgs = union(enum) {
             \\        List the tables matching the given tree/level.
             \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
             \\
-            \\  consistency
+            \\  integrity
             \\        Scans the data file and checks all internal checksums to verify internal
-            \\        consistency.
+            \\        integrity.
             \\
         ;
     };
@@ -591,7 +591,7 @@ pub const Command = union(enum) {
         metrics,
         op: u64,
         data_file: DataFile,
-        consistency: Consistency,
+        integrity: Integrity,
 
         pub const DataFile = struct {
             path: []const u8,
@@ -619,7 +619,7 @@ pub const Command = union(enum) {
             },
         };
 
-        pub const Consistency = struct {
+        pub const Integrity = struct {
             log_debug: bool,
             seed: ?[]const u8,
             lsm_forest_node_count: u32,
@@ -1150,10 +1150,10 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     };
 }
 
-fn parse_args_inspect_consistency(args: CLIArgs.Inspect) Command.Inspect.Consistency {
-    const consistency = args.consistency;
+fn parse_args_inspect_integrity(args: CLIArgs.Inspect) Command.Inspect.Integrity {
+    const integrity = args.integrity;
 
-    const scrub_memory_lsm_manifest: ByteSize = consistency.memory_lsm_manifest orelse
+    const scrub_memory_lsm_manifest: ByteSize = integrity.memory_lsm_manifest orelse
         .{ .value = constants.lsm_manifest_memory_size_default };
 
     const lsm_manifest_memory = scrub_memory_lsm_manifest.bytes();
@@ -1190,12 +1190,12 @@ fn parse_args_inspect_consistency(args: CLIArgs.Inspect) Command.Inspect.Consist
         @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
     return .{
-        .path = consistency.positional.path,
-        .log_debug = consistency.log_debug,
-        .seed = consistency.seed,
-        .skip_wal = consistency.skip_wal,
-        .skip_client_replies = consistency.skip_client_replies,
-        .skip_grid = consistency.skip_grid,
+        .path = integrity.positional.path,
+        .log_debug = integrity.log_debug,
+        .seed = integrity.seed,
+        .skip_wal = integrity.skip_wal,
+        .skip_client_replies = integrity.skip_client_replies,
+        .skip_grid = integrity.skip_grid,
         .lsm_forest_node_count = lsm_forest_node_count,
     };
 }
@@ -1205,7 +1205,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
         .constants => return .constants,
         .metrics => return .metrics,
         .op => |args| return .{ .op = args.positional.op },
-        .consistency => return .{ .consistency = parse_args_inspect_consistency(inspect) },
+        .integrity => return .{ .integrity = parse_args_inspect_integrity(inspect) },
         inline else => |args| args.positional.path,
     };
 
@@ -1215,7 +1215,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
             .constants,
             .metrics,
             .op,
-            .consistency,
+            .integrity,
             => unreachable,
             .superblock => .superblock,
             .wal => |args| .{ .wal = .{ .slot = args.slot } },
