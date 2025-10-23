@@ -67,7 +67,7 @@ pub fn spawn(
         struct {
             fn poll_broken_pipe(stdin: std.fs.File, process: *LoggedProcess) void {
                 while (process.state() == .running) {
-                    std.time.sleep(1 * std.time.ns_per_s);
+                    std.time.sleep(50 * std.time.ns_per_ms);
                     _ = stdin.write(&.{1}) catch |err| {
                         switch (err) {
                             error.WouldBlock => {}, // still running

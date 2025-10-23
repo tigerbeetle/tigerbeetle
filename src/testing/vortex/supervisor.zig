@@ -308,9 +308,7 @@ const Supervisor = struct {
                 }
             }
 
-            if (now < sleep_deadline) continue;
-
-            if (!supervisor.disable_faults) {
+            if (sleep_deadline < now and !supervisor.disable_faults) {
                 const Action = enum {
                     sleep,
                     replica_terminate,
