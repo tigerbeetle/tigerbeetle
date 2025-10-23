@@ -488,7 +488,7 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            let responses: &[tbc::tb_create_accounts_result_t] = handle_message(&msg)?;
+            let responses: &[tbc::tb_create_account_result_t] = handle_message(&msg)?;
 
             Ok(responses
                 .iter()
@@ -592,7 +592,7 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            let responses: &[tbc::tb_create_transfers_result_t] = handle_message(&msg)?;
+            let responses: &[tbc::tb_create_transfer_result_t] = handle_message(&msg)?;
 
             Ok(responses
                 .iter()

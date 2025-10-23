@@ -214,17 +214,17 @@ CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
 
 ### Response and Errors
 
-The response is an array containing the _result code_ and the _timestamp_ of
+The response is an array containing the _status code_ and the _timestamp_ of
 each account in the request batch:
-- Successfully created accounts with the result
-  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+- Successfully created accounts with the status
+  [`created`](https://docs.tigerbeetle.com/reference/requests/create_accounts#created)
   return the timestamp assigned to the `Account` object.
 - Already existing accounts with the result
   [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
   return the timestamp of the original existing object.
-- Failed accounts return the error code along with the timestamp when the validation
+- Failed accounts return the status code along with the timestamp when the validation
   occurred. See all error conditions in the
-  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts#status).
 
 ```java
 AccountBatch accounts = new AccountBatch(3);
@@ -249,8 +249,8 @@ accounts.setFlags(AccountFlags.NONE);
 
 CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
 while (accountsResults.next()) {
-    switch (accountsResults.getResult()) {
-        case Ok:
+    switch (accountsResults.getStatus()) {
+        case Created:
             System.out.printf("Batch account at %d successfully created with timestamp %d.\n",
                     accountsResults.getPosition(), accountsResults.getTimestamp());
             break;
@@ -260,7 +260,7 @@ while (accountsResults.next()) {
             break;
         default:
             System.err.printf("Batch account at %d failed to create: %s.\n",
-                    accountsResults.getPosition(), accountsResults.getResult());
+                    accountsResults.getPosition(), accountsResults.getStatus());
             break;
     }
 }
@@ -318,17 +318,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an array containing the _result code_ and the _timestamp_ of
+The response is an array containing the _status code_ and the _timestamp_ of
 each transfer in the request batch:
 - Successfully created transfers with the result
-  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  [`created`](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
   return the timestamp assigned to the `Transfer` object.
 - Already existing transfers with the result
   [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
   return the timestamp of the original existing object.
-- Failed transfers return the error code along with the timestamp when the validation
+- Failed transfers return the status code along with the timestamp when the validation
   occurred. See all error conditions in the
-  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers#status).
 
 ```java
 TransferBatch transfers = new TransferBatch(3);
@@ -359,8 +359,8 @@ transfers.setCode(1);
 
 CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
 while (transfersResults.next()) {
-    switch (transfersResults.getResult()) {
-        case Ok:
+    switch (transfersResults.getStatus()) {
+        case Created:
             System.out.printf("Batch transfer at %d successfully created with timestamp %d.\n",
                     transfersResults.getPosition(), transfersResults.getTimestamp());
             break;
@@ -370,7 +370,7 @@ while (transfersResults.next()) {
             break;
         default:
             System.err.printf("Batch transfer at %d failed to create: %s\n",
-                    transfersResults.getPosition(), transfersResults.getResult());
+                    transfersResults.getPosition(), transfersResults.getStatus());
             break;
     }
 }
