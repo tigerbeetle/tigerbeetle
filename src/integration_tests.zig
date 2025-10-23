@@ -310,15 +310,28 @@ test "benchmark/inspect smoke" {
     {
         const file = try std.fs.cwd().openFile(data_file, .{ .mode = .read_write });
         defer file.close();
-        try file.pwriteAll(&.{ 0, 0, 0, 0 }, offset);
+
+        var prng = stdx.PRNG.from_seed_testing();
+        var random_bytes: [256]u8 = undefined;
+        prng.fill(&random_bytes);
+
+        try file.pwriteAll(&random_bytes, offset);
     }
 
-    const output = shell.exec("{tigerbeetle} inspect consistency {data_file}", .{
-        .tigerbeetle = tigerbeetle,
-        .data_file = data_file,
-    });
+    // `shell.exec` assumes that success is a zero exit code; but in this case the test expects
+    // corruption to be found and wants to assert a non-zero exit code.
+    var child = std.process.Child.init(
+        &.{ tigerbeetle, "inspect", "consistency", data_file },
+        std.testing.allocator,
+    );
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
 
-    try std.testing.expectError(error.ExecFailed, output);
+    const term = try child.spawnAndWait();
+    switch (term) {
+        .Exited, .Signal => |value| try std.testing.expect(value != 0),
+        else => unreachable,
+    }
 }
 
 test "help/version smoke" {
