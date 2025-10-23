@@ -28,24 +28,24 @@ public sealed class Client : IDisposable
 
     public UInt128 ClusterID => clusterID;
 
-    public CreateAccountsResult[] CreateAccounts(ReadOnlySpan<Account> batch)
+    public CreateAccountResult[] CreateAccounts(ReadOnlySpan<Account> batch)
     {
-        return nativeClient.CallRequest<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
+        return nativeClient.CallRequest<CreateAccountResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
-    public Task<CreateAccountsResult[]> CreateAccountsAsync(ReadOnlyMemory<Account> batch)
+    public Task<CreateAccountResult[]> CreateAccountsAsync(ReadOnlyMemory<Account> batch)
     {
-        return nativeClient.CallRequestAsync<CreateAccountsResult, Account>(TBOperation.CreateAccounts, batch);
+        return nativeClient.CallRequestAsync<CreateAccountResult, Account>(TBOperation.CreateAccounts, batch);
     }
 
-    public CreateTransfersResult[] CreateTransfers(ReadOnlySpan<Transfer> batch)
+    public CreateTransferResult[] CreateTransfers(ReadOnlySpan<Transfer> batch)
     {
-        return nativeClient.CallRequest<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
+        return nativeClient.CallRequest<CreateTransferResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
-    public Task<CreateTransfersResult[]> CreateTransfersAsync(ReadOnlyMemory<Transfer> batch)
+    public Task<CreateTransferResult[]> CreateTransfersAsync(ReadOnlyMemory<Transfer> batch)
     {
-        return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
+        return nativeClient.CallRequestAsync<CreateTransferResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
     public Account[] LookupAccounts(ReadOnlySpan<UInt128> batch)

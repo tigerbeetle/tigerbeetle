@@ -196,7 +196,7 @@ fn smoke() -> anyhow::Result<()> {
 
             assert_eq!(results.len(), 2);
             assert!(results.iter().all(|result| {
-                result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+                result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
             }));
         }
 
@@ -221,7 +221,7 @@ fn smoke() -> anyhow::Result<()> {
 
             assert_eq!(results.len(), 1);
             assert!(results.iter().all(|result| {
-                result.timestamp > 0 && result.result == tb::CreateTransferResult::Ok
+                result.timestamp > 0 && result.status == tb::CreateTransferStatus::Created
             }));
         }
 
@@ -598,7 +598,7 @@ fn multithread() -> anyhow::Result<()> {
 
                     assert_eq!(results.len(), 1);
                     assert!(results.iter().all(|result| {
-                        result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+                        result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
                     }));
                 }
 
@@ -653,7 +653,7 @@ fn concurrent_requests() -> anyhow::Result<()> {
         let results = block_on(async { response.await })?;
         assert_eq!(results.len(), 1);
         assert!(results.iter().all(|result| {
-            result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+            result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
         }));
     }
 
@@ -833,14 +833,14 @@ fn make_paging_test_transfers(client: &tb::Client) -> anyhow::Result<PagingTestP
         let account_results = client.create_accounts(&[account1, account2]).await?;
         assert_eq!(account_results.len(), 2);
         assert!(account_results.iter().all(|result| {
-            result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+            result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
         }));
 
         for transfers in transfers.chunks(batch_size) {
             let transfer_results = client.create_transfers(transfers).await?;
             assert_eq!(transfer_results.len(), transfers.len());
             assert!(transfer_results.iter().all(|result| {
-                result.timestamp > 0 && result.result == tb::CreateTransferResult::Ok
+                result.timestamp > 0 && result.status == tb::CreateTransferStatus::Created
             }));
         }
 
@@ -932,8 +932,8 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
             .map(move |(i, account)| (account, create_accounts_results[i]));
 
         for (account, create_account_result) in it {
-            match create_account_result.result {
-                tb::CreateAccountResult::Ok | tb::CreateAccountResult::Exists => {
+            match create_account_result.status {
+                tb::CreateAccountStatus::Created | tb::CreateAccountStatus::Exists => {
                     handle_create_account_success(account, create_account_result).await?;
                 }
                 _ => {
@@ -946,14 +946,14 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
 
     async fn handle_create_account_success(
         _account: &tb::Account,
-        _result: tb::CreateAccountsResult,
+        _result: tb::CreateAccountResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_create_account_failure(
         _account: &tb::Account,
-        _result: tb::CreateAccountsResult,
+        _result: tb::CreateAccountResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
@@ -983,9 +983,9 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
             ]
         };
         let results_expected = &[
-            tb::CreateAccountResult::Ok,
-            tb::CreateAccountResult::Exists,
-            tb::CreateAccountResult::CodeMustNotBeZero,
+            tb::CreateAccountStatus::Created,
+            tb::CreateAccountStatus::Exists,
+            tb::CreateAccountStatus::CodeMustNotBeZero,
         ];
 
         let client = test_client()?;
@@ -997,8 +997,8 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
         let accounts = gen_accounts();
         let results = client.create_accounts(&accounts).await?;
         assert_eq!(accounts.len(), results.len());
-        let results_actual: Vec<tb::CreateAccountResult> =
-            results.iter().map(|result| result.result).collect();
+        let results_actual: Vec<tb::CreateAccountStatus> =
+            results.iter().map(|result| result.status).collect();
         assert_eq!(results_expected, &results_actual[..]);
 
         Ok(())
@@ -1019,8 +1019,8 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(move |(i, transfer)| (transfer, results[i]));
         for (transfer, create_transfer_result) in it {
-            match create_transfer_result.result {
-                tb::CreateTransferResult::Ok | tb::CreateTransferResult::Exists => {
+            match create_transfer_result.status {
+                tb::CreateTransferStatus::Created | tb::CreateTransferStatus::Exists => {
                     handle_create_transfer_success(transfer, create_transfer_result).await?;
                 }
                 _ => {
@@ -1033,14 +1033,14 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
 
     async fn handle_create_transfer_success(
         _transfer: &tb::Transfer,
-        _result: tb::CreateTransfersResult,
+        _result: tb::CreateTransferResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_create_transfer_failure(
         _transfer: &tb::Transfer,
-        _result: tb::CreateTransfersResult,
+        _result: tb::CreateTransferResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
@@ -1100,9 +1100,9 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let results_expected = &[
-            tb::CreateTransferResult::Ok,
-            tb::CreateTransferResult::Exists,
-            tb::CreateTransferResult::CodeMustNotBeZero,
+            tb::CreateTransferStatus::Created,
+            tb::CreateTransferStatus::Exists,
+            tb::CreateTransferStatus::CodeMustNotBeZero,
         ];
 
         // Test the example.
@@ -1112,8 +1112,8 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
         let transfers = gen_transfers();
         let results = client.create_transfers(&transfers).await?;
         assert_eq!(transfers.len(), results.len());
-        let results_actual: Vec<tb::CreateTransferResult> =
-            results.iter().map(|result| result.result).collect();
+        let results_actual: Vec<tb::CreateTransferStatus> =
+            results.iter().map(|result| result.status).collect();
         assert_eq!(results_expected, &results_actual[..]);
 
         Ok(())

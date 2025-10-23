@@ -81,23 +81,23 @@ const type_mappings = .{
             ,
         },
     },
-    .{ tb.CreateAccountResult, TypeMapping{
-        .name = "CreateAccountResult",
+    .{ tb.CreateAccountStatus, TypeMapping{
+        .name = "CreateAccountStatus",
         .visibility = .public,
         .docs_link = "reference/requests/create_accounts#",
     } },
-    .{ tb.CreateTransferResult, TypeMapping{
-        .name = "CreateTransferResult",
+    .{ tb.CreateTransferStatus, TypeMapping{
+        .name = "CreateTransferStatus",
         .visibility = .public,
         .docs_link = "reference/requests/create_transfers#",
     } },
-    .{ tb.CreateAccountsResult, TypeMapping{
-        .name = "CreateAccountsResult",
+    .{ tb.CreateAccountResult, TypeMapping{
+        .name = "CreateAccountResult",
         .visibility = .public,
         .private_fields = &.{"reserved"},
     } },
-    .{ tb.CreateTransfersResult, TypeMapping{
-        .name = "CreateTransfersResult",
+    .{ tb.CreateTransferResult, TypeMapping{
+        .name = "CreateTransferResult",
         .visibility = .public,
         .private_fields = &.{"reserved"},
     } },

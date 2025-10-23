@@ -32,8 +32,8 @@ const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
 const TransferPendingStatus = tb.TransferPendingStatus;
 
-const CreateAccountResult = tb.CreateAccountResult;
-const CreateTransferResult = tb.CreateTransferResult;
+const CreateAccountStatus = tb.CreateAccountStatus;
+const CreateTransferStatus = tb.CreateTransferStatus;
 
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
@@ -2995,7 +2995,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     break :result .{
                         std.meta.activeTag(create_result),
                         switch (create_result) {
-                            .ok, .exists => |timestamp_actual| timestamp_actual,
+                            .created, .exists => |timestamp_actual| timestamp_actual,
                             else => timestamp_event,
                         },
                     };
@@ -3010,7 +3010,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         event,
                     });
                 }
-                if (result_code != .ok) {
+                if (result_code != .created) {
                     if (chain) |chain_start_index| {
                         if (!chain_broken) {
                             chain_broken = true;
@@ -3024,7 +3024,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                                     .create_accounts,
                                     .create_transfers,
                                     => {
-                                        results[chain_index].result = .linked_event_failed;
+                                        results[chain_index].status = .linked_event_failed;
                                     },
                                     .deprecated_create_accounts_sparse,
                                     .deprecated_create_transfers_sparse,
@@ -3075,7 +3075,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     => {
                         results[count] = .{
                             .timestamp = timestamp_actual,
-                            .result = result_code,
+                            .status = result_code,
                         };
                         count += 1;
                     },
@@ -3117,15 +3117,15 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .create_accounts,
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
-                => CreateAccountResult,
+                => CreateAccountStatus,
                 .create_transfers,
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
-                => CreateTransferResult,
+                => CreateTransferStatus,
                 else => unreachable,
             },
         ) void {
-            assert(result_code != .ok);
+            assert(result_code != .created);
 
             switch (operation) {
                 // The `create_accounts` error codes do not depend on transient system status.
@@ -3495,14 +3495,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             };
         }
 
-        /// Generates a comptime union tagged by `CreateAccountResult`,
-        /// adding the timestamp `u64` payload to the `.ok` and `.exists` variants.
-        const CreateAccountResultUnion = stdx.EnumUnionType(
-            CreateAccountResult,
+        /// Generates a comptime union tagged by `CreateAccountStatus`,
+        /// adding the timestamp `u64` payload to the `.created` and `.exists` variants.
+        const CreateAccountStatusUnion = stdx.EnumUnionType(
+            CreateAccountStatus,
             struct {
-                fn Type(comptime result: CreateAccountResult) type {
+                fn Type(comptime result: CreateAccountStatus) type {
                     return switch (result) {
-                        .ok, .exists => u64,
+                        .created, .exists => u64,
                         else => void,
                     };
                 }
@@ -3513,7 +3513,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             timestamp_event: u64,
             a: *const Account,
-        ) CreateAccountResultUnion {
+        ) CreateAccountStatusUnion {
             assert(timestamp_event != 0);
             assert(timestamp_event > self.commit_timestamp or
                 a.flags.imported or
@@ -3585,10 +3585,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .timestamp = timestamp_actual,
             });
             self.commit_timestamp = timestamp_actual;
-            return .{ .ok = timestamp_actual };
+            return .{ .created = timestamp_actual };
         }
 
-        fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResultUnion {
+        fn create_account_exists(a: *const Account, e: *const Account) CreateAccountStatusUnion {
             assert(a.id == e.id);
             if (@as(u16, @bitCast(a.flags)) != @as(u16, @bitCast(e.flags))) {
                 return .exists_with_different_flags;
@@ -3602,14 +3602,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             return .{ .exists = e.timestamp };
         }
 
-        /// Generates a comptime union tagged by `CreateTransferResult`,
-        /// adding the timestamp `u64` payload to the `.ok` and `.exists` variants.
-        const CreateTransferResultUnion = stdx.EnumUnionType(
-            CreateTransferResult,
+        /// Generates a comptime union tagged by `CreateTransferStatus`,
+        /// adding the timestamp `u64` payload to the `.created` and `.exists` variants.
+        const CreateTransferStatusUnion = stdx.EnumUnionType(
+            CreateTransferStatus,
             struct {
-                fn Type(comptime result: CreateTransferResult) type {
+                fn Type(comptime result: CreateTransferStatus) type {
                     return switch (result) {
-                        .ok, .exists => u64,
+                        .created, .exists => u64,
                         else => void,
                     };
                 }
@@ -3620,7 +3620,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             timestamp_event: u64,
             t: *const Transfer,
-        ) CreateTransferResultUnion {
+        ) CreateTransferStatusUnion {
             assert(timestamp_event != 0);
             assert(timestamp_event > self.commit_timestamp or
                 t.flags.imported or
@@ -3867,14 +3867,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             self.commit_timestamp = timestamp_actual;
-            return .{ .ok = timestamp_actual };
+            return .{ .created = timestamp_actual };
         }
 
         fn create_transfer_exists(
             self: *const StateMachine,
             t: *const Transfer,
             e: *const Transfer,
-        ) CreateTransferResultUnion {
+        ) CreateTransferStatusUnion {
             assert(t.id == e.id);
             // The flags change the behavior of the remaining comparisons,
             // so compare the flags first.
@@ -3939,7 +3939,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             timestamp_event: u64,
             t: *const Transfer,
-        ) CreateTransferResultUnion {
+        ) CreateTransferStatusUnion {
             assert(t.id != 0);
             assert(t.id != std.math.maxInt(u128));
             assert(self.forest.grooves.transfers.get(t.id) == .not_found);
@@ -4171,14 +4171,14 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             self.commit_timestamp = timestamp_actual;
 
-            return .{ .ok = timestamp_actual };
+            return .{ .created = timestamp_actual };
         }
 
         fn post_or_void_pending_transfer_exists(
             t: *const Transfer,
             e: *const Transfer,
             p: *const Transfer,
-        ) CreateTransferResultUnion {
+        ) CreateTransferStatusUnion {
             assert(t.id == e.id);
             assert(t.id != p.id);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);

@@ -3,8 +3,8 @@ const process = require("process");
 
 const {
     createClient,
-    CreateAccountResult,
-    CreateTransferResult,
+    CreateAccountStatus,
+    CreateTransferStatus,
     TransferFlags,
 } = require("tigerbeetle-node");
 
@@ -48,8 +48,8 @@ async function main() {
     },
   ]);
   assert.strictEqual(accountsResults.length, 2);
-  assert.strictEqual(accountsResults[0].result, CreateAccountResult.ok);
-  assert.strictEqual(accountsResults[1].result, CreateAccountResult.ok);
+  assert.strictEqual(accountsResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountsResults[1].status, CreateAccountStatus.created);
 
   // Start a pending transfer
   let transfersResults = await client.createTransfers([
@@ -70,7 +70,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
   let accounts = await client.lookupAccounts([1n, 2n]);
@@ -110,7 +110,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate the contents of all transfers
   let transfers = await client.lookupTransfers([1n, 2n]);

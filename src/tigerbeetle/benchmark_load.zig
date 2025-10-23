@@ -461,13 +461,13 @@ const Benchmark = struct {
 
         const create_accounts_results = stdx.bytes_as_slice(
             .exact,
-            tb.CreateAccountsResult,
+            tb.CreateAccountResult,
             results,
         );
         for (create_accounts_results) |result| {
             assert(result.timestamp > 0);
-            if (result.result != .ok) {
-                panic("CreateAccountsResults: {any}", .{result.result});
+            if (result.status != .created) {
+                panic("CreateAccountStatus: {any}", .{result.status});
             }
         }
         if (create_accounts_results.len != 0) {}
@@ -504,13 +504,13 @@ const Benchmark = struct {
         assert(!b.clients_busy.is_set(client_index));
         const create_transfers_results = stdx.bytes_as_slice(
             .exact,
-            tb.CreateTransfersResult,
+            tb.CreateTransferResult,
             results,
         );
         for (create_transfers_results) |result| {
             assert(result.timestamp > 0);
-            if (result.result != .ok) {
-                panic("CreateTransfersResults: {any}", .{result.result});
+            if (result.status != .created) {
+                panic("CreateTransferStatus: {any}", .{result.status});
             }
         }
 

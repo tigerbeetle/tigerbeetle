@@ -276,14 +276,14 @@ export type Transfer = {
 
 
 /**
-* See [CreateAccountResult](https://docs.tigerbeetle.com/reference/requests/create_accounts#)
+* See [CreateAccountStatus](https://docs.tigerbeetle.com/reference/requests/create_accounts#)
 */
-export enum CreateAccountResult {
+export enum CreateAccountStatus {
 
   /**
-  * See [ok](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  * See [created](https://docs.tigerbeetle.com/reference/requests/create_accounts#created)
   */
-  ok = 0,
+  created = 0,
 
   /**
   * See [linked_event_failed](https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed)
@@ -418,14 +418,14 @@ export enum CreateAccountResult {
 
 
 /**
-* See [CreateTransferResult](https://docs.tigerbeetle.com/reference/requests/create_transfers#)
+* See [CreateTransferStatus](https://docs.tigerbeetle.com/reference/requests/create_transfers#)
 */
-export enum CreateTransferResult {
+export enum CreateTransferStatus {
 
   /**
-  * See [ok](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  * See [created](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
   */
-  ok = 0,
+  created = 0,
 
   /**
   * See [linked_event_failed](https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed)
@@ -763,14 +763,14 @@ export enum CreateTransferResult {
   exceeds_debits = 55,
 }
 
-export type CreateAccountsResult = {
+export type CreateAccountResult = {
   timestamp: bigint
-  result: CreateAccountResult
+  status: CreateAccountStatus
 }
 
-export type CreateTransfersResult = {
+export type CreateTransferResult = {
   timestamp: bigint
-  result: CreateTransferResult
+  status: CreateTransferStatus
 }
 
 

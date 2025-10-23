@@ -70,7 +70,7 @@ typedef struct tb_transfer_t {
 } tb_transfer_t;
 
 typedef enum TB_CREATE_ACCOUNT_RESULT {
-    TB_CREATE_ACCOUNT_OK = 0,
+    TB_CREATE_ACCOUNT_CREATED = 0,
     TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED = 1,
     TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN = 2,
     TB_CREATE_ACCOUNT_IMPORTED_EVENT_EXPECTED = 22,
@@ -100,7 +100,7 @@ typedef enum TB_CREATE_ACCOUNT_RESULT {
 } TB_CREATE_ACCOUNT_RESULT;
 
 typedef enum TB_CREATE_TRANSFER_RESULT {
-    TB_CREATE_TRANSFER_OK = 0,
+    TB_CREATE_TRANSFER_CREATED = 0,
     TB_CREATE_TRANSFER_LINKED_EVENT_FAILED = 1,
     TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN = 2,
     TB_CREATE_TRANSFER_IMPORTED_EVENT_EXPECTED = 56,
@@ -172,13 +172,13 @@ typedef enum TB_CREATE_TRANSFER_RESULT {
 
 typedef struct tb_create_accounts_result_t {
     uint64_t timestamp;
-    uint32_t result;
+    uint32_t status;
     uint32_t reserved;
 } tb_create_accounts_result_t;
 
 typedef struct tb_create_transfers_result_t {
     uint64_t timestamp;
-    uint32_t result;
+    uint32_t status;
     uint32_t reserved;
 } tb_create_transfers_result_t;
 

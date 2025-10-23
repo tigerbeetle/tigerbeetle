@@ -9,8 +9,8 @@ console.log("Import ok!");
 const {
   AccountFlags,
   TransferFlags,
-  CreateTransferResult,
-  CreateAccountResult,
+  CreateTransferStatus,
+  CreateAccountStatus,
   AccountFilterFlags,
   QueryFilterFlags,
   amount_max,
@@ -140,15 +140,15 @@ async function main() {
 
     const accounts_results = await client.createAccounts([account0, account1, account2]);
     for (let i = 0; i < accounts_results.length; i++) {
-      switch (accounts_results[i].result) {
-        case CreateAccountResult.ok:
+      switch (accounts_results[i].status) {
+        case CreateAccountStatus.created:
           console.error(`Batch account at ${i} successfully created with timestamp ${accounts_results[i].timestamp}.`);
           break;
-        case CreateAccountResult.exists:
+        case CreateAccountStatus.exists:
           console.error(`Batch account at ${i} already exists with timestamp ${accounts_results[i].timestamp}.`);
           break;
         default:
-          console.error(`Batch account at ${i} failed to create: ${accounts_results[i].result}`);
+          console.error(`Batch account at ${i} failed to create: ${accounts_results[i].status}`);
           break;
       }
     }
@@ -234,15 +234,15 @@ async function main() {
 
     const transfers_results = await client.createTransfers(batch);
     for (let i = 0; i < transfers_results.length; i++) {
-      switch (transfers_results[i].result) {
-        case CreateTransferResult.ok:
+      switch (transfers_results[i].status) {
+        case CreateTransferStatus.created:
           console.error(`Batch transfer at ${i} successfully created with timestamp ${transfers_results[i].timestamp}.`);
           break;
-        case CreateTransferResult.exists:
+        case CreateTransferStatus.exists:
           console.error(`Batch transfer at ${i} already exists with timestamp ${transfers_results[i].timestamp}.`);
           break;
         default:
-          console.error(`Batch transfer at ${i} failed to create: ${transfers_results[i].result}`);
+          console.error(`Batch transfer at ${i} failed to create: ${transfers_results[i].status}`);
           break;
       }
     }

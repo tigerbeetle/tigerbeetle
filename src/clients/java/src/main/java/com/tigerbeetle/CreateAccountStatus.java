@@ -5,12 +5,12 @@
 
 package com.tigerbeetle;
 
-public enum CreateAccountResult {
+public enum CreateAccountStatus {
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#ok">ok</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#created">created</a>
      */
-    Ok((int) 0),
+    Created((int) 0),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed">linked_event_failed</a>
@@ -144,13 +144,13 @@ public enum CreateAccountResult {
 
     public final int value;
 
-    CreateAccountResult(int value) {
+    CreateAccountStatus(int value) {
         this.value = value;
     }
 
-    public static CreateAccountResult fromValue(int value) {
+    public static CreateAccountStatus fromValue(int value) {
         switch (value) {
-            case 0: return Ok;
+            case 0: return Created;
             case 1: return LinkedEventFailed;
             case 2: return LinkedEventChainOpen;
             case 22: return ImportedEventExpected;
@@ -178,7 +178,7 @@ public enum CreateAccountResult {
             case 14: return CodeMustNotBeZero;
             case 26: return ImportedEventTimestampMustNotRegress;
             default: throw new IllegalArgumentException(
-                String.format("Invalid CreateAccountResult value=%d", value));
+                String.format("Invalid CreateAccountStatus value=%d", value));
         }
     }
 }

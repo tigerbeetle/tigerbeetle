@@ -48,20 +48,20 @@ const type_mappings = .{
         .name = "Transfer",
         .docs_link = "reference/transfer/#",
     } },
+    .{ tb.CreateAccountStatus, TypeMapping{
+        .name = "CreateAccountStatus",
+        .docs_link = "reference/requests/create_accounts#",
+    } },
+    .{ tb.CreateTransferStatus, TypeMapping{
+        .name = "CreateTransferStatus",
+        .docs_link = "reference/requests/create_transfers#",
+    } },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
-        .docs_link = "reference/requests/create_accounts#",
+        .hidden_fields = &.{"reserved"},
     } },
     .{ tb.CreateTransferResult, TypeMapping{
         .name = "CreateTransferResult",
-        .docs_link = "reference/requests/create_transfers#",
-    } },
-    .{ tb.CreateAccountsResult, TypeMapping{
-        .name = "CreateAccountsResult",
-        .hidden_fields = &.{"reserved"},
-    } },
-    .{ tb.CreateTransfersResult, TypeMapping{
-        .name = "CreateTransfersResult",
         .hidden_fields = &.{"reserved"},
     } },
     .{ tb.AccountFilter, TypeMapping{

@@ -19,8 +19,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
     print(accounts_results)
     assert len(accounts_results) == 2
-    assert accounts_results[0].result == tb.CreateAccountResult.OK
-    assert accounts_results[1].result == tb.CreateAccountResult.OK
+    assert accounts_results[0].status == tb.CreateAccountStatus.CREATED
+    assert accounts_results[1].status == tb.CreateAccountStatus.CREATED
 
     # Start five pending transfers.
     transfers = [
@@ -74,7 +74,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     print(transfers_results)
     assert len(transfers_results) == len(transfers)
     for result in transfers_results:
-        assert result.result == tb.CreateTransferResult.OK
+        assert result.status == tb.CreateTransferStatus.CREATED
 
     # Validate accounts pending and posted debits/credits before
     # finishing the two-phase transfer.
@@ -110,7 +110,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     ])
     print(transfers_results)
     assert len(transfers_results) == 1
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate account balances after posting 1st pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -144,7 +144,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     ])
     print(transfers_results)
     assert len(transfers_results) == 1
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate account balances after voiding 2d pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -178,7 +178,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     ])
     print(transfers_results)
     assert len(transfers_results) == 1
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate account balances after posting 3rd pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -212,7 +212,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     ])
     print(transfers_results)
     assert len(transfers_results) == 1
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate account balances after voiding 4th pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -246,7 +246,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     ])
     print(transfers_results)
     assert len(transfers_results) == 1
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate account balances after posting 5th pending transfer.
     accounts = client.lookup_accounts([1, 2])

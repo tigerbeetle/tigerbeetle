@@ -3,8 +3,8 @@ const process = require("process");
 
 const {
     createClient,
-    CreateAccountResult,
-    CreateTransferResult,
+    CreateAccountStatus,
+    CreateTransferStatus,
     TransferFlags,
 } = require("tigerbeetle-node");
 
@@ -48,8 +48,8 @@ async function main() {
     },
   ]);
   assert.strictEqual(accountsResults.length, 2);
-  assert.strictEqual(accountsResults[0].result, CreateAccountResult.ok);
-  assert.strictEqual(accountsResults[1].result, CreateAccountResult.ok);
+  assert.strictEqual(accountsResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountsResults[1].status, CreateAccountStatus.created);
 
   // Start five pending transfer.
   let transfers = [
@@ -131,8 +131,8 @@ async function main() {
   ];
   let transfersResults = await client.createTransfers(transfers);
   assert.strictEqual(transfersResults.length, transfers.length);
-  for (const item of transfersResults) {
-    assert.strictEqual(item.result, CreateTransferResult.ok);
+  for (const result of transfersResults) {
+    assert.strictEqual(result.status, CreateTransferStatus.created);
   }
 
   // Validate accounts pending and posted debits/credits before
@@ -174,7 +174,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after posting 1st pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -214,7 +214,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after voiding 2nd pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -254,7 +254,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after posting 3rd pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -294,7 +294,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after voiding 4th pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -334,7 +334,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after posting 5th pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);

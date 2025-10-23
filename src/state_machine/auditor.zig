@@ -16,9 +16,9 @@ const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 
-pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
+pub const CreateAccountStatusSet = std.enums.EnumSet(tb.CreateAccountStatus);
 // TODO(zig): See `Ordered` comments.
-pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Ordered);
+pub const CreateTransferStatusSet = std.enums.EnumSet(tb.CreateTransferStatus.Ordered);
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
@@ -34,8 +34,8 @@ const InFlightKey = struct {
 /// Store expected possible results for an in-flight request.
 /// This reply validation takes advantage of the Workload's additional context about the request.
 const InFlight = union(enum) {
-    create_accounts: [accounts_batch_size_max]CreateAccountResultSet,
-    create_transfers: [transfers_batch_size_max]CreateTransferResultSet,
+    create_accounts: [accounts_batch_size_max]CreateAccountStatusSet,
+    create_transfers: [transfers_batch_size_max]CreateTransferStatusSet,
 };
 
 const InFlightQueue = std.AutoHashMapUnmanaged(InFlightKey, InFlight);
@@ -67,7 +67,7 @@ const PendingExpiryQueue = PriorityQueue(PendingExpiry, void, struct {
 
 pub const AccountingAuditor = struct {
     pub const AccountState = struct {
-        /// Set to true when `create_accounts` returns `.ok` for an account.
+        /// Set to true when `create_accounts` returns `.created` for an account.
         created: bool = false,
         /// The number of transfers created on the debit side.
         dr_transfer_count: u32 = 0,
@@ -427,7 +427,7 @@ pub const AccountingAuditor = struct {
     pub fn expect_create_accounts(
         self: *AccountingAuditor,
         client_index: usize,
-    ) []CreateAccountResultSet {
+    ) []CreateAccountStatusSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,
             .client_request = self.creates_sent[client_index],
@@ -442,7 +442,7 @@ pub const AccountingAuditor = struct {
     pub fn expect_create_transfers(
         self: *AccountingAuditor,
         client_index: usize,
-    ) []CreateTransferResultSet {
+    ) []CreateTransferStatusSet {
         const result = self.in_flight.getOrPutAssumeCapacity(.{
             .client_index = client_index,
             .client_request = self.creates_sent[client_index],
@@ -498,7 +498,7 @@ pub const AccountingAuditor = struct {
         client_index: usize,
         timestamp: u64,
         accounts: []const tb.Account,
-        results_sparse: []const tb.CreateAccountsErrorResult,
+        results_sparse: []const tb.CreateAccountErrorResult,
     ) void {
         assert(accounts.len >= results_sparse.len);
         assert(self.timestamp < timestamp or
@@ -507,7 +507,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
-        var iterator: ResultsSparseIteratorType(tb.CreateAccountsErrorResult) = .init(
+        var iterator: ResultsSparseIteratorType(tb.CreateAccountErrorResult) = .init(
             results_sparse,
         );
         defer assert(iterator.results.len == 0);
@@ -515,7 +515,7 @@ pub const AccountingAuditor = struct {
         for (accounts, 0..) |*account, i| {
             const account_timestamp = timestamp - accounts.len + i + 1;
 
-            const result_actual = iterator.take(i) orelse .ok;
+            const result_actual = iterator.take(i) orelse .created;
             if (!results_expect[i].contains(result_actual)) {
                 log.err("on_create_accounts_sparse: account={} expect={} result={}", .{
                     account.*,
@@ -525,7 +525,7 @@ pub const AccountingAuditor = struct {
                 @panic("on_create_accounts_sparse: unexpected result");
             }
 
-            if (result_actual == .ok) {
+            if (result_actual == .created) {
                 self.on_create_account_ok(account_timestamp, account);
             }
         }
@@ -536,7 +536,7 @@ pub const AccountingAuditor = struct {
         client_index: usize,
         timestamp: u64,
         accounts: []const tb.Account,
-        results: []const tb.CreateAccountsResult,
+        results: []const tb.CreateAccountResult,
     ) void {
         assert(accounts.len == results.len);
         assert(self.timestamp < timestamp or
@@ -547,28 +547,28 @@ pub const AccountingAuditor = struct {
         const results_expect = self.take_in_flight(client_index).create_accounts;
         for (accounts, results, 0..) |
             *account,
-            *outcome,
+            *result,
             i,
         | {
-            assert(outcome.reserved == 0);
+            assert(result.reserved == 0);
             const account_timestamp = timestamp - accounts.len + i + 1;
 
-            if (!results_expect[i].contains(outcome.result)) {
+            if (!results_expect[i].contains(result.status)) {
                 log.err("on_create_accounts: account={} expect={} result={}", .{
                     account.*,
                     results_expect[i],
-                    outcome,
+                    result,
                 });
                 @panic("on_create_accounts: unexpected result");
             }
 
-            switch (outcome.result) {
-                .ok => {
-                    assert(outcome.timestamp == account_timestamp);
+            switch (result.status) {
+                .created => {
+                    assert(result.timestamp == account_timestamp);
                     self.on_create_account_ok(account_timestamp, account);
                 },
-                .exists => assert(outcome.timestamp == self.get_account(account.id).?.timestamp),
-                else => assert(outcome.timestamp > 0),
+                .exists => assert(result.timestamp == self.get_account(account.id).?.timestamp),
+                else => assert(result.timestamp > 0),
             }
         }
     }
@@ -602,7 +602,7 @@ pub const AccountingAuditor = struct {
         client_index: usize,
         timestamp: u64,
         transfers: []const tb.Transfer,
-        results_sparse: []const tb.CreateTransfersErrorResult,
+        results_sparse: []const tb.CreateTransferErrorResult,
     ) void {
         assert(transfers.len >= results_sparse.len);
         assert(self.timestamp < timestamp or
@@ -611,7 +611,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
-        var iterator: ResultsSparseIteratorType(tb.CreateTransfersErrorResult) = .init(
+        var iterator: ResultsSparseIteratorType(tb.CreateTransferErrorResult) = .init(
             results_sparse,
         );
         defer assert(iterator.results.len == 0);
@@ -619,7 +619,7 @@ pub const AccountingAuditor = struct {
         for (transfers, 0..) |*transfer, i| {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
 
-            const result_actual = iterator.take(i) orelse .ok;
+            const result_actual = iterator.take(i) orelse .created;
             if (!results_expect[i].contains(result_actual.to_ordered())) {
                 log.err("on_create_transfers_sparse: transfer={} expect={} result={}", .{
                     transfer.*,
@@ -629,7 +629,7 @@ pub const AccountingAuditor = struct {
                 @panic("on_create_transfers_sparse: unexpected result");
             }
 
-            if (result_actual == .ok) self.on_create_transfer_ok(
+            if (result_actual == .created) self.on_create_transfer_ok(
                 transfer_timestamp,
                 transfer,
             );
@@ -641,7 +641,7 @@ pub const AccountingAuditor = struct {
         client_index: usize,
         timestamp: u64,
         transfers: []const tb.Transfer,
-        results: []const tb.CreateTransfersResult,
+        results: []const tb.CreateTransferResult,
     ) void {
         assert(transfers.len == results.len);
         assert(self.timestamp < timestamp or
@@ -652,27 +652,27 @@ pub const AccountingAuditor = struct {
         const results_expect = self.take_in_flight(client_index).create_transfers;
         for (transfers, results, 0..) |
             *transfer,
-            outcome,
+            result,
             i,
         | {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
 
-            if (!results_expect[i].contains(outcome.result.to_ordered())) {
+            if (!results_expect[i].contains(result.status.to_ordered())) {
                 log.err("on_create_transfers: transfer={} expect={} result={}", .{
                     transfer.*,
                     results_expect[i],
-                    outcome,
+                    result,
                 });
                 @panic("on_create_transfers: unexpected result");
             }
 
-            assert(outcome.timestamp > 0);
-            switch (outcome.result) {
-                .ok => {
-                    assert(outcome.timestamp == transfer_timestamp);
+            assert(result.timestamp > 0);
+            switch (result.status) {
+                .created => {
+                    assert(result.timestamp == transfer_timestamp);
                     self.on_create_transfer_ok(transfer_timestamp, transfer);
                 },
-                .exists => assert(outcome.timestamp < transfer_timestamp),
+                .exists => assert(result.timestamp < transfer_timestamp),
                 else => {},
             }
         }
@@ -963,7 +963,7 @@ pub const AccountingAuditor = struct {
 };
 
 pub fn ResultsSparseIteratorType(comptime Result: type) type {
-    assert(Result == tb.CreateAccountsErrorResult or Result == tb.CreateTransfersErrorResult);
+    assert(Result == tb.CreateAccountErrorResult or Result == tb.CreateTransferErrorResult);
 
     return struct {
         const IteratorForCreate = @This();
