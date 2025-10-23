@@ -159,13 +159,13 @@ fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
 
 fn reconcile(result: Result, command: *const Command, model: *Model) !void {
     switch (result) {
-        .create_accounts => |entries| {
+        .create_accounts => |account_results| {
             const accounts_new = command.create_accounts;
-            assert(entries.len == accounts_new.len);
+            assert(account_results.len == accounts_new.len);
 
             for (
                 accounts_new,
-                entries,
+                account_results,
                 0..,
             ) |account, account_result, index| {
                 if (account_result.result == .ok) {
@@ -180,21 +180,21 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 }
             }
         },
-        .create_transfers => |entries| {
+        .create_transfers => |transfer_results| {
             const transfers = command.create_transfers;
             // Collect all successful transfer IDs.
             var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
 
             for (
                 transfers,
-                entries,
+                transfer_results,
                 0..,
             ) |transfer, transfer_result, index| {
                 // Check that linked transfers fail together.
                 if (index > 0) {
                     const preceding_transfer = transfers[index - 1];
                     if (preceding_transfer.flags.linked) {
-                        const preceding_entry = entries[index - 1];
+                        const preceding_entry = transfer_results[index - 1];
                         try testing.expect(preceding_entry.result != .ok);
                     }
                 }
