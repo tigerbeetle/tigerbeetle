@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) !void {
         ),
         .config_verify = b.option(bool, "config_verify", "Enable extra assertions.") orelse
             // If `config_verify` isn't set, disable it for `release` builds; otherwise, enable it.
-            if (mode == .ReleaseSafe) false else true,
+            (mode == .Debug),
         .config_aof_recovery = b.option(
             bool,
             "config-aof-recovery",
