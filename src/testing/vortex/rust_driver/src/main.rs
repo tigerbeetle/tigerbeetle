@@ -127,7 +127,7 @@ impl Input {
         };
 
         match op {
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS => {
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<tb::Account>()];
@@ -137,7 +137,7 @@ impl Input {
                 }
                 Ok(Some(Request::CreateAccounts(events)))
             }
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS => {
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<tb::Account>()];

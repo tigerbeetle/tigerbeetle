@@ -690,16 +690,14 @@ pub const Operation = enum(u8) {
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
 
-    // TODO: Remove the `with_results` suffix.
-    // These are only temporary to make renaming and refactoring easier.
-    create_accounts_with_results = constants.vsr_operations_reserved + 18,
-    create_transfers_with_results = constants.vsr_operations_reserved + 19,
+    create_accounts = constants.vsr_operations_reserved + 18,
+    create_transfers = constants.vsr_operations_reserved + 19,
 
     pub fn EventType(comptime operation: Operation) type {
         return switch (operation) {
             .pulse => void,
-            .create_accounts_with_results => Account,
-            .create_transfers_with_results => Transfer,
+            .create_accounts => Account,
+            .create_transfers => Transfer,
             .lookup_accounts => u128,
             .lookup_transfers => u128,
             .get_account_transfers => AccountFilter,
@@ -725,8 +723,8 @@ pub const Operation = enum(u8) {
     pub fn ResultType(comptime operation: Operation) type {
         return switch (operation) {
             .pulse => void,
-            .create_accounts_with_results => CreateAccountsResult,
-            .create_transfers_with_results => CreateTransfersResult,
+            .create_accounts => CreateAccountsResult,
+            .create_transfers => CreateTransfersResult,
             .lookup_accounts => Account,
             .lookup_transfers => Transfer,
             .get_account_transfers => Transfer,
@@ -770,8 +768,8 @@ pub const Operation = enum(u8) {
             // Pulse does not take any input.
             .pulse => false,
             // Operations that take multiple events as input:
-            .create_accounts_with_results => true,
-            .create_transfers_with_results => true,
+            .create_accounts => true,
+            .create_transfers => true,
             .lookup_accounts => true,
             .lookup_transfers => true,
             // Operations that take a single event as input:
@@ -801,8 +799,8 @@ pub const Operation = enum(u8) {
         return switch (operation) {
             .pulse => false,
 
-            .create_accounts_with_results,
-            .create_transfers_with_results,
+            .create_accounts,
+            .create_transfers,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
@@ -920,8 +918,8 @@ pub const Operation = enum(u8) {
     ) u32 {
         return switch (operation) {
             .pulse => 0,
-            inline .create_accounts_with_results,
-            .create_transfers_with_results,
+            inline .create_accounts,
+            .create_transfers,
             .lookup_accounts,
             .lookup_transfers,
             .deprecated_create_accounts_sparse,

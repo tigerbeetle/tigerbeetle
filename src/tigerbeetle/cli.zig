@@ -139,13 +139,13 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         no_history: bool = false,
         imported: bool = false,
-        account_batch_count: u32 = Operation.create_accounts_with_results.event_max(
+        account_batch_count: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
         ),
         transfer_count: u64 = 10_000_000,
         transfer_hot_percent: u32 = 100,
         transfer_pending: bool = false,
-        transfer_batch_count: u32 = Operation.create_transfers_with_results.event_max(
+        transfer_batch_count: u32 = Operation.create_transfers.event_max(
             constants.message_body_size_max,
         ),
         transfer_batch_delay: Duration = .ms(0),
