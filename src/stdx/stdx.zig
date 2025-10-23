@@ -993,6 +993,8 @@ pub const Duration = struct {
         }
     };
 
+    // Human readable format like `1.123s`.
+    // NB: this is a lossy operation, durations are rounded to look nice.
     pub fn format(
         duration: Duration,
         comptime fmt: []const u8,
@@ -1106,14 +1108,8 @@ test "Duration.parse_flag_value fuzz" {
         switch (result) {
             .ok => |duration| {
                 var buffer: [64]u8 = undefined;
-                const formatted = std.fmt.bufPrint(&buffer, "{}", .{duration}) catch unreachable;
-                const result_round_trip = Duration.parse_flag_value(formatted);
-                switch (result_round_trip) {
-                    .ok => |duration_b| {
-                        assert(duration.ns == duration_b.ns);
-                    },
-                    .err => {}, // Formatting can use floating point notation.
-                }
+                _ = std.fmt.bufPrint(&buffer, "{}", .{duration}) catch unreachable;
+                // Round-trip not guaranteed.
             },
             .err => {},
         }
