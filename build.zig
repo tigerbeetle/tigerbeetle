@@ -367,7 +367,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     );
     vsr_options.addOption(bool, "config_aof_recovery", options.config_aof_recovery);
 
-    const vsr_module = b.createModule(.{
+    const vsr_module = b.addModule("vsr", .{
         .root_source_file = b.path("src/vsr.zig"),
     });
     vsr_module.addImport("stdx", options.stdx_module);
