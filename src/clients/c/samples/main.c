@@ -130,8 +130,8 @@ int main(int argc, char **argv) {
     int results_len = ctx.size / sizeof(tb_create_accounts_result_t);
     printf("create_account results:\n");
     for(int i=0;i<results_len;i++) {
-        printf("timestamp=%lu, ret=%d\n", create_accounts_result[i].timestamp, create_accounts_result[i].result);
-        if (create_accounts_result[i].result != TB_CREATE_ACCOUNT_OK) exit(-1);
+        printf("timestamp=%lu, ret=%d\n", create_accounts_result[i].timestamp, create_accounts_result[i].status);
+        if (create_accounts_result[i].status != TB_CREATE_ACCOUNT_CREATED) exit(-1);
     }
 
     printf("Accounts created successfully\n");
@@ -164,8 +164,8 @@ int main(int argc, char **argv) {
         packet.operation = TB_OPERATION_CREATE_TRANSFERS; // The operation to execute.
         packet.data = transfers;                          // The data to be sent.
         packet.data_size = TRANSFERS_SIZE;                //
-        packet.user_data = &ctx;                                       // User-defined context.
-        packet.status = TB_PACKET_OK;                                  // Set when the reply arrives.
+        packet.user_data = &ctx;                          // User-defined context.
+        packet.status = TB_PACKET_OK;                     // Set when the reply arrives.
 
         long long now = get_time_ms();
 
@@ -190,8 +190,8 @@ int main(int argc, char **argv) {
         int results_len = ctx.size / sizeof(tb_create_transfers_result_t);
         printf("create_transfers results:\n");
         for(int i=0;i<results_len;i++) {
-            printf("timestamp=%lu, ret=%d\n", create_transfers_result[i].timestamp, create_transfers_result[i].result);
-            if (create_transfers_result[i].result != TB_CREATE_TRANSFER_OK) exit(-1);
+            printf("timestamp=%lu, ret=%d\n", create_transfers_result[i].timestamp, create_transfers_result[i].status);
+            if (create_transfers_result[i].status != TB_CREATE_TRANSFER_CREATED) exit(-1);
         }
     }
 

@@ -27,13 +27,13 @@ public final class Main {
 
             CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
             while (accountsResults.next()) {
-                switch (accountsResults.getResult()) {
-                    case Ok:
+                switch (accountsResults.getStatus()) {
+                    case Created:
                         break;
                     default:
                         System.err.printf("Error creating account %d: %s\n",
                                 accountsResults.getPosition(),
-                                accountsResults.getResult());
+                                accountsResults.getStatus());
                         assert false;
                 }
             }
@@ -51,13 +51,13 @@ public final class Main {
 
             CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
             while (transfersResults.next()) {
-                switch (transfersResults.getResult()) {
-                    case Ok:
+                switch (transfersResults.getStatus()) {
+                    case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
                                 transfersResults.getPosition(),
-                                transfersResults.getResult());
+                                transfersResults.getStatus());
                         assert false;
                 }
             }
@@ -104,13 +104,13 @@ public final class Main {
 
             transfersResults = client.createTransfers(transfers);
             while (transfersResults.next()) {
-                switch (transfersResults.getResult()) {
-                    case Ok:
+                switch (transfersResults.getStatus()) {
+                    case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
                                 transfersResults.getPosition(),
-                                transfersResults.getResult());
+                                transfersResults.getStatus());
                         assert false;
                 }
             }

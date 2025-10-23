@@ -15,9 +15,9 @@ import java.util.concurrent.ExecutionException;
 import com.tigerbeetle.AccountBatch;
 import com.tigerbeetle.AccountFlags;
 import com.tigerbeetle.Client;
-import com.tigerbeetle.CreateAccountResult;
+import com.tigerbeetle.CreateAccountStatus;
 import com.tigerbeetle.CreateAccountResultBatch;
-import com.tigerbeetle.CreateTransferResult;
+import com.tigerbeetle.CreateTransferStatus;
 import com.tigerbeetle.CreateTransferResultBatch;
 import com.tigerbeetle.IdBatch;
 import com.tigerbeetle.TransferBatch;
@@ -156,7 +156,7 @@ class Driver {
     writer.u32(results.getLength());
     while (results.next()) {
       writer.u64(results.getTimestamp());
-      writer.u32(results.getResult().value);
+      writer.u32(results.getStatus().value);
       writer.u32(0);
     }
     writer.flush();
@@ -197,11 +197,11 @@ class Driver {
 
     class Result {
       private final long timestamp;
-      private final CreateAccountResult result;
+      private final CreateAccountStatus status;
 
-      public Result(long timestamp, CreateAccountResult result) {
+      public Result(long timestamp, CreateAccountStatus status) {
         this.timestamp = timestamp;
-        this.result = result;
+        this.status = status;
       }
     }
     var results = new ArrayList<Result>(count);
@@ -210,7 +210,7 @@ class Driver {
     for (final var request : requests) {
       final var result = request.get();
       while (result.next()) {
-        results.add(new Result(result.getTimestamp(), result.getResult()));
+        results.add(new Result(result.getTimestamp(), result.getStatus()));
       }
     }
 
@@ -218,7 +218,7 @@ class Driver {
     writer.u32(results.size());
     for (final var result : results) {
       writer.u64(result.timestamp);
-      writer.u32(result.result.value);
+      writer.u32(result.status.value);
       writer.u32(0);
     }
     writer.flush();
@@ -248,7 +248,7 @@ class Driver {
     writer.u32(results.getLength());
     while (results.next()) {
       writer.u64(results.getTimestamp());
-      writer.u32(results.getResult().value);
+      writer.u32(results.getStatus().value);
       writer.u32(0);
     }
     writer.flush();
@@ -289,11 +289,11 @@ class Driver {
 
     class Result {
       private final long timestamp;
-      private final CreateTransferResult result;
+      private final CreateTransferStatus status;
 
-      public Result(long timestamp, CreateTransferResult result) {
+      public Result(long timestamp, CreateTransferStatus status) {
         this.timestamp = timestamp;
-        this.result = result;
+        this.status = status;
       }
     }
     var results = new ArrayList<Result>(count);
@@ -302,7 +302,7 @@ class Driver {
     for (final var request : requests) {
       final var result = request.get();
       while (result.next()) {
-        results.add(new Result(result.getTimestamp(), result.getResult()));
+        results.add(new Result(result.getTimestamp(), result.getStatus()));
       }
     }
 
@@ -310,7 +310,7 @@ class Driver {
     writer.u32(results.size());
     for (final var result : results) {
       writer.u64(result.timestamp);
-      writer.u32(result.result.value);
+      writer.u32(result.status.value);
       writer.u32(0);
     }
     writer.flush();

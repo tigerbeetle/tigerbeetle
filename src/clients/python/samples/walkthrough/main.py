@@ -136,12 +136,12 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
         accounts_results = client.create_accounts([account0, account1, account2])
         for i, result in enumerate(accounts_results):
-            if result.result == tb.CreateAccountResult.OK:
+            if result.status == tb.CreateAccountStatus.CREATED:
                 print(f"Batch account at {i} successfully created with timestamp {result.timestamp}.")
-            elif result.result == tb.CreateAccountResult.EXISTS:
+            elif result.status == tb.CreateAccountStatus.EXISTS:
                 print(f"Batch account at {i} already exists with timestamp {result.timestamp}.")
             else:
-                print(f"Batch account at {i} failed to create: {result.result}.")
+                print(f"Batch account at {i} failed to create: {result.status}.")
         # endsection:create-accounts-errors
     except:
         raise
@@ -226,13 +226,13 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         )]
 
         transfers_results = client.create_transfers(batch)
-        for i, item in enumerate(transfers_results):
-            if item.result == tb.CreateTransferResult.OK:
-                print(f"Batch transfer at {i} successfully created with timestamp {item.timestamp}.")
-            elif item.result == tb.CreateTransferResult.EXISTS:
-                print(f"Batch transfer at {i} already exists with timestamp {item.timestamp}.")
+        for i, result in enumerate(transfers_results):
+            if result.status == tb.CreateTransferStatus.CREATED:
+                print(f"Batch transfer at {i} successfully created with timestamp {result.timestamp}.")
+            elif result.status == tb.CreateTransferStatus.EXISTS:
+                print(f"Batch transfer at {i} already exists with timestamp {result.timestamp}.")
             else:
-                print(f"Batch transfer at {i} failed to create: {item.result}.")
+                print(f"Batch transfer at {i} failed to create: {result.status}.")
         # endsection:create-transfers-errors
     except:
         raise

@@ -874,8 +874,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             comptime assert(@TypeOf(object.*) == tb.Account or
                 @TypeOf(object.*) == tb.Transfer or
                 @TypeOf(object.*) == tb.AccountBalance or
-                @TypeOf(object.*) == tb.CreateAccountsResult or
-                @TypeOf(object.*) == tb.CreateTransfersResult);
+                @TypeOf(object.*) == tb.CreateAccountResult or
+                @TypeOf(object.*) == tb.CreateTransferResult);
 
             try repl.terminal.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).@"struct".fields, 0..) |object_field, i| {
@@ -939,7 +939,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_accounts => {
                     const create_account_results = stdx.bytes_as_slice(
                         .exact,
-                        tb.CreateAccountsResult,
+                        tb.CreateAccountResult,
                         result,
                     );
                     if (create_account_results.len == 0) {
@@ -967,7 +967,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_transfers => {
                     const create_transfer_results = stdx.bytes_as_slice(
                         .exact,
-                        tb.CreateTransfersResult,
+                        tb.CreateTransferResult,
                         result,
                     );
                     if (create_transfer_results.len == 0) {

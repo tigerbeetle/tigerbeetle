@@ -82,11 +82,11 @@ test "repl integration" {
     , snap(@src(),
         \\{
         \\  "timestamp": "<snap:ignore>",
-        \\  "result": "tigerbeetle.CreateAccountResult.ok"
+        \\  "status": "tigerbeetle.CreateAccountStatus.created"
         \\}
         \\{
         \\  "timestamp": "<snap:ignore>",
-        \\  "result": "tigerbeetle.CreateAccountResult.ok"
+        \\  "status": "tigerbeetle.CreateAccountStatus.created"
         \\}
         \\
     ));
@@ -97,7 +97,7 @@ test "repl integration" {
     , snap(@src(),
         \\{
         \\  "timestamp": "<snap:ignore>",
-        \\  "result": "tigerbeetle.CreateTransferResult.ok"
+        \\  "status": "tigerbeetle.CreateTransferStatus.created"
         \\}
         \\
     ));

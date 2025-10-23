@@ -5,12 +5,12 @@
 
 package com.tigerbeetle;
 
-public enum CreateTransferResult {
+public enum CreateTransferStatus {
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#ok">ok</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#created">created</a>
      */
-    Ok((int) 0),
+    Created((int) 0),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed">linked_event_failed</a>
@@ -349,13 +349,13 @@ public enum CreateTransferResult {
 
     public final int value;
 
-    CreateTransferResult(int value) {
+    CreateTransferStatus(int value) {
         this.value = value;
     }
 
-    public static CreateTransferResult fromValue(int value) {
+    public static CreateTransferStatus fromValue(int value) {
         switch (value) {
-            case 0: return Ok;
+            case 0: return Created;
             case 1: return LinkedEventFailed;
             case 2: return LinkedEventChainOpen;
             case 56: return ImportedEventExpected;
@@ -424,7 +424,7 @@ public enum CreateTransferResult {
             case 54: return ExceedsCredits;
             case 55: return ExceedsDebits;
             default: throw new IllegalArgumentException(
-                String.format("Invalid CreateTransferResult value=%d", value));
+                String.format("Invalid CreateTransferStatus value=%d", value));
         }
     }
 }

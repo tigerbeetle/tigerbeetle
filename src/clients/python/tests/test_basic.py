@@ -60,15 +60,15 @@ def test_create_accounts(client):
     results = client.create_accounts([account_a])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateAccountResult.OK
+    assert results[0].status == tb.CreateAccountStatus.CREATED
 
 def test_return_error_on_account(client):
     results = client.create_accounts([account_a, account_b])
     assert len(results) == 2
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateAccountResult.EXISTS
+    assert results[0].status == tb.CreateAccountStatus.EXISTS
     assert results[1].timestamp > 0
-    assert results[1].result == tb.CreateAccountResult.OK
+    assert results[1].status == tb.CreateAccountStatus.CREATED
 
 def test_error_if_timestamp_is_not_set_to_0_on_account(client):
     account = { **asdict(account_a), "timestamp": 2, "id": 3 }
@@ -76,7 +76,7 @@ def test_error_if_timestamp_is_not_set_to_0_on_account(client):
     assert len(results) == 1
     assert results[0].timestamp > 0
     assert results[0].timestamp != 2
-    assert results[0].result == tb.CreateAccountResult.TIMESTAMP_MUST_BE_ZERO
+    assert results[0].status == tb.CreateAccountStatus.TIMESTAMP_MUST_BE_ZERO
 
 def test_lookup_accounts(client):
     accounts = client.lookup_accounts([account_a.id, account_b.id])
@@ -130,7 +130,7 @@ def test_create_a_transfer(client):
     results = client.create_transfers([transfer])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -164,7 +164,7 @@ def test_create_a_two_phase_transfer(client):
     results = client.create_transfers([transfer])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -213,7 +213,7 @@ def test_post_a_two_phase_transfer(client):
     results = client.create_transfers([commit])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -247,7 +247,7 @@ def test_reject_a_two_phase_transfer(client):
     results = client.create_transfers([transfer])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     # send in the reject
     reject = tb.Transfer(
@@ -269,7 +269,7 @@ def test_reject_a_two_phase_transfer(client):
     results = client.create_transfers([reject])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -320,9 +320,9 @@ def test_link_transfers(client):
     results = client.create_transfers([transfer1, transfer2])
     assert len(results) == 2
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.LINKED_EVENT_FAILED
+    assert results[0].status == tb.CreateTransferStatus.LINKED_EVENT_FAILED
     assert results[1].timestamp > 0
-    assert results[1].result == tb.CreateTransferResult.EXISTS_WITH_DIFFERENT_FLAGS
+    assert results[1].status == tb.CreateTransferStatus.EXISTS_WITH_DIFFERENT_FLAGS
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -356,7 +356,7 @@ def test_cannot_void_an_expired_transfer(client):
     results = client.create_transfers([transfer])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -409,7 +409,7 @@ def test_cannot_void_an_expired_transfer(client):
     results = client.create_transfers([reject])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.PENDING_TRANSFER_EXPIRED
+    assert results[0].status == tb.CreateTransferStatus.PENDING_TRANSFER_EXPIRED
 
 def test_close_accounts(client):
     closing_transfer = tb.Transfer(
@@ -430,7 +430,7 @@ def test_close_accounts(client):
     results = client.create_transfers([closing_transfer])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -459,7 +459,7 @@ def test_close_accounts(client):
     results = client.create_transfers([voiding_transfer])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateTransferResult.OK
+    assert results[0].status == tb.CreateTransferStatus.CREATED
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -487,7 +487,7 @@ def test_get_account_transfers(client):
     account_results = client.create_accounts([accountC])
     assert len(account_results) == 1
     assert account_results[0].timestamp > 0
-    assert account_results[0].result == tb.CreateAccountResult.OK
+    assert account_results[0].status == tb.CreateAccountStatus.CREATED
 
     transfers_created = []
     # Create transfers where the new account is either the debit or credit account:
@@ -512,7 +512,7 @@ def test_get_account_transfers(client):
     assert len(transfers_results) == len(transfers_created)
     for result in transfers_results:
         assert result.timestamp > 0
-        assert result.result == tb.CreateAccountResult.OK
+        assert result.status == tb.CreateAccountStatus.CREATED
 
     # Query all transfers for accountC:
     filter = tb.AccountFilter(
@@ -852,7 +852,7 @@ def test_query_accounts(client):
     assert len(accounts) == len(accounts_results)
     for result in accounts_results:
         assert result.timestamp > 0
-        assert result.result == tb.CreateAccountResult.OK
+        assert result.status == tb.CreateAccountStatus.CREATED
 
 
     # Querying accounts where:
@@ -1008,7 +1008,7 @@ def test_query_transfers(client):
     accounts_results = client.create_accounts([account])
     assert len(accounts_results) == 1
     accounts_results[0].timestamp > 0
-    accounts_results[0].result == tb.CreateAccountResult.OK
+    accounts_results[0].status == tb.CreateAccountStatus.CREATED
 
     transfers_created = []
     # Create transfers:
@@ -1033,7 +1033,7 @@ def test_query_transfers(client):
     assert len(transfers_results) == len(transfers_created)
     for result in transfers_results:
         assert result.timestamp > 0
-        assert result.result == tb.CreateTransferResult.OK
+        assert result.status == tb.CreateTransferStatus.CREATED
 
     # Querying transfers where:
     # `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
@@ -1264,7 +1264,7 @@ def test_import_accounts_and_transfers(client):
     accounts_results = client.create_accounts([account_tmp])
     assert len(accounts_results) == 1
     accounts_results[0].timestamp > 0
-    accounts_results[0].result == tb.CreateAccountResult.OK
+    accounts_results[0].status == tb.CreateAccountStatus.CREATED
 
     timestamp_max = accounts_results[0].timestamp
 
@@ -1303,9 +1303,9 @@ def test_import_accounts_and_transfers(client):
     accounts_results = client.create_accounts([account_a, account_b])
     assert len(accounts_results) == 2
     accounts_results[0].timestamp == account_a.timestamp
-    accounts_results[0].result == tb.CreateAccountResult.OK
+    accounts_results[0].status == tb.CreateAccountStatus.CREATED
     accounts_results[1].timestamp == account_b.timestamp
-    accounts_results[1].result == tb.CreateAccountResult.OK
+    accounts_results[1].status == tb.CreateAccountStatus.CREATED
 
     account_lookup = client.lookup_accounts([account_a.id, account_b.id])
     assert len(account_lookup) == 2
@@ -1331,7 +1331,7 @@ def test_import_accounts_and_transfers(client):
     transfers_results = client.create_transfers([transfer])
     assert len(transfers_results) == 1
     assert transfers_results[0].timestamp == transfer.timestamp
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     transfers = client.lookup_transfers([transfer.id])
     assert len(transfers) == 1
@@ -1367,7 +1367,7 @@ def test_uint128(client):
     results = client.create_accounts([account])
     assert len(results) == 1
     assert results[0].timestamp > 0
-    assert results[0].result == tb.CreateAccountResult.OK
+    assert results[0].status == tb.CreateAccountStatus.CREATED
 
     accounts = client.lookup_accounts([account.id])
     assert len(accounts) == 1

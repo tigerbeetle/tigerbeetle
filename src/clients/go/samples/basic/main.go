@@ -48,11 +48,11 @@ func main() {
 	}
 
 	assert(len(accountsRes), 2, "accountsRes")
-	for i, item := range accountsRes {
-		switch item.Result {
-		case types.AccountOK:
+	for i, result := range accountsRes {
+		switch result.Status {
+		case types.AccountCreated:
 		default:
-			log.Fatalf("Error creating account %d: %s", i, item.Result)
+			log.Fatalf("Error creating account %d: %s", i, result.Status)
 		}
 	}
 
@@ -71,11 +71,11 @@ func main() {
 	}
 
 	assert(len(transfersRes), 1, "transfersRes")
-	for i, item := range transfersRes {
-		switch item.Result {
-		case types.TransferOK:
+	for i, result := range transfersRes {
+		switch result.Status {
+		case types.TransferCreated:
 		default:
-			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}
 	}
 

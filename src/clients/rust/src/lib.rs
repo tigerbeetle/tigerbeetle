@@ -410,12 +410,12 @@ impl Client {
     /// that none of the submitted events were processed.
     ///
     /// The results of events are represented individually. There are two
-    /// related event result types: `CreateAccountResult` is the enum of
-    /// possible outcomes, and `CreateAccountsResult` which includes both the
+    /// related event result types: `CreateAccountStatus` is the enum of
+    /// possible outcomes, and `CreateAccountResult` which includes both the
     /// `result` enum and the `timestamp` when the event was processed.
     ///
-    /// Note that a result of `CreateAccountResult::Exists` should often be treated
-    /// the same as `CreateAccountResult::Ok`, as it also returns the same `timestamp`
+    /// Note that a result of `CreateAccountStatus::Exists` should often be treated
+    /// the same as `CreateAccountStatus::Created`, as it also returns the same `timestamp`
     //  of the original account. This result can happen in cases of application crashes
     /// or other scenarios where requests have been replayed.
     ///
@@ -436,8 +436,8 @@ impl Client {
     ///         .map(move |(i, account)| (account, create_accounts_results[i]));
     ///
     ///     for (account, create_account_result) in it {
-    ///         match create_account_result.result {
-    ///             tb::CreateAccountResult::Ok | tb::CreateAccountResult::Exists => {
+    ///         match create_account_result.status {
+    ///             tb::CreateAccountStatus::Created | tb::CreateAccountStatus::Exists => {
     ///                 handle_create_account_success(account, create_account_result).await?;
     ///             }
     ///             _ => {
@@ -450,14 +450,14 @@ impl Client {
     ///
     /// async fn handle_create_account_success(
     ///     _account: &tb::Account,
-    ///     _result: tb::CreateAccountsResult,
+    ///     _result: tb::CreateAccountResult,
     /// ) -> Result<(), Box<dyn std::error::Error>> {
     ///     Ok(())
     /// }
     ///
     /// async fn handle_create_account_failure(
     ///     _account: &tb::Account,
-    ///     _result: tb::CreateAccountsResult,
+    ///     _result: tb::CreateAccountResult,
     /// ) -> Result<(), Box<dyn std::error::Error>> {
     ///     Ok(())
     /// }
@@ -476,11 +476,9 @@ impl Client {
     pub fn create_accounts(
         &self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> {
-        let (packet, rx) = create_packet::<Account>(
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS,
-            events,
-        );
+    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> {
+        let (packet, rx) =
+            create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
         unsafe {
             let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -494,9 +492,9 @@ impl Client {
 
             Ok(responses
                 .iter()
-                .map(|result| CreateAccountsResult {
+                .map(|result| CreateAccountResult {
                     timestamp: result.timestamp,
-                    result: CreateAccountResult::from(result.result),
+                    status: CreateAccountStatus::from(result.status),
                 })
                 .collect())
         }
@@ -518,12 +516,12 @@ impl Client {
     /// that none of the submitted events were processed.
     ///
     /// The results of events are represented individually. There are two
-    /// related event result types: `CreateTransferResult` is the enum of
-    /// possible outcomes, and `CreateTransfersResult` which includes both the
+    /// related event result types: `CreateTransferStatus` is the enum of
+    /// possible outcomes, and `CreateTransferResult` which includes both the
     /// `result` enum and the `timestamp` when the event was processed.
     ///
-    /// Note that a result of `CreateTransferResult::Exists` should often be treated
-    /// the same as `CreateTransferResult::Ok`, as it also returns the same `timestamp`
+    /// Note that a result of `CreateTransferStatus::Exists` should often be treated
+    /// the same as `CreateTransferStatus::Created`, as it also returns the same `timestamp`
     /// of the original transfer. This result can happen in cases of application crashes
     /// or other scenarios where requests have been replayed.
     ///
@@ -542,8 +540,8 @@ impl Client {
     ///         .enumerate()
     ///         .map(move |(i, transfer)| (transfer, results[i]));
     ///     for (transfer, create_transfer_result) in it {
-    ///         match create_transfer_result.result {
-    ///             tb::CreateTransferResult::Ok | tb::CreateTransferResult::Exists => {
+    ///         match create_transfer_result.status {
+    ///             tb::CreateTransferStatus::Created | tb::CreateTransferStatus::Exists => {
     ///                 handle_create_transfer_success(transfer, create_transfer_result).await?;
     ///             }
     ///             _ => {
@@ -556,14 +554,14 @@ impl Client {
     ///
     /// async fn handle_create_transfer_success(
     ///     _transfer: &tb::Transfer,
-    ///     _result: tb::CreateTransfersResult,
+    ///     _result: tb::CreateTransferResult,
     /// ) -> Result<(), Box<dyn std::error::Error>> {
     ///     Ok(())
     /// }
     ///
     /// async fn handle_create_transfer_failure(
     ///     _transfer: &tb::Transfer,
-    ///     _result: tb::CreateTransfersResult,
+    ///     _result: tb::CreateTransferResult,
     /// ) -> Result<(), Box<dyn std::error::Error>> {
     ///     Ok(())
     /// }
@@ -582,11 +580,9 @@ impl Client {
     pub fn create_transfers(
         &self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> {
-        let (packet, rx) = create_packet::<Transfer>(
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS,
-            events,
-        );
+    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> {
+        let (packet, rx) =
+            create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
         unsafe {
             let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -600,9 +596,9 @@ impl Client {
 
             Ok(responses
                 .iter()
-                .map(|result| CreateTransfersResult {
+                .map(|result| CreateTransferResult {
                     timestamp: result.timestamp,
-                    result: CreateTransferResult::from(result.result),
+                    status: CreateTransferStatus::from(result.status),
                 })
                 .collect())
         }
@@ -1251,7 +1247,7 @@ bitflags! {
 ///
 /// For the meaning of individual enum variants see the linked protocol reference.
 ///
-/// See also [`CreateAccountsResult`] (note the plural), the type directly
+/// See also [`CreateAccountResult`] (note the plural), the type directly
 /// returned by `create_accunts`, and which contains an additional index for
 /// relating results with input events.
 ///
@@ -1259,11 +1255,11 @@ bitflags! {
 ///
 /// # Protocol reference
 ///
-/// [`CreateAccountResult`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
+/// [`CreateAccountStatus`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum CreateAccountResult {
-    Ok,
+pub enum CreateAccountStatus {
+    Created,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -1298,17 +1294,17 @@ pub enum CreateAccountResult {
 ///
 /// # Protocol reference
 ///
-/// [`CreateAccountResult`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
+/// [`CreateAccountStatus`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CreateAccountsResult {
+pub struct CreateAccountResult {
     pub timestamp: u64,
-    pub result: CreateAccountResult,
+    pub status: CreateAccountStatus,
 }
 
-impl core::fmt::Display for CreateAccountResult {
+impl core::fmt::Display for CreateAccountStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
-            Self::Ok => f.write_str("ok"),
+            Self::Created => f.write_str("created"),
             Self::LinkedEventFailed => f.write_str("linked event failed"),
             Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
             Self::ImportedEventExpected => f.write_str("imported event expected"),
@@ -1355,7 +1351,7 @@ impl core::fmt::Display for CreateAccountResult {
 ///
 /// For the meaning of individual enum variants see the linked protocol reference.
 ///
-/// See also [`CreateTransfersResult`] (note the plural), the type directly
+/// See also [`CreateTransferResult`] (note the plural), the type directly
 /// returned by `create_accunts`, and which contains an additional index for
 /// relating results with input events.
 ///
@@ -1363,11 +1359,11 @@ impl core::fmt::Display for CreateAccountResult {
 ///
 /// # Protocol reference
 ///
-/// [`CreateTransferResult`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
+/// [`CreateTransferStatus`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum CreateTransferResult {
-    Ok,
+pub enum CreateTransferStatus {
+    Created,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -1443,17 +1439,17 @@ pub enum CreateTransferResult {
 ///
 /// # Protocol reference
 ///
-/// [`CreateTransferResult`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
+/// [`CreateTransferStatus`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CreateTransfersResult {
+pub struct CreateTransferResult {
     pub timestamp: u64,
-    pub result: CreateTransferResult,
+    pub status: CreateTransferStatus,
 }
 
-impl core::fmt::Display for CreateTransferResult {
+impl core::fmt::Display for CreateTransferStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
-            Self::Ok => f.write_str("ok"),
+            Self::Created => f.write_str("created"),
             Self::LinkedEventFailed => f.write_str("linked event failed"),
             Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
             Self::ImportedEventExpected => f.write_str("imported event expected"),

@@ -110,8 +110,8 @@ class QueryFilterFlags(enum.IntFlag):
     REVERSED = 1 << 0
 
 
-class CreateAccountResult(enum.IntEnum):
-    OK = 0
+class CreateAccountStatus(enum.IntEnum):
+    CREATED = 0
     LINKED_EVENT_FAILED = 1
     LINKED_EVENT_CHAIN_OPEN = 2
     IMPORTED_EVENT_EXPECTED = 22
@@ -140,8 +140,8 @@ class CreateAccountResult(enum.IntEnum):
     IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS = 26
 
 
-class CreateTransferResult(enum.IntEnum):
-    OK = 0
+class CreateTransferStatus(enum.IntEnum):
+    CREATED = 0
     LINKED_EVENT_FAILED = 1
     LINKED_EVENT_CHAIN_OPEN = 2
     IMPORTED_EVENT_EXPECTED = 56
@@ -245,15 +245,15 @@ class Transfer:
 
 
 @dataclass
-class CreateAccountsResult:
+class CreateAccountResult:
     timestamp: int = 0
-    result: CreateAccountResult = CreateAccountResult.OK
+    status: CreateAccountStatus = CreateAccountStatus.CREATED
 
 
 @dataclass
-class CreateTransfersResult:
+class CreateTransferResult:
     timestamp: int = 0
-    result: CreateTransferResult = CreateTransferResult.OK
+    status: CreateTransferStatus = CreateTransferStatus.CREATED
 
 
 @dataclass
@@ -459,48 +459,48 @@ CTransfer._fields_ = [ # noqa: SLF001
 ]
 
 
-class CCreateAccountsResult(ctypes.Structure):
+class CCreateAccountResult(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
             timestamp=obj.timestamp,
-            result=obj.result,
+            status=obj.status,
         )
 
 
-    def to_python(self) -> CreateAccountsResult:
-        return CreateAccountsResult(
+    def to_python(self) -> CreateAccountResult:
+        return CreateAccountResult(
             timestamp=self.timestamp,
-            result=CreateAccountResult(self.result),
+            status=CreateAccountStatus(self.status),
         )
 
-CCreateAccountsResult._fields_ = [ # noqa: SLF001
+CCreateAccountResult._fields_ = [ # noqa: SLF001
     ("timestamp", ctypes.c_uint64),
-    ("result", ctypes.c_uint32),
+    ("status", ctypes.c_uint32),
     ("reserved", ctypes.c_uint32),
 ]
 
 
-class CCreateTransfersResult(ctypes.Structure):
+class CCreateTransferResult(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
             timestamp=obj.timestamp,
-            result=obj.result,
+            status=obj.status,
         )
 
 
-    def to_python(self) -> CreateTransfersResult:
-        return CreateTransfersResult(
+    def to_python(self) -> CreateTransferResult:
+        return CreateTransferResult(
             timestamp=self.timestamp,
-            result=CreateTransferResult(self.result),
+            status=CreateTransferStatus(self.status),
         )
 
-CCreateTransfersResult._fields_ = [ # noqa: SLF001
+CCreateTransferResult._fields_ = [ # noqa: SLF001
     ("timestamp", ctypes.c_uint64),
-    ("result", ctypes.c_uint32),
+    ("status", ctypes.c_uint32),
     ("reserved", ctypes.c_uint32),
 ]
 
@@ -696,20 +696,20 @@ tb_client_register_log_callback.restype = RegisterLogCallbackStatus
 
 class AsyncStateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
-    async def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
+    async def create_accounts(self, accounts: list[Account]) -> list[CreateAccountResult]:
         return await self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_ACCOUNTS,
             accounts,
             CAccount,
-            CCreateAccountsResult,
+            CCreateAccountResult,
         )
 
-    async def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
+    async def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransferResult]:
         return await self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_TRANSFERS,
             transfers,
             CTransfer,
-            CCreateTransfersResult,
+            CCreateTransferResult,
         )
 
     async def lookup_accounts(self, accounts: list[int]) -> list[Account]:
@@ -764,20 +764,20 @@ class AsyncStateMachineMixin:
 
 class StateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
-    def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
+    def create_accounts(self, accounts: list[Account]) -> list[CreateAccountResult]:
         return self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_ACCOUNTS,
             accounts,
             CAccount,
-            CCreateAccountsResult,
+            CCreateAccountResult,
         )
 
-    def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
+    def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransferResult]:
         return self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_TRANSFERS,
             transfers,
             CTransfer,
-            CCreateTransfersResult,
+            CCreateTransferResult,
         )
 
     def lookup_accounts(self, accounts: list[int]) -> list[Account]:

@@ -2,8 +2,8 @@ export * from './bindings'
 import {
   Account,
   Transfer,
-  CreateAccountsResult,
-  CreateTransfersResult,
+  CreateAccountResult,
+  CreateTransferResult,
   Operation,
   AccountFilter,
   AccountBalance,
@@ -70,7 +70,7 @@ export type Context = object // tb_client
 export type AccountID = bigint // u128
 export type TransferID = bigint // u128
 export type Event = Account | Transfer | AccountID | TransferID | AccountFilter | QueryFilter
-export type Result = CreateAccountsResult | CreateTransfersResult | Account | Transfer | AccountBalance
+export type Result = CreateAccountResult | CreateTransferResult | Account | Transfer | AccountBalance
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
 export const amount_max: bigint = (2n ** 128n) - 1n
@@ -92,8 +92,8 @@ export interface ClientInitArgs {
 }
 
 export interface Client {
-  createAccounts: (batch: Account[]) => Promise<CreateAccountsResult[]>
-  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersResult[]>
+  createAccounts: (batch: Account[]) => Promise<CreateAccountResult[]>
+  createTransfers: (batch: Transfer[]) => Promise<CreateTransferResult[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   getAccountTransfers: (filter: AccountFilter) => Promise<Transfer[]>

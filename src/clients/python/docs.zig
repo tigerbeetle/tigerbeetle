@@ -42,13 +42,13 @@ pub const PythonDocs = Docs{
     .create_accounts_errors_documentation =
     \\To handle errors you can compare the result code returned
     \\from `client.create_accounts` with enum values in the
-    \\`CreateAccountResult` object.
+    \\`CreateAccountStatus` object.
     ,
     .create_transfers_documentation = "",
     .create_transfers_errors_documentation =
     \\To handle errors you can compare the result code returned
     \\from `client.create_transfers` with enum values in the
-    \\`CreateTransferResult` object.
+    \\`CreateTransferStatus` object.
     ,
 
     .transfer_flags_documentation =

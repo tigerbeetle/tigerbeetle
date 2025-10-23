@@ -83,7 +83,7 @@ const TransferPlan = struct {
 
 const TransferTemplate = struct {
     ledger: u32,
-    result: accounting_auditor.CreateTransferResultSet,
+    result: accounting_auditor.CreateTransferStatusSet,
 };
 
 const TransferBatchQueue = PriorityQueue(TransferBatch, void, struct {
@@ -110,16 +110,16 @@ const transfer_templates = table: {
     const PEND = @intFromEnum(TransferPlan.Method.pending);
     const POST = @intFromEnum(TransferPlan.Method.post_pending);
     const VOID = @intFromEnum(TransferPlan.Method.void_pending);
-    const Result = accounting_auditor.CreateTransferResultSet;
+    const Result = accounting_auditor.CreateTransferStatusSet;
     const result = Result.init;
 
     const InitValues = std.enums.EnumFieldStruct(
-        tb.CreateTransferResult.Ordered,
+        tb.CreateTransferStatus.Ordered,
         bool,
         false,
     );
     const two_phase_ok: InitValues = .{
-        .ok = true,
+        .created = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,
         .pending_transfer_expired = true,
@@ -161,13 +161,13 @@ const transfer_templates = table: {
     templates[0][1][POST] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
     templates[0][1][VOID] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
 
-    templates[1][0][SNGL] = template(1, result(.{ .ok = true }));
-    templates[1][0][PEND] = template(1, result(.{ .ok = true }));
+    templates[1][0][SNGL] = template(1, result(.{ .created = true }));
+    templates[1][0][PEND] = template(1, result(.{ .created = true }));
     templates[1][0][POST] = template(1, result(two_phase_ok));
     templates[1][0][VOID] = template(1, result(two_phase_ok));
 
-    templates[1][1][SNGL] = template(1, either(limits, result(.{ .ok = true })));
-    templates[1][1][PEND] = template(1, either(limits, result(.{ .ok = true })));
+    templates[1][1][SNGL] = template(1, either(limits, result(.{ .created = true })));
+    templates[1][1][PEND] = template(1, either(limits, result(.{ .created = true })));
     templates[1][1][POST] = template(1, either(limits, result(two_phase_ok)));
     templates[1][1][VOID] = template(1, either(limits, result(two_phase_ok)));
 
@@ -648,7 +648,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     client_index,
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Account, request_body),
-                    stdx.bytes_as_slice(.exact, tb.CreateAccountsResult, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateAccountResult, reply_body),
                 ),
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
@@ -663,7 +663,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     client_index,
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Transfer, request_body),
-                    stdx.bytes_as_slice(.exact, tb.CreateTransfersResult, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateTransferResult, reply_body),
                 ),
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
@@ -757,7 +757,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account.credits_pending = 0;
                 account.credits_posted = 0;
                 account.timestamp = 0;
-                results[i] = accounting_auditor.CreateAccountResultSet{};
+                results[i] = accounting_auditor.CreateAccountStatusSet{};
 
                 if (self.prng.chance(self.options.create_account_invalid_probability)) {
                     account.ledger = 0;
@@ -766,7 +766,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     results[i].insert(.ledger_must_not_be_zero);
                 } else {
                     if (!self.auditor.accounts_state[account_index].created) {
-                        results[i].insert(.ok);
+                        results[i].insert(.created);
                     }
                     // Even if the account doesn't exist yet, we may race another request.
                     results[i].insert(.exists);
@@ -805,13 +805,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     // Instead, link transfers opportunistically, when consecutive transfers can be
                     // linked without altering any of their outcomes.
 
-                    if (results[i].contains(.ok) and results[i - 1].contains(.ok) and
+                    if (results[i].contains(.created) and results[i - 1].contains(.created) and
                         self.prng.chance(self.options.linked_valid_probability))
                     {
                         transfers[i - 1].flags.linked = true;
                     }
 
-                    if (!results[i].contains(.ok) and !results[i - 1].contains(.ok) and
+                    if (!results[i].contains(.created) and !results[i - 1].contains(.created) and
                         self.prng.chance(self.options.linked_invalid_probability))
                     {
                         // Convert the previous transfer to a single-phase no-limit transfer, but
@@ -823,10 +823,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         }, &transfers[i - 1]);
                         if (result_set_opt) |result_set| {
                             assert(result_set.count() == 1);
-                            assert(result_set.contains(.ok));
+                            assert(result_set.contains(.created));
 
                             transfers[i - 1].flags.linked = true;
-                            results[i - 1] = accounting_auditor.CreateTransferResultSet.init(.{
+                            results[i - 1] = accounting_auditor.CreateTransferStatusSet.init(.{
                                 .linked_event_failed = true,
                             });
                         }
@@ -855,7 +855,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn build_retry_transfers(
             self: *Workload,
             transfers: []tb.Transfer,
-            results: []accounting_auditor.CreateTransferResultSet,
+            results: []accounting_auditor.CreateTransferStatusSet,
         ) void {
             assert(results.len >= transfers.len);
 
@@ -1204,7 +1204,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             transfer_id: u128,
             transfer_plan: TransferPlan,
             transfer: *tb.Transfer,
-        ) ?accounting_auditor.CreateTransferResultSet {
+        ) ?accounting_auditor.CreateTransferStatusSet {
             // If the specified method is unavailable, swap it.
             // Changing the method may narrow the TransferOutcome (unknown→success, unknown→failure)
             // but never broaden it (success→unknown, success→failure).
@@ -1469,13 +1469,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 results_sparse,
             );
             for (transfers, 0..) |*transfer, i| {
-                const result: tb.CreateTransferResult = iterator.take(i) orelse .ok;
+                const result: tb.CreateTransferStatus = iterator.take(i) orelse .created;
                 if (transfer.flags.pending and result != .exists) {
                     self.transfers_pending_in_flight -= 1;
                 }
 
                 // Add some successfully completed transfers to be retried in the next request.
-                if (result == .ok and !transfer.flags.linked and
+                if (result == .created and !transfer.flags.linked and
                     self.transfers_retry_exists.items.len <
                         self.options.transfers_retry_exists_max and
                     self.prng.chance(self.options.create_transfer_retry_probability))
@@ -1489,7 +1489,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
 
                 // Enqueue the `id`s of transient errors to be retried in the next request.
-                if (result != .ok and result.transient() and
+                if (result != .created and result.transient() and
                     self.transfers_retry_failed.count() <
                         self.options.transfers_retry_failed_max)
                 {
@@ -1506,7 +1506,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             client_index: usize,
             timestamp: u64,
             transfers: []const tb.Transfer,
-            results: []const tb.CreateTransfersResult,
+            results: []const tb.CreateTransferResult,
         ) void {
             self.auditor.on_create_transfers(
                 client_index,
@@ -1535,14 +1535,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
             }
 
-            for (transfers, results) |*transfer, *outcome| {
-                assert(outcome.reserved == 0);
-                if (transfer.flags.pending and outcome.result != .exists) {
+            for (transfers, results) |*transfer, *result| {
+                assert(result.reserved == 0);
+                if (transfer.flags.pending and result.status != .exists) {
                     self.transfers_pending_in_flight -= 1;
                 }
 
                 // Add some successfully completed transfers to be retried in the next request.
-                if (outcome.result == .ok and !transfer.flags.linked and
+                if (result.status == .created and !transfer.flags.linked and
                     self.transfers_retry_exists.items.len <
                         self.options.transfers_retry_exists_max and
                     self.prng.chance(self.options.create_transfer_retry_probability))
@@ -1556,7 +1556,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
 
                 // Enqueue the `id`s of transient errors to be retried in the next request.
-                if (outcome.result != .ok and outcome.result.transient() and
+                if (result.status != .created and result.status.transient() and
                     self.transfers_retry_failed.count() <
                         self.options.transfers_retry_failed_max)
                 {

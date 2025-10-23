@@ -145,11 +145,11 @@ pub const TransferFlags = packed struct(u16) {
     }
 };
 
-/// Result codes are ordered by descending precedence.
+/// Status codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
 /// the ordering matches struct field order.
-pub const CreateAccountResult = enum(u32) {
-    ok = 0,
+pub const CreateAccountStatus = enum(u32) {
+    created = 0,
     linked_event_failed = 1,
     linked_event_chain_open = 2,
 
@@ -187,11 +187,11 @@ pub const CreateAccountResult = enum(u32) {
     imported_event_timestamp_must_not_regress = 26,
 
     comptime {
-        const values = std.enums.values(CreateAccountResult);
+        const values = std.enums.values(CreateAccountStatus);
         const BitSet = stdx.BitSetType(values.len);
         var set: BitSet = .{};
         for (0..values.len) |index| {
-            const result: CreateAccountResult = @enumFromInt(index);
+            const result: CreateAccountStatus = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
             assert(!set.is_set(index));
@@ -204,11 +204,11 @@ pub const CreateAccountResult = enum(u32) {
     }
 };
 
-/// Result codes are ordered by descending precedence.
+/// Status codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
 /// the ordering matches struct field order.
-pub const CreateTransferResult = enum(u32) {
-    ok = 0,
+pub const CreateTransferStatus = enum(u32) {
+    created = 0,
     linked_event_failed = 1,
     linked_event_chain_open = 2,
 
@@ -307,9 +307,9 @@ pub const CreateTransferResult = enum(u32) {
 
     /// Returns `true` if the error code depends on transient system status and retrying
     /// the same transfer with identical request data can produce different outcomes.
-    pub fn transient(result: CreateTransferResult) bool {
+    pub fn transient(result: CreateTransferStatus) bool {
         return switch (result) {
-            .ok => unreachable,
+            .created => unreachable,
 
             .debit_account_not_found,
             .credit_account_not_found,
@@ -388,11 +388,11 @@ pub const CreateTransferResult = enum(u32) {
 
     comptime {
         @setEvalBranchQuota(2_000);
-        const values = std.enums.values(CreateTransferResult);
+        const values = std.enums.values(CreateTransferStatus);
         const BitSet = stdx.BitSetType(values.len);
         var set: BitSet = .{};
         for (0..values.len) |index| {
-            const result: CreateTransferResult = @enumFromInt(index);
+            const result: CreateTransferStatus = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
             assert(!set.is_set(index));
@@ -404,7 +404,7 @@ pub const CreateTransferResult = enum(u32) {
         assert(set.full());
     }
 
-    /// TODO(zig): CreateTransferResult is ordered by precedence, but it crashes
+    /// TODO(zig): CreateTransferStatus is ordered by precedence, but it crashes
     /// `EnumSet`, and `@setEvalBranchQuota()` isn't propagating correctly:
     /// https://godbolt.org/z/6a45bx6xs
     /// error: evaluation exceeded 1000 backwards branches
@@ -412,10 +412,10 @@ pub const CreateTransferResult = enum(u32) {
     ///
     /// As a workaround we generate a new Ordered enum to be used in this case.
     pub const Ordered = type: {
-        const values = std.enums.values(CreateTransferResult);
+        const values = std.enums.values(CreateTransferStatus);
         var fields: [values.len]std.builtin.Type.EnumField = undefined;
         for (0..values.len) |index| {
-            const result: CreateTransferResult = @enumFromInt(index);
+            const result: CreateTransferStatus = @enumFromInt(index);
             fields[index] = .{
                 .name = @tagName(result),
                 .value = index,
@@ -423,56 +423,56 @@ pub const CreateTransferResult = enum(u32) {
         }
 
         var type_info = @typeInfo(enum {});
-        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferResult);
+        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferStatus);
         type_info.@"enum".fields = &fields;
         break :type @Type(type_info);
     };
 
-    pub fn to_ordered(value: CreateTransferResult) Ordered {
+    pub fn to_ordered(value: CreateTransferStatus) Ordered {
         return @enumFromInt(@intFromEnum(value));
     }
 
     comptime {
         const values = std.enums.values(Ordered);
-        assert(values.len == std.enums.values(CreateTransferResult).len);
+        assert(values.len == std.enums.values(CreateTransferStatus).len);
         for (0..values.len) |index| {
             const value: Ordered = @enumFromInt(index);
             assert(value == values[index]);
 
-            const value_source: CreateTransferResult = @enumFromInt(index);
+            const value_source: CreateTransferStatus = @enumFromInt(index);
             assert(std.mem.eql(u8, @tagName(value_source), @tagName(value)));
         }
     }
 };
 
-pub const CreateAccountsResult = extern struct {
+pub const CreateAccountResult = extern struct {
     timestamp: u64,
-    result: CreateAccountResult,
+    status: CreateAccountStatus,
     reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateAccountsResult) == 16);
-        assert(@alignOf(CreateAccountsResult) == 8);
-        assert(stdx.no_padding(CreateAccountsResult));
+        assert(@sizeOf(CreateAccountResult) == 16);
+        assert(@alignOf(CreateAccountResult) == 8);
+        assert(stdx.no_padding(CreateAccountResult));
     }
 };
 
-pub const CreateTransfersResult = extern struct {
+pub const CreateTransferResult = extern struct {
     timestamp: u64,
-    result: CreateTransferResult,
+    status: CreateTransferStatus,
     reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateTransfersResult) == 16);
-        assert(@alignOf(CreateTransfersResult) == 8);
-        assert(stdx.no_padding(CreateTransfersResult));
+        assert(@sizeOf(CreateTransferResult) == 16);
+        assert(@alignOf(CreateTransferResult) == 8);
+        assert(stdx.no_padding(CreateTransferResult));
     }
 };
 
 // Deprecated: sparse results containing only error codes.
 pub const CreateAccountsErrorResult = extern struct {
     index: u32,
-    result: CreateAccountResult,
+    result: CreateAccountStatus,
 
     comptime {
         assert(@sizeOf(CreateAccountsErrorResult) == 8);
@@ -483,7 +483,7 @@ pub const CreateAccountsErrorResult = extern struct {
 // Deprecated: sparse results containing only error codes.
 pub const CreateTransfersErrorResult = extern struct {
     index: u32,
-    result: CreateTransferResult,
+    result: CreateTransferStatus,
 
     comptime {
         assert(@sizeOf(CreateTransfersErrorResult) == 8);
