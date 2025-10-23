@@ -404,7 +404,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     vsr_options.addOption([]const u8, "release", options.config_release);
     vsr_options.addOption([]const u8, "release_client_min", options.config_release_client_min);
 
-    const vsr_module = b.createModule(.{
+    const vsr_module = b.addModule("vsr", .{
         .root_source_file = b.path("src/vsr.zig"),
     });
     vsr_module.addImport("stdx", options.stdx_module);
