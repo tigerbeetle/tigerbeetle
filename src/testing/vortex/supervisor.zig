@@ -146,7 +146,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             .datafile = datafile,
         }) catch |err| {
             log.err("failed formatting datafile: {}", .{err});
-            std.process.exit(1);
+            return error.SetupFailed;
         };
 
         var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
@@ -420,7 +420,7 @@ const Supervisor = struct {
                                         "{}: replica terminated unexpectedly with signal {d}",
                                         .{ index, signal },
                                     );
-                                    std.process.exit(1);
+                                    return error.TestFailed;
                                 },
                             }
                         },
@@ -457,7 +457,7 @@ const Supervisor = struct {
                     std.posix.SIG.KILL => log.info("workload terminated as requested", .{}),
                     else => {
                         log.err("workload exited unexpectedly with signal {d}", .{signal});
-                        std.process.exit(1);
+                        return error.TestFailed;
                     },
                 }
             },
