@@ -28,8 +28,8 @@ using (var client = new Client(
 
     var accountsResults = client.CreateAccounts(accounts);
     Debug.Assert(accountsResults.Length == 2);
-    Debug.Assert(accountsResults[0].Result == CreateAccountResult.Ok);
-    Debug.Assert(accountsResults[1].Result == CreateAccountResult.Ok);
+    Debug.Assert(accountsResults[0].Status == CreateAccountStatus.Created);
+    Debug.Assert(accountsResults[1].Status == CreateAccountStatus.Created);
 
     // Start a pending transfer
     var transfersResults = client.CreateTransfers(new[] {
@@ -45,7 +45,7 @@ using (var client = new Client(
     }
     });
     Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Result == CreateTransferResult.Ok);
+    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -87,7 +87,7 @@ using (var client = new Client(
     }
     });
     Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Result == CreateTransferResult.Ok);
+    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
 
     // Validate the contents of all transfers
     var transfers = client.LookupTransfers(new UInt128[] { 1, 2 });

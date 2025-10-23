@@ -3,8 +3,8 @@ const process = require("process");
 
 const {
     createClient,
-    CreateAccountResult,
-    CreateTransferResult,
+    CreateAccountStatus,
+    CreateTransferStatus,
 } = require("tigerbeetle-node");
 
 const client = createClient({
@@ -46,8 +46,8 @@ async function main() {
     },
   ]);
   assert.strictEqual(accountsResults.length, 2);
-  assert.strictEqual(accountsResults[0].result, CreateAccountResult.ok);
-  assert.strictEqual(accountsResults[1].result, CreateAccountResult.ok);
+  assert.strictEqual(accountsResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountsResults[1].status, CreateAccountStatus.created);
 
   let transfersResults = await client.createTransfers([
     {
@@ -67,7 +67,7 @@ async function main() {
     },
   ]);
   assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].result, CreateTransferResult.ok);
+  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
 
   let accounts = await client.lookupAccounts([1n, 2n]);
   assert.strictEqual(accounts.length, 2);

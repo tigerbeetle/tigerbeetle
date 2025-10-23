@@ -1,13 +1,13 @@
 pub use super::*;
 
 #[rustfmt::skip]
-impl From<u32> for CreateAccountResult {
-    fn from(other: u32) -> CreateAccountResult {
+impl From<u32> for CreateAccountStatus {
+    fn from(other: u32) -> CreateAccountStatus {
         use tbc::*;
-        use CreateAccountResult::*;
+        use CreateAccountStatus::*;
 
         match other {
-            TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK => Ok,
+            TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CREATED => Created,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED => LinkedEventFailed,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN => LinkedEventChainOpen,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_EXPECTED => ImportedEventExpected,
@@ -34,19 +34,19 @@ impl From<u32> for CreateAccountResult {
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LEDGER_MUST_NOT_BE_ZERO => LedgerMustNotBeZero,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CODE_MUST_NOT_BE_ZERO => CodeMustNotBeZero,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS => ImportedEventTimestampMustNotRegress,
-            v => panic!("Unknown CreateAccountResult: {v}"),
+            v => panic!("Unknown CreateAccountStatus: {v}"),
         }
     }
 }
 
 #[rustfmt::skip]
-impl From<CreateAccountResult> for u32 {
-    fn from(other: CreateAccountResult) -> u32 {
+impl From<CreateAccountStatus> for u32 {
+    fn from(other: CreateAccountStatus) -> u32 {
         use tbc::*;
-        use CreateAccountResult::*;
+        use CreateAccountStatus::*;
 
         match other {
-            Ok => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK,
+            Created => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CREATED,
             LinkedEventFailed => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED,
             LinkedEventChainOpen => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN,
             ImportedEventExpected => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_EXPECTED,
@@ -78,13 +78,13 @@ impl From<CreateAccountResult> for u32 {
 }
 
 #[rustfmt::skip]
-impl From<u32> for CreateTransferResult {
-    fn from(other: u32) -> CreateTransferResult {
+impl From<u32> for CreateTransferStatus {
+    fn from(other: u32) -> CreateTransferStatus {
         use tbc::*;
-        use CreateTransferResult::*;
+        use CreateTransferStatus::*;
 
         match other {
-            TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK => Ok,
+            TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_CREATED => Created,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_FAILED => LinkedEventFailed,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN => LinkedEventChainOpen,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_IMPORTED_EVENT_EXPECTED => ImportedEventExpected,
@@ -152,19 +152,19 @@ impl From<u32> for CreateTransferResult {
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OVERFLOWS_TIMEOUT => OverflowsTimeout,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_CREDITS => ExceedsCredits,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_DEBITS => ExceedsDebits,
-            v => panic!("Unknown CreateTransferResult: {v}"),
+            v => panic!("Unknown CreateTransferStatus: {v}"),
         }
     }
 }
 
 #[rustfmt::skip]
-impl From<CreateTransferResult> for u32 {
-    fn from(other: CreateTransferResult) -> u32 {
+impl From<CreateTransferStatus> for u32 {
+    fn from(other: CreateTransferStatus) -> u32 {
         use tbc::*;
-        use CreateTransferResult::*;
+        use CreateTransferStatus::*;
 
         match other {
-            Ok => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK,
+            Created => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_CREATED,
             LinkedEventFailed => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_FAILED,
             LinkedEventChainOpen => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN,
             ImportedEventExpected => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_IMPORTED_EVENT_EXPECTED,

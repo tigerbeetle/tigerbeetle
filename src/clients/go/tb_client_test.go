@@ -261,9 +261,9 @@ func doTestClient(t *testing.T, client Client) {
 		}
 		assert.Len(t, results, 2)
 		assert.True(t, results[0].Timestamp > 0)
-		assert.Equal(t, results[0].Result, types.TransferLinkedEventFailed)
+		assert.Equal(t, results[0].Status, types.TransferLinkedEventFailed)
 		assert.True(t, results[1].Timestamp > 0)
-		assert.Equal(t, results[1].Result, types.TransferExistsWithDifferentFlags)
+		assert.Equal(t, results[1].Status, types.TransferExistsWithDifferentFlags)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -488,9 +488,9 @@ func doTestClient(t *testing.T, client Client) {
 				assert.Len(t, results, 1)
 				assert.True(t, results[0].Timestamp > 0)
 				if i%10 == 0 {
-					assert.Equal(t, results[0].Result, types.TransferLinkedEventChainOpen)
+					assert.Equal(t, results[0].Status, types.TransferLinkedEventChainOpen)
 				} else {
-					assert.Equal(t, results[0].Result, types.TransferOK)
+					assert.Equal(t, results[0].Status, types.TransferCreated)
 				}
 			}(i)
 		}
@@ -1634,19 +1634,19 @@ func doTestImportedFlag(t *testing.T, client Client) {
 	})
 }
 
-func assertCreateAccountsOK(t *testing.T, results []types.CreateAccountsResult, expected int) {
+func assertCreateAccountsOK(t *testing.T, results []types.CreateAccountResult, expected int) {
 	assert.Len(t, results, expected)
 	for _, result := range results {
 		assert.True(t, result.Timestamp > 0)
-		assert.Equal(t, result.Result, types.AccountOK)
+		assert.Equal(t, result.Status, types.AccountCreated)
 	}
 }
 
-func assertCreateTransfersOK(t *testing.T, results []types.CreateTransfersResult, expected int) {
+func assertCreateTransfersOK(t *testing.T, results []types.CreateTransferResult, expected int) {
 	assert.Len(t, results, expected)
 	for _, result := range results {
 		assert.True(t, result.Timestamp > 0)
-		assert.Equal(t, result.Result, types.TransferOK)
+		assert.Equal(t, result.Status, types.TransferCreated)
 	}
 }
 

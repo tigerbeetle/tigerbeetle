@@ -22,7 +22,7 @@
 //!      result enum value (see `src/tigerbeetle.zig`)
 //! 3. The workload receives the results, and expects them to be of the same operation type as
 //!    originally requested. There might be fewer results than events, because clients can omit
-//!    .ok results.
+//!    .created results.
 //!
 //! Additionally, the workload itself sends `Progress` events on its stdout back to the supervisor.
 //! This is used for tracing and liveness checks.
@@ -120,8 +120,8 @@ const CommandBuffers = FixedSizeBuffersType(Command);
 var command_buffers: CommandBuffers = std.mem.zeroes(CommandBuffers);
 
 const Result = union(enum) {
-    create_accounts: []tb.CreateAccountsResult,
-    create_transfers: []tb.CreateTransfersResult,
+    create_accounts: []tb.CreateAccountResult,
+    create_transfers: []tb.CreateTransferResult,
     lookup_all_accounts: []tb.Account,
     lookup_latest_transfers: []tb.Transfer,
 };
@@ -168,11 +168,11 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 account_results,
                 0..,
             ) |account, account_result, index| {
-                if (account_result.result == .ok) {
+                if (account_result.status == .created) {
                     model.accounts.appendAssumeCapacity(account);
                 } else {
-                    log.err("got result {s} for event {d}: {any}", .{
-                        @tagName(account_result.result),
+                    log.err("got status {s} for event {d}: {any}", .{
+                        @tagName(account_result.status),
                         index,
                         account,
                     });
@@ -195,12 +195,12 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                     const preceding_transfer = transfers[index - 1];
                     if (preceding_transfer.flags.linked) {
                         const preceding_entry = transfer_results[index - 1];
-                        try testing.expect(preceding_entry.result != .ok);
+                        try testing.expect(preceding_entry.status != .created);
                     }
                 }
 
                 // No further validation needed for failed transfers.
-                if (transfer_result.result != .ok) {
+                if (transfer_result.status != .created) {
                     continue;
                 }
 

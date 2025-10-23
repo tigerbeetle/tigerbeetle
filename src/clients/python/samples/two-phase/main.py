@@ -19,8 +19,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
     print(accounts_results)
     assert len(accounts_results) == 2
-    assert accounts_results[0].result == tb.CreateAccountResult.OK
-    assert accounts_results[1].result == tb.CreateAccountResult.OK
+    assert accounts_results[0].status == tb.CreateAccountStatus.CREATED
+    assert accounts_results[1].status == tb.CreateAccountStatus.CREATED
 
     # Start a pending transfer
     transfers_results = client.create_transfers([
@@ -38,7 +38,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     print(transfers_results)
     assert len(transfers_results) == 1
     assert transfers_results[0].timestamp > 0
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate accounts pending and posted debits/credits before finishing the two-phase transfer
     accounts = client.lookup_accounts([1, 2])
@@ -72,7 +72,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
     ])
     print(transfers_results)
     assert len(transfers_results) == 1
-    assert transfers_results[0].result == tb.CreateTransferResult.OK
+    assert transfers_results[0].status == tb.CreateTransferStatus.CREATED
 
     # Validate the contents of all transfers
     transfers = client.lookup_transfers([1, 2])

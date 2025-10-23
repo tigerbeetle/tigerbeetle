@@ -98,16 +98,16 @@ using (var client = new Client(clusterID, addresses))
         var accountsResults = client.CreateAccounts(new[] { account0, account1, account2 });
         for (int i = 0; i < accountsResults.Length; i++)
         {
-            switch (accountsResults[i].Result)
+            switch (accountsResults[i].Status)
             {
-                case CreateAccountResult.Ok:
+                case CreateAccountStatus.Created:
                     Console.WriteLine($"Batch account at {i} successfully created with timestamp {accountsResults[i].Timestamp}.");
                     break;
-                case CreateAccountResult.Exists:
+                case CreateAccountStatus.Exists:
                     Console.WriteLine($"Batch account at {i} already exists with timestamp {accountsResults[i].Timestamp}.");
                     break;
                 default:
-                    Console.WriteLine($"Batch account at {i} failed to create: {accountsResults[i].Result}");
+                    Console.WriteLine($"Batch account at {i} failed to create: {accountsResults[i].Status}");
                     break;
             }
         }
@@ -189,16 +189,16 @@ using (var client = new Client(clusterID, addresses))
         var transfersResults = client.CreateTransfers(transfers);
         for (int i = 0; i < transfersResults.Length; i++)
         {
-            switch (transfersResults[i].Result)
+            switch (transfersResults[i].Status)
             {
-                case CreateTransferResult.Ok:
+                case CreateTransferStatus.Created:
                     Console.WriteLine($"Batch transfer at {i} successfully created with timestamp {transfersResults[i].Timestamp}.");
                     break;
-                case CreateTransferResult.Exists:
+                case CreateTransferStatus.Exists:
                     Console.WriteLine($"Batch transfer at {i} already exists with timestamp {transfersResults[i].Timestamp}.");
                     break;
                 default:
-                    Console.WriteLine($"Batch transfer at {i} failed to create: {transfersResults[i].Result}");
+                    Console.WriteLine($"Batch transfer at {i} failed to create: {transfersResults[i].Status}");
                     break;
             }
         }

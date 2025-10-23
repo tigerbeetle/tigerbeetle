@@ -134,7 +134,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var lookupAccount = client.LookupAccounts(new[] { accounts[0].Id });
         Assert.AreEqual(1, lookupAccount.Length);
@@ -142,7 +142,7 @@ public class IntegrationTests
 
         var existsResult = client.CreateAccounts(accounts);
         Assert.AreEqual(1, existsResult.Length);
-        Assert.AreEqual(CreateAccountResult.Exists, existsResult[0].Result);
+        Assert.AreEqual(CreateAccountStatus.Exists, existsResult[0].Status);
     }
 
     [TestMethod]
@@ -152,7 +152,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var lookupAccount = await client.LookupAccountsAsync(new[] { accounts[0].Id });
         Assert.AreEqual(1, lookupAccount.Length);
@@ -160,7 +160,7 @@ public class IntegrationTests
 
         var existsResult = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(1, existsResult.Length);
-        Assert.AreEqual(CreateAccountResult.Exists, existsResult[0].Result);
+        Assert.AreEqual(CreateAccountStatus.Exists, existsResult[0].Status);
     }
 
     [TestMethod]
@@ -170,7 +170,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -183,7 +183,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -196,7 +196,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfers = new Transfer[] {
             new()
@@ -213,7 +213,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(transfers);
         Assert.AreEqual(transfers.Length, transfersResults.Length);
         Assert.IsTrue(transfersResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(transfersResults.All(x => x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(transfersResults.All(x => x.Status == CreateTransferStatus.Created));
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -237,7 +237,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfers = new Transfer[] {
             new()
@@ -254,7 +254,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(transfers);
         Assert.AreEqual(transfers.Length, transfersResults.Length);
         Assert.IsTrue(transfersResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(transfersResults.All(x => x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(transfersResults.All(x => x.Status == CreateTransferStatus.Created));
 
         var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -278,7 +278,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -293,7 +293,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupTransfers = client.LookupTransfers(new[] { transfer.Id });
         Assert.AreEqual(1, lookupTransfers.Length);
@@ -302,7 +302,7 @@ public class IntegrationTests
         var exitsResults = client.CreateTransfers(new[] { transfer });
         Assert.AreEqual(1, exitsResults.Length);
         Assert.AreEqual(transfersResults[0].Timestamp, exitsResults[0].Timestamp);
-        Assert.AreEqual(CreateTransferResult.Exists, exitsResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Exists, exitsResults[0].Status);
     }
 
     [TestMethod]
@@ -312,7 +312,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -327,7 +327,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupTransfers = await client.LookupTransfersAsync(new[] { transfer.Id });
         Assert.AreEqual(1, lookupTransfers.Length);
@@ -336,7 +336,7 @@ public class IntegrationTests
         var exitsResults = await client.CreateTransfersAsync(new[] { transfer });
         Assert.AreEqual(1, exitsResults.Length);
         Assert.AreEqual(transfersResults[0].Timestamp, exitsResults[0].Timestamp);
-        Assert.AreEqual(CreateTransferResult.Exists, exitsResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Exists, exitsResults[0].Status);
     }
 
     [TestMethod]
@@ -346,7 +346,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -363,7 +363,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -393,7 +393,7 @@ public class IntegrationTests
         transfersResults = client.CreateTransfers(new[] { postTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -416,7 +416,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -433,7 +433,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -463,7 +463,7 @@ public class IntegrationTests
         transfersResults = await client.CreateTransfersAsync(new[] { postTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -486,7 +486,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -503,7 +503,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -533,7 +533,7 @@ public class IntegrationTests
         transfersResults = client.CreateTransfers(new[] { voidTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -556,7 +556,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -573,7 +573,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -603,7 +603,7 @@ public class IntegrationTests
         transfersResults = await client.CreateTransfersAsync(new[] { voidTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -627,7 +627,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -644,7 +644,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -696,7 +696,7 @@ public class IntegrationTests
         transfersResults = client.CreateTransfers(new[] { voidTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.PendingTransferExpired, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.PendingTransferExpired, transfersResults[0].Status);
     }
 
     [TestMethod]
@@ -706,7 +706,7 @@ public class IntegrationTests
         var accountsResults = await client.CreateAccountsAsync(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer = new Transfer
         {
@@ -723,7 +723,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -777,7 +777,7 @@ public class IntegrationTests
         transfersResults = await client.CreateTransfersAsync(new[] { voidTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.PendingTransferExpired, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.PendingTransferExpired, transfersResults[0].Status);
     }
 
 
@@ -788,7 +788,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer1 = new Transfer
         {
@@ -815,7 +815,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { transfer1, transfer2 });
         Assert.AreEqual(2, transfersResults.Length);
         Assert.IsTrue(transfersResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(transfersResults.All(x => x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(transfersResults.All(x => x.Status == CreateTransferStatus.Created));
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -843,7 +843,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var transfer1 = new Transfer
         {
@@ -870,7 +870,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(new[] { transfer1, transfer2 });
         Assert.AreEqual(2, transfersResults.Length);
         Assert.IsTrue(transfersResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(transfersResults.All(x => x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(transfersResults.All(x => x.Status == CreateTransferStatus.Created));
 
         var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -898,7 +898,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var closingTransfer = new Transfer
         {
@@ -914,7 +914,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { closingTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         Assert.AreNotEqual(lookupAccounts[0].Flags, accounts[0].Flags);
@@ -937,7 +937,7 @@ public class IntegrationTests
         transfersResults = client.CreateTransfers(new[] { voidingTransfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.IsTrue(transfersResults[0].Timestamp > 0);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -1126,7 +1126,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         // Creating a transfer.
         var transfers = new Transfer[10];
@@ -1150,7 +1150,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(transfers);
         Assert.AreEqual(transfers.Length, transfersResults.Length);
         Assert.IsTrue(transfersResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(transfersResults.All(x => x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(transfersResults.All(x => x.Status == CreateTransferStatus.Created));
 
         {
             // Querying transfers where:
@@ -1513,7 +1513,7 @@ public class IntegrationTests
             var createAccountResults = client.CreateAccounts(accounts);
             Assert.AreEqual(accounts.Length, createAccountResults.Length);
             Assert.IsTrue(createAccountResults.All(x => x.Timestamp > 0));
-            Assert.IsTrue(createAccountResults.All(x => x.Result == CreateAccountResult.Ok));
+            Assert.IsTrue(createAccountResults.All(x => x.Status == CreateAccountStatus.Created));
         }
 
         {
@@ -1666,7 +1666,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         {
             // Creating transfers.
@@ -1704,7 +1704,7 @@ public class IntegrationTests
             var transfersResults = client.CreateTransfers(transfers);
             Assert.AreEqual(transfers.Length, transfersResults.Length);
             Assert.IsTrue(transfersResults.All(x => x.Timestamp > 0));
-            Assert.IsTrue(transfersResults.All(x => x.Result == CreateTransferResult.Ok));
+            Assert.IsTrue(transfersResults.All(x => x.Status == CreateTransferStatus.Created));
         }
 
         {
@@ -1934,7 +1934,7 @@ public class IntegrationTests
         for (int i = 0; i < accounts.Length; i++)
         {
             Assert.AreEqual(accounts[i].Timestamp, accountsResults[i].Timestamp);
-            Assert.AreEqual(CreateAccountResult.Ok, accountsResults[i].Result);
+            Assert.AreEqual(CreateAccountStatus.Created, accountsResults[i].Status);
         }
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
@@ -1959,7 +1959,7 @@ public class IntegrationTests
         var transfersResults = client.CreateTransfers(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.AreEqual(transfer.Timestamp, transfersResults[0].Timestamp);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupTransfers = client.LookupTransfers(new[] { transfer.Id });
         Assert.AreEqual(1, lookupTransfers.Length);
@@ -1988,7 +1988,7 @@ public class IntegrationTests
         for (int i = 0; i < accounts.Length; i++)
         {
             Assert.AreEqual(accounts[i].Timestamp, accountsResults[i].Timestamp);
-            Assert.AreEqual(CreateAccountResult.Ok, accountsResults[i].Result);
+            Assert.AreEqual(CreateAccountStatus.Created, accountsResults[i].Status);
         }
 
         var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
@@ -2013,7 +2013,7 @@ public class IntegrationTests
         var transfersResults = await client.CreateTransfersAsync(new[] { transfer });
         Assert.AreEqual(1, transfersResults.Length);
         Assert.AreEqual(transfer.Timestamp, transfersResults[0].Timestamp);
-        Assert.AreEqual(CreateTransferResult.Ok, transfersResults[0].Result);
+        Assert.AreEqual(CreateTransferStatus.Created, transfersResults[0].Status);
 
         var lookupTransfers = await client.LookupTransfersAsync(new[] { transfer.Id });
         Assert.AreEqual(1, lookupTransfers.Length);
@@ -2030,7 +2030,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var lookup = client.LookupAccounts(new[] { accounts[0].Id });
         Assert.AreEqual(1, lookup.Length);
@@ -2056,7 +2056,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         var tasks = new Task[isAsync ? 1_000_000 : 10_000];
         for (int i = 0; i < tasks.Length; i += 2)
@@ -2089,10 +2089,10 @@ public class IntegrationTests
         {
             switch (task)
             {
-                case Task<CreateTransfersResult[]> createAccounts:
+                case Task<CreateTransferResult[]> createAccounts:
                     Assert.AreEqual(1, createAccounts.Result.Length);
                     Assert.IsTrue(createAccounts.Result[0].Timestamp > 0);
-                    Assert.AreEqual(CreateTransferResult.Ok, createAccounts.Result[0].Result);
+                    Assert.AreEqual(CreateTransferStatus.Created, createAccounts.Result[0].Status);
                     break;
                 case Task<Account[]> lookupAccounts:
                     Assert.AreEqual(1, lookupAccounts.Result.Length);
@@ -2136,16 +2136,16 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
-        var tasks = new Task<CreateTransfersResult[]>[TASKS_QTY];
+        var tasks = new Task<CreateTransferResult[]>[TASKS_QTY];
 
-        async Task<CreateTransfersResult[]> asyncAction(Transfer[] transfers)
+        async Task<CreateTransferResult[]> asyncAction(Transfer[] transfers)
         {
             return await client.CreateTransfersAsync(transfers);
         }
 
-        CreateTransfersResult[] syncAction(Transfer[] transfers)
+        CreateTransferResult[] syncAction(Transfer[] transfers)
         {
             return client.CreateTransfers(transfers);
         }
@@ -2177,16 +2177,16 @@ public class IntegrationTests
 
         for (int i = 0; i < tasks.Length; i++)
         {
-            CreateTransfersResult[] result = tasks[i].Result;
-            Assert.AreEqual(1, result.Length);
+            CreateTransferResult[] results = tasks[i].Result;
+            Assert.AreEqual(1, results.Length);
 
             if (i % 10 == 0)
             {
-                Assert.AreEqual(result[0].Result, CreateTransferResult.LinkedEventChainOpen);
+                Assert.AreEqual(results[0].Status, CreateTransferStatus.LinkedEventChainOpen);
             }
             else
             {
-                Assert.AreEqual(result[0].Result, CreateTransferResult.Ok);
+                Assert.AreEqual(results[0].Status, CreateTransferStatus.Created);
             }
         }
     }
@@ -2212,9 +2212,9 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
-        var tasks = new Task<CreateTransfersResult[]>[TASKS_QTY];
+        var tasks = new Task<CreateTransferResult[]>[TASKS_QTY];
 
         for (int i = 0; i < TASKS_QTY; i++)
         {
@@ -2251,8 +2251,8 @@ public class IntegrationTests
 
         // Asserting that either the task failed or succeeded,
         // at least one must be succeeded.
-        Assert.IsTrue(tasks.Any(x => !x.IsFaulted && x.Result[0].Result == CreateTransferResult.Ok));
-        Assert.IsTrue(tasks.All(x => x.IsFaulted || x.Result[0].Result == CreateTransferResult.Ok));
+        Assert.IsTrue(tasks.Any(x => !x.IsFaulted && x.Result[0].Status == CreateTransferStatus.Created));
+        Assert.IsTrue(tasks.All(x => x.IsFaulted || x.Result[0].Status == CreateTransferStatus.Created));
     }
 
     [TestMethod]
@@ -2265,7 +2265,7 @@ public class IntegrationTests
         var accountsResults = client.CreateAccounts(accounts);
         Assert.AreEqual(accounts.Length, accountsResults.Length);
         Assert.IsTrue(accountsResults.All(x => x.Timestamp > 0));
-        Assert.IsTrue(accountsResults.All(x => x.Result == CreateAccountResult.Ok));
+        Assert.IsTrue(accountsResults.All(x => x.Status == CreateAccountStatus.Created));
 
         client.Dispose();
 

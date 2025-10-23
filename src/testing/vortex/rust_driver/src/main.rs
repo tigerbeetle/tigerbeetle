@@ -93,8 +93,8 @@ enum Request {
 }
 
 enum Reply {
-    CreateAccounts(Vec<tb::CreateAccountsResult>),
-    CreateTransfers(Vec<tb::CreateTransfersResult>),
+    CreateAccounts(Vec<tb::CreateAccountResult>),
+    CreateTransfers(Vec<tb::CreateTransferResult>),
     LookupAccounts(Vec<tb::Account>),
     LookupTransfers(Vec<tb::Transfer>),
 }
@@ -198,7 +198,7 @@ impl Output {
                 for result in results {
                     let result = tbc::tb_create_accounts_result_t {
                         timestamp: result.timestamp,
-                        result: u32::from(result.result),
+                        status: u32::from(result.status),
                         reserved: 0,
                     };
                     let bytes: [u8; mem::size_of::<tbc::tb_create_accounts_result_t>()] =
@@ -212,7 +212,7 @@ impl Output {
                 for result in results {
                     let result = tbc::tb_create_transfers_result_t {
                         timestamp: result.timestamp,
-                        result: u32::from(result.result),
+                        status: u32::from(result.status),
                         reserved: 0,
                     };
                     let bytes: [u8; mem::size_of::<tbc::tb_create_transfers_result_t>()] =

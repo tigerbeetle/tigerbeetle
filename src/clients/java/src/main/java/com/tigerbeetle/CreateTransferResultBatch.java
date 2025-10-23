@@ -15,7 +15,7 @@ public final class CreateTransferResultBatch extends Batch {
         int SIZE = 16;
 
         int Timestamp = 0;
-        int Result = 8;
+        int Status = 8;
         int Reserved = 12;
     }
 
@@ -56,18 +56,18 @@ public final class CreateTransferResultBatch extends Batch {
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
-    public CreateTransferResult getResult() {
-        final var value = getUInt32(at(Struct.Result));
-        return CreateTransferResult.fromValue(value);
+    public CreateTransferStatus getStatus() {
+        final var value = getUInt32(at(Struct.Status));
+        return CreateTransferStatus.fromValue(value);
     }
 
     /**
-     * @param result
+     * @param status
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
-    void setResult(final CreateTransferResult result) {
-        putUInt32(at(Struct.Result), result.value);
+    void setStatus(final CreateTransferStatus status) {
+        putUInt32(at(Struct.Status), status.value);
     }
 
     /**

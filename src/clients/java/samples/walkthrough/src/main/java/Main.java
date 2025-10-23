@@ -84,8 +84,8 @@ public final class Main {
 
                 CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
                 while (accountsResults.next()) {
-                    switch (accountsResults.getResult()) {
-                        case Ok:
+                    switch (accountsResults.getStatus()) {
+                        case Created:
                             System.out.printf("Batch account at %d successfully created with timestamp %d.\n",
                                     accountsResults.getPosition(), accountsResults.getTimestamp());
                             break;
@@ -95,7 +95,7 @@ public final class Main {
                             break;
                         default:
                             System.err.printf("Batch account at %d failed to create: %s.\n",
-                                    accountsResults.getPosition(), accountsResults.getResult());
+                                    accountsResults.getPosition(), accountsResults.getStatus());
                             break;
                     }
                 }
@@ -165,8 +165,8 @@ public final class Main {
 
                 CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
                 while (transfersResults.next()) {
-                    switch (transfersResults.getResult()) {
-                        case Ok:
+                    switch (transfersResults.getStatus()) {
+                        case Created:
                             System.out.printf("Batch transfer at %d successfully created with timestamp %d.\n",
                                     transfersResults.getPosition(), transfersResults.getTimestamp());
                             break;
@@ -176,7 +176,7 @@ public final class Main {
                             break;
                         default:
                             System.err.printf("Batch transfer at %d failed to create: %s\n",
-                                    transfersResults.getPosition(), transfersResults.getResult());
+                                    transfersResults.getPosition(), transfersResults.getStatus());
                             break;
                     }
                 }

@@ -24,15 +24,15 @@ public class BatchTest {
 
     private static final long createAccountTimestamp1;
     private static final long createAccountTimestamp2;
-    private static final CreateAccountResult createAccountResult1;
-    private static final CreateAccountResult createAccountResult2;
-    private static final ByteBuffer dummyCreateAccountResultsStream;
+    private static final CreateAccountStatus createAccountResult1;
+    private static final CreateAccountStatus createAccountResult2;
+    private static final ByteBuffer dummyCreateAccountStatussStream;
 
     private static final long createTransferTimestamp1;
     private static final long createTransferTimestamp2;
-    private static final CreateTransferResult createTransferResult1;
-    private static final CreateTransferResult createTransferResult2;
-    private static final ByteBuffer dummyCreateTransfersResultsStream;
+    private static final CreateTransferStatus createTransferResult1;
+    private static final CreateTransferStatus createTransferResult2;
+    private static final ByteBuffer dummyCreateTransferResultsStream;
 
 
     private static final byte[] id1;
@@ -485,43 +485,43 @@ public class BatchTest {
     }
 
     @Test
-    public void testReadCreateAccountResults() {
+    public void testReadCreateAccountStatuss() {
 
-        var batch = new CreateAccountResultBatch(dummyCreateAccountResultsStream.position(0));
+        var batch = new CreateAccountResultBatch(dummyCreateAccountStatussStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
         assertTrue(batch.next());
         assertEquals(createAccountTimestamp1, batch.getTimestamp());
-        assertEquals(createAccountResult1, batch.getResult());
+        assertEquals(createAccountResult1, batch.getStatus());
         assertEquals(0L, batch.getReserved());
 
         assertTrue(batch.next());
         assertEquals(createAccountTimestamp2, batch.getTimestamp());
-        assertEquals(createAccountResult2, batch.getResult());
+        assertEquals(createAccountResult2, batch.getStatus());
         assertEquals(0L, batch.getReserved());
 
         assertFalse(batch.next());
     }
 
     @Test
-    public void testWriteCreateAccountResults() {
+    public void testWriteCreateAccountStatuss() {
         var batch = new CreateAccountResultBatch(1);
         batch.add();
 
         batch.setTimestamp(createAccountTimestamp1);
         assertEquals(createAccountTimestamp1, batch.getTimestamp());
 
-        batch.setResult(createAccountResult1);
-        assertEquals(createAccountResult1, batch.getResult());
+        batch.setStatus(createAccountResult1);
+        assertEquals(createAccountResult1, batch.getStatus());
 
         batch.setReserved(100);
         assertEquals(100, batch.getReserved());
     }
 
     @Test(expected = AssertionError.class)
-    public void testInvalidCreateAccountResultsBuffer() {
+    public void testInvalidCreateAccountStatussBuffer() {
 
         // Invalid size
         var invalidBuffer = ByteBuffer.allocate((CreateAccountResultBatch.Struct.SIZE * 2) - 1)
@@ -533,36 +533,36 @@ public class BatchTest {
     }
 
     @Test
-    public void testReadCreateTransferResults() {
+    public void testReadCreateTransferStatuss() {
 
-        var batch = new CreateTransferResultBatch(dummyCreateTransfersResultsStream.position(0));
+        var batch = new CreateTransferResultBatch(dummyCreateTransferResultsStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
 
         assertTrue(batch.next());
         assertEquals(createTransferTimestamp1, batch.getTimestamp());
-        assertEquals(createTransferResult1, batch.getResult());
+        assertEquals(createTransferResult1, batch.getStatus());
         assertEquals(0L, batch.getReserved());
 
         assertTrue(batch.next());
         assertEquals(createTransferTimestamp2, batch.getTimestamp());
-        assertEquals(createTransferResult2, batch.getResult());
+        assertEquals(createTransferResult2, batch.getStatus());
         assertEquals(0L, batch.getReserved());
 
         assertFalse(batch.next());
     }
 
     @Test
-    public void testWriteCreateTransferResults() {
+    public void testWriteCreateTransferStatuss() {
         var batch = new CreateTransferResultBatch(1);
         batch.add();
 
         batch.setTimestamp(createTransferTimestamp1);
         assertEquals(createTransferTimestamp1, batch.getTimestamp());
 
-        batch.setResult(createTransferResult1);
-        assertEquals(createTransferResult1, batch.getResult());
+        batch.setStatus(createTransferResult1);
+        assertEquals(createTransferResult1, batch.getStatus());
 
         batch.setReserved(100);
         assertEquals(100, batch.getReserved());
@@ -972,26 +972,26 @@ public class BatchTest {
 
         createAccountTimestamp1 = 999_998;
         createAccountTimestamp2 = 999_999;
-        createAccountResult1 = CreateAccountResult.Ok;
-        createAccountResult2 = CreateAccountResult.Exists;
+        createAccountResult1 = CreateAccountStatus.Created;
+        createAccountResult2 = CreateAccountStatus.Exists;
 
         // Mimic the binary response
-        dummyCreateAccountResultsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
-        dummyCreateAccountResultsStream.putLong(createAccountTimestamp1)
+        dummyCreateAccountStatussStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+        dummyCreateAccountStatussStream.putLong(createAccountTimestamp1)
                 .putInt(createAccountResult1.value).putInt(0);
-        dummyCreateAccountResultsStream.putLong(createAccountTimestamp2)
+        dummyCreateAccountStatussStream.putLong(createAccountTimestamp2)
                 .putInt(createAccountResult2.value).putInt(0);
 
         createTransferTimestamp1 = 999_998;
         createTransferTimestamp2 = 999_999;
-        createTransferResult1 = CreateTransferResult.Ok;
-        createTransferResult2 = CreateTransferResult.ExceedsDebits;
+        createTransferResult1 = CreateTransferStatus.Created;
+        createTransferResult2 = CreateTransferStatus.ExceedsDebits;
 
         // Mimic the binary response
-        dummyCreateTransfersResultsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
-        dummyCreateTransfersResultsStream.putLong(createTransferTimestamp1)
+        dummyCreateTransferResultsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+        dummyCreateTransferResultsStream.putLong(createTransferTimestamp1)
                 .putInt(createTransferResult1.value).putInt(0);
-        dummyCreateTransfersResultsStream.putLong(createTransferTimestamp2)
+        dummyCreateTransferResultsStream.putLong(createTransferTimestamp2)
                 .putInt(createTransferResult2.value).putInt(0);
 
         id1 = new byte[] {10, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0};

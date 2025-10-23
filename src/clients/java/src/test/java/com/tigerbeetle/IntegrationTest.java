@@ -175,7 +175,7 @@ public class IntegrationTest {
         assertHeader(zeroedAccounts, accountsResults);
         assertTrue(accountsResults.getLength() == 1);
         assertTrue(accountsResults.next());
-        assertEquals(CreateAccountResult.IdMustNotBeZero, accountsResults.getResult());
+        assertEquals(CreateAccountStatus.IdMustNotBeZero, accountsResults.getStatus());
     }
 
     @Test
@@ -192,7 +192,7 @@ public class IntegrationTest {
         assertEquals(accounts.getLength(), accountsResults.getLength());
         while (accountsResults.next()) {
             assertTrue(accountsResults.getTimestamp() > 0);
-            assertEquals(CreateAccountResult.Ok, accountsResults.getResult());
+            assertEquals(CreateAccountStatus.Created, accountsResults.getStatus());
         }
 
         CompletableFuture<AccountBatch> lookupFuture =
@@ -298,7 +298,7 @@ public class IntegrationTest {
         assertEquals(accounts.getLength(), accountsResults.getLength());
         while (accountsResults.next()) {
             assertTrue(accountsResults.getTimestamp() > 0);
-            assertEquals(CreateAccountResult.Ok, accountsResults.getResult());
+            assertEquals(CreateAccountStatus.Created, accountsResults.getStatus());
         }
 
         // Creating a transfer.
@@ -319,7 +319,7 @@ public class IntegrationTest {
         assertEquals(transfers.getLength(), transfersResults.getLength());
         while (transfersResults.next()) {
             assertTrue(transfersResults.getTimestamp() > 0);
-            assertEquals(CreateTransferResult.Ok, transfersResults.getResult());
+            assertEquals(CreateTransferStatus.Created, transfersResults.getStatus());
         }
 
 
@@ -374,7 +374,7 @@ public class IntegrationTest {
         assertHeader(zeroedTransfers, transfersResults);
         assertTrue(transfersResults.getLength() == 1);
         assertTrue(transfersResults.next());
-        assertEquals(CreateTransferResult.IdMustNotBeZero, transfersResults.getResult());
+        assertEquals(CreateTransferStatus.IdMustNotBeZero, transfersResults.getStatus());
     }
 
     @Test
@@ -748,7 +748,7 @@ public class IntegrationTest {
         assertEquals(voidTransfers.getLength(), transfersResults.getLength());
         assertTrue(transfersResults.next());
         assertTrue(transfersResults.getTimestamp() > 0);
-        assertEquals(CreateTransferResult.PendingTransferExpired, transfersResults.getResult());
+        assertEquals(CreateTransferStatus.PendingTransferExpired, transfersResults.getStatus());
     }
 
     @Test
@@ -1130,7 +1130,7 @@ public class IntegrationTest {
                 tasks[i].join();
                 assertTrue(tasks[i].result.next());
                 assertTrue(tasks[i].result.getTimestamp() > 0);
-                assertTrue(tasks[i].result.getResult() == CreateTransferResult.Ok);
+                assertTrue(tasks[i].result.getStatus() == CreateTransferStatus.Created);
                 assertFalse(tasks[i].result.next());
             }
 
@@ -1192,10 +1192,10 @@ public class IntegrationTest {
                 assertTrue(batch.next());
 
                 if (i % 10 == 0) {
-                    assertTrue(batch.getResult() == CreateTransferResult.LinkedEventChainOpen);
+                    assertTrue(batch.getStatus() == CreateTransferStatus.LinkedEventChainOpen);
                 } else {
                     assertTrue(batch.getTimestamp() > 0);
-                    assertTrue(batch.getResult() == CreateTransferResult.Ok);
+                    assertTrue(batch.getStatus() == CreateTransferStatus.Created);
                 }
                 assertFalse(batch.next());
             }
@@ -2426,7 +2426,7 @@ public class IntegrationTest {
         assertEquals(accounts.getLength(), accountsResults.getLength());
         while (accountsResults.next()) {
             assertTrue(accountsResults.getTimestamp() > 0);
-            assertEquals(CreateAccountResult.Ok, accountsResults.getResult());
+            assertEquals(CreateAccountStatus.Created, accountsResults.getStatus());
         }
 
         // Creating a transfer.
@@ -2542,11 +2542,11 @@ public class IntegrationTest {
                 if (batch instanceof CreateAccountResultBatch) {
                     final var createAccountResults = (CreateAccountResultBatch) batch;
                     assertTrue(createAccountResults.getTimestamp() > 0);
-                    hasError |= createAccountResults.getResult() != CreateAccountResult.Ok;
+                    hasError |= createAccountResults.getStatus() != CreateAccountStatus.Created;
                 } else if (batch instanceof CreateTransferResultBatch) {
                     final var createTransfersResults = (CreateTransferResultBatch) batch;
                     assertTrue(createTransfersResults.getTimestamp() > 0);
-                    hasError |= createTransfersResults.getResult() != CreateTransferResult.Ok;
+                    hasError |= createTransfersResults.getStatus() != CreateTransferStatus.Created;
                 } else
                     assert false;
             }

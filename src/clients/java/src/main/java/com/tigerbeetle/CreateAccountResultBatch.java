@@ -15,7 +15,7 @@ public final class CreateAccountResultBatch extends Batch {
         int SIZE = 16;
 
         int Timestamp = 0;
-        int Result = 8;
+        int Status = 8;
         int Reserved = 12;
     }
 
@@ -56,18 +56,18 @@ public final class CreateAccountResultBatch extends Batch {
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
-    public CreateAccountResult getResult() {
-        final var value = getUInt32(at(Struct.Result));
-        return CreateAccountResult.fromValue(value);
+    public CreateAccountStatus getStatus() {
+        final var value = getUInt32(at(Struct.Status));
+        return CreateAccountStatus.fromValue(value);
     }
 
     /**
-     * @param result
+     * @param status
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
-    void setResult(final CreateAccountResult result) {
-        putUInt32(at(Struct.Result), result.value);
+    void setStatus(final CreateAccountStatus status) {
+        putUInt32(at(Struct.Status), status.value);
     }
 
     /**

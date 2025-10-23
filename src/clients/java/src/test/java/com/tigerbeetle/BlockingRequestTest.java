@@ -274,10 +274,10 @@ public class BlockingRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putLong(100);
-        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
+        dummyReplyBuffer.putInt(CreateAccountStatus.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(0);
         dummyReplyBuffer.putLong(101);
-        dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
+        dummyReplyBuffer.putInt(CreateAccountStatus.Exists.value);
         dummyReplyBuffer.putInt(0);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
@@ -290,11 +290,11 @@ public class BlockingRequestTest {
 
         assertTrue(result.next());
         assertEquals(100, result.getTimestamp());
-        assertEquals(CreateAccountResult.IdMustNotBeZero, result.getResult());
+        assertEquals(CreateAccountStatus.IdMustNotBeZero, result.getStatus());
 
         assertTrue(result.next());
         assertEquals(101, result.getTimestamp());
-        assertEquals(CreateAccountResult.Exists, result.getResult());
+        assertEquals(CreateAccountStatus.Exists, result.getStatus());
     }
 
     @Test
@@ -310,10 +310,10 @@ public class BlockingRequestTest {
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putLong(100);
-        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
+        dummyReplyBuffer.putInt(CreateTransferStatus.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(0);
         dummyReplyBuffer.putLong(101);
-        dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
+        dummyReplyBuffer.putInt(CreateTransferStatus.Exists.value);
         dummyReplyBuffer.putInt(0);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
@@ -326,11 +326,11 @@ public class BlockingRequestTest {
 
         assertTrue(result.next());
         assertEquals(100, result.getTimestamp());
-        assertEquals(CreateTransferResult.IdMustNotBeZero, result.getResult());
+        assertEquals(CreateTransferStatus.IdMustNotBeZero, result.getStatus());
 
         assertTrue(result.next());
         assertEquals(101, result.getTimestamp());
-        assertEquals(CreateTransferResult.Exists, result.getResult());
+        assertEquals(CreateTransferStatus.Exists, result.getStatus());
     }
 
     @Test

@@ -28,8 +28,8 @@ using (var client = new Client(
 
     var accountsResults = client.CreateAccounts(accounts);
     Debug.Assert(accountsResults.Length == 2);
-    Debug.Assert(accountsResults[0].Result == CreateAccountResult.Ok);
-    Debug.Assert(accountsResults[1].Result == CreateAccountResult.Ok);
+    Debug.Assert(accountsResults[0].Status == CreateAccountStatus.Created);
+    Debug.Assert(accountsResults[1].Status == CreateAccountStatus.Created);
 
     var transfers = new[] {
     new Transfer
@@ -45,7 +45,7 @@ using (var client = new Client(
 
     var transfersResults = client.CreateTransfers(transfers);
     Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Result == CreateTransferResult.Ok);
+    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
 
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);

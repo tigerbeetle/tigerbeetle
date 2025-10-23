@@ -31,10 +31,10 @@ const mappings_state_machine = .{
     .{ tb.QueryFilterFlags, "QueryFilterFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
+    .{ tb.CreateAccountStatus, "CreateAccountStatus" },
+    .{ tb.CreateTransferStatus, "CreateTransferStatus" },
     .{ tb.CreateAccountResult, "CreateAccountResult" },
     .{ tb.CreateTransferResult, "CreateTransferResult" },
-    .{ tb.CreateAccountsResult, "CreateAccountsResult" },
-    .{ tb.CreateTransfersResult, "CreateTransfersResult" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
     .{ tb.QueryFilter, "QueryFilter" },
@@ -317,8 +317,11 @@ fn emit_struct_dataclass(
                 buffer.print("{s}.NONE\n", .{python_type});
             } else {
                 if (field_type_info == .@"enum") {
-                    // Enums - the only ones exposed by the client call `.0` as `.OK`:
-                    buffer.print("{s}.OK\n", .{python_type});
+                    // Enums - initialized with the default value.
+                    buffer.print("{s}.{s}\n", .{
+                        python_type,
+                        to_uppercase(@tagName(@as(field.type, @enumFromInt(0)))),
+                    });
                 } else {
                     // Simple integer types:
                     buffer.print("0\n", .{});

@@ -99,14 +99,14 @@ func main() {
 			return
 		}
 
-		for i, item := range accountsRes {
-			switch item.Result {
-			case AccountOK:
-				log.Printf("Batch account at %d successfully created with timestamp %d.", i, item.Timestamp)
+		for i, result := range accountsRes {
+			switch result.Status {
+			case AccountCreated:
+				log.Printf("Batch account at %d successfully created with timestamp %d.", i, result.Timestamp)
 			case AccountExists:
-				log.Printf("Batch account at %d already exists with timestamp %d.", i, item.Timestamp)
+				log.Printf("Batch account at %d already exists with timestamp %d.", i, result.Timestamp)
 			default:
-				log.Printf("Batch account at %d failed to create: %s", i, item.Timestamp)
+				log.Printf("Batch account at %d failed to create: %s", i, result.Status)
 			}
 		}
 		// endsection:create-accounts-errors
@@ -172,14 +172,14 @@ func main() {
 			return
 		}
 
-		for i, item := range transfersRes {
-			switch item.Result {
-			case TransferOK:
-				log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, item.Timestamp)
+		for i, result := range transfersRes {
+			switch result.Status {
+			case TransferCreated:
+				log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, result.Timestamp)
 			case TransferExists:
-				log.Printf("Batch transfer at %d already exists with timestamp %d.", i, item.Timestamp)
+				log.Printf("Batch transfer at %d already exists with timestamp %d.", i, result.Timestamp)
 			default:
-				log.Printf("Batch transfer at %d failed to create: %s", i, item.Result)
+				log.Printf("Batch transfer at %d failed to create: %s", i, result.Status)
 			}
 		}
 		// endsection:create-transfers-errors
