@@ -283,7 +283,7 @@ test "benchmark/inspect smoke" {
         "{tigerbeetle} inspect grid                    {path}",
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
-        "{tigerbeetle} inspect integrity             {path}",
+        "{tigerbeetle} inspect integrity               {path}",
     }) |command| {
         log.debug("{s}", .{command});
 
