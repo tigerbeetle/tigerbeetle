@@ -9,6 +9,11 @@ Released: 2025-10-24
 
 ### Safety And Performance
 
+- [#3294](https://github.com/tigerbeetle/tigerbeetle/pull/3294)
+
+  Allow backups to accept prepares from the next checkpoint when they replace already committed
+  prepares.
+
 - [#3323](https://github.com/tigerbeetle/tigerbeetle/pull/3323)
 
   Assert the size of `Headers` and `StartView` messages.
@@ -18,11 +23,6 @@ Released: 2025-10-24
   Correctly reset the `pulse_next_timestamp`.
 
 ### Features
-
-- [#3294](https://github.com/tigerbeetle/tigerbeetle/pull/3294)
-
-  Allow backups to accept prepares from the next checkpoint when they replace already committed
-  prepares.
 
 - [#3302](https://github.com/tigerbeetle/tigerbeetle/pull/3302)
 
