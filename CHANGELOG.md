@@ -28,6 +28,10 @@ Released: 2025-10-24
 
   Clarify that the `TBID`, which is a `u128` number, only specifies the bit layout.
 
+- [#3291](https://github.com/tigerbeetle/tigerbeetle/pull/3291)
+
+  Introduces `tigerbeetle inspect integrity` to verify offline that a datafile is uncorrupted.
+
 ### Internals
 
 - [#3312](https://github.com/tigerbeetle/tigerbeetle/pull/3312),
