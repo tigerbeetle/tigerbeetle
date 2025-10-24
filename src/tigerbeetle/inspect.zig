@@ -33,6 +33,7 @@ const EventMetric = vsr.trace.EventMetric;
 const EventMetricAggregate = vsr.trace.EventMetricAggregate;
 const EventTiming = vsr.trace.EventTiming;
 const EventTimingAggregate = vsr.trace.EventTimingAggregate;
+const command_inspect_integrity = @import("inspect_integrity.zig").command_inspect_integrity;
 
 pub fn command_inspect(
     allocator: std.mem.Allocator,
@@ -66,6 +67,7 @@ fn run_inspect(
         .constants => return try inspect_constants(stdout),
         .metrics => return try inspect_metrics(stdout),
         .op => |op| return try inspect_op(stdout, op),
+        .integrity => |*args| return try command_inspect_integrity(allocator, io, tracer, args),
         .data_file => |data_file| data_file,
     };
 
@@ -1608,11 +1610,12 @@ fn print_table_info(
         try output.print(" S={}..{}", .{ table.snapshot_min, table.snapshot_max });
     }
 
-    try output.print(" V={:_>6}/{} C={x:0>32} A={}\n", .{
+    try output.print(" V={:_>6}/{} C={x:0>32} A={} O={}\n", .{
         table.value_count,
         tree_info.Tree.Table.value_count_max,
         table.checksum,
         table.address,
+        vsr.Zone.offset(.grid, (table.address - 1) * constants.block_size),
     });
 }
 

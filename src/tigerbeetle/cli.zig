@@ -190,6 +190,18 @@ const CLIArgs = union(enum) {
             level: ?u6 = null,
             positional: struct { path: []const u8 },
         },
+        integrity: struct {
+            log_debug: bool = false,
+            seed: ?[]const u8 = null,
+            memory_lsm_manifest: ?ByteSize = null,
+            skip_wal: bool = false,
+            skip_client_replies: bool = false,
+            skip_grid: bool = false,
+
+            positional: struct {
+                path: [:0]const u8,
+            },
+        },
 
         pub const help =
             \\Usage:
@@ -213,6 +225,11 @@ const CLIArgs = union(enum) {
             \\  tigerbeetle inspect manifest <path>
             \\
             \\  tigerbeetle inspect tables --tree=<name|id> [--level=<integer>] <path>
+            \\
+            \\  tigerbeetle inspect integrity [--log-debug] [--seed=<seed>]
+            \\                                [--memory-lsm-manifest=<size>]
+            \\                                [--skip-wal] [--skip-client-replies] [--skip-grid]
+            \\                                <path>
             \\
             \\Options:
             \\
@@ -258,6 +275,10 @@ const CLIArgs = union(enum) {
             \\  tables --tree=<name|id> [--level=<integer>] [--superblock-copy=<copy>]
             \\        List the tables matching the given tree/level.
             \\        Example tree names: "transfers" (object table), "transfers.amount" (index table).
+            \\
+            \\  integrity
+            \\        Scans the data file and checks all internal checksums to verify internal
+            \\        integrity.
             \\
         ;
     };
@@ -570,6 +591,7 @@ pub const Command = union(enum) {
         metrics,
         op: u64,
         data_file: DataFile,
+        integrity: Integrity,
 
         pub const DataFile = struct {
             path: []const u8,
@@ -595,6 +617,16 @@ pub const Command = union(enum) {
                     level: ?u6,
                 },
             },
+        };
+
+        pub const Integrity = struct {
+            log_debug: bool,
+            seed: ?[]const u8,
+            lsm_forest_node_count: u32,
+            skip_wal: bool,
+            skip_client_replies: bool,
+            skip_grid: bool,
+            path: [:0]const u8,
         };
     };
 
@@ -1118,11 +1150,62 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     };
 }
 
+fn parse_args_inspect_integrity(args: CLIArgs.Inspect) Command.Inspect.Integrity {
+    const integrity = args.integrity;
+
+    const scrub_memory_lsm_manifest: ByteSize = integrity.memory_lsm_manifest orelse
+        .{ .value = constants.lsm_manifest_memory_size_default };
+
+    const lsm_manifest_memory = scrub_memory_lsm_manifest.bytes();
+    const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
+    const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
+    const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
+    if (lsm_manifest_memory > lsm_manifest_memory_max) {
+        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} exceeds maximum: {}", .{
+            scrub_memory_lsm_manifest.value,
+            scrub_memory_lsm_manifest.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_max),
+        });
+    }
+    if (lsm_manifest_memory < lsm_manifest_memory_min) {
+        vsr.fatal(.cli, "--memory-lsm-manifest: size {}{s} is below minimum: {}", .{
+            scrub_memory_lsm_manifest.value,
+            scrub_memory_lsm_manifest.suffix(),
+            vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_min),
+        });
+    }
+    if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
+        vsr.fatal(
+            .cli,
+            "--memory-lsm-manifest: size {}{s} must be a multiple of {}",
+            .{
+                scrub_memory_lsm_manifest.value,
+                scrub_memory_lsm_manifest.suffix(),
+                vsr.stdx.fmt_int_size_bin_exact(lsm_manifest_memory_multiplier),
+            },
+        );
+    }
+
+    const lsm_forest_node_count: u32 =
+        @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
+
+    return .{
+        .path = integrity.positional.path,
+        .log_debug = integrity.log_debug,
+        .seed = integrity.seed,
+        .skip_wal = integrity.skip_wal,
+        .skip_client_replies = integrity.skip_client_replies,
+        .skip_grid = integrity.skip_grid,
+        .lsm_forest_node_count = lsm_forest_node_count,
+    };
+}
+
 fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         .constants => return .constants,
         .metrics => return .metrics,
         .op => |args| return .{ .op = args.positional.op },
+        .integrity => return .{ .integrity = parse_args_inspect_integrity(inspect) },
         inline else => |args| args.positional.path,
     };
 
@@ -1132,6 +1215,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
             .constants,
             .metrics,
             .op,
+            .integrity,
             => unreachable,
             .superblock => .superblock,
             .wal => |args| .{ .wal = .{ .slot = args.slot } },

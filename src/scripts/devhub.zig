@@ -146,9 +146,24 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     // `--log-debug-replica` is explicitly enabled, to measure the performance hit from debug
     // logging and count the log lines.
     const benchmark_result, const benchmark_stderr = try shell.exec_stdout_stderr(
-        "./tigerbeetle benchmark --validate --checksum-performance --log-debug-replica",
+        "./tigerbeetle benchmark --validate --checksum-performance --log-debug-replica " ++
+            "--file=datafile-devhub",
         .{},
     );
+
+    const integrity_time_ms = blk: {
+        timer.reset();
+
+        try shell.exec(
+            "./tigerbeetle inspect integrity datafile-devhub",
+            .{},
+        );
+
+        break :blk timer.read() / std.time.ns_per_ms;
+    };
+
+    shell.cwd.deleteFile("datafile-devhub") catch unreachable;
+
     const replica_log_lines = std.mem.count(u8, benchmark_stderr, "\n");
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
     const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
@@ -318,6 +333,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },
             .{ .name = "stats count", .value = stats_count, .unit = "count" },
             .{ .name = "repl single command", .value = repl_single_command_ms, .unit = "ms" },
+            .{ .name = "inspect integrity time", .value = integrity_time_ms, .unit = "ms" },
         },
     };
 

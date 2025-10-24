@@ -283,6 +283,7 @@ test "benchmark/inspect smoke" {
         "{tigerbeetle} inspect grid                    {path}",
         "{tigerbeetle} inspect manifest                {path}",
         "{tigerbeetle} inspect tables --tree=transfers {path}",
+        "{tigerbeetle} inspect integrity             {path}",
     }) |command| {
         log.debug("{s}", .{command});
 
@@ -290,6 +291,46 @@ test "benchmark/inspect smoke" {
             command,
             .{ .tigerbeetle = tigerbeetle, .path = data_file },
         );
+    }
+
+    // Corrupt the data file, and ensure the integrity check fails. Due to how it works, the
+    // corruption has to be in a spot that's actually used. Take the first offset from
+    // `tigerbeetle inspect tables --tree=transfers`.
+    const tables_output = try shell.exec_stdout(
+        "{tigerbeetle} inspect tables --tree=transfers {path}",
+        .{ .tigerbeetle = tigerbeetle, .path = data_file },
+    );
+
+    const offset = try std.fmt.parseInt(
+        u64,
+        stdx.cut(tables_output, "O=").?[1],
+        10,
+    );
+
+    {
+        const file = try std.fs.cwd().openFile(data_file, .{ .mode = .read_write });
+        defer file.close();
+
+        var prng = stdx.PRNG.from_seed_testing();
+        var random_bytes: [256]u8 = undefined;
+        prng.fill(&random_bytes);
+
+        try file.pwriteAll(&random_bytes, offset);
+    }
+
+    // `shell.exec` assumes that success is a zero exit code; but in this case the test expects
+    // corruption to be found and wants to assert a non-zero exit code.
+    var child = std.process.Child.init(
+        &.{ tigerbeetle, "inspect", "integrity", data_file },
+        std.testing.allocator,
+    );
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+
+    const term = try child.spawnAndWait();
+    switch (term) {
+        .Exited, .Signal => |value| try std.testing.expect(value != 0),
+        else => unreachable,
     }
 }
 
@@ -327,10 +368,8 @@ test "in-place upgrade" {
     }
 
     const replica_count = TmpCluster.replica_count;
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
 
-    var cluster = try TmpCluster.init(.{ .seed = seed });
+    var cluster = try TmpCluster.init();
     defer cluster.deinit();
 
     for (0..replica_count) |replica_index| {
@@ -387,10 +426,8 @@ test "recover smoke" {
     }
 
     const replica_count = TmpCluster.replica_count;
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
 
-    var cluster = try TmpCluster.init(.{ .seed = seed });
+    var cluster = try TmpCluster.init();
     defer cluster.deinit();
 
     for (0..replica_count) |replica_index| {
@@ -448,9 +485,7 @@ const TmpCluster = struct {
     workload_thread: ?std.Thread = null,
     workload_exit_ok: bool = false,
 
-    fn init(options: struct {
-        seed: u64,
-    }) !TmpCluster {
+    fn init() !TmpCluster {
         const shell = try Shell.create(std.testing.allocator);
         errdefer shell.destroy();
 
@@ -473,7 +508,7 @@ const TmpCluster = struct {
             });
         }
 
-        const prng = stdx.PRNG.from_seed(options.seed);
+        const prng = stdx.PRNG.from_seed_testing();
         return .{
             .shell = shell,
             .tmp = tmp,

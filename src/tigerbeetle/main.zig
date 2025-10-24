@@ -29,7 +29,7 @@ pub const StateMachine =
 pub const Grid = vsr.GridType(Storage);
 
 const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient);
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
+pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
 const ReplicaReformat =
     vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;

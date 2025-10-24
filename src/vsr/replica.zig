@@ -152,7 +152,7 @@ pub fn ReplicaType(
 ) type {
     const Grid = GridType(Storage);
     const Forest = StateMachine.Forest;
-    const GridScrubber = vsr.GridScrubberType(Forest);
+    const GridScrubber = vsr.GridScrubberType(Forest, constants.grid_scrubber_reads_max);
 
     return struct {
         const Replica = @This();
@@ -3777,7 +3777,13 @@ pub fn ReplicaType(
             );
 
             while (self.grid.blocks_missing.repair_blocks_available() > 0) {
-                const fault = self.grid_scrubber.read_fault() orelse break;
+                const fault = blk: {
+                    while (self.grid_scrubber.read_result_next()) |result| {
+                        if (result.status == .repair) {
+                            break :blk result.block;
+                        }
+                    } else break;
+                };
                 assert(!self.grid.free_set.is_free(fault.block_address));
 
                 log.debug("{}: on_grid_scrub_timeout: fault found: " ++
@@ -3796,7 +3802,10 @@ pub fn ReplicaType(
 
             for (0..constants.grid_scrubber_reads_max + 1) |_| {
                 const scrub_next = self.grid_scrubber.read_next();
-                if (!scrub_next) break;
+                if (!scrub_next) {
+                    if (self.grid_scrubber.tour == .done) self.grid_scrubber.wrap();
+                    break;
+                }
             } else unreachable;
         }
 
