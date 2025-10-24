@@ -149,7 +149,9 @@ pub const TransferFlags = packed struct(u16) {
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
 /// the ordering matches struct field order.
 pub const CreateAccountStatus = enum(u32) {
-    created = 0,
+    deprecated_ok = 0,
+    created = std.math.maxInt(u32),
+
     linked_event_failed = 1,
     linked_event_chain_open = 2,
 
@@ -188,9 +190,9 @@ pub const CreateAccountStatus = enum(u32) {
 
     comptime {
         const values = std.enums.values(CreateAccountStatus);
-        const BitSet = stdx.BitSetType(values.len);
+        const BitSet = stdx.BitSetType(values.len - 1);
         var set: BitSet = .{};
-        for (0..values.len) |index| {
+        for (0..values.len - 1) |index| {
             const result: CreateAccountStatus = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
@@ -201,6 +203,12 @@ pub const CreateAccountStatus = enum(u32) {
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
         assert(set.full());
+
+        // Except by the "created" result, which is represented as `maxInt`.
+        const max: CreateAccountStatus = @enumFromInt(
+            std.math.maxInt(std.meta.Tag(CreateAccountStatus)),
+        );
+        assert(max == .created);
     }
 };
 
@@ -208,7 +216,9 @@ pub const CreateAccountStatus = enum(u32) {
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
 /// the ordering matches struct field order.
 pub const CreateTransferStatus = enum(u32) {
-    created = 0,
+    deprecated_ok = 0,
+    created = std.math.maxInt(u32),
+
     linked_event_failed = 1,
     linked_event_chain_open = 2,
 
@@ -309,7 +319,7 @@ pub const CreateTransferStatus = enum(u32) {
     /// the same transfer with identical request data can produce different outcomes.
     pub fn transient(result: CreateTransferStatus) bool {
         return switch (result) {
-            .created => unreachable,
+            .created, .deprecated_ok => unreachable,
 
             .debit_account_not_found,
             .credit_account_not_found,
@@ -389,9 +399,9 @@ pub const CreateTransferStatus = enum(u32) {
     comptime {
         @setEvalBranchQuota(2_000);
         const values = std.enums.values(CreateTransferStatus);
-        const BitSet = stdx.BitSetType(values.len);
+        const BitSet = stdx.BitSetType(values.len - 1);
         var set: BitSet = .{};
-        for (0..values.len) |index| {
+        for (0..values.len - 1) |index| {
             const result: CreateTransferStatus = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
@@ -402,6 +412,12 @@ pub const CreateTransferStatus = enum(u32) {
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
         assert(set.full());
+
+        // Except by the "created" result, which is represented as `maxInt`.
+        const max: CreateTransferStatus = @enumFromInt(
+            std.math.maxInt(std.meta.Tag(CreateTransferStatus)),
+        );
+        assert(max == .created);
     }
 
     /// TODO(zig): CreateTransferStatus is ordered by precedence, but it crashes
@@ -414,13 +430,17 @@ pub const CreateTransferStatus = enum(u32) {
     pub const Ordered = type: {
         const values = std.enums.values(CreateTransferStatus);
         var fields: [values.len]std.builtin.Type.EnumField = undefined;
-        for (0..values.len) |index| {
+        for (0..values.len - 1) |index| {
             const result: CreateTransferStatus = @enumFromInt(index);
             fields[index] = .{
                 .name = @tagName(result),
                 .value = index,
             };
         }
+        fields[values.len - 1] = .{
+            .name = @tagName(CreateTransferStatus.created),
+            .value = @intFromEnum(CreateTransferStatus.created),
+        };
 
         var type_info = @typeInfo(enum {});
         type_info.@"enum".tag_type = std.meta.Tag(CreateTransferStatus);
@@ -435,13 +455,14 @@ pub const CreateTransferStatus = enum(u32) {
     comptime {
         const values = std.enums.values(Ordered);
         assert(values.len == std.enums.values(CreateTransferStatus).len);
-        for (0..values.len) |index| {
+        for (0..values.len - 1) |index| {
             const value: Ordered = @enumFromInt(index);
             assert(value == values[index]);
 
             const value_source: CreateTransferStatus = @enumFromInt(index);
             assert(std.mem.eql(u8, @tagName(value_source), @tagName(value)));
         }
+        assert(@intFromEnum(Ordered.created) == @intFromEnum(CreateTransferStatus.created));
     }
 };
 

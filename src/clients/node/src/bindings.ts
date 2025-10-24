@@ -283,7 +283,7 @@ export enum CreateAccountStatus {
   /**
   * See [created](https://docs.tigerbeetle.com/reference/requests/create_accounts#created)
   */
-  created = 0,
+  created = 0xFFFFFFFF,
 
   /**
   * See [linked_event_failed](https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed)
@@ -425,7 +425,7 @@ export enum CreateTransferStatus {
   /**
   * See [created](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
   */
-  created = 0,
+  created = 0xFFFFFFFF,
 
   /**
   * See [linked_event_failed](https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed)

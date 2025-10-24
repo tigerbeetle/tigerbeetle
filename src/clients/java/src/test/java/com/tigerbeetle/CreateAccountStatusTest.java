@@ -19,6 +19,12 @@ public class CreateAccountStatusTest {
         }
     }
 
+    @Test
+    public void testMaxValue() {
+        var value = 0xFFFFFFFF;
+        Assert.assertEquals(CreateAccountStatus.Created, CreateAccountStatus.fromValue(value));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void testInvalidValue() {
         var value = 999;
@@ -27,7 +33,7 @@ public class CreateAccountStatusTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testNegativeValue() {
-        var value = -1;
+        var value = -100;
         CreateAccountStatus.fromValue(value);
     }
 }

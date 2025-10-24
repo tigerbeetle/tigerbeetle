@@ -202,7 +202,7 @@ func (o Transfer) TransferFlags() TransferFlags {
 type CreateAccountStatus uint32
 
 const (
-	AccountCreated                              CreateAccountStatus = 0
+	AccountCreated                              CreateAccountStatus = 0xFFFFFFFF
 	AccountLinkedEventFailed                    CreateAccountStatus = 1
 	AccountLinkedEventChainOpen                 CreateAccountStatus = 2
 	AccountImportedEventExpected                CreateAccountStatus = 22
@@ -294,7 +294,7 @@ func (i CreateAccountStatus) String() string {
 type CreateTransferStatus uint32
 
 const (
-	TransferCreated                                         CreateTransferStatus = 0
+	TransferCreated                                         CreateTransferStatus = 0xFFFFFFFF
 	TransferLinkedEventFailed                               CreateTransferStatus = 1
 	TransferLinkedEventChainOpen                            CreateTransferStatus = 2
 	TransferImportedEventExpected                           CreateTransferStatus = 56
