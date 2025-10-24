@@ -923,11 +923,14 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const data_checksums = index_schema.value_checksums_used(self.buffer.index_block);
             assert(data_addresses.len == data_checksums.len);
 
-            self.state = .{
-                .iterating = .{
-                    .key_exclusive_next = self.state.loading_index.key_exclusive_next,
-                    .values = .none,
-                },
+            self.state = iterating: {
+                const key_exclusive_next = self.state.loading_index.key_exclusive_next;
+                break :iterating .{
+                    .iterating = .{
+                        .key_exclusive_next = key_exclusive_next,
+                        .values = .none,
+                    },
+                };
             };
 
             if (range_found) |range| {
