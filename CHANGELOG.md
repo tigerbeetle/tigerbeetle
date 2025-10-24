@@ -3,6 +3,50 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.63
+
+Released: 2025-10-24
+
+### Safety And Performance
+
+- [#3323](https://github.com/tigerbeetle/tigerbeetle/pull/3323)
+
+  Assert the size of `Headers` and `StartView` messages.
+
+- [#3318](https://github.com/tigerbeetle/tigerbeetle/pull/3318)
+
+  Correctly reset the `pulse_next_timestamp`.
+
+### Features
+
+- [#3294](https://github.com/tigerbeetle/tigerbeetle/pull/3294)
+
+  Allow backups to accept prepares from the next checkpoint when they replace already committed
+  prepares.
+
+- [#3302](https://github.com/tigerbeetle/tigerbeetle/pull/3302)
+
+  Clarify that the `TBID`, which is a `u128` number, only specifies the bit layout.
+
+### Internals
+
+- [#3312](https://github.com/tigerbeetle/tigerbeetle/pull/3312),
+  [#3324](https://github.com/tigerbeetle/tigerbeetle/pull/3324)
+  
+  Improve duration parsing by removing ambigious units and adding fuzz tests.
+
+- [#3313](https://github.com/tigerbeetle/tigerbeetle/pull/3313)
+
+  Update data file documentation to correctly state the grid block size as 512 KiB.
+
+- [#3311](https://github.com/tigerbeetle/tigerbeetle/pull/3311)
+
+  Clarify the release process in case a version of TigerBeetle is skipped.
+
+### TigerTracks 🎧
+
+- [NINETY-TWO](https://www.youtube.com/watch?v=qbXSXDv6gWU)
+
 ## TigerBeetle 0.16.62
 
 Released: 2025-10-17
