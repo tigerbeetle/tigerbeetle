@@ -14,7 +14,7 @@ const assert = std.debug.assert;
 
 const LoggedProcess = @This();
 
-pub const State = enum(u8) { running, stopped, terminated };
+pub const State = enum(u8) { running, paused, terminated };
 const AtomicState = std.atomic.Value(State);
 
 const Options = struct {
@@ -106,15 +106,15 @@ pub fn state(self: *LoggedProcess) State {
     return self.current_state.load(.seq_cst);
 }
 
-pub fn stop(
+pub fn pause(
     self: *LoggedProcess,
 ) !void {
     assert(builtin.os.tag != .windows);
     try std.posix.kill(self.child.id, std.posix.SIG.STOP);
-    self.current_state.store(.stopped, .seq_cst);
+    self.current_state.store(.paused, .seq_cst);
 }
 
-pub fn cont(
+pub fn unpause(
     self: *LoggedProcess,
 ) !void {
     assert(builtin.os.tag != .windows);
@@ -125,7 +125,7 @@ pub fn cont(
 pub fn terminate(
     self: *LoggedProcess,
 ) !std.process.Child.Term {
-    self.expect_state_in(.{ .running, .stopped });
+    self.expect_state_in(.{ .running, .paused });
     defer self.expect_state_in(.{.terminated});
 
     // Terminate the process.
