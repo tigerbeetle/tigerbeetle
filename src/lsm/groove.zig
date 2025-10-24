@@ -1319,7 +1319,7 @@ pub fn GrooveType(
             // an object that has changes.
             // Unlike the index trees, the new and old values in the object tree share the same
             // key. Therefore put() is sufficient to overwrite the old value.
-            if (constants.verify) {
+            {
                 const tombstone = ObjectTreeHelper.tombstone;
                 const key_from_value = ObjectTreeHelper.key_from_value;
 

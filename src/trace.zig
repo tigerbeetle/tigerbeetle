@@ -99,7 +99,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
-const constants = @import("constants.zig");
 const stdx = @import("stdx");
 const KiB = stdx.KiB;
 const Duration = stdx.Duration;
@@ -428,9 +427,7 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
     const timing_slot = event_timing.slot();
 
     if (tracer.events_timing[timing_slot]) |*event_timing_existing| {
-        if (constants.verify) {
-            assert(std.meta.eql(event_timing_existing.event, event_timing));
-        }
+        assert(std.meta.eql(event_timing_existing.event, event_timing));
 
         const timing_existing = event_timing_existing.values;
         event_timing_existing.values = .{

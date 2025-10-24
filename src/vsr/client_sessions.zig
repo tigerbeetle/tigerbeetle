@@ -234,7 +234,7 @@ pub const ClientSessions = struct {
         assert(header.command == .reply);
         const client = header.client;
 
-        defer if (constants.verify) assert(client_sessions.entries_by_client.contains(client));
+        defer assert(client_sessions.entries_by_client.contains(client));
 
         const entry_gop = client_sessions.entries_by_client.getOrPutAssumeCapacity(client);
         if (entry_gop.found_existing) {
@@ -309,7 +309,7 @@ pub const ClientSessions = struct {
         assert(client_sessions.entries[entry_index].header.client == client);
         client_sessions.entries[entry_index] = std.mem.zeroes(Entry);
 
-        if (constants.verify) assert(!client_sessions.entries_by_client.contains(client));
+        assert(!client_sessions.entries_by_client.contains(client));
     }
 
     pub const Iterator = struct {

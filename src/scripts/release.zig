@@ -302,7 +302,7 @@ fn build_tigerbeetle_target(
         const output = try shell.exec_stdout("./{exe_name} version --verbose", .{
             .exe_name = exe_name,
         });
-        assert(std.mem.indexOf(u8, output, "process.verify=true") != null);
+        assert(debug == (std.mem.indexOf(u8, output, "process.verify=true") != null));
         const build_mode = if (debug)
             "build.mode=builtin.OptimizeMode.Debug"
         else

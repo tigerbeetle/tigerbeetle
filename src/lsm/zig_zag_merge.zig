@@ -4,7 +4,6 @@ const math = std.math;
 const mem = std.mem;
 
 const stdx = @import("stdx");
-const constants = @import("../constants.zig");
 
 const Direction = @import("../direction.zig").Direction;
 
@@ -77,12 +76,10 @@ pub fn ZigZagMergeIteratorType(
                     const value_other = stream_pop(it.context, @intCast(stream_index));
                     assert(key_from_value(&value_other) == key);
 
-                    if (constants.verify) {
-                        // Differently from K-way merge, there's no precedence between streams
-                        // in Zig-Zag merge. It's assumed that all streams will produce the same
-                        // value during a key intersection.
-                        assert(stdx.equal_bytes(Value, &value, &value_other));
-                    }
+                    // Differently from K-way merge, there's no precedence between streams
+                    // in Zig-Zag merge. It's assumed that all streams will produce the same
+                    // value during a key intersection.
+                    assert(stdx.equal_bytes(Value, &value, &value_other));
                 }
 
                 if (it.key_popped) |previous| {

@@ -191,9 +191,7 @@ pub inline fn binary_search_values(
 
     if (exact) {
         const value = &values[index];
-        if (constants.verify) {
-            assert(key == key_from_value(value));
-        }
+        assert(key == key_from_value(value));
         return value;
     } else {
         // TODO: Figure out how to fuzz this without causing asymptotic

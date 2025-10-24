@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const stdx = @import("stdx");
-const constants = @import("../constants.zig");
 
 /// Combines a field (the key prefix) with a timestamp (the primary key).
 /// - To keep alignment, it supports either `u64` or `u128` prefixes (which can be truncated
@@ -60,7 +59,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
 
         pub inline fn key_from_value(value: *const CompositeKey) Key {
-            if (constants.verify) assert(value.padding == 0);
+            assert(value.padding == 0);
             if (Field == void) {
                 comptime assert(Key == u64);
                 return value.timestamp & ~tombstone_bit;
@@ -75,7 +74,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
 
         pub inline fn tombstone(value: *const CompositeKey) bool {
-            if (constants.verify) assert(value.padding == 0);
+            assert(value.padding == 0);
             return (value.timestamp & tombstone_bit) != 0;
         }
 
