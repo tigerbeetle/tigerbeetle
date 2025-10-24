@@ -229,11 +229,6 @@ for i, result := range accountsRes {
 }
 ```
 
-To handle errors you can either 1) exactly match error codes returned
-from `client.createAccounts` with enum values in the
-`CreateAccountError` object, or you can 2) look up the error code in
-the `CreateAccountError` object for a human-readable string.
-
 ## Account Lookup
 
 Account lookup is batched, like account creation. Pass
