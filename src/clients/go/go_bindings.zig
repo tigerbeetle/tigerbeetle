@@ -125,10 +125,14 @@ fn emit_enum(
                 if (@intFromEnum(@field(Type, field.name)) == 1) "true" else "false",
             });
         } else {
-            try buffer.writer().print("\t{s} {s} = {d}\n", .{
+            const int_value = @intFromEnum(@field(Type, field.name));
+            try buffer.writer().print("\t{s} {s} = {s}\n", .{
                 enum_name,
                 name,
-                @intFromEnum(@field(Type, field.name)),
+                if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                    std.fmt.comptimePrint("0x{X}", .{int_value})
+                else
+                    std.fmt.comptimePrint("{}", .{int_value}),
             });
         }
     }

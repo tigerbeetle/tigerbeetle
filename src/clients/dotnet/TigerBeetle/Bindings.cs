@@ -335,7 +335,7 @@ public enum CreateAccountStatus : uint
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#created
     /// </summary>
-    Created = 0,
+    Created = 0xFFFFFFFF,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed
@@ -474,7 +474,7 @@ public enum CreateTransferStatus : uint
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#created
     /// </summary>
-    Created = 0,
+    Created = 0xFFFFFFFF,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed

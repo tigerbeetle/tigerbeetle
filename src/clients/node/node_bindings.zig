@@ -135,9 +135,13 @@ fn emit_enum(
 
         try emit_docs(buffer, mapping, 1, field.name);
 
-        try buffer.writer().print("  {s} = {d},\n", .{
+        const int_value = @intFromEnum(@field(Type, field.name));
+        try buffer.writer().print("  {s} = {s},\n", .{
             field.name,
-            @intFromEnum(@field(Type, field.name)),
+            if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                std.fmt.comptimePrint("0x{X}", .{int_value})
+            else
+                std.fmt.comptimePrint("{}", .{int_value}),
         });
     }
 

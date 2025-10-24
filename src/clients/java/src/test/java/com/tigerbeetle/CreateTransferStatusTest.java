@@ -20,6 +20,12 @@ public class CreateTransferStatusTest {
         }
     }
 
+    @Test
+    public void testMaxValue() {
+        var value = 0xFFFFFFFF;
+        Assert.assertEquals(CreateTransferStatus.Created, CreateTransferStatus.fromValue(value));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void testInvalidValue() {
         var value = 999;
@@ -28,7 +34,7 @@ public class CreateTransferStatusTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void testNegativeValue() {
-        var value = -1;
+        var value = -100;
         CreateTransferStatus.fromValue(value);
     }
 }
