@@ -1759,9 +1759,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            // Future-compatibility with adaptive routing.
-            maybe(message.header.route != 0);
-
             // TODO Drop pings that were not addressed to us.
 
             self.send_header_to_replica(message.header.replica, @bitCast(Header.Pong{
