@@ -30,6 +30,7 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     for (0..events_max) |_| {
         var io = try IO.init(32, 0);
+        io.set_io_thread();
         defer io.deinit();
 
         var context: Context = .{

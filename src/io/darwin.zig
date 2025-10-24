@@ -17,6 +17,7 @@ pub const IO = struct {
     pub const ListenOptions = common.ListenOptions;
 
     kq: fd_t,
+    thread_id: std.Thread.Id,
     event_id: Event = 0,
     time_os: TimeOS = .{},
     io_inflight: usize = 0,
@@ -30,7 +31,10 @@ pub const IO = struct {
 
         const kq = try posix.kqueue();
         assert(kq > -1);
-        return IO{ .kq = kq };
+        return IO{
+            .kq = kq,
+            .thread_id = undefined,
+        };
     }
 
     pub fn deinit(self: *IO) void {
@@ -1048,5 +1052,17 @@ pub const IO = struct {
 
     pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
         return common.aof_blocking_close(fd);
+    }
+
+    pub fn set_io_thread(self: *IO) void {
+        self.thread_id = std.Thread.getCurrentId();
+    }
+
+    pub fn assert_io_thread(self: *const IO) void {
+        assert(std.Thread.getCurrentId() == self.thread_id);
+    }
+
+    pub fn assert_any_thread(self: *const IO) void {
+        _ = self;
     }
 };
