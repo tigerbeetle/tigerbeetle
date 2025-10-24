@@ -2,15 +2,15 @@ package tigerbeetle_go
 
 /*
 #cgo CFLAGS: -g -Wall
-#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_aarch64-macos.a -ldl -lm
-#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_x86_64-macos.a -ldl -lm
-#cgo linux,arm64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_aarch64-linux.a -ldl -lm
-#cgo linux,amd64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_x86_64-linux.a -ldl -lm
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/pkg/native -ltb_client_x86_64-windows -lws2_32 -lntdll
+#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/native/libtb_client_aarch64-macos.a -ldl -lm
+#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/native/libtb_client_x86_64-macos.a -ldl -lm
+#cgo linux,arm64 LDFLAGS: ${SRCDIR}/native/libtb_client_aarch64-linux.a -ldl -lm
+#cgo linux,amd64 LDFLAGS: ${SRCDIR}/native/libtb_client_x86_64-linux.a -ldl -lm
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/native -ltb_client_x86_64-windows -lws2_32 -lntdll
 
 #include <stdlib.h>
 #include <string.h>
-#include "./pkg/native/tb_client.h"
+#include "./native/tb_client.h"
 
 #ifndef __declspec
 	#define __declspec(x)
@@ -33,30 +33,28 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
-	_ "github.com/tigerbeetle/tigerbeetle-go/pkg/native"
-	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
+	_ "github.com/tigerbeetle/tigerbeetle-go/native"
 )
 
 ///////////////////////////////////////////////////////////////
 
-var AmountMax = types.BytesToUint128([16]byte{
+var AmountMax = BytesToUint128([16]byte{
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 })
 
 type Client interface {
-	CreateAccounts(accounts []types.Account) ([]types.CreateAccountResult, error)
-	CreateTransfers(transfers []types.Transfer) ([]types.CreateTransferResult, error)
-	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
-	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
-	GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error)
-	GetAccountBalances(filter types.AccountFilter) ([]types.AccountBalance, error)
-	QueryAccounts(filter types.QueryFilter) ([]types.Account, error)
-	QueryTransfers(filter types.QueryFilter) ([]types.Transfer, error)
+	CreateAccounts(accounts []Account) ([]CreateAccountResult, error)
+	CreateTransfers(transfers []Transfer) ([]CreateTransferResult, error)
+	LookupAccounts(accountIDs []Uint128) ([]Account, error)
+	LookupTransfers(transferIDs []Uint128) ([]Transfer, error)
+	GetAccountTransfers(filter AccountFilter) ([]Transfer, error)
+	GetAccountBalances(filter AccountFilter) ([]AccountBalance, error)
+	QueryAccounts(filter QueryFilter) ([]Account, error)
+	QueryTransfers(filter QueryFilter) ([]Transfer, error)
 
 	// Experimental: GetChangeEvents API is undocumented.
-	GetChangeEvents(filter types.ChangeEventsFilter) ([]types.ChangeEvent, error)
+	GetChangeEvents(filter ChangeEventsFilter) ([]ChangeEvent, error)
 
 	Nop() error
 	Close()
@@ -71,7 +69,7 @@ type c_client struct {
 }
 
 func NewClient(
-	clusterID types.Uint128,
+	clusterID Uint128,
 	addresses []string,
 ) (Client, error) {
 	// Allocate a cstring of the addresses joined with ",".
@@ -95,17 +93,17 @@ func NewClient(
 	if init_status != C.TB_INIT_SUCCESS {
 		switch init_status {
 		case C.TB_INIT_UNEXPECTED:
-			return nil, errors.ErrUnexpected{}
+			return nil, ErrUnexpected{}
 		case C.TB_INIT_OUT_OF_MEMORY:
-			return nil, errors.ErrOutOfMemory{}
+			return nil, ErrOutOfMemory{}
 		case C.TB_INIT_ADDRESS_INVALID:
-			return nil, errors.ErrInvalidAddress{}
+			return nil, ErrInvalidAddress{}
 		case C.TB_INIT_ADDRESS_LIMIT_EXCEEDED:
-			return nil, errors.ErrAddressLimitExceeded{}
+			return nil, ErrAddressLimitExceeded{}
 		case C.TB_INIT_SYSTEM_RESOURCES:
-			return nil, errors.ErrSystemResources{}
+			return nil, ErrSystemResources{}
 		case C.TB_INIT_NETWORK_SUBSYSTEM:
-			return nil, errors.ErrNetworkSubsystem{}
+			return nil, ErrNetworkSubsystem{}
 		default:
 			panic("tb_client_init(): invalid error code")
 		}
@@ -125,23 +123,23 @@ func (c *c_client) Close() {
 func getEventSize(op C.TB_OPERATION) uintptr {
 	switch op {
 	case C.TB_OPERATION_CREATE_ACCOUNTS:
-		return unsafe.Sizeof(types.Account{})
+		return unsafe.Sizeof(Account{})
 	case C.TB_OPERATION_CREATE_TRANSFERS:
-		return unsafe.Sizeof(types.Transfer{})
+		return unsafe.Sizeof(Transfer{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		fallthrough
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
-		return unsafe.Sizeof(types.Uint128{})
+		return unsafe.Sizeof(Uint128{})
 	case C.TB_OPERATION_GET_ACCOUNT_TRANSFERS:
-		return unsafe.Sizeof(types.AccountFilter{})
+		return unsafe.Sizeof(AccountFilter{})
 	case C.TB_OPERATION_GET_ACCOUNT_BALANCES:
-		return unsafe.Sizeof(types.AccountFilter{})
+		return unsafe.Sizeof(AccountFilter{})
 	case C.TB_OPERATION_QUERY_ACCOUNTS:
-		return unsafe.Sizeof(types.QueryFilter{})
+		return unsafe.Sizeof(QueryFilter{})
 	case C.TB_OPERATION_QUERY_TRANSFERS:
-		return unsafe.Sizeof(types.QueryFilter{})
+		return unsafe.Sizeof(QueryFilter{})
 	case C.TB_OPERATION_GET_CHANGE_EVENTS:
-		return unsafe.Sizeof(types.ChangeEventsFilter{})
+		return unsafe.Sizeof(ChangeEventsFilter{})
 	default:
 		return 0
 	}
@@ -150,23 +148,23 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch op {
 	case C.TB_OPERATION_CREATE_ACCOUNTS:
-		return unsafe.Sizeof(types.CreateAccountResult{})
+		return unsafe.Sizeof(CreateAccountResult{})
 	case C.TB_OPERATION_CREATE_TRANSFERS:
-		return unsafe.Sizeof(types.CreateTransferResult{})
+		return unsafe.Sizeof(CreateTransferResult{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
-		return unsafe.Sizeof(types.Account{})
+		return unsafe.Sizeof(Account{})
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
-		return unsafe.Sizeof(types.Transfer{})
+		return unsafe.Sizeof(Transfer{})
 	case C.TB_OPERATION_GET_ACCOUNT_TRANSFERS:
-		return unsafe.Sizeof(types.Transfer{})
+		return unsafe.Sizeof(Transfer{})
 	case C.TB_OPERATION_GET_ACCOUNT_BALANCES:
-		return unsafe.Sizeof(types.AccountBalance{})
+		return unsafe.Sizeof(AccountBalance{})
 	case C.TB_OPERATION_QUERY_ACCOUNTS:
-		return unsafe.Sizeof(types.Account{})
+		return unsafe.Sizeof(Account{})
 	case C.TB_OPERATION_QUERY_TRANSFERS:
-		return unsafe.Sizeof(types.Transfer{})
+		return unsafe.Sizeof(Transfer{})
 	case C.TB_OPERATION_GET_CHANGE_EVENTS:
-		return unsafe.Sizeof(types.ChangeEvent{})
+		return unsafe.Sizeof(ChangeEvent{})
 	default:
 		return 0
 	}
@@ -200,7 +198,7 @@ func (c *c_client) doRequest(
 
 	client_status := C.tb_client_submit(c.tb_client, packet)
 	if client_status == C.TB_CLIENT_INVALID {
-		return nil, errors.ErrClientClosed{}
+		return nil, ErrClientClosed{}
 	}
 
 	// Wait for the request to complete.
@@ -211,19 +209,19 @@ func (c *c_client) doRequest(
 	if packet_status != C.TB_PACKET_OK {
 		switch packet_status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
-			return nil, errors.ErrMaximumBatchSizeExceeded{}
+			return nil, ErrMaximumBatchSizeExceeded{}
 		case C.TB_PACKET_CLIENT_EVICTED:
-			return nil, errors.ErrClientEvicted{}
+			return nil, ErrClientEvicted{}
 		case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
-			return nil, errors.ErrClientReleaseTooLow{}
+			return nil, ErrClientReleaseTooLow{}
 		case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
-			return nil, errors.ErrClientReleaseTooHigh{}
+			return nil, ErrClientReleaseTooHigh{}
 		case C.TB_PACKET_CLIENT_SHUTDOWN:
-			return nil, errors.ErrClientClosed{}
+			return nil, ErrClientClosed{}
 		case C.TB_PACKET_INVALID_OPERATION:
 			// we control what C.TB_OPERATION is given
 			// but allow an invalid opcode to be passed to emulate a client nop
-			return nil, errors.ErrInvalidOperation{}
+			return nil, ErrInvalidOperation{}
 		case C.TB_PACKET_INVALID_DATA_SIZE:
 			panic("unreachable") // we control what type of data is given
 		default:
@@ -279,7 +277,7 @@ func onGoPacketCompletion(
 	req.ready <- reply
 }
 
-func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.CreateAccountResult, error) {
+func (c *c_client) CreateAccounts(accounts []Account) ([]CreateAccountResult, error) {
 	count := len(accounts)
 	var dataPtr unsafe.Pointer
 	if count > 0 {
@@ -299,15 +297,15 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.CreateAccou
 	}
 
 	if reply == nil {
-		return make([]types.CreateAccountResult, 0), nil
+		return make([]CreateAccountResult, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.CreateAccountResult{}))
-	results := unsafe.Slice((*types.CreateAccountResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(CreateAccountResult{}))
+	results := unsafe.Slice((*CreateAccountResult)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.CreateTransferResult, error) {
+func (c *c_client) CreateTransfers(transfers []Transfer) ([]CreateTransferResult, error) {
 	count := len(transfers)
 	var dataPtr unsafe.Pointer
 	if count > 0 {
@@ -327,15 +325,15 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.CreateTr
 	}
 
 	if reply == nil {
-		return make([]types.CreateTransferResult, 0), nil
+		return make([]CreateTransferResult, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.CreateTransferResult{}))
-	results := unsafe.Slice((*types.CreateTransferResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(CreateTransferResult{}))
+	results := unsafe.Slice((*CreateTransferResult)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error) {
+func (c *c_client) LookupAccounts(accountIDs []Uint128) ([]Account, error) {
 	count := len(accountIDs)
 	var dataPtr unsafe.Pointer
 	if count > 0 {
@@ -355,15 +353,15 @@ func (c *c_client) LookupAccounts(accountIDs []types.Uint128) ([]types.Account, 
 	}
 
 	if reply == nil {
-		return make([]types.Account, 0), nil
+		return make([]Account, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.Account{}))
-	results := unsafe.Slice((*types.Account)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(Account{}))
+	results := unsafe.Slice((*Account)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error) {
+func (c *c_client) LookupTransfers(transferIDs []Uint128) ([]Transfer, error) {
 	count := len(transferIDs)
 	var dataPtr unsafe.Pointer
 	if count > 0 {
@@ -383,15 +381,15 @@ func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfe
 	}
 
 	if reply == nil {
-		return make([]types.Transfer, 0), nil
+		return make([]Transfer, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
-	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(Transfer{}))
+	results := unsafe.Slice((*Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error) {
+func (c *c_client) GetAccountTransfers(filter AccountFilter) ([]Transfer, error) {
 	reply, err := c.doRequest(
 		C.TB_OPERATION_GET_ACCOUNT_TRANSFERS,
 		1,
@@ -403,15 +401,15 @@ func (c *c_client) GetAccountTransfers(filter types.AccountFilter) ([]types.Tran
 	}
 
 	if reply == nil {
-		return make([]types.Transfer, 0), nil
+		return make([]Transfer, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
-	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(Transfer{}))
+	results := unsafe.Slice((*Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) GetAccountBalances(filter types.AccountFilter) ([]types.AccountBalance, error) {
+func (c *c_client) GetAccountBalances(filter AccountFilter) ([]AccountBalance, error) {
 	reply, err := c.doRequest(
 		C.TB_OPERATION_GET_ACCOUNT_BALANCES,
 		1,
@@ -423,15 +421,15 @@ func (c *c_client) GetAccountBalances(filter types.AccountFilter) ([]types.Accou
 	}
 
 	if reply == nil {
-		return make([]types.AccountBalance, 0), nil
+		return make([]AccountBalance, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.AccountBalance{}))
-	results := unsafe.Slice((*types.AccountBalance)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(AccountBalance{}))
+	results := unsafe.Slice((*AccountBalance)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) QueryAccounts(filter types.QueryFilter) ([]types.Account, error) {
+func (c *c_client) QueryAccounts(filter QueryFilter) ([]Account, error) {
 	reply, err := c.doRequest(
 		C.TB_OPERATION_QUERY_ACCOUNTS,
 		1,
@@ -443,15 +441,15 @@ func (c *c_client) QueryAccounts(filter types.QueryFilter) ([]types.Account, err
 	}
 
 	if reply == nil {
-		return make([]types.Account, 0), nil
+		return make([]Account, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.Account{}))
-	results := unsafe.Slice((*types.Account)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(Account{}))
+	results := unsafe.Slice((*Account)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) QueryTransfers(filter types.QueryFilter) ([]types.Transfer, error) {
+func (c *c_client) QueryTransfers(filter QueryFilter) ([]Transfer, error) {
 	reply, err := c.doRequest(
 		C.TB_OPERATION_QUERY_TRANSFERS,
 		1,
@@ -463,15 +461,15 @@ func (c *c_client) QueryTransfers(filter types.QueryFilter) ([]types.Transfer, e
 	}
 
 	if reply == nil {
-		return make([]types.Transfer, 0), nil
+		return make([]Transfer, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
-	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(Transfer{}))
+	results := unsafe.Slice((*Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) GetChangeEvents(filter types.ChangeEventsFilter) ([]types.ChangeEvent, error) {
+func (c *c_client) GetChangeEvents(filter ChangeEventsFilter) ([]ChangeEvent, error) {
 	reply, err := c.doRequest(
 		C.TB_OPERATION_GET_CHANGE_EVENTS,
 		1,
@@ -483,11 +481,11 @@ func (c *c_client) GetChangeEvents(filter types.ChangeEventsFilter) ([]types.Cha
 	}
 
 	if reply == nil {
-		return make([]types.ChangeEvent, 0), nil
+		return make([]ChangeEvent, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.ChangeEvent{}))
-	results := unsafe.Slice((*types.ChangeEvent)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(ChangeEvent{}))
+	results := unsafe.Slice((*ChangeEvent)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
@@ -499,7 +497,7 @@ func (c *c_client) Nop() error {
 	reservedOp := C.TB_OPERATION(0)
 	reply, err := c.doRequest(reservedOp, 1, ptr)
 
-	if !e.Is(err, errors.ErrInvalidOperation{}) {
+	if !e.Is(err, ErrInvalidOperation{}) {
 		return err
 	}
 
