@@ -7,7 +7,6 @@ import (
 	"os"
 
 	. "github.com/tigerbeetle/tigerbeetle-go"
-	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 func main() {

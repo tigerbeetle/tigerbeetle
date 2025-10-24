@@ -7,8 +7,6 @@ import (
 	"reflect"
 
 	. "github.com/tigerbeetle/tigerbeetle-go"
-	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
-	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 // Since we only require Go 1.17 we can't do this as a generic function
@@ -84,7 +82,7 @@ func main() {
 	assert(len(accountsRes), 2, "accountsRes")
 	for i, result := range accountsRes {
 		switch result.Status {
-		case types.AccountCreated:
+		case AccountCreated:
 		default:
 			log.Fatalf("Error creating account %d: %s", i, result.Status)
 		}
@@ -146,7 +144,7 @@ func main() {
 	assert(len(transfersRes), len(transfers), "transfersRes")
 	for i, result := range transfersRes {
 		switch result.Status {
-		case types.TransferCreated:
+		case TransferCreated:
 		default:
 			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}
@@ -190,7 +188,7 @@ func main() {
 	assert(len(transfersRes), 1, "transfersRes")
 	for i, result := range transfersRes {
 		switch result.Status {
-		case types.TransferCreated:
+		case TransferCreated:
 		default:
 			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}
@@ -234,7 +232,7 @@ func main() {
 	assert(len(transfersRes), 1, "transfersRes")
 	for i, result := range transfersRes {
 		switch result.Status {
-		case types.TransferCreated:
+		case TransferCreated:
 		default:
 			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}
@@ -278,7 +276,7 @@ func main() {
 	assert(len(transfersRes), 1, "transfersRes")
 	for i, result := range transfersRes {
 		switch result.Status {
-		case types.TransferCreated:
+		case TransferCreated:
 		default:
 			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}
@@ -322,7 +320,7 @@ func main() {
 	assert(len(transfersRes), 1, "transfersRes")
 	for i, result := range transfersRes {
 		switch result.Status {
-		case types.TransferCreated:
+		case TransferCreated:
 		default:
 			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}
@@ -366,7 +364,7 @@ func main() {
 	assert(len(transfersRes), 1, "transfersRes")
 	for i, result := range transfersRes {
 		switch result.Status {
-		case types.TransferCreated:
+		case TransferCreated:
 		default:
 			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
 		}

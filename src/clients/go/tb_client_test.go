@@ -14,7 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/assert"
-	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 const (
@@ -23,14 +22,6 @@ const (
 	TIGERBEETLE_REPLICA_ID    uint32 = 0
 	TIGERBEETLE_REPLICA_COUNT uint32 = 1
 )
-
-func HexStringToUint128(value string) types.Uint128 {
-	number, err := types.HexStringToUint128(value)
-	if err != nil {
-		panic(err)
-	}
-	return number
-}
 
 func WithClient(t testing.TB, withClient func(Client)) {
 	var tigerbeetlePath string
@@ -75,7 +66,7 @@ func WithClient(t testing.TB, withClient func(Client)) {
 	})
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
-	client, err := NewClient(types.ToUint128(TIGERBEETLE_CLUSTER_ID), addresses)
+	client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), addresses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,19 +93,19 @@ func TestImportedFlag(t *testing.T) {
 }
 
 func doTestClient(t *testing.T, client Client) {
-	createTwoAccounts := func(t *testing.T) (types.Account, types.Account) {
-		accountA := types.Account{
-			ID:     types.ID(),
+	createTwoAccounts := func(t *testing.T) (Account, Account) {
+		accountA := Account{
+			ID:     ID(),
 			Ledger: 1,
 			Code:   1,
 		}
-		accountB := types.Account{
-			ID:     types.ID(),
+		accountB := Account{
+			ID:     ID(),
 			Ledger: 1,
 			Code:   2,
 		}
 
-		results, err := client.CreateAccounts([]types.Account{
+		results, err := client.CreateAccounts([]Account{
 			accountA,
 			accountB,
 		})
@@ -145,11 +136,11 @@ func doTestClient(t *testing.T, client Client) {
 			t.Fatal()
 		}
 
-		u128 := types.BytesToUint128(binary)
+		u128 := BytesToUint128(binary)
 
 		assert.Equal(t, u128.Bytes(), binary)
 		assert.Equal(t, u128.BigInt(), *decimal)
-		assert.Equal(t, types.BigIntToUint128(*decimal).Bytes(), u128.Bytes())
+		assert.Equal(t, BigIntToUint128(*decimal).Bytes(), u128.Bytes())
 	})
 
 	t.Run("can create accounts", func(t *testing.T) {
@@ -161,7 +152,7 @@ func doTestClient(t *testing.T, client Client) {
 		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
-		results, err := client.LookupAccounts([]types.Uint128{
+		results, err := client.LookupAccounts([]Uint128{
 			accountA.ID,
 			accountB.ID,
 		})
@@ -174,10 +165,10 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Equal(t, uint32(1), accA.Ledger)
 		assert.Equal(t, uint16(1), accA.Code)
 		assert.Equal(t, uint16(0), accA.Flags)
-		assert.Equal(t, types.ToUint128(0), accA.DebitsPending)
-		assert.Equal(t, types.ToUint128(0), accA.DebitsPosted)
-		assert.Equal(t, types.ToUint128(0), accA.CreditsPending)
-		assert.Equal(t, types.ToUint128(0), accA.CreditsPosted)
+		assert.Equal(t, ToUint128(0), accA.DebitsPending)
+		assert.Equal(t, ToUint128(0), accA.DebitsPosted)
+		assert.Equal(t, ToUint128(0), accA.CreditsPending)
+		assert.Equal(t, ToUint128(0), accA.CreditsPosted)
 		assert.NotEqual(t, uint64(0), accA.Timestamp)
 		assert.Equal(t, unsafe.Sizeof(accA), 128)
 
@@ -185,10 +176,10 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Equal(t, uint32(1), accB.Ledger)
 		assert.Equal(t, uint16(2), accB.Code)
 		assert.Equal(t, uint16(0), accB.Flags)
-		assert.Equal(t, types.ToUint128(0), accB.DebitsPending)
-		assert.Equal(t, types.ToUint128(0), accB.DebitsPosted)
-		assert.Equal(t, types.ToUint128(0), accB.CreditsPending)
-		assert.Equal(t, types.ToUint128(0), accB.CreditsPosted)
+		assert.Equal(t, ToUint128(0), accB.DebitsPending)
+		assert.Equal(t, ToUint128(0), accB.DebitsPosted)
+		assert.Equal(t, ToUint128(0), accB.CreditsPending)
+		assert.Equal(t, ToUint128(0), accB.CreditsPosted)
 		assert.NotEqual(t, uint64(0), accB.Timestamp)
 	})
 
@@ -196,12 +187,12 @@ func doTestClient(t *testing.T, client Client) {
 		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
-		results, err := client.CreateTransfers([]types.Transfer{
+		results, err := client.CreateTransfers([]Transfer{
 			{
-				ID:              types.ID(),
+				ID:              ID(),
 				CreditAccountID: accountA.ID,
 				DebitAccountID:  accountB.ID,
-				Amount:          types.ToUint128(100),
+				Amount:          ToUint128(100),
 				Ledger:          1,
 				Code:            1,
 			},
@@ -211,89 +202,89 @@ func doTestClient(t *testing.T, client Client) {
 		}
 		assertCreateTransfersOK(t, results, 1)
 
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err := client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, types.ToUint128(0), accountA.DebitsPending)
-		assert.Equal(t, types.ToUint128(0), accountA.DebitsPosted)
-		assert.Equal(t, types.ToUint128(0), accountA.CreditsPending)
-		assert.Equal(t, types.ToUint128(100), accountA.CreditsPosted)
+		assert.Equal(t, ToUint128(0), accountA.DebitsPending)
+		assert.Equal(t, ToUint128(0), accountA.DebitsPosted)
+		assert.Equal(t, ToUint128(0), accountA.CreditsPending)
+		assert.Equal(t, ToUint128(100), accountA.CreditsPosted)
 
 		accountB = accounts[1]
-		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
-		assert.Equal(t, types.ToUint128(100), accountB.DebitsPosted)
-		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
-		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
+		assert.Equal(t, ToUint128(0), accountB.DebitsPending)
+		assert.Equal(t, ToUint128(100), accountB.DebitsPosted)
+		assert.Equal(t, ToUint128(0), accountB.CreditsPending)
+		assert.Equal(t, ToUint128(0), accountB.CreditsPosted)
 	})
 
 	t.Run("can create linked transfers", func(t *testing.T) {
 		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
-		id := types.ID()
-		transfer1 := types.Transfer{
+		id := ID()
+		transfer1 := Transfer{
 			ID:              id,
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
-			Amount:          types.ToUint128(50),
-			Flags:           types.TransferFlags{Linked: true}.ToUint16(), // points to transfer 2
+			Amount:          ToUint128(50),
+			Flags:           TransferFlags{Linked: true}.ToUint16(), // points to transfer 2
 			Code:            1,
 			Ledger:          1,
 		}
-		transfer2 := types.Transfer{
+		transfer2 := Transfer{
 			ID:              id,
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
-			Amount:          types.ToUint128(50),
+			Amount:          ToUint128(50),
 			// Does not have linked flag as it is the end of the chain.
 			// This will also cause it to fail as this is now a duplicate with different flags
 			Flags:  0,
 			Code:   1,
 			Ledger: 1,
 		}
-		results, err := client.CreateTransfers([]types.Transfer{transfer1, transfer2})
+		results, err := client.CreateTransfers([]Transfer{transfer1, transfer2})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.Len(t, results, 2)
 		assert.True(t, results[0].Timestamp > 0)
-		assert.Equal(t, results[0].Status, types.TransferLinkedEventFailed)
+		assert.Equal(t, results[0].Status, TransferLinkedEventFailed)
 		assert.True(t, results[1].Timestamp > 0)
-		assert.Equal(t, results[1].Status, types.TransferExistsWithDifferentFlags)
+		assert.Equal(t, results[1].Status, TransferExistsWithDifferentFlags)
 
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err := client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, types.ToUint128(0), accountA.CreditsPosted)
-		assert.Equal(t, types.ToUint128(0), accountA.CreditsPending)
-		assert.Equal(t, types.ToUint128(0), accountA.DebitsPosted)
-		assert.Equal(t, types.ToUint128(0), accountA.DebitsPending)
+		assert.Equal(t, ToUint128(0), accountA.CreditsPosted)
+		assert.Equal(t, ToUint128(0), accountA.CreditsPending)
+		assert.Equal(t, ToUint128(0), accountA.DebitsPosted)
+		assert.Equal(t, ToUint128(0), accountA.DebitsPending)
 
 		accountB = accounts[1]
-		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
-		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
-		assert.Equal(t, types.ToUint128(0), accountB.DebitsPosted)
-		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
+		assert.Equal(t, ToUint128(0), accountB.CreditsPosted)
+		assert.Equal(t, ToUint128(0), accountB.CreditsPending)
+		assert.Equal(t, ToUint128(0), accountB.DebitsPosted)
+		assert.Equal(t, ToUint128(0), accountB.DebitsPending)
 	})
 
 	t.Run("can close accounts", func(t *testing.T) {
 		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
 
-		closingTransfer := types.Transfer{
-			ID:              types.ID(),
+		closingTransfer := Transfer{
+			ID:              ID(),
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
-			Amount:          types.ToUint128(0),
-			Flags: types.TransferFlags{
+			Amount:          ToUint128(0),
+			Flags: TransferFlags{
 				ClosingDebit:  true,
 				ClosingCredit: true,
 				Pending:       true,
@@ -301,13 +292,13 @@ func doTestClient(t *testing.T, client Client) {
 			Code:   1,
 			Ledger: 1,
 		}
-		results, err := client.CreateTransfers([]types.Transfer{closingTransfer})
+		results, err := client.CreateTransfers([]Transfer{closingTransfer})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assertCreateTransfersOK(t, results, 1)
 
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err := client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -319,25 +310,25 @@ func doTestClient(t *testing.T, client Client) {
 		assert.NotEqual(t, accountB.Flags, accounts[1].Flags)
 		assert.True(t, accounts[1].AccountFlags().Closed)
 
-		voidingTransfer := types.Transfer{
-			ID:              types.ID(),
+		voidingTransfer := Transfer{
+			ID:              ID(),
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
-			Amount:          types.ToUint128(0),
-			Flags: types.TransferFlags{
+			Amount:          ToUint128(0),
+			Flags: TransferFlags{
 				VoidPendingTransfer: true,
 			}.ToUint16(),
 			PendingID: closingTransfer.ID,
 			Code:      1,
 			Ledger:    1,
 		}
-		results, err = client.CreateTransfers([]types.Transfer{voidingTransfer})
+		results, err = client.CreateTransfers([]Transfer{voidingTransfer})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assertCreateTransfersOK(t, results, 1)
 
-		accounts, err = client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err = client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -352,7 +343,7 @@ func doTestClient(t *testing.T, client Client) {
 
 	t.Run("accept zero-length create_accounts", func(t *testing.T) {
 		t.Parallel()
-		results, err := client.CreateAccounts([]types.Account{})
+		results, err := client.CreateAccounts([]Account{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -361,7 +352,7 @@ func doTestClient(t *testing.T, client Client) {
 
 	t.Run("accept zero-length create_transfers", func(t *testing.T) {
 		t.Parallel()
-		results, err := client.CreateTransfers([]types.Transfer{})
+		results, err := client.CreateTransfers([]Transfer{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -370,7 +361,7 @@ func doTestClient(t *testing.T, client Client) {
 
 	t.Run("accept zero-length lookup_accounts", func(t *testing.T) {
 		t.Parallel()
-		results, err := client.LookupAccounts([]types.Uint128{})
+		results, err := client.LookupAccounts([]Uint128{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -380,7 +371,7 @@ func doTestClient(t *testing.T, client Client) {
 
 	t.Run("accept zero-length lookup_transfers", func(t *testing.T) {
 		t.Parallel()
-		results, err := client.LookupTransfers([]types.Uint128{})
+		results, err := client.LookupTransfers([]Uint128{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -390,7 +381,7 @@ func doTestClient(t *testing.T, client Client) {
 
 	t.Run("can submit concurrent requests", func(t *testing.T) {
 		accountA, accountB := createTwoAccounts(t)
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err := client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -406,12 +397,12 @@ func doTestClient(t *testing.T, client Client) {
 			go func(i int) {
 				defer waitGroup.Done()
 				if i%2 == 0 {
-					results, err := client.CreateTransfers([]types.Transfer{
+					results, err := client.CreateTransfers([]Transfer{
 						{
-							ID:              types.ID(),
+							ID:              ID(),
 							CreditAccountID: accountA.ID,
 							DebitAccountID:  accountB.ID,
-							Amount:          types.ToUint128(1),
+							Amount:          ToUint128(1),
 							Ledger:          1,
 							Code:            1,
 						},
@@ -422,7 +413,7 @@ func doTestClient(t *testing.T, client Client) {
 					}
 					assertCreateTransfersOK(t, results, 1)
 				} else {
-					results, err := client.LookupAccounts([]types.Uint128{accountA.ID})
+					results, err := client.LookupAccounts([]Uint128{accountA.ID})
 					if err != nil {
 						t.Error(err)
 						return
@@ -434,7 +425,7 @@ func doTestClient(t *testing.T, client Client) {
 		}
 		waitGroup.Wait()
 
-		accounts, err = client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err = client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -454,7 +445,7 @@ func doTestClient(t *testing.T, client Client) {
 		// NB: this test is _not_ parallel, so can use up all the concurrency.
 		const TRANSFERS_MAX = 10_000
 
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		accounts, err := client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -468,13 +459,13 @@ func doTestClient(t *testing.T, client Client) {
 
 				// The Linked flag will cause the
 				// batch to fail due to LinkedEventChainOpen.
-				flags := types.TransferFlags{Linked: i%10 == 0}.ToUint16()
-				results, err := client.CreateTransfers([]types.Transfer{
+				flags := TransferFlags{Linked: i%10 == 0}.ToUint16()
+				results, err := client.CreateTransfers([]Transfer{
 					{
-						ID:              types.ID(),
+						ID:              ID(),
 						CreditAccountID: accountA.ID,
 						DebitAccountID:  accountB.ID,
-						Amount:          types.ToUint128(1),
+						Amount:          ToUint128(1),
 						Ledger:          1,
 						Code:            1,
 						Flags:           flags,
@@ -488,9 +479,9 @@ func doTestClient(t *testing.T, client Client) {
 				assert.Len(t, results, 1)
 				assert.True(t, results[0].Timestamp > 0)
 				if i%10 == 0 {
-					assert.Equal(t, results[0].Status, types.TransferLinkedEventChainOpen)
+					assert.Equal(t, results[0].Status, TransferLinkedEventChainOpen)
 				} else {
-					assert.Equal(t, results[0].Status, types.TransferCreated)
+					assert.Equal(t, results[0].Status, TransferCreated)
 				}
 			}(i)
 		}
@@ -504,42 +495,42 @@ func doTestClient(t *testing.T, client Client) {
 		BATCH_MAX := uint32(8189)
 
 		// Create a new account:
-		accountC := types.Account{
-			ID:     types.ID(),
+		accountC := Account{
+			ID:     ID(),
 			Ledger: 1,
 			Code:   1,
-			Flags: types.AccountFlags{
+			Flags: AccountFlags{
 				History: true,
 			}.ToUint16(),
 		}
-		account_results, err := client.CreateAccounts([]types.Account{accountC})
+		account_results, err := client.CreateAccounts([]Account{accountC})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assertCreateAccountsOK(t, account_results, 1)
 
 		// Create transfers where the new account is either the debit or credit account:
-		transfers_created := make([]types.Transfer, 10)
+		transfers_created := make([]Transfer, 10)
 		for i := 0; i < 10; i++ {
-			transfer_id := types.ID()
+			transfer_id := ID()
 
 			// Swap debit and credit accounts:
 			if i%2 == 0 {
-				transfers_created[i] = types.Transfer{
+				transfers_created[i] = Transfer{
 					ID:              transfer_id,
 					CreditAccountID: accountA.ID,
 					DebitAccountID:  accountC.ID,
-					Amount:          types.ToUint128(50),
+					Amount:          ToUint128(50),
 					Flags:           0,
 					Code:            1,
 					Ledger:          1,
 				}
 			} else {
-				transfers_created[i] = types.Transfer{
+				transfers_created[i] = Transfer{
 					ID:              transfer_id,
 					CreditAccountID: accountC.ID,
 					DebitAccountID:  accountB.ID,
-					Amount:          types.ToUint128(50),
+					Amount:          ToUint128(50),
 					Flags:           0,
 					Code:            1,
 					Ledger:          1,
@@ -553,12 +544,12 @@ func doTestClient(t *testing.T, client Client) {
 		assertCreateTransfersOK(t, transfer_results, len(transfers_created))
 
 		// Query all transfers for accountC:
-		filter := types.AccountFilter{
+		filter := AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -585,12 +576,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query only the debit transfers for accountC, descending:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  false,
 				Reversed: true,
@@ -617,12 +608,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query only the credit transfers for accountC, descending:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   false,
 				Credits:  true,
 				Reversed: true,
@@ -649,12 +640,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query the first 5 transfers for accountC:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        uint32(len(transfers_created) / 2),
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -681,12 +672,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query the next 5 transfers for accountC, with pagination:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: timestamp + 1,
 			TimestampMax: 0,
 			Limit:        uint32(len(transfers_created) / 2),
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -712,12 +703,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query again, no more transfers should be found:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: timestamp + 1,
 			TimestampMax: 0,
 			Limit:        uint32(len(transfers_created) / 2),
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -736,12 +727,12 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Query the first 5 transfers for accountC order by DESC:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        uint32(len(transfers_created) / 2),
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: true,
@@ -768,12 +759,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query the next 5 transfers for accountC, with pagination:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: timestamp - 1,
 			Limit:        uint32(len(transfers_created) / 2),
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: true,
@@ -799,12 +790,12 @@ func doTestClient(t *testing.T, client Client) {
 		}
 
 		// Query again, no more transfers should be found:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: timestamp - 1,
 			Limit:        uint32(len(transfers_created) / 2),
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: true,
@@ -823,12 +814,12 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid account:
-		filter = types.AccountFilter{
-			AccountID:    types.ToUint128(0),
+		filter = AccountFilter{
+			AccountID:    ToUint128(0),
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -847,12 +838,12 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid timestamp min:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: ^uint64(0), // ulong max value
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -871,12 +862,12 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid timestamp max:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: ^uint64(0), // ulong max value
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -895,12 +886,12 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid timestamps:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: (^uint64(0)) - 1, // ulong max - 1
 			TimestampMax: 1,
 			Limit:        BATCH_MAX,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -919,12 +910,12 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Zero limit:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        0,
-			Flags: types.AccountFilterFlags{
+			Flags: AccountFilterFlags{
 				Debits:   true,
 				Credits:  true,
 				Reversed: false,
@@ -943,7 +934,7 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Empty flags:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
@@ -963,7 +954,7 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid flags:
-		filter = types.AccountFilter{
+		filter = AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
@@ -989,14 +980,14 @@ func doTestClient(t *testing.T, client Client) {
 		BATCH_MAX := uint32(8189)
 
 		// Creating accounts:
-		accounts_created := make([]types.Account, 10)
+		accounts_created := make([]Account, 10)
 		for i := 0; i < 10; i++ {
-			account_id := types.ID()
+			account_id := ID()
 
 			if i%2 == 0 {
-				accounts_created[i] = types.Account{
+				accounts_created[i] = Account{
 					ID:          account_id,
-					UserData128: types.ToUint128(1000),
+					UserData128: ToUint128(1000),
 					UserData64:  100,
 					UserData32:  10,
 					Code:        999,
@@ -1004,9 +995,9 @@ func doTestClient(t *testing.T, client Client) {
 					Flags:       0,
 				}
 			} else {
-				accounts_created[i] = types.Account{
+				accounts_created[i] = Account{
 					ID:          account_id,
-					UserData128: types.ToUint128(2000),
+					UserData128: ToUint128(2000),
 					UserData64:  200,
 					UserData32:  20,
 					Code:        999,
@@ -1024,8 +1015,8 @@ func doTestClient(t *testing.T, client Client) {
 		// Querying accounts where:
 		// `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
 		// AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
-		filter := types.QueryFilter{
-			UserData128:  types.ToUint128(1000),
+		filter := QueryFilter{
+			UserData128:  ToUint128(1000),
 			UserData64:   100,
 			UserData32:   10,
 			Code:         999,
@@ -1033,7 +1024,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1058,8 +1049,8 @@ func doTestClient(t *testing.T, client Client) {
 		// Querying accounts where:
 		// `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
 		// AND code=999 AND ledger=1 ORDER BY timestamp DESC`.
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(2000),
+		filter = QueryFilter{
+			UserData128:  ToUint128(2000),
 			UserData64:   200,
 			UserData32:   20,
 			Code:         999,
@@ -1067,7 +1058,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: true,
 			}.ToUint32(),
 		}
@@ -1091,8 +1082,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		// Querying accounts where:
 		// `code=999 ORDER BY timestamp ASC`.
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Code:         999,
@@ -1100,7 +1091,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1120,8 +1111,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		// Querying accounts where:
 		// `code=999 ORDER BY timestamp DESC LIMIT 5`.
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Code:         999,
@@ -1129,7 +1120,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        5,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: true,
 			}.ToUint32(),
 		}
@@ -1173,8 +1164,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, query, 0)
 
 		// Not found:
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   200,
 			UserData32:   10,
 			Code:         0,
@@ -1182,7 +1173,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1201,44 +1192,44 @@ func doTestClient(t *testing.T, client Client) {
 		BATCH_MAX := uint32(8189)
 
 		// Create a new account:
-		account := types.Account{
-			ID:     types.ID(),
+		account := Account{
+			ID:     ID(),
 			Ledger: 1,
 			Code:   1,
 			Flags:  0,
 		}
-		account_results, err := client.CreateAccounts([]types.Account{account})
+		account_results, err := client.CreateAccounts([]Account{account})
 		if err != nil {
 			t.Fatal(err)
 		}
 		assertCreateAccountsOK(t, account_results, 1)
 
 		// Creating transfers:
-		transfers_created := make([]types.Transfer, 10)
+		transfers_created := make([]Transfer, 10)
 		for i := 0; i < 10; i++ {
-			transfer_id := types.ID()
+			transfer_id := ID()
 
 			if i%2 == 0 {
-				transfers_created[i] = types.Transfer{
+				transfers_created[i] = Transfer{
 					ID:              transfer_id,
 					CreditAccountID: accountA.ID,
 					DebitAccountID:  account.ID,
-					Amount:          types.ToUint128(100),
+					Amount:          ToUint128(100),
 					Flags:           0,
-					UserData128:     types.ToUint128(1000),
+					UserData128:     ToUint128(1000),
 					UserData64:      100,
 					UserData32:      10,
 					Code:            999,
 					Ledger:          1,
 				}
 			} else {
-				transfers_created[i] = types.Transfer{
+				transfers_created[i] = Transfer{
 					ID:              transfer_id,
 					CreditAccountID: account.ID,
 					DebitAccountID:  accountB.ID,
-					Amount:          types.ToUint128(100),
+					Amount:          ToUint128(100),
 					Flags:           0,
-					UserData128:     types.ToUint128(2000),
+					UserData128:     ToUint128(2000),
 					UserData64:      200,
 					UserData32:      20,
 					Code:            999,
@@ -1255,8 +1246,8 @@ func doTestClient(t *testing.T, client Client) {
 		// Querying transfers where:
 		// `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
 		// AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
-		filter := types.QueryFilter{
-			UserData128:  types.ToUint128(1000),
+		filter := QueryFilter{
+			UserData128:  ToUint128(1000),
 			UserData64:   100,
 			UserData32:   10,
 			Code:         999,
@@ -1264,7 +1255,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1289,8 +1280,8 @@ func doTestClient(t *testing.T, client Client) {
 		// Querying transfers where:
 		// `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
 		// AND code=999 AND ledger=1 ORDER BY timestamp DESC`.
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(2000),
+		filter = QueryFilter{
+			UserData128:  ToUint128(2000),
 			UserData64:   200,
 			UserData32:   20,
 			Code:         999,
@@ -1298,7 +1289,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: true,
 			}.ToUint32(),
 		}
@@ -1322,8 +1313,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		// Querying transfers where:
 		// `code=999 ORDER BY timestamp ASC`.
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Code:         999,
@@ -1331,7 +1322,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1351,8 +1342,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		// Querying transfers where:
 		// `code=999 ORDER BY timestamp DESC LIMIT 5`.
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Code:         999,
@@ -1360,7 +1351,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        5,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: true,
 			}.ToUint32(),
 		}
@@ -1404,8 +1395,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, query, 0)
 
 		// Not found:
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   200,
 			UserData32:   10,
 			Code:         0,
@@ -1413,7 +1404,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1431,8 +1422,8 @@ func doTestClient(t *testing.T, client Client) {
 		BATCH_MAX := uint32(8189)
 
 		// Invalid timestamp min:
-		filter := types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter := QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Ledger:       0,
@@ -1440,7 +1431,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: ^uint64(0), // ulong max value
 			TimestampMax: 0,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1451,8 +1442,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, query, 0)
 
 		// Invalid timestamp max:
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Ledger:       0,
@@ -1460,7 +1451,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: ^uint64(0), // ulong max value,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1471,8 +1462,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, query, 0)
 
 		// Invalid timestamps:
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Ledger:       0,
@@ -1480,7 +1471,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: (^uint64(0)) - 1, // ulong max - 1,
 			TimestampMax: 1,
 			Limit:        BATCH_MAX,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1491,8 +1482,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, query, 0)
 
 		// Zero limit:
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Ledger:       0,
@@ -1500,7 +1491,7 @@ func doTestClient(t *testing.T, client Client) {
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        0,
-			Flags: types.QueryFilterFlags{
+			Flags: QueryFilterFlags{
 				Reversed: false,
 			}.ToUint32(),
 		}
@@ -1511,8 +1502,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, query, 0)
 
 		// Invalid flags:
-		filter = types.QueryFilter{
-			UserData128:  types.ToUint128(0),
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,
 			Ledger:       0,
@@ -1531,7 +1522,7 @@ func doTestClient(t *testing.T, client Client) {
 
 	t.Run("get change events", func(t *testing.T) {
 		t.Parallel()
-		filter := types.ChangeEventsFilter{
+		filter := ChangeEventsFilter{
 			TimestampMin: 0,
 			TimestampMax: 0,
 			Limit:        10,
@@ -1546,8 +1537,8 @@ func doTestClient(t *testing.T, client Client) {
 
 func doTestImportedFlag(t *testing.T, client Client) {
 	t.Run("can import accounts and transfers", func(t *testing.T) {
-		tmpAccount := types.ID()
-		tmpResults, err := client.CreateAccounts([]types.Account{
+		tmpAccount := ID()
+		tmpResults, err := client.CreateAccounts([]Account{
 			{
 				ID:     tmpAccount,
 				Ledger: 1,
@@ -1559,7 +1550,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		}
 		assertCreateAccountsOK(t, tmpResults, 1)
 
-		tmpAccounts, err := client.LookupAccounts([]types.Uint128{tmpAccount})
+		tmpAccounts, err := client.LookupAccounts([]Uint128{tmpAccount})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1570,16 +1561,16 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		time.Sleep(10 * time.Millisecond)
 		timestampMax := tmpAccounts[0].Timestamp
 
-		accountA := types.ID()
-		accountB := types.ID()
-		transferA := types.ID()
+		accountA := ID()
+		accountB := ID()
+		transferA := ID()
 
-		accountResults, err := client.CreateAccounts([]types.Account{
+		accountResults, err := client.CreateAccounts([]Account{
 			{
 				ID:     accountA,
 				Ledger: 1,
 				Code:   1,
-				Flags: types.AccountFlags{
+				Flags: AccountFlags{
 					Imported: true,
 				}.ToUint16(),
 				Timestamp: timestampMax + 1,
@@ -1588,7 +1579,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 				ID:     accountB,
 				Ledger: 1,
 				Code:   2,
-				Flags: types.AccountFlags{
+				Flags: AccountFlags{
 					Imported: true,
 				}.ToUint16(),
 				Timestamp: timestampMax + 2,
@@ -1598,15 +1589,15 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		}
 		assertCreateAccountsOK(t, accountResults, 2)
 
-		transfersResults, err := client.CreateTransfers([]types.Transfer{
+		transfersResults, err := client.CreateTransfers([]Transfer{
 			{
 				ID:              transferA,
 				CreditAccountID: accountA,
 				DebitAccountID:  accountB,
-				Amount:          types.ToUint128(100),
+				Amount:          ToUint128(100),
 				Ledger:          1,
 				Code:            1,
-				Flags: types.TransferFlags{
+				Flags: TransferFlags{
 					Imported: true,
 				}.ToUint16(),
 				Timestamp: timestampMax + 3,
@@ -1617,7 +1608,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		}
 		assertCreateTransfersOK(t, transfersResults, 1)
 
-		accounts, err := client.LookupAccounts([]types.Uint128{accountA, accountB})
+		accounts, err := client.LookupAccounts([]Uint128{accountA, accountB})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1625,7 +1616,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		assert.Equal(t, timestampMax+1, accounts[0].Timestamp)
 		assert.Equal(t, timestampMax+2, accounts[1].Timestamp)
 
-		transfers, err := client.LookupTransfers([]types.Uint128{transferA})
+		transfers, err := client.LookupTransfers([]Uint128{transferA})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1634,19 +1625,19 @@ func doTestImportedFlag(t *testing.T, client Client) {
 	})
 }
 
-func assertCreateAccountsOK(t *testing.T, results []types.CreateAccountResult, expected int) {
+func assertCreateAccountsOK(t *testing.T, results []CreateAccountResult, expected int) {
 	assert.Len(t, results, expected)
 	for _, result := range results {
 		assert.True(t, result.Timestamp > 0)
-		assert.Equal(t, result.Status, types.AccountCreated)
+		assert.Equal(t, result.Status, AccountCreated)
 	}
 }
 
-func assertCreateTransfersOK(t *testing.T, results []types.CreateTransferResult, expected int) {
+func assertCreateTransfersOK(t *testing.T, results []CreateTransferResult, expected int) {
 	assert.Len(t, results, expected)
 	for _, result := range results {
 		assert.True(t, result.Timestamp > 0)
-		assert.Equal(t, result.Status, types.TransferCreated)
+		assert.Equal(t, result.Status, TransferCreated)
 	}
 }
 

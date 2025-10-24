@@ -314,10 +314,10 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\//              Do not manually modify.              //
         \\///////////////////////////////////////////////////////
         \\
-        \\package types
+        \\package tigerbeetle_go
         \\
         \\/*
-        \\#include "../native/tb_client.h"
+        \\#include "./native/tb_client.h"
         \\*/
         \\import "C"
         \\import "strconv"

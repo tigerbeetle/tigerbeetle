@@ -1337,7 +1337,7 @@ fn build_go_client(
     // Updates the generated header file:
     const tb_client_header_copy = Generated.file_copy(b, .{
         .from = options.tb_client_header,
-        .path = "./src/clients/go/pkg/native/tb_client.h",
+        .path = "./src/clients/go/native/tb_client.h",
     });
 
     const go_bindings_generator = b.addExecutable(.{
@@ -1352,7 +1352,7 @@ fn build_go_client(
     go_bindings_generator.step.dependOn(&tb_client_header_copy.step);
     const bindings = Generated.file(b, .{
         .generator = go_bindings_generator,
-        .path = "./src/clients/go/pkg/types/bindings.go",
+        .path = "./src/clients/go/bindings.go",
     });
 
     inline for (platforms) |platform| {
@@ -1402,7 +1402,7 @@ fn build_go_client(
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         step_clients_go.dependOn(&b.addInstallFile(
             lib.getEmittedBin(),
-            b.fmt("../src/clients/go/pkg/native/{s}_{s}.{s}", .{
+            b.fmt("../src/clients/go/native/{s}_{s}.{s}", .{
                 file_name,
                 platform_name,
                 extension,

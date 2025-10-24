@@ -1,4 +1,4 @@
-package errors
+package tigerbeetle_go
 
 type ErrUnexpected struct{}
 
