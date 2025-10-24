@@ -99,11 +99,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .query_accounts,
                 .query_transfers,
                 => |operation| {
-                    const state_machine_operation =
-                        std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
-                    assert(state_machine_operation != null);
+                    const state_machine_operation = operation.state_machine_op();
                     try repl.send(
-                        state_machine_operation.?,
+                        state_machine_operation,
                         statement.arguments,
                     );
                 },
@@ -873,9 +871,11 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_object(repl: *Repl, object: anytype) !void {
-            assert(@TypeOf(object.*) == tb.Account or
+            comptime assert(@TypeOf(object.*) == tb.Account or
                 @TypeOf(object.*) == tb.Transfer or
-                @TypeOf(object.*) == tb.AccountBalance);
+                @TypeOf(object.*) == tb.AccountBalance or
+                @TypeOf(object.*) == tb.CreateAccountResult or
+                @TypeOf(object.*) == tb.CreateTransferResult);
 
             try repl.terminal.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).@"struct".fields, 0..) |object_field, i| {
@@ -939,15 +939,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_accounts => {
                     const create_account_results = stdx.bytes_as_slice(
                         .exact,
-                        tb.CreateAccountsResult,
+                        tb.CreateAccountResult,
                         result,
                     );
-                    if (create_account_results.len > 0) {
-                        for (create_account_results) |*reason| {
-                            try repl.terminal.print(
-                                "Failed to create account ({}): {any}.\n",
-                                .{ reason.index, reason.result },
-                            );
+                    if (create_account_results.len == 0) {
+                        try repl.fail("No accounts were created.\n", .{});
+                    } else {
+                        for (create_account_results) |*create_result| {
+                            try repl.display_object(create_result);
                         }
                     }
                 },
@@ -968,15 +967,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_transfers => {
                     const create_transfer_results = stdx.bytes_as_slice(
                         .exact,
-                        tb.CreateTransfersResult,
+                        tb.CreateTransferResult,
                         result,
                     );
-                    if (create_transfer_results.len > 0) {
-                        for (create_transfer_results) |*reason| {
-                            try repl.terminal.print(
-                                "Failed to create transfer ({}): {any}.\n",
-                                .{ reason.index, reason.result },
-                            );
+                    if (create_transfer_results.len == 0) {
+                        try repl.fail("No transfers were created.\n", .{});
+                    } else {
+                        for (create_transfer_results) |*create_result| {
+                            try repl.display_object(create_result);
                         }
                     }
                 },

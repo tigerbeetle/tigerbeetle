@@ -79,12 +79,28 @@ test "repl integration" {
 
     try context.check(
         \\create_accounts id=1 flags=linked|history code=10 ledger=700, id=2 code=10 ledger=700
-    , snap(@src(), ""));
+    , snap(@src(),
+        \\{
+        \\  "timestamp": "<snap:ignore>",
+        \\  "status": "tigerbeetle.CreateAccountStatus.created"
+        \\}
+        \\{
+        \\  "timestamp": "<snap:ignore>",
+        \\  "status": "tigerbeetle.CreateAccountStatus.created"
+        \\}
+        \\
+    ));
 
     try context.check(
         \\create_transfers id=1 debit_account_id=1
         \\  credit_account_id=2 amount=10 ledger=700 code=10
-    , snap(@src(), ""));
+    , snap(@src(),
+        \\{
+        \\  "timestamp": "<snap:ignore>",
+        \\  "status": "tigerbeetle.CreateTransferStatus.created"
+        \\}
+        \\
+    ));
 
     try context.check(
         \\lookup_accounts id=1

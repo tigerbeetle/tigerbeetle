@@ -8,5 +8,5 @@ zigcc*
 main
 main.exe
 
-pkg/native/*.a
-pkg/native/*.lib
+native/*.a
+native/*.lib

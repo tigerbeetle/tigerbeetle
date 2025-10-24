@@ -30,7 +30,7 @@ const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
 const accounting_auditor = @import("auditor.zig");
 const Auditor = accounting_auditor.AccountingAuditor;
-const IteratorForCreateType = accounting_auditor.IteratorForCreateType;
+const ResultsSparseIteratorType = accounting_auditor.ResultsSparseIteratorType;
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 const fuzz = @import("../testing/fuzz.zig");
@@ -83,7 +83,7 @@ const TransferPlan = struct {
 
 const TransferTemplate = struct {
     ledger: u32,
-    result: accounting_auditor.CreateTransferResultSet,
+    result: accounting_auditor.CreateTransferStatusSet,
 };
 
 const TransferBatchQueue = PriorityQueue(TransferBatch, void, struct {
@@ -110,16 +110,16 @@ const transfer_templates = table: {
     const PEND = @intFromEnum(TransferPlan.Method.pending);
     const POST = @intFromEnum(TransferPlan.Method.post_pending);
     const VOID = @intFromEnum(TransferPlan.Method.void_pending);
-    const Result = accounting_auditor.CreateTransferResultSet;
+    const Result = accounting_auditor.CreateTransferStatusSet;
     const result = Result.init;
 
     const InitValues = std.enums.EnumFieldStruct(
-        tb.CreateTransferResult.Ordered,
+        tb.CreateTransferStatus.Ordered,
         bool,
         false,
     );
     const two_phase_ok: InitValues = .{
-        .ok = true,
+        .created = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,
         .pending_transfer_expired = true,
@@ -161,13 +161,13 @@ const transfer_templates = table: {
     templates[0][1][POST] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
     templates[0][1][VOID] = template(9, result(.{ .pending_transfer_has_different_ledger = true }));
 
-    templates[1][0][SNGL] = template(1, result(.{ .ok = true }));
-    templates[1][0][PEND] = template(1, result(.{ .ok = true }));
+    templates[1][0][SNGL] = template(1, result(.{ .created = true }));
+    templates[1][0][PEND] = template(1, result(.{ .created = true }));
     templates[1][0][POST] = template(1, result(two_phase_ok));
     templates[1][0][VOID] = template(1, result(two_phase_ok));
 
-    templates[1][1][SNGL] = template(1, either(limits, result(.{ .ok = true })));
-    templates[1][1][PEND] = template(1, either(limits, result(.{ .ok = true })));
+    templates[1][1][SNGL] = template(1, either(limits, result(.{ .created = true })));
+    templates[1][1][PEND] = template(1, either(limits, result(.{ .created = true })));
     templates[1][1][POST] = template(1, either(limits, result(two_phase_ok)));
     templates[1][1][VOID] = template(1, either(limits, result(two_phase_ok)));
 
@@ -188,6 +188,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         query_transfers = @intFromEnum(Operation.query_transfers),
         get_change_events = @intFromEnum(Operation.get_change_events),
 
+        deprecated_create_accounts_sparse = @intFromEnum(
+            Operation.deprecated_create_accounts_sparse,
+        ),
+        deprecated_create_transfers_sparse = @intFromEnum(
+            Operation.deprecated_create_transfers_sparse,
+        ),
         deprecated_create_accounts_unbatched = @intFromEnum(
             Operation.deprecated_create_accounts_unbatched,
         ),
@@ -472,10 +478,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) usize {
             switch (action) {
                 inline else => |action_comptime| {
-                    const operation_comptime = comptime std.enums.nameCast(
-                        Operation,
+                    const operation_comptime: Operation = comptime @enumFromInt(@intFromEnum(
                         action_comptime,
-                    );
+                    ));
+
                     const Event = AccountingStateMachine.EventType(operation_comptime);
                     const event_size: u32 = @sizeOf(Event);
                     const batchable: []Event = self.batch(
@@ -488,12 +494,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                     const count = switch (action_comptime) {
                         .create_accounts,
+                        .deprecated_create_accounts_sparse,
                         .deprecated_create_accounts_unbatched,
                         => self.build_create_accounts(
                             client_index,
                             batchable,
                         ),
                         .create_transfers,
+                        .deprecated_create_transfers_sparse,
                         .deprecated_create_transfers_unbatched,
                         => self.build_create_transfers(
                             client_index,
@@ -586,8 +594,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                             .create_transfers,
                             batch_size_limit,
                         ),
-                        .create_accounts => @divExact(input_len, @sizeOf(tb.Account)),
-                        .create_transfers => @divExact(input_len, @sizeOf(tb.Transfer)),
+                        .create_accounts,
+                        .deprecated_create_accounts_sparse,
+                        => @divExact(input_len, @sizeOf(tb.Account)),
+                        .create_transfers,
+                        .deprecated_create_transfers_sparse,
+                        => @divExact(input_len, @sizeOf(tb.Transfer)),
                         .lookup_accounts => 0,
                         .lookup_transfers => 0,
                         .get_account_transfers => 0,
@@ -632,20 +644,34 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) void {
             switch (operation) {
                 .create_accounts,
-                .deprecated_create_accounts_unbatched,
                 => self.auditor.on_create_accounts(
                     client_index,
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Account, request_body),
-                    stdx.bytes_as_slice(.exact, tb.CreateAccountsResult, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateAccountResult, reply_body),
+                ),
+                .deprecated_create_accounts_sparse,
+                .deprecated_create_accounts_unbatched,
+                => self.auditor.on_create_accounts_sparse(
+                    client_index,
+                    timestamp,
+                    stdx.bytes_as_slice(.exact, tb.Account, request_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateAccountsErrorResult, reply_body),
                 ),
                 .create_transfers,
-                .deprecated_create_transfers_unbatched,
                 => self.on_create_transfers(
                     client_index,
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Transfer, request_body),
-                    stdx.bytes_as_slice(.exact, tb.CreateTransfersResult, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateTransferResult, reply_body),
+                ),
+                .deprecated_create_transfers_sparse,
+                .deprecated_create_transfers_unbatched,
+                => self.on_create_transfers_sparse(
+                    client_index,
+                    timestamp,
+                    stdx.bytes_as_slice(.exact, tb.Transfer, request_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateTransfersErrorResult, reply_body),
                 ),
                 .lookup_accounts,
                 .deprecated_lookup_accounts_unbatched,
@@ -731,7 +757,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account.credits_pending = 0;
                 account.credits_posted = 0;
                 account.timestamp = 0;
-                results[i] = accounting_auditor.CreateAccountResultSet{};
+                results[i] = accounting_auditor.CreateAccountStatusSet{};
 
                 if (self.prng.chance(self.options.create_account_invalid_probability)) {
                     account.ledger = 0;
@@ -740,7 +766,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     results[i].insert(.ledger_must_not_be_zero);
                 } else {
                     if (!self.auditor.accounts_state[account_index].created) {
-                        results[i].insert(.ok);
+                        results[i].insert(.created);
                     }
                     // Even if the account doesn't exist yet, we may race another request.
                     results[i].insert(.exists);
@@ -779,13 +805,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     // Instead, link transfers opportunistically, when consecutive transfers can be
                     // linked without altering any of their outcomes.
 
-                    if (results[i].contains(.ok) and results[i - 1].contains(.ok) and
+                    if (results[i].contains(.created) and results[i - 1].contains(.created) and
                         self.prng.chance(self.options.linked_valid_probability))
                     {
                         transfers[i - 1].flags.linked = true;
                     }
 
-                    if (!results[i].contains(.ok) and !results[i - 1].contains(.ok) and
+                    if (!results[i].contains(.created) and !results[i - 1].contains(.created) and
                         self.prng.chance(self.options.linked_invalid_probability))
                     {
                         // Convert the previous transfer to a single-phase no-limit transfer, but
@@ -797,10 +823,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         }, &transfers[i - 1]);
                         if (result_set_opt) |result_set| {
                             assert(result_set.count() == 1);
-                            assert(result_set.contains(.ok));
+                            assert(result_set.contains(.created));
 
                             transfers[i - 1].flags.linked = true;
-                            results[i - 1] = accounting_auditor.CreateTransferResultSet.init(.{
+                            results[i - 1] = accounting_auditor.CreateTransferStatusSet.init(.{
                                 .linked_event_failed = true,
                             });
                         }
@@ -829,7 +855,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn build_retry_transfers(
             self: *Workload,
             transfers: []tb.Transfer,
-            results: []accounting_auditor.CreateTransferResultSet,
+            results: []accounting_auditor.CreateTransferStatusSet,
         ) void {
             assert(results.len >= transfers.len);
 
@@ -1178,7 +1204,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             transfer_id: u128,
             transfer_plan: TransferPlan,
             transfer: *tb.Transfer,
-        ) ?accounting_auditor.CreateTransferResultSet {
+        ) ?accounting_auditor.CreateTransferStatusSet {
             // If the specified method is unavailable, swap it.
             // Changing the method may narrow the TransferOutcome (unknown→success, unknown→failure)
             // but never broaden it (success→unknown, success→failure).
@@ -1316,11 +1342,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const batch_min = switch (action) {
                 .create_accounts,
                 .lookup_accounts,
+                .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 .deprecated_lookup_accounts_unbatched,
                 => self.options.accounts_batch_size_min,
                 .create_transfers,
                 .lookup_transfers,
+                .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 .deprecated_lookup_transfers_unbatched,
                 => self.options.transfers_batch_size_min,
@@ -1338,11 +1366,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const batch_span = switch (action) {
                 .create_accounts,
                 .lookup_accounts,
+                .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 .deprecated_lookup_accounts_unbatched,
                 => self.options.accounts_batch_size_span,
                 .create_transfers,
                 .lookup_transfers,
+                .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 .deprecated_lookup_transfers_unbatched,
                 => self.options.transfers_batch_size_span,
@@ -1401,14 +1431,19 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             };
         }
 
-        fn on_create_transfers(
+        fn on_create_transfers_sparse(
             self: *Workload,
             client_index: usize,
             timestamp: u64,
             transfers: []const tb.Transfer,
-            results_sparse: []const tb.CreateTransfersResult,
+            results_sparse: []const tb.CreateTransfersErrorResult,
         ) void {
-            self.auditor.on_create_transfers(client_index, timestamp, transfers, results_sparse);
+            self.auditor.on_create_transfers_sparse(
+                client_index,
+                timestamp,
+                transfers,
+                results_sparse,
+            );
             if (transfers.len == 0) return;
 
             const transfer_index_min = self.transfer_id_to_index(transfers[0].id);
@@ -1430,16 +1465,17 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
             }
 
-            const CreateTransfersResultIterator = IteratorForCreateType(tb.CreateTransfersResult);
-            var results_iterator: CreateTransfersResultIterator = .init(results_sparse);
+            var iterator: ResultsSparseIteratorType(tb.CreateTransfersErrorResult) = .init(
+                results_sparse,
+            );
             for (transfers, 0..) |*transfer, i| {
-                const result: tb.CreateTransferResult = results_iterator.take(i) orelse .ok;
+                const result: tb.CreateTransferStatus = iterator.take(i) orelse .created;
                 if (transfer.flags.pending and result != .exists) {
                     self.transfers_pending_in_flight -= 1;
                 }
 
                 // Add some successfully completed transfers to be retried in the next request.
-                if (result == .ok and !transfer.flags.linked and
+                if (result == .created and !transfer.flags.linked and
                     self.transfers_retry_exists.items.len <
                         self.options.transfers_retry_exists_max and
                     self.prng.chance(self.options.create_transfer_retry_probability))
@@ -1453,7 +1489,74 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
 
                 // Enqueue the `id`s of transient errors to be retried in the next request.
-                if (result != .ok and result.transient() and
+                if (result != .created and result.transient() and
+                    self.transfers_retry_failed.count() <
+                        self.options.transfers_retry_failed_max)
+                {
+                    self.transfers_retry_failed.putAssumeCapacityNoClobber(
+                        transfer.id,
+                        {},
+                    );
+                }
+            }
+        }
+
+        fn on_create_transfers(
+            self: *Workload,
+            client_index: usize,
+            timestamp: u64,
+            transfers: []const tb.Transfer,
+            results: []const tb.CreateTransferResult,
+        ) void {
+            self.auditor.on_create_transfers(
+                client_index,
+                timestamp,
+                transfers,
+                results,
+            );
+            if (transfers.len == 0) return;
+
+            const transfer_index_min = self.transfer_id_to_index(transfers[0].id);
+            const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
+            assert(transfer_index_min <= transfer_index_max);
+
+            self.transfers_delivered_recently.add(.{
+                .min = transfer_index_min,
+                .max = transfer_index_max,
+            }) catch unreachable;
+
+            while (self.transfers_delivered_recently.peek()) |delivered| {
+                if (self.transfers_delivered_past == delivered.min) {
+                    self.transfers_delivered_past = delivered.max + 1;
+                    _ = self.transfers_delivered_recently.remove();
+                } else {
+                    assert(self.transfers_delivered_past < delivered.min);
+                    break;
+                }
+            }
+
+            for (transfers, results) |*transfer, *result| {
+                assert(result.reserved == 0);
+                if (transfer.flags.pending and result.status != .exists) {
+                    self.transfers_pending_in_flight -= 1;
+                }
+
+                // Add some successfully completed transfers to be retried in the next request.
+                if (result.status == .created and !transfer.flags.linked and
+                    self.transfers_retry_exists.items.len <
+                        self.options.transfers_retry_exists_max and
+                    self.prng.chance(self.options.create_transfer_retry_probability))
+                {
+                    var transfer_exists = transfer.*;
+                    assert(transfer_exists.timestamp == 0);
+                    assert(transfer_exists.user_data_128 != 0);
+
+                    transfer_exists.user_data_128 = 0; // This will be replaced by the checksum.
+                    self.transfers_retry_exists.appendAssumeCapacity(transfer_exists);
+                }
+
+                // Enqueue the `id`s of transient errors to be retried in the next request.
+                if (result.status != .created and result.status.transient() and
                     self.transfers_retry_failed.count() <
                         self.options.transfers_retry_failed_max)
                 {
@@ -2000,6 +2103,10 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     options.batch_size_limit,
                 ),
                 StateMachine.operation_event_max(
+                    .deprecated_create_accounts_sparse,
+                    options.batch_size_limit,
+                ),
+                StateMachine.operation_event_max(
                     .deprecated_create_accounts_unbatched,
                     options.batch_size_limit,
                 ),
@@ -2011,6 +2118,10 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
             const batch_create_transfers_limit = @min(
                 StateMachine.operation_event_max(
                     .create_transfers,
+                    options.batch_size_limit,
+                ),
+                StateMachine.operation_event_max(
+                    .deprecated_create_transfers_sparse,
                     options.batch_size_limit,
                 ),
                 StateMachine.operation_event_max(
@@ -2040,6 +2151,10 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                             options.batch_size_limit,
                         ),
                         StateMachine.operation_event_max(
+                            .deprecated_create_transfers_sparse,
+                            options.batch_size_limit,
+                        ),
+                        StateMachine.operation_event_max(
                             .deprecated_create_transfers_unbatched,
                             options.batch_size_limit,
                         ),
@@ -2056,6 +2171,9 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     .query_accounts = prng.range_inclusive(u64, 1, 20),
                     .query_transfers = prng.range_inclusive(u64, 1, 20),
                     .get_change_events = prng.range_inclusive(u64, 1, 20),
+
+                    .deprecated_create_accounts_sparse = prng.range_inclusive(u64, 1, 10),
+                    .deprecated_create_transfers_sparse = prng.range_inclusive(u64, 1, 100),
 
                     .deprecated_create_accounts_unbatched = prng.range_inclusive(u64, 1, 10),
                     .deprecated_create_transfers_unbatched = prng.range_inclusive(u64, 1, 100),

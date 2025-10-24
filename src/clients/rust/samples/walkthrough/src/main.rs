@@ -32,10 +32,6 @@ fn main() {
     // // todo
     // endsection:create-transfers-errors
 
-    // section:no-batch
-    // // todo
-    // endsection:no-batch
-
     // section:batch
     // // todo
     // endsection:batch

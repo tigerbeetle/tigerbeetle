@@ -8,10 +8,10 @@ const type_mappings = .{
     .{ exports.tb_account_t, "tb_account_t" },
     .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
     .{ exports.tb_transfer_t, "tb_transfer_t" },
-    .{ exports.tb_create_account_result, "TB_CREATE_ACCOUNT_RESULT" },
-    .{ exports.tb_create_transfer_result, "TB_CREATE_TRANSFER_RESULT" },
-    .{ exports.tb_create_accounts_result_t, "tb_create_accounts_result_t" },
-    .{ exports.tb_create_transfers_result_t, "tb_create_transfers_result_t" },
+    .{ exports.tb_create_account_status, "TB_CREATE_ACCOUNT_STATUS" },
+    .{ exports.tb_create_transfer_status, "TB_CREATE_TRANSFER_STATUS" },
+    .{ exports.tb_create_account_result_t, "tb_create_account_result_t" },
+    .{ exports.tb_create_transfer_result_t, "tb_create_transfer_result_t" },
     .{ exports.tb_account_filter_t, "tb_account_filter_t" },
     .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
     .{ exports.tb_account_balance_t, "tb_account_balance_t" },
@@ -129,12 +129,16 @@ fn emit_enum(
         if (!skip) {
             const field_name = to_uppercase(field.name);
             if (@typeInfo(Type) == .@"enum") {
-                try buffer.writer().print("pub const {s}_{s}_{s}: {s} = {};\n", .{
+                const int_value = @intFromEnum(@field(Type, field.name));
+                try buffer.writer().print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
                     rust_name,
                     rust_name[0..suffix_pos],
                     @as([]const u8, &field_name),
                     rust_name,
-                    @intFromEnum(@field(Type, field.name)),
+                    if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                        std.fmt.comptimePrint("0x{X}", .{int_value})
+                    else
+                        std.fmt.comptimePrint("{}", .{int_value}),
                 });
             } else {
                 // Packed structs.
