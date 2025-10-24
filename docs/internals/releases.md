@@ -59,6 +59,8 @@ The motivation for specific steps follows after.
    - group related PRs into a single bullet point
    - double-check that the version looks right
    - if there are any big features in the release, write about them in the lead paragraph.
+   - for safety/perf changes, formulate them from the user's perspective, to clearly communicate the
+     implications
    - pick the tiger track!
 
 4. Commit the changelog and submit a pull request for review.
