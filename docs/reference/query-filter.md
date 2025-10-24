@@ -56,6 +56,15 @@ Constraints:
 
 - Type is 16-bit unsigned integer (2 bytes)
 
+### `reserved`
+
+This space may be used for additional data in the future.
+
+Constraints:
+
+- Type is 6 bytes
+- Must be zero
+
 ### `timestamp_min`
 
 The minimum [`Account.timestamp`](account.md#timestamp) or
@@ -104,12 +113,3 @@ Constraints:
 Whether the results are sorted by timestamp in chronological or reverse-chronological order. If the
 flag is not set, the event that happened first (has the smallest timestamp) will come first. If the
 flag is set, the event that happened last (has the largest timestamp) will come first.
-
-### `reserved`
-
-This space may be used for additional data in the future.
-
-Constraints:
-
-- Type is 6 bytes
-- Must be zero
