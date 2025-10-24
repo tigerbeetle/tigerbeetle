@@ -8,26 +8,17 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const assert = std.debug.assert;
 const log = std.log.scoped(.logged_process);
 
-const assert = std.debug.assert;
-
 const LoggedProcess = @This();
-
-pub const State = enum(u8) { running, paused, terminated };
-const AtomicState = std.atomic.Value(State);
 
 const Options = struct {
     stdout_behavior: std.process.Child.StdIo = .Ignore,
 };
 
-// Allocated by init
 child: std.process.Child,
-stdin_thread: std.Thread,
-stderr_thread: std.Thread,
-
-// Lifecycle state
-current_state: AtomicState,
+state: enum { running, paused, terminated },
 
 pub fn spawn(
     allocator: std.mem.Allocator,
@@ -38,88 +29,43 @@ pub fn spawn(
     errdefer allocator.destroy(self);
 
     self.* = .{
-        .current_state = AtomicState.init(.running),
+        .state = .running,
         .child = std.process.Child.init(argv, allocator),
-        .stdin_thread = undefined,
-        .stderr_thread = undefined,
     };
 
-    self.child.stdin_behavior = .Pipe;
+    self.child.stdin_behavior = .Ignore;
     self.child.stdout_behavior = options.stdout_behavior;
     self.child.stderr_behavior = .Inherit;
 
     try self.child.spawn();
-
-    errdefer {
-        _ = self.child.kill() catch {};
-    }
-
-    // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
-    // on writing to child's stdin to detect if a child is dead in a non-blocking
-    // manner. Checks once a second in a separate thread.
-    _ = try std.posix.fcntl(
-        self.child.stdin.?.handle,
-        std.posix.F.SETFL,
-        @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
-    );
-    self.stdin_thread = try std.Thread.spawn(
-        .{},
-        struct {
-            fn poll_broken_pipe(stdin: std.fs.File, process: *LoggedProcess) void {
-                while (process.state() == .running) {
-                    std.time.sleep(50 * std.time.ns_per_ms);
-                    _ = stdin.write(&.{1}) catch |err| {
-                        switch (err) {
-                            error.WouldBlock => {}, // still running
-                            error.BrokenPipe,
-                            error.NotOpenForWriting,
-                            => {
-                                // Only write the state variable in case the process is still
-                                // considered running. If it was actively terminated, we don't
-                                // want to overwrite that state.
-                                _ = process.current_state.cmpxchgStrong(
-                                    .running,
-                                    .terminated,
-                                    .seq_cst,
-                                    .seq_cst,
-                                );
-                                break;
-                            },
-                            else => @panic(@errorName(err)),
-                        }
-                    };
-                }
-            }
-        }.poll_broken_pipe,
-        .{ self.child.stdin.?, self },
-    );
+    errdefer _ = self.child.kill() catch {};
 
     return self;
 }
 
 pub fn destroy(self: *LoggedProcess, allocator: std.mem.Allocator) void {
-    assert(self.state() == .terminated);
+    assert(self.state == .terminated);
     allocator.destroy(self);
-}
-
-pub fn state(self: *LoggedProcess) State {
-    return self.current_state.load(.seq_cst);
 }
 
 pub fn pause(
     self: *LoggedProcess,
 ) !void {
-    assert(builtin.os.tag != .windows);
+    comptime assert(builtin.os.tag != .windows);
+    assert(self.state == .running);
+
     try std.posix.kill(self.child.id, std.posix.SIG.STOP);
-    self.current_state.store(.paused, .seq_cst);
+    self.state = .paused;
 }
 
 pub fn unpause(
     self: *LoggedProcess,
 ) !void {
-    assert(builtin.os.tag != .windows);
+    comptime assert(builtin.os.tag != .windows);
+    assert(self.state == .paused);
+
     try std.posix.kill(self.child.id, std.posix.SIG.CONT);
-    self.current_state.store(.running, .seq_cst);
+    self.state = .running;
 }
 
 pub fn terminate(
@@ -146,14 +92,8 @@ pub fn terminate(
         );
     };
 
-    // Await thread.
-    self.stdin_thread.join();
-
-    // Await the terminated process.
-    const term = self.child.wait() catch unreachable;
-
-    self.current_state.store(.terminated, .seq_cst);
-
+    const term = try self.child.wait();
+    self.state = .terminated;
     return term;
 }
 
@@ -163,29 +103,35 @@ pub fn wait(
     self.expect_state_in(.{ .running, .terminated });
     defer self.expect_state_in(.{.terminated});
 
-    // Wait until the process runs to completion.
-    const term = self.child.wait();
-
-    if (self.state() == .running) {
-        // Await thread in case this process is still running.
-        self.stdin_thread.join();
-    }
-
+    const term = try self.child.wait();
+    self.state = .terminated;
     return term;
 }
 
-fn expect_state_in(self: *LoggedProcess, comptime valid_states: anytype) void {
-    const actual_state = self.state();
+/// If the process has exited, reap it and return the exit code.
+/// Otherwise, return null.
+pub fn wait_nonblocking(self: *LoggedProcess) ?u8 {
+    self.expect_state_in(.{ .running, .paused });
 
+    const result = std.posix.waitpid(self.child.id, std.posix.W.NOHANG);
+    if (result.pid == 0) return null;
+    assert(result.pid == self.child.id);
+
+    self.state = .terminated;
+
+    const result_code = @as(i32, @bitCast(result.status));
+    return @intCast(result_code);
+}
+
+fn expect_state_in(self: *LoggedProcess, comptime valid_states: anytype) void {
     inline for (valid_states) |valid| {
-        if (actual_state == valid) return;
+        if (self.state == valid) return;
     }
 
-    log.err("expected state in {any} but actual state is {s}", .{
+    std.debug.panic("expected state in {any} but actual state is {s}", .{
         valid_states,
-        @tagName(actual_state),
+        @tagName(self.state),
     });
-    unreachable;
 }
 
 // The test for LoggedProcess needs an executable that runs forever which is solved (without
