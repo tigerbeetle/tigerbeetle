@@ -41,6 +41,9 @@ jobs:
 
       # No special setup for Go.
 
+      # Rust: publish with the oldest supported release to ensure compatible lockfiles etc.
+      - run: rustup default 1.63 && rustup component add clippy rustfmt
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24.x'
@@ -62,6 +65,7 @@ jobs:
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
           TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   alert_failure:

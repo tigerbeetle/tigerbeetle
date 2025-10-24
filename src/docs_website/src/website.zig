@@ -4,7 +4,7 @@ const Compile = std.Build.Step.Compile;
 
 pub const Website = @This();
 
-pub const file_size_max = 1 << 20; // 1 MiB
+pub const file_size_max = 2 << 20; // 1 MiB
 
 url_prefix: []const u8,
 pandoc_bin: LazyPath,

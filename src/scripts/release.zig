@@ -29,7 +29,7 @@ const MiB = stdx.MiB;
 
 const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
 
-const Language = enum { dotnet, go, java, node, python, zig, docker };
+const Language = enum { dotnet, go, java, node, python, rust, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CLIArgs = struct {
     sha: []const u8,
@@ -228,6 +228,10 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
         defer dist_dir_python.close();
 
         try build_python(shell, info, dist_dir_python);
+    }
+
+    if (languages.contains(.rust)) {
+        // Currently disabled.
     }
 }
 

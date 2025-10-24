@@ -125,10 +125,10 @@
 //! use tigerbeetle as tb;
 //! use futures::{stream, Stream};
 //!
-//! fn get_account_transfers_paged<'s>(
-//!     client: &'s tb::Client,
+//! fn get_account_transfers_paged(
+//!     client: &tb::Client,
 //!     event: tb::AccountFilter,
-//! ) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + use<'s> {
+//! ) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + '_ {
 //!     assert!(
 //!         event.limit > 1,
 //!         "paged queries should use an explicit limit"
@@ -321,7 +321,7 @@ use futures_channel::oneshot::{channel, Receiver};
 use std::convert::Infallible;
 use std::future::Future;
 use std::os::raw::{c_char, c_void};
-use std::{mem, ptr};
+use std::{fmt, mem, ptr};
 
 // The generated bindings.
 // These are not part of the public API but are re-exported hidden
@@ -458,7 +458,7 @@ impl Client {
     /// fn merge_create_accounts_results(
     ///     accounts: &[tb::Account],
     ///     results: Vec<tb::CreateAccountsResult>,
-    /// ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + use<'_> {
+    /// ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + '_ {
     ///     let mut results = results.into_iter().peekable();
     ///     accounts.iter().enumerate().map(move |(i, account)| {
     ///         match results.peek().copied() {
@@ -590,7 +590,7 @@ impl Client {
     /// fn merge_create_transfers_results(
     ///     transfers: &[tb::Transfer],
     ///     results: Vec<tb::CreateTransfersResult>,
-    /// ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + use<'_> {
+    /// ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + '_ {
     ///     let mut results = results.into_iter().peekable();
     ///     transfers.iter().enumerate().map(move |(i, transfer)| {
     ///         match results.peek().copied() {
@@ -698,7 +698,7 @@ impl Client {
     /// fn merge_lookup_accounts_results(
     ///     accounts: &[u128],
     ///     results: Vec<tb::Account>,
-    /// ) -> impl Iterator<Item = (u128, Option<tb::Account>)> + use<'_> {
+    /// ) -> impl Iterator<Item = (u128, Option<tb::Account>)> + '_ {
     ///     let mut results = results.into_iter().peekable();
     ///     accounts.iter().map(move |&id| match results.peek() {
     ///         Some(acc) if acc.id == id => (id, results.next()),
@@ -801,7 +801,7 @@ impl Client {
     /// fn merge_lookup_transfers_results(
     ///     transfers: &[u128],
     ///     results: Vec<tb::Transfer>,
-    /// ) -> impl Iterator<Item = (u128, Option<tb::Transfer>)> + use<'_> {
+    /// ) -> impl Iterator<Item = (u128, Option<tb::Transfer>)> + '_ {
     ///     let mut results = results.into_iter().peekable();
     ///     transfers.iter().map(move |&id| match results.peek() {
     ///         Some(transfer) if transfer.id == id => (id, results.next()),
@@ -1014,11 +1014,19 @@ impl Client {
 impl Drop for Client {
     fn drop(&mut self) {
         if !self.client.is_null() {
-            _ = Client {
+            let close_future = Client {
                 client: self.client,
             }
             .close();
+            // NB: Rust 1.68 clippy - specifically - want's an explicit drop for this future.
+            drop(close_future);
         }
+    }
+}
+
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str("Client")
     }
 }
 

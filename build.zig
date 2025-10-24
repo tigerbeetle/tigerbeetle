@@ -292,6 +292,7 @@ pub fn build(b: *std.Build) !void {
     build_rust_client(b, build_steps.clients_rust, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header,
         .mode = mode,
     });
     build_go_client(b, build_steps.clients_go, .{
@@ -1268,9 +1269,44 @@ fn build_rust_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        tb_client_header: *Generated,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    step_clients_rust.dependOn(&options.tb_client_header.step);
+
+    inline for (platforms) |platform| {
+        const query = Query.parse(.{
+            .arch_os_abi = platform[0],
+            .cpu_features = platform[2],
+        }) catch unreachable;
+        const resolved_target = b.resolveTargetQuery(query);
+
+        const root_module = b.createModule(.{
+            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+        const static_lib = b.addLibrary(.{
+            .name = "tb_client",
+            .linkage = .static,
+            .root_module = root_module,
+        });
+        static_lib.bundle_compiler_rt = true;
+        static_lib.pie = true;
+        static_lib.linkLibC();
+
+        step_clients_rust.dependOn(&b.addInstallFile(static_lib.getEmittedBin(), b.pathJoin(&.{
+            "../src/clients/rust/assets/lib/",
+            platform[0],
+            static_lib.out_filename,
+        })).step);
+    }
+
     const rust_bindings_generator = b.addExecutable(.{
         .name = "rust_bindings",
         .root_module = b.createModule(.{
