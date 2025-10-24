@@ -55,7 +55,7 @@ fn parse_enum_value(text: &str) -> u32 {
 
     // At this point expr should either be an uint or "uint << uint" for flags.
     if !expr.contains("<<") {
-        match expr.parse() {
+        match parse_dec_or_hex(expr) {
             Ok(val) => val,
             Err(_) => {
                 panic!("enum text '{text}' didn't parse as u32");
@@ -78,6 +78,14 @@ fn parse_enum_value(text: &str) -> u32 {
             .parse()
             .expect(&format!("enum arg1 in '{text}' didn't parse as u32"));
         arg1 << arg2
+    }
+}
+
+fn parse_dec_or_hex(s: &str) -> Result<u32, std::num::ParseIntError> {
+    if let Some(hex) = s.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+    } else {
+        s.parse()
     }
 }
 

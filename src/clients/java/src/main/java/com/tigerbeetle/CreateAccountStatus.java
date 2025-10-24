@@ -10,7 +10,7 @@ public enum CreateAccountStatus {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#created">created</a>
      */
-    Created((int) 0),
+    Created((int) 0xFFFFFFFF),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed">linked_event_failed</a>
@@ -150,7 +150,7 @@ public enum CreateAccountStatus {
 
     public static CreateAccountStatus fromValue(int value) {
         switch (value) {
-            case 0: return Created;
+            case 0xFFFFFFFF: return Created;
             case 1: return LinkedEventFailed;
             case 2: return LinkedEventChainOpen;
             case 22: return ImportedEventExpected;

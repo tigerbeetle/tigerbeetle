@@ -10,7 +10,7 @@ public enum CreateTransferStatus {
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#created">created</a>
      */
-    Created((int) 0),
+    Created((int) 0xFFFFFFFF),
 
     /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed">linked_event_failed</a>
@@ -355,7 +355,7 @@ public enum CreateTransferStatus {
 
     public static CreateTransferStatus fromValue(int value) {
         switch (value) {
-            case 0: return Created;
+            case 0xFFFFFFFF: return Created;
             case 1: return LinkedEventFailed;
             case 2: return LinkedEventChainOpen;
             case 56: return ImportedEventExpected;

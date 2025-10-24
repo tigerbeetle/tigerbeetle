@@ -111,7 +111,7 @@ class QueryFilterFlags(enum.IntFlag):
 
 
 class CreateAccountStatus(enum.IntEnum):
-    CREATED = 0
+    CREATED = 0xFFFFFFFF
     LINKED_EVENT_FAILED = 1
     LINKED_EVENT_CHAIN_OPEN = 2
     IMPORTED_EVENT_EXPECTED = 22
@@ -141,7 +141,7 @@ class CreateAccountStatus(enum.IntEnum):
 
 
 class CreateTransferStatus(enum.IntEnum):
-    CREATED = 0
+    CREATED = 0xFFFFFFFF
     LINKED_EVENT_FAILED = 1
     LINKED_EVENT_CHAIN_OPEN = 2
     IMPORTED_EVENT_EXPECTED = 56
@@ -246,14 +246,14 @@ class Transfer:
 
 @dataclass
 class CreateAccountResult:
-    timestamp: int = 0
-    status: CreateAccountStatus = CreateAccountStatus.CREATED
+    timestamp: int
+    status: CreateAccountStatus
 
 
 @dataclass
 class CreateTransferResult:
-    timestamp: int = 0
-    status: CreateTransferStatus = CreateTransferStatus.CREATED
+    timestamp: int
+    status: CreateTransferStatus
 
 
 @dataclass
@@ -271,11 +271,11 @@ class AccountFilter:
 
 @dataclass
 class AccountBalance:
-    debits_pending: int = 0
-    debits_posted: int = 0
-    credits_pending: int = 0
-    credits_posted: int = 0
-    timestamp: int = 0
+    debits_pending: int
+    debits_posted: int
+    credits_pending: int
+    credits_posted: int
+    timestamp: int
 
 
 @dataclass

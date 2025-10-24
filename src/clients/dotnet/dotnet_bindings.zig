@@ -254,9 +254,13 @@ fn emit_enum(
                 i,
             });
         } else {
-            try buffer.writer().print("    {s} = {},\n\n", .{
+            const int_value = @intFromEnum(@field(Type, field.name));
+            try buffer.writer().print("    {s} = {s},\n\n", .{
                 to_case(field.name, .pascal),
-                @intFromEnum(@field(Type, field.name)),
+                if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                    std.fmt.comptimePrint("0x{X}", .{int_value})
+                else
+                    std.fmt.comptimePrint("{}", .{int_value}),
             });
         }
     }
