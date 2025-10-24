@@ -32,7 +32,7 @@ Released: 2025-10-24
 
 - [#3312](https://github.com/tigerbeetle/tigerbeetle/pull/3312),
   [#3324](https://github.com/tigerbeetle/tigerbeetle/pull/3324)
-  
+
   Improve duration parsing by removing ambigious units and adding fuzz tests.
 
 - [#3313](https://github.com/tigerbeetle/tigerbeetle/pull/3313)
