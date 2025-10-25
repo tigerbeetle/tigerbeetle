@@ -78,7 +78,7 @@ Each client is built using language-specific tooling (`npm`, `maven`, `dotnet`, 
 to a native library built with Zig. The general pattern is
 
 ```console
-./zig/zig build client_lang
+./zig/zig build clients:lang
 cd src/clients/lang
 lang_package_manager test
 ```
