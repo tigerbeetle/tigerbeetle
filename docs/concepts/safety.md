@@ -199,6 +199,6 @@ This concludes the discussion of the concepts behind TigerBeetle --- an [OLTP](.
 for recording business transactions in real time, using a
 [double-entry bookkeeping](./debit-credit.md) schema, which
 [is orders of magnitude faster](./performance.md) and
-[keeps the data safe](./safety.md) even when the underling hardware inevitably fails.
+[keeps the data safe](./safety.md) even when the underlying hardware inevitably fails.
 
 We will now learn [how to build applications on top of TigerBeetle](../coding/).
