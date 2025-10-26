@@ -582,18 +582,18 @@ pub fn TableMemoryType(comptime Table: type) type {
                 assert(!table.mutability.mutable.radix_scratch.in_use);
             }
 
-            const sort_buffer_size = @sizeOf(Value) * Table.value_count_max;
-            const sort_buffer_values = stdx.bytes_as_slice(
+            const radix_scratch_size = @sizeOf(Value) * Table.value_count_max;
+            const radix_scratch_values = stdx.bytes_as_slice(
                 .exact,
                 Value,
-                table.mutability.mutable.radix_scratch.buffer[0..sort_buffer_size],
+                table.mutability.mutable.radix_scratch.buffer[0..radix_scratch_size],
             );
-            assert(@as(usize, @intFromPtr(sort_buffer_values.ptr)) % @alignOf(Value) == 0);
-            assert(sort_buffer_values.len == table.values.len);
+            assert(@as(usize, @intFromPtr(radix_scratch_values.ptr)) % @alignOf(Value) == 0);
+            assert(radix_scratch_values.len == table.values.len);
 
             const target_count = sort_suffix_from_offset(
                 table.values_used(),
-                sort_buffer_values[0..table.count()],
+                radix_scratch_values[0..table.count()],
                 offset,
             );
             table.value_context.count = target_count;

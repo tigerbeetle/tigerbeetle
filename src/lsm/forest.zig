@@ -179,7 +179,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const Grid = GridType(_Storage);
 
-    const sort_buffer_size: usize, const sort_buffer_alignment: usize = comptime blk: {
+    const radix_scratch_size: usize, const radix_scratch_alignment: usize = comptime blk: {
         var max_size: usize = 0;
         var max_alignment: usize = 0;
 
@@ -307,11 +307,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 }
             };
 
-            forest.radix_scratch.buffer = try allocator.alignedAlloc(
-                u8,
-                sort_buffer_alignment,
-                sort_buffer_size,
-            );
+            forest.radix_scratch.buffer =
+                try allocator.alignedAlloc(u8, radix_scratch_alignment, radix_scratch_size);
             errdefer allocator.free(forest.radix_scratch.buffer);
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -353,7 +350,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             // This matches the allocation alignment.
             allocator.free(
-                @as([]align(sort_buffer_alignment) u8, @alignCast(forest.radix_scratch.buffer)),
+                @as([]align(radix_scratch_alignment) u8, @alignCast(forest.radix_scratch.buffer)),
             );
 
             forest.compaction_schedule.deinit(allocator);
