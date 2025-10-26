@@ -12,6 +12,7 @@ const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 
+const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
 const Direction = @import("../direction.zig").Direction;
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -144,6 +145,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_results_count: u32,
         scan_results_model: []Value,
         compaction_exhausted: bool = false,
+        sort_scratch: RadixBuffer,
 
         pool: ResourcePool,
 
@@ -201,6 +203,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.pool = try ResourcePool.init(gpa, block_count);
             defer env.pool.deinit(gpa);
 
+            env.sort_scratch.buffer = try gpa.alignedAlloc(
+                u8,
+                @alignOf(Value),
+                value_count_max * @sizeOf(Value),
+            );
+            defer gpa.free(@as([]align(@alignOf(Value)) u8, @alignCast(env.sort_scratch.buffer)));
+
             try env.open_then_apply(gpa, fuzz_ops);
         }
 
@@ -237,7 +246,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             // The first checkpoint is trivially durable.
             env.grid.free_set.mark_checkpoint_durable();
 
-            try env.tree.init(gpa, &env.node_pool, &env.grid, .{
+            try env.tree.init(gpa, &env.node_pool, &env.grid, &env.sort_scratch, .{
                 .id = 1,
                 .name = "Key.Value",
             }, .{

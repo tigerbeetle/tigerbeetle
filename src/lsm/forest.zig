@@ -14,6 +14,7 @@ const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_no
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLogPace = @import("manifest_log.zig").Pace;
 
+const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
 const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
 const ResourcePoolType = @import("compaction.zig").ResourcePoolType;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
@@ -178,6 +179,20 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const Grid = GridType(_Storage);
 
+    const sort_buffer_size: usize, const sort_buffer_alignment: usize = comptime blk: {
+        var max_size: usize = 0;
+        var max_alignment: usize = 0;
+
+        for (std.enums.values(_TreeID)) |tree_id| {
+            const tree = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];
+            const size = tree.Tree.Table.value_count_max * @sizeOf(tree.Tree.Value);
+            const alignment = @alignOf(tree.Tree.Value);
+            max_size = @max(max_size, size);
+            max_alignment = @max(max_alignment, alignment);
+        }
+        break :blk .{ max_size, max_alignment };
+    };
+
     return struct {
         const Forest = @This();
 
@@ -248,6 +263,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         scan_buffer_pool: ScanBufferPool,
 
+        radix_scratch: RadixBuffer,
+
         pub fn init(
             forest: *Forest,
             allocator: mem.Allocator,
@@ -264,6 +281,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .manifest_log = undefined,
                 .compaction_schedule = undefined,
                 .scan_buffer_pool = undefined,
+                .radix_scratch = .{
+                    .buffer = undefined,
+                    .in_use = false,
+                },
             };
 
             // TODO: look into using lsm_table_size_max for the node_count.
@@ -286,12 +307,25 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 }
             };
 
+            forest.radix_scratch.buffer = try allocator.alignedAlloc(
+                u8,
+                sort_buffer_alignment,
+                sort_buffer_size,
+            );
+            errdefer allocator.free(forest.radix_scratch.buffer);
+
             inline for (std.meta.fields(Grooves)) |field| {
                 const Groove = field.type;
                 const groove: *Groove = &@field(forest.grooves, field.name);
                 const groove_options: Groove.Options = @field(grooves_options, field.name);
 
-                try groove.init(allocator, &forest.node_pool, grid, groove_options);
+                try groove.init(
+                    allocator,
+                    &forest.node_pool,
+                    grid,
+                    &forest.radix_scratch,
+                    groove_options,
+                );
                 grooves_initialized += 1;
             }
 
@@ -316,6 +350,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
+
+            // This matches the allocation alignment.
+            allocator.free(
+                @as([]align(sort_buffer_alignment) u8, @alignCast(forest.radix_scratch.buffer)),
+            );
 
             forest.compaction_schedule.deinit(allocator);
             forest.scan_buffer_pool.deinit(allocator);
@@ -346,6 +385,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .compaction_schedule = forest.compaction_schedule,
 
                 .scan_buffer_pool = forest.scan_buffer_pool,
+                .radix_scratch = forest.radix_scratch,
             };
         }
 

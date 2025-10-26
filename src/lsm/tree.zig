@@ -12,6 +12,7 @@ const schema = @import("schema.zig");
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
+const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
 
 pub const ScopeCloseMode = enum { persist, discard };
 
@@ -103,6 +104,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
+            radix_scratch: *RadixBuffer,
             config: Config,
             options: Options,
         ) !void {
@@ -126,12 +128,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .compactions = undefined,
             };
 
-            try tree.table_mutable.init(allocator, .mutable, config.name, .{
+            try tree.table_mutable.init(allocator, .mutable, radix_scratch, config.name, .{
                 .value_count_limit = value_count_limit,
             });
             errdefer tree.table_mutable.deinit(allocator);
 
-            try tree.table_immutable.init(allocator, .immutable, config.name, .{
+            try tree.table_immutable.init(allocator, .immutable, radix_scratch, config.name, .{
                 .value_count_limit = value_count_limit,
             });
             errdefer tree.table_immutable.deinit(allocator);
