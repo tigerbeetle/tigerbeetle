@@ -588,6 +588,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 Value,
                 table.mutability.mutable.radix_scratch.buffer[0..sort_buffer_size],
             );
+            assert(@as(usize, @intFromPtr(sort_buffer_values.ptr)) % @alignOf(Value) == 0);
             assert(sort_buffer_values.len == table.values.len);
 
             const target_count = sort_suffix_from_offset(

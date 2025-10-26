@@ -203,6 +203,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.pool = try ResourcePool.init(gpa, block_count);
             defer env.pool.deinit(gpa);
 
+            env.sort_scratch.in_use = false;
             env.sort_scratch.buffer = try gpa.alignedAlloc(
                 u8,
                 @alignOf(Value),
