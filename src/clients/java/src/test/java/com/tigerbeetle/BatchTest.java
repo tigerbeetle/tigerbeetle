@@ -26,7 +26,7 @@ public class BatchTest {
     private static final long createAccountTimestamp2;
     private static final CreateAccountStatus createAccountResult1;
     private static final CreateAccountStatus createAccountResult2;
-    private static final ByteBuffer dummyCreateAccountStatussStream;
+    private static final ByteBuffer dummyCreateAccountStatusStream;
 
     private static final long createTransferTimestamp1;
     private static final long createTransferTimestamp2;
@@ -485,9 +485,9 @@ public class BatchTest {
     }
 
     @Test
-    public void testReadCreateAccountStatuss() {
+    public void testReadCreateAccountStatus() {
 
-        var batch = new CreateAccountResultBatch(dummyCreateAccountStatussStream.position(0));
+        var batch = new CreateAccountResultBatch(dummyCreateAccountStatusStream.position(0));
         assertEquals(-1, batch.getPosition());
         assertEquals(2, batch.getLength());
         assertEquals(2, batch.getCapacity());
@@ -506,7 +506,7 @@ public class BatchTest {
     }
 
     @Test
-    public void testWriteCreateAccountStatuss() {
+    public void testWriteCreateAccountStatus() {
         var batch = new CreateAccountResultBatch(1);
         batch.add();
 
@@ -521,7 +521,7 @@ public class BatchTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testInvalidCreateAccountStatussBuffer() {
+    public void testInvalidCreateAccountStatusBuffer() {
 
         // Invalid size
         var invalidBuffer = ByteBuffer.allocate((CreateAccountResultBatch.Struct.SIZE * 2) - 1)
@@ -533,7 +533,7 @@ public class BatchTest {
     }
 
     @Test
-    public void testReadCreateTransferStatuss() {
+    public void testReadCreateTransferStatus() {
 
         var batch = new CreateTransferResultBatch(dummyCreateTransferResultsStream.position(0));
         assertEquals(-1, batch.getPosition());
@@ -554,7 +554,7 @@ public class BatchTest {
     }
 
     @Test
-    public void testWriteCreateTransferStatuss() {
+    public void testWriteCreateTransferStatus() {
         var batch = new CreateTransferResultBatch(1);
         batch.add();
 
@@ -976,10 +976,10 @@ public class BatchTest {
         createAccountResult2 = CreateAccountStatus.Exists;
 
         // Mimic the binary response
-        dummyCreateAccountStatussStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
-        dummyCreateAccountStatussStream.putLong(createAccountTimestamp1)
+        dummyCreateAccountStatusStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+        dummyCreateAccountStatusStream.putLong(createAccountTimestamp1)
                 .putInt(createAccountResult1.value).putInt(0);
-        dummyCreateAccountStatussStream.putLong(createAccountTimestamp2)
+        dummyCreateAccountStatusStream.putLong(createAccountTimestamp2)
                 .putInt(createAccountResult2.value).putInt(0);
 
         createTransferTimestamp1 = 999_998;
