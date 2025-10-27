@@ -263,5 +263,5 @@ pub fn main() !void {
 
     var buffer = std.ArrayList(u8).init(allocator);
     try generate_bindings(&buffer);
-    try std.io.getStdOut().writeAll(buffer.items);
+    try std.fs.File.stdout().writeAll(buffer.items);
 }

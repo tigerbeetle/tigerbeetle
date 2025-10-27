@@ -495,9 +495,10 @@ fn synchronize(self: *Clock) void {
     // operator, as the counterpoint to `no agreement on cluster time`.
     if (self.epoch.synchronized == null and self.window.synchronized != null) {
         const new_interval = self.window.synchronized.?;
-        log.info("{}: synchronized: accuracy={}", .{
+        // {D} == duration signed.
+        log.info("{}: synchronized: accuracy={D}", .{
             self.replica,
-            fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+            new_interval.upper_bound - new_interval.lower_bound,
         });
     }
 
@@ -512,13 +513,14 @@ fn synchronize(self: *Clock) void {
 fn after_synchronization(self: *Clock) void {
     const new_interval = self.epoch.synchronized.?;
 
-    log.debug("{}: synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
+    // {D} == duration signed.
+    log.debug("{}: synchronized: truechimers={}/{} clock_offset={D}..{D} accuracy={D}", .{
         self.replica,
         new_interval.sources_true,
         self.epoch.sources.len,
-        fmt.fmtDurationSigned(new_interval.lower_bound),
-        fmt.fmtDurationSigned(new_interval.upper_bound),
-        fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+        new_interval.lower_bound,
+        new_interval.upper_bound,
+        new_interval.upper_bound - new_interval.lower_bound,
     });
 
     const elapsed: i64 = @intCast(self.epoch.elapsed(self));
@@ -530,30 +532,32 @@ fn after_synchronization(self: *Clock) void {
     if (system == cluster) {} else if (system < lower) {
         const delta = lower - system;
         if (delta < std.time.ns_per_ms) {
-            log.debug("{}: system time is {} behind", .{
+            // {D} == duration signed.
+            log.debug("{}: system time is {D} behind", .{
                 self.replica,
-                fmt.fmtDurationSigned(delta),
+                delta,
             });
         } else {
             log.warn(
-                "{}: system time is {} behind, clamping system time to cluster time",
+                // {D} == duration signed.
+                "{}: system time is {D} behind, clamping system time to cluster time",
                 .{
                     self.replica,
-                    fmt.fmtDurationSigned(delta),
+                    delta,
                 },
             );
         }
     } else {
         const delta = system - upper;
         if (delta < std.time.ns_per_ms) {
-            log.debug("{}: system time is {} ahead", .{
+            log.debug("{}: system time is {D} ahead", .{
                 self.replica,
-                fmt.fmtDurationSigned(delta),
+                delta,
             });
         } else {
-            log.warn("{}: system time is {} ahead, clamping system time to cluster time", .{
+            log.warn("{}: system time is {D} ahead, clamping system time to cluster time", .{
                 self.replica,
-                fmt.fmtDurationSigned(delta),
+                delta,
             });
         }
     }

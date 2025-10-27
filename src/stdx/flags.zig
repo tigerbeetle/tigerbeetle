@@ -44,7 +44,7 @@ const assert = std.debug.assert;
 
 /// Format and print an error message to stderr, then exit with an exit code of 1.
 fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
-    const stderr = std.io.getStdErr().writer();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
     // NB: this status must match vsr.FatalReason.cli, but it would be wrong for flags to depend on
     // vsr. The right way would be to parametrize flags by this behavior, and let the caller inject
@@ -94,7 +94,7 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
         if (std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "--help")) {
-            std.io.getStdOut().writeAll(Commands.help) catch std.process.exit(1);
+            std.fs.File.stdout().writeAll(Commands.help) catch std.process.exit(1);
             std.process.exit(0);
         }
     }
@@ -505,8 +505,8 @@ pub const main =
 
             const cli_args = parse(&args, CLIArgs);
 
-            const stdout = std.io.getStdOut();
-            const out_stream = stdout.writer();
+            const stdout = std.fs.File.stdout();
+            const out_stream = stdout.deprecatedWriter();
             switch (cli_args) {
                 .empty => try out_stream.print("empty\n", .{}),
                 .prefix => |values| {
@@ -554,7 +554,7 @@ test "flags" {
 
         gpa: std.mem.Allocator,
         tmp_dir: std.testing.TmpDir,
-        output_buf: std.ArrayList(u8),
+        output_buf: std.io.Writer.Allocating,
         flags_exe_buf: *[std.fs.max_path_bytes]u8,
         flags_exe: []const u8,
 
@@ -574,7 +574,7 @@ test "flags" {
             });
             defer gpa.free(tmp_dir_path);
 
-            const output_buf = std.ArrayList(u8).init(gpa);
+            var output_buf = std.io.Writer.Allocating.init(gpa);
             errdefer output_buf.deinit();
 
             const flags_exe_buf = try gpa.create([std.fs.max_path_bytes]u8);
@@ -651,16 +651,17 @@ test "flags" {
             t.output_buf.clearRetainingCapacity();
 
             if (exec_result.term.Exited != 0) {
-                try t.output_buf.writer().print("status: {}\n", .{exec_result.term.Exited});
+                try t.output_buf.writer.print("status: {}\n", .{exec_result.term.Exited});
             }
             if (exec_result.stdout.len > 0) {
-                try t.output_buf.writer().print("stdout:\n{s}", .{exec_result.stdout});
+                try t.output_buf.writer.print("stdout:\n{s}", .{exec_result.stdout});
             }
             if (exec_result.stderr.len > 0) {
-                try t.output_buf.writer().print("stderr:\n{s}", .{exec_result.stderr});
+                try t.output_buf.writer.print("stderr:\n{s}", .{exec_result.stderr});
             }
 
-            try want.diff(t.output_buf.items);
+            try t.output_buf.writer.flush();
+            try want.diff(t.output_buf.written());
         }
     };
 

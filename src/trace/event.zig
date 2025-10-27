@@ -297,15 +297,7 @@ pub const EventTiming = union(Event.Tag) {
         }
     }
 
-    pub fn format(
-        event: *const EventTiming,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
+    pub fn format(event: *const EventTiming, writer: *std.io.Writer) !void {
         switch (event.*) {
             inline else => |data| {
                 try format_data(data, writer);
@@ -428,15 +420,7 @@ pub const EventTracing = union(Event.Tag) {
         }
     }
 
-    pub fn format(
-        event: *const EventTracing,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
+    pub fn format(event: *const EventTracing, writer: *std.io.Writer) !void {
         switch (event.*) {
             inline else => |data| {
                 try format_data(data, writer);
@@ -545,7 +529,7 @@ pub const EventMetric = union(enum) {
 
 pub fn format_data(
     data: anytype,
-    writer: anytype,
+    writer: *std.io.Writer,
 ) !void {
     const Data = @TypeOf(data);
     if (Data == void) return;

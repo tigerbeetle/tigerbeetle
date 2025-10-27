@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 const multiversion = @import("./multiversion.zig");
 const stdx = @import("stdx");
 const Shell = @import("shell.zig");
+const constants = @import("./constants.zig");
 
 const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
 const MultiversionHeader = multiversion.MultiversionHeader;
@@ -436,7 +437,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         options.tigerbeetle_past,
         multiversion_binary_size_max,
         null,
-        8,
+        .@"8",
         null,
     );
 
@@ -463,13 +464,19 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         header.current_release_client_min = (try multiversion.Release.parse("0.15.3")).value;
     }
 
-    var unpacked = std.ArrayList([]const u8).init(shell.arena.allocator());
+    const allocator = shell.arena.allocator();
+    var unpacked = try std.ArrayList([]const u8).initCapacity(
+        allocator,
+        constants.vsr_releases_max,
+    );
+    defer unpacked.deinit(allocator);
+
     var past_releases: MultiversionHeader.PastReleases = .{};
     assert(past_releases.count == 0);
     // Extract the old current release - this is the release that was the current release, and not
     // embedded in the past pack.
     const old_current_release = header.current_release;
-    const old_current_release_output_name = try shell.fmt("{s}/tigerbeetle-past-{}-{s}", .{
+    const old_current_release_output_name = try shell.fmt("{s}/tigerbeetle-past-{f}-{s}", .{
         options.tmp_path,
         multiversion.Release{ .value = old_current_release },
         @tagName(options.arch),
@@ -581,7 +588,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
             .git_commit = past_commit,
             .release_client_min = past_release_client_min,
         });
-        try unpacked.append(past_name);
+        try unpacked.appendAssumeCapacity(allocator, past_name);
     }
 
     const old_current_release_flags = blk: {
@@ -602,7 +609,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         .git_commit = header.current_git_commit,
         .release_client_min = header.current_release_client_min,
     });
-    try unpacked.append(old_current_release_output_name);
+    try unpacked.appendAssumeCapacity(old_current_release_output_name);
     assert(past_releases.count == past_count + 1); // +1 to include the old current release.
     try past_releases.verify();
 
@@ -625,7 +632,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
 
     return .{
         .past_releases = past_releases,
-        .unpacked = unpacked.items,
+        .unpacked = unpacked.toOwnedSlice(allocator),
     };
 }
 
@@ -800,8 +807,8 @@ fn git_sha_to_binary(commit: []const u8) ![20]u8 {
     var commit_roundtrip: [40]u8 = undefined;
     assert(std.mem.eql(u8, try std.fmt.bufPrint(
         &commit_roundtrip,
-        "{s}",
-        .{std.fmt.fmtSliceHexLower(&commit_bytes)},
+        "{x}",
+        .{&commit_bytes},
     ), commit));
 
     return commit_bytes;

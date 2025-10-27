@@ -95,18 +95,18 @@ pub fn command_benchmark(
         tigerbeetle_process = null;
 
         if (rusage.getMaxRss()) |max_rss_bytes| {
-            std.io.getStdOut().writer().print("\nrss = {} bytes\n", .{max_rss_bytes}) catch {};
+            std.fs.File.stdout().deprecatedWriter().print("\nrss = {} bytes\n", .{max_rss_bytes}) catch {};
         }
     }
 
     if (data_file_created) {
         const stat = try std.fs.cwd().statFile(data_file);
         if (maybe_stat_empty) |stat_empty| {
-            try std.io.getStdOut().writer().print("\ndatafile empty = {} bytes\n", .{
+            try std.fs.File.stdout().deprecatedWriter().print("\ndatafile empty = {} bytes\n", .{
                 stat_empty.size,
             });
         }
-        try std.io.getStdOut().writer().print("datafile = {} bytes\n", .{stat.size});
+        try std.fs.File.stdout().deprecatedWriter().print("datafile = {} bytes\n", .{stat.size});
     }
 }
 

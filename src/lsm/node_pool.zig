@@ -35,7 +35,7 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
                 .free = undefined,
             };
             const size = node_size * node_count;
-            pool.buffer = try allocator.alignedAlloc(u8, node_alignment, size);
+            pool.buffer = try allocator.alignedAlloc(u8, .fromByteUnits(node_alignment), size);
             errdefer allocator.free(pool.buffer);
 
             pool.free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);

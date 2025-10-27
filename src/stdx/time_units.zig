@@ -227,12 +227,8 @@ pub const DateTimeUTC = struct {
 
     pub fn format(
         datetime: DateTimeUTC,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
+        writer: *std.io.Writer,
     ) !void {
-        _ = fmt;
-        _ = options;
         try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
             datetime.year,
             datetime.month,

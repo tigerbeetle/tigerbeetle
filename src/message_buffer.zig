@@ -141,7 +141,7 @@ pub const MessageBuffer = struct {
             vsr.fatal(
                 .unknown_vsr_command,
                 "unknown VSR command, crashing for safety " ++
-                    "(command={d} protocol={d} replica={d} release={})",
+                    "(command={d} protocol={d} replica={d} release={f})",
                 .{
                     command_raw,
                     header.protocol,

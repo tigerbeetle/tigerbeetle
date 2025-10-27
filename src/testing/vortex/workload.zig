@@ -63,7 +63,7 @@ pub fn main(
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
-    const stdout = std.io.getStdOut().writer().any();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     for (0..std.math.maxInt(u64)) |i| {
         const command_timestamp_start: u64 = @intCast(std.time.microTimestamp());

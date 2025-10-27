@@ -85,7 +85,16 @@ pub fn main(
         message_pools.push(try MessagePool.init(allocator, .client));
     }
 
-    std.log.info("Benchmark running against {any}", .{addresses});
+    const addresses_fmt: struct {
+        context: []const std.net.Address,
+        pub fn format(self: @This(), writer: *std.io.Writer) !void {
+            for (self.context, 0..) |*address, i| {
+                if (i > 0) try writer.writeAll(", ");
+                try writer.print("{f}", .{address});
+            }
+        }
+    } = .{ .context = addresses };
+    std.log.info("Benchmark running against {f}", .{addresses_fmt});
 
     var clients = stdx.BoundedArrayType(Client, constants.clients_max){};
     defer for (clients.slice()) |*client| client.deinit(allocator);
@@ -114,14 +123,14 @@ pub fn main(
 
     const client_requests = try allocator.alignedAlloc(
         [constants.message_body_size_max]u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
         clients.count(),
     );
     defer allocator.free(client_requests);
 
     const client_replies = try allocator.alignedAlloc(
         [constants.message_body_size_max]u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
         clients.count(),
     );
     defer allocator.free(client_replies);
@@ -161,7 +170,7 @@ pub fn main(
         .io = io,
         .prng = &prng,
         .timer = try std.time.Timer.start(),
-        .output = std.io.getStdOut().writer().any(),
+        .output = std.fs.File.stdout().deprecatedWriter().any(),
         .clients = clients.slice(),
         .client_timeouts = client_timeouts,
         .client_requests = client_requests,

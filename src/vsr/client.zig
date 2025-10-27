@@ -436,7 +436,7 @@ pub fn ClientType(
                     else => "",
                 };
                 log.err(
-                    "{}: session evicted: reason={?s} (cluster_release={}, client_release={}){s}",
+                    "{}: session evicted: reason={?s} (cluster_release={f}, client_release={f}){s}",
                     .{
                         self.id,
                         std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
@@ -450,7 +450,7 @@ pub fn ClientType(
                 self.on_eviction_callback = null;
                 callback(self, eviction);
             } else {
-                std.debug.panic("session evicted: {?s} (cluster_release={})", .{
+                std.debug.panic("session evicted: {?s} (cluster_release={f})", .{
                     std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
                     eviction.header.release,
                 });

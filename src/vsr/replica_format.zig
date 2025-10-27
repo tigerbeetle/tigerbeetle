@@ -97,7 +97,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 // sector in the arena, so they can be written concurrently.
                 const header_buffer = try arena.alignedAlloc(
                     u8,
-                    constants.sector_size,
+                    .fromByteUnits(constants.sector_size),
                     constants.sector_size,
                 );
                 const header: *Header.Prepare = std.mem.bytesAsValue(
@@ -147,7 +147,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             // There might be padding, so allocate []u8 instead of []Header.Prepare.
             const headers_buffer = try arena.alignedAlloc(
                 u8,
-                constants.sector_size,
+                .fromByteUnits(constants.sector_size),
                 vsr.sector_ceil(constants.journal_size_headers),
             );
 

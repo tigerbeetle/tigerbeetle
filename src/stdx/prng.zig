@@ -38,14 +38,7 @@ pub const Ratio = struct {
         return .{ .numerator = 0, .denominator = 1 };
     }
 
-    pub fn format(
-        r: Ratio,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(r: Ratio, writer: *std.io.Writer) !void {
         return writer.print("{d}/{d}", .{ r.numerator, r.denominator });
     }
 

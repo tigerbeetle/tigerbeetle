@@ -139,12 +139,8 @@ pub const ProcessID = union(enum) {
 
     pub fn format(
         self: ProcessID,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
+        writer: *std.io.Writer,
     ) !void {
-        _ = fmt;
-        _ = options;
         try switch (self) {
             .unknown => writer.writeByte('_'),
             .replica => |replica| try writer.print("{d}", .{replica.replica}),
@@ -275,7 +271,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
 
     if (tracer.log_trace) {
         log.debug(
-            "{}: {s}({}): start: {}",
+            "{f}: {s}({f}): start: {f}",
             .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
         );
     }
@@ -293,8 +289,8 @@ pub fn start(tracer: *Tracer, event: Event) void {
         "\"ph\":\"{[event]c}\"," ++
         "\"ts\":{[timestamp]}," ++
         "\"cat\":\"{[category]s}\"," ++
-        "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
-        "\"args\":{[args]s}" ++
+        "\"name\":\"{[category]s} {[event_tracing]f} {[event_timing]f}\"," ++
+        "\"args\":{[args]f}" ++
         "}},\n", .{
         .process_id = tracer.process_id.json(),
         .thread_id = event_tracing.stack(),
@@ -305,7 +301,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         .event_timing = event_timing,
         .args = std.json.Formatter(Event){ .value = event, .options = .{} },
     }) catch {
-        log.err("{}: {s}({}): event too large: {}", .{
+        log.err("{f}: {s}({f}): event too large: {f}", .{
             tracer.process_id,
             @tagName(event),
             event_tracing,
@@ -335,7 +331,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 
     if (tracer.log_trace) {
         // Double leading space to align with 'start: '.
-        log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
+        log.debug("{f}: {s}({f}): stop:  {f} (duration={}{s})", .{
             tracer.process_id,
             @tagName(event),
             event_tracing,
@@ -360,7 +356,7 @@ pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
     for (stack_base..stack_base + cardinality) |stack| {
         if (tracer.events_started[stack]) |_| {
             if (tracer.log_trace) {
-                log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
+                log.debug("{f}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
             }
 
             const event_duration = event_end.duration_since(tracer.time_start);

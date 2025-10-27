@@ -231,9 +231,9 @@ fn Aegis128LGenericType(comptime tag_bits: u9) type {
                 blocks[4] = blocks[4].xorBlocks(AesBlock.fromBytes(dst[16..32]));
             }
             var computed_tag = state.mac(tag_bits, ad.len, m.len);
-            const verify = crypto.utils.timingSafeEql([tag_length]u8, computed_tag, tag);
+            const verify = crypto.timing_safe.eql([tag_length]u8, computed_tag, tag);
             if (!verify) {
-                crypto.utils.secureZero(u8, &computed_tag);
+                crypto.secureZero(u8, &computed_tag);
                 @memset(m, undefined);
                 return error.AuthenticationFailed;
             }

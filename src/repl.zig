@@ -628,6 +628,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                     error.WouldBlock,
                     error.NoDevice,
                     error.ProcessNotFound,
+                    error.PermissionDenied,
+                    error.MessageTooBig,
                     => return err,
                 }
             };
@@ -635,7 +637,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_help(repl: *Repl) !void {
-            try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
+            try repl.terminal.print("TigerBeetle CLI Client {f}\n" ++
                 \\  Hit enter after a semicolon to run a command.
                 \\  Ctrl+D to exit.
                 \\
@@ -795,6 +797,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 error.WouldBlock,
                                 error.NoDevice,
                                 error.ProcessNotFound,
+                                error.PermissionDenied,
+                                error.MessageTooBig,
                                 => return err,
                             }
                         };

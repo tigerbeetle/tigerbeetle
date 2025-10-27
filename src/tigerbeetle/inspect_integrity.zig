@@ -230,14 +230,14 @@ fn init(
 
     integrity.buffer_headers = try gpa.alignedAlloc(
         u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
         constants.journal_size_headers,
     );
     errdefer gpa.free(integrity.buffer_headers);
 
     integrity.buffer_prepare = try gpa.alignedAlloc(
         u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
         constants.message_size_max,
     );
     errdefer gpa.free(integrity.buffer_prepare);

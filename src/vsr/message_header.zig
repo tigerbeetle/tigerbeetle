@@ -238,20 +238,9 @@ pub const Header = extern struct {
         };
     }
 
-    pub fn format(
-        self: *const Header,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
+    pub fn format(self: *const Header, writer: *std.io.Writer) !void {
         switch (self.into_any()) {
-            inline else => |header| return try std.fmt.formatType(
-                header,
-                fmt,
-                options,
-                writer,
-                std.options.fmt_max_depth,
-            ),
+            inline else => |header| return try writer.print("{f}", .{header}),
         }
     }
 

@@ -301,5 +301,5 @@ pub fn main() !void {
         \\}}
     , .{});
 
-    try std.io.getStdOut().writeAll(buffer.items);
+    try std.fs.File.stdout().writeAll(buffer.items);
 }

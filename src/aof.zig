@@ -560,7 +560,7 @@ pub fn AOFType(comptime IO: type) type {
             input_paths: []const []const u8,
             output_path: []const u8,
         ) !void {
-            const stdout = std.io.getStdOut().writer();
+            const stdout = std.fs.File.stdout().deprecatedWriter();
 
             var aofs: [constants.members_max]Iterator = undefined;
             var aof_count: usize = 0;
@@ -895,7 +895,7 @@ pub fn main() !void {
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
+            std.fs.File.stdout().writeAll(usage) catch std.posix.exit(1);
             std.posix.exit(0);
         }
 
@@ -942,7 +942,7 @@ pub fn main() !void {
         var data_checksum: [32]u8 = undefined;
         var blake3 = std.crypto.hash.Blake3.init(.{});
 
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.fs.File.stdout().deprecatedWriter();
         while (try it.next(target)) |entry| {
             const header = entry.header();
             if (!AOFReplayClient.replay_message(header)) continue;
@@ -965,7 +965,7 @@ pub fn main() !void {
     } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
         try AOF.merge(&io, allocator, paths[0 .. count - 2], "prepared.aof");
     } else {
-        std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
+        std.fs.File.stdout().writeAll(usage) catch std.posix.exit(1);
         std.posix.exit(1);
     }
 }

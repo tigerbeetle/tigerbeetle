@@ -318,13 +318,13 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
             maybe(read.status != .repair);
 
             log.debug("{}: read_next_callback: result={s} " ++
-                "(address={} checksum={x:0>32} type={s} status={?})", .{
+                "(address={} checksum={x:0>32} type={s} status={s})", .{
                 scrubber.superblock.replica_index.?,
                 @tagName(result),
                 read.read.address,
                 read.read.checksum,
                 @tagName(read.block_type),
-                read.status,
+                @tagName(read.status),
             });
 
             if (read.status == .repair and

@@ -96,7 +96,7 @@ const CLIArgs = struct {
 pub fn main() !void {
     comptime assert(constants.verify);
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
-    log_buffer.unbuffered_writer = std.io.getStdErr().writer();
+    log_buffer.unbuffered_writer = std.fs.File.stderr().deprecatedWriter();
     fuzz.limit_ram();
 
     var gpa_instance: std.heap.GeneralPurposeAllocator(.{}) = .{};
@@ -1749,7 +1749,7 @@ fn full_core(replica_count: u8, standby_count: u8) Core {
 }
 
 var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
-    // This is initialized in main(), as std.io.getStdErr() is not comptime known on e.g. Windows.
+    // This is initialized in main(), as std.fs.File.stderr() is not comptime known on e.g. Windows.
     .unbuffered_writer = undefined,
 };
 

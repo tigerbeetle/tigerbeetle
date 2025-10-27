@@ -13,22 +13,22 @@ pub const Terminal = struct {
     };
 
     mode_start: ?ModeStart,
-    stdin: std.io.BufferedReader(4096, std.fs.File.Reader),
+    stdin: ?std.fs.File.DeprecatedReader,
     // These are made optional so that printing on failure can be disabled in tests expecting them.
-    stdout: ?std.fs.File.Writer,
-    stderr: ?std.fs.File.Writer,
+    stdout: ?std.fs.File.DeprecatedWriter,
+    stderr: ?std.fs.File.DeprecatedWriter,
 
     pub fn init(
         self: *Terminal,
         interactive: bool,
     ) !void {
-        const stdout = std.io.getStdOut();
+        const stdout = std.fs.File.stdout();
         if (interactive and !stdout.getOrEnableAnsiEscapeSupport()) {
             std.debug.print("ANSI escape sequences not supported.\n", .{});
             std.process.exit(1);
         }
 
-        const stdin = std.io.getStdIn();
+        const stdin = std.fs.File.stdin();
         var mode_start: ?ModeStart = null;
         if (interactive) {
             if (builtin.os.tag == .windows) {
@@ -53,9 +53,9 @@ pub const Terminal = struct {
 
         self.* = Terminal{
             .mode_start = mode_start,
-            .stdin = std.io.bufferedReader(stdin.reader()),
-            .stdout = stdout.writer(),
-            .stderr = std.io.getStdErr().writer(),
+            .stdin = stdin.deprecatedReader(),
+            .stdout = stdout.deprecatedWriter(),
+            .stderr = std.fs.File.stderr().deprecatedWriter(),
         };
     }
 
@@ -81,7 +81,7 @@ pub const Terminal = struct {
 
     pub fn read_user_input(self: *Terminal) !?UserInput {
         assert(self.mode_start != null);
-        const stdin = self.stdin.reader();
+        const stdin = self.stdin.?;
 
         // NB: Many control codes have names unrelated to their modern function.
         // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
@@ -165,7 +165,7 @@ pub const Terminal = struct {
 
     pub fn prompt_mode_set(self: *const Terminal) anyerror!void {
         assert(self.mode_start != null);
-        const stdin = std.io.getStdIn();
+        const stdin = std.fs.File.stdin();
         if (builtin.os.tag == .windows) {
             const console_mode = self.mode_start.?;
 
@@ -185,7 +185,7 @@ pub const Terminal = struct {
                 WindowsConsoleMode.Output.enable_virtual_terminal_processing,
             );
             mode_stdout &= ~@intFromEnum(WindowsConsoleMode.Output.disable_newline_auto_return);
-            if (windows.kernel32.SetConsoleMode(std.io.getStdOut().handle, mode_stdout) == 0) {
+            if (windows.kernel32.SetConsoleMode(std.fs.File.stdout().handle, mode_stdout) == 0) {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
         } else {
@@ -201,19 +201,19 @@ pub const Terminal = struct {
 
     pub fn prompt_mode_unset(self: *const Terminal) !void {
         assert(self.mode_start != null);
-        const stdin = std.io.getStdIn();
+        const stdin = std.fs.File.stdin();
         if (builtin.os.tag == .windows) {
             const console_mode = self.mode_start.?;
             if (windows.kernel32.SetConsoleMode(stdin.handle, console_mode.stdin) == 0) {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
-            const stdout = std.io.getStdOut();
+            const stdout = std.fs.File.stdout();
             if (windows.kernel32.SetConsoleMode(stdout.handle, console_mode.stdout) == 0) {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
         } else {
             const termios = self.mode_start.?;
-            try posix.tcsetattr(std.io.getStdIn().handle, .NOW, termios);
+            try posix.tcsetattr(stdin.handle, .NOW, termios);
         }
     }
 
@@ -223,7 +223,7 @@ pub const Terminal = struct {
         // Obtaining the cursor's position relies on sending a request payload to stdout. The
         // response is read from stdin, but it may have been altered by user input, so we keep
         // retrying until successful.
-        const stdin = self.stdin.reader();
+        const stdin = self.stdin.?;
         while (true) {
             // The terminal needs to read control codes, but the exact input capacity
             // is unknown; this should be more than enough.

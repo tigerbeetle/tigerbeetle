@@ -16,7 +16,7 @@ const stdx = @import("stdx.zig");
 pub fn sort(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []Value,
     values_scratch: []Value,
 ) void {
@@ -43,7 +43,7 @@ pub fn sort(
 fn radix_sort(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []Value,
     values_scratch: []Value,
 ) void {

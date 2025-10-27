@@ -24,5 +24,5 @@ pub fn main() !void {
     }
 
     const json_string = try std.json.stringifyAlloc(allocator, entries.items, .{});
-    try std.io.getStdOut().writer().print("{s}\n", .{json_string});
+    try std.fs.File.stdout().writer().print("{s}\n", .{json_string});
 }

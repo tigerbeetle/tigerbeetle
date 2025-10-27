@@ -425,7 +425,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             if (bus.replicas[replica]) |connection| {
                 connection.send_message(bus, message);
             } else {
-                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
+                log.debug("{}: send_message_to_replica: no connection to={} header={any}", .{
                     bus.id,
                     replica,
                     message.header,

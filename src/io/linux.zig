@@ -1580,7 +1580,7 @@ pub const IO = struct {
             for (0..2) |_| {
                 posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
                     error.WouldBlock => {
-                        std.time.sleep(50 * std.time.ns_per_ms);
+                        std.Thread.sleep(50 * std.time.ns_per_ms);
                         continue;
                     },
                     else => return err,
@@ -1615,7 +1615,7 @@ pub const IO = struct {
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
         if (purpose == .format and kind == .file) {
-            log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+            log.info("allocating {Bi}...", .{size});
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {
                     log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
@@ -1674,10 +1674,10 @@ pub const IO = struct {
 
                 if (block_device_size < size) {
                     std.debug.panic(
-                        "The block device used is too small ({} available/{} needed).",
+                        "The block device used is too small ({Bi} available/{Bi} needed).",
                         .{
-                            std.fmt.fmtIntSizeBin(block_device_size),
-                            std.fmt.fmtIntSizeBin(size),
+                            block_device_size,
+                            size,
                         },
                     );
                 }
@@ -1703,8 +1703,8 @@ pub const IO = struct {
                         std.debug.panic(
                             "Superblock on block device not empty. " ++
                                 "If this is the correct block device to use, " ++
-                                "please zero the first {} using a tool like dd.",
-                            .{std.fmt.fmtIntSizeBin(superblock_zone_size)},
+                                "please zero the first {Bi} using a tool like dd.",
+                            .{superblock_zone_size},
                         );
                     }
                     // Reset position in the block device to compensate for read(2).

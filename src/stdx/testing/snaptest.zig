@@ -218,7 +218,7 @@ pub const Snap = struct {
                 try file_text_updated.writer().print("{s}\\\\{s}\n", .{ indent, line });
             }
         }
-        try file_text_updated.appendSlice(snapshot_suffix);
+        try file_text_updated.appendSliceAssumeCapacity(snapshot_suffix);
 
         try std.fs.cwd().writeFile(.{
             .sub_path = file_path_relative,

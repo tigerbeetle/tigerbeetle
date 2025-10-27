@@ -52,8 +52,8 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
         assert(client_status == c.TB_CLIENT_OK);
     }
 
-    const stdin = std.io.getStdIn().reader().any();
-    const stdout = std.io.getStdOut().writer().any();
+    const stdin = std.fs.File.stdin().deprecatedReader();
+    const stdout = std.fs.File.stdout().deprecatedWriter();
 
     while (true) {
         var events_buffer: [events_buffer_size_max]u8 = undefined;
@@ -72,7 +72,7 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
 
             var packet: c.tb_packet_t = undefined;
             packet.operation = @intFromEnum(operation);
-            packet.user_data = @constCast(@ptrCast(&context));
+            packet.user_data = @ptrCast(@constCast(&context));
             packet.data = @constCast(events.ptr);
             packet.data_size = @intCast(events.len);
             packet.user_tag = 0;

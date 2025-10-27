@@ -195,14 +195,7 @@ pub const Release = extern struct {
         return std.mem.bytesAsValue(ReleaseTriple, std.mem.asBytes(release)).*;
     }
 
-    pub fn format(
-        release: Release,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(release: Release, writer: *std.io.Writer) !void {
         const release_triple = release.triple();
         return writer.print("{}.{}.{}", .{
             release_triple.major,
@@ -710,7 +703,7 @@ pub const MultiversionOS = struct {
         // This does impact memory usage.
         const source_buffer = try allocator.alignedAlloc(
             u8,
-            8,
+            .@"8",
             multiversion_binary_size_max_by_format,
         );
         errdefer allocator.free(source_buffer);
@@ -1673,7 +1666,8 @@ const HeaderBodyOffsets = struct {
 /// like bounds checking on slices.
 pub fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBodyOffsets {
     if (@sizeOf(elf.Elf64_Ehdr) > buffer.len) return error.InvalidELF;
-    const elf_header = try elf.Header.parse(buffer[0..@sizeOf(elf.Elf64_Ehdr)]);
+    var reader = std.io.Reader.fixed(buffer[0..@sizeOf(elf.Elf64_Ehdr)]);
+    const elf_header = try elf.Header.read(&reader);
 
     // TigerBeetle only supports little endian on 64 bit platforms.
     if (elf_header.endian != .little) return error.WrongEndian;
@@ -2049,7 +2043,7 @@ test parse_elf {
 pub fn print_information(
     gpa: std.mem.Allocator,
     exe_path: []const u8,
-    output: std.io.AnyWriter,
+    output: *std.io.Writer,
 ) !void {
     var io = try IO.init(32, 0);
     defer io.deinit();
@@ -2099,9 +2093,9 @@ pub fn print_information(
         switch (field) {
             .past, .current_flags_padding, .past_padding, .reserved => continue,
             .current_git_commit => {
-                try output.print("multiversioning.header.{s}={s}\n", .{
+                try output.print("multiversioning.header.{s}={x}\n", .{
                     field_name,
-                    std.fmt.fmtSliceHexLower(&header.current_git_commit),
+                    &header.current_git_commit,
                 });
             },
             .current_release, .current_release_client_min => {
@@ -2145,10 +2139,10 @@ pub fn print_information(
             },
             .git_commits => {
                 for (@field(header.past, field_name)[0..header.past.count], 0..) |*git_commit, i| {
-                    try output.print("multiversioning.header.past.{s}.{}={}\n", .{
+                    try output.print("multiversioning.header.past.{s}.{f}={x}\n", .{
                         field_name,
                         Release{ .value = header.past.releases[i] },
-                        std.fmt.fmtSliceHexLower(git_commit),
+                        git_commit,
                     });
                 }
             },

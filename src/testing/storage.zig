@@ -1224,14 +1224,7 @@ const StackTrace = struct {
         return StackTrace{ .addresses = addresses, .index = stack_trace.index };
     }
 
-    pub fn format(
-        self: StackTrace,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(self: StackTrace, writer: *std.io.Writer) !void {
         var addresses = self.addresses;
         const stack_trace = std.builtin.StackTrace{
             .instruction_addresses = &addresses,

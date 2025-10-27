@@ -495,7 +495,7 @@ pub const Runner = struct {
                                             progress_tracker.release.value)
                                         {
                                             fatal("The last event was published using a newer " ++
-                                                "release (event={} current={}).", .{
+                                                "release (event={f} current={f}).", .{
                                                 progress_tracker.release,
                                                 vsr.constants.state_machine_config.release,
                                             });
@@ -1051,7 +1051,7 @@ const Metrics = struct {
                 );
                 log.info("{s}: p0={}ms mean={}ms p100={}ms " ++
                     "event_count={} throughput={} op/s " ++
-                    "last timestamp={} ({})", .{
+                    "last timestamp={} ({f})", .{
                     @tagName(field),
                     summary.duration_min.?.to_ms(),
                     @divFloor(summary.duration_sum.to_ms(), summary.count),
@@ -1202,15 +1202,17 @@ const ProgressTrackerMessage = struct {
                 fn write(context: *const anyopaque, encoder: *amqp.Encoder.TableEncoder) void {
                     const message: *const ProgressTrackerMessage = @ptrCast(@alignCast(context));
                     var release_buffer: [
-                        std.fmt.count("{}", vsr.Release.from(.{
-                            .major = std.math.maxInt(u16),
-                            .minor = std.math.maxInt(u8),
-                            .patch = std.math.maxInt(u8),
-                        }))
+                        std.fmt.count("{f}", .{
+                            vsr.Release.from(.{
+                                .major = std.math.maxInt(u16),
+                                .minor = std.math.maxInt(u8),
+                                .patch = std.math.maxInt(u8),
+                            }),
+                        })
                     ]u8 = undefined;
                     encoder.put("release", .{ .string = std.fmt.bufPrint(
                         &release_buffer,
-                        "{}",
+                        "{f}",
                         .{message.release},
                     ) catch unreachable });
                     encoder.put("timestamp", .{ .int64 = @intCast(message.timestamp) });
@@ -1264,20 +1266,20 @@ const ProgressTrackerMessage = struct {
 /// Message with the body in the JSON schema.
 pub const Message = struct {
     pub const content_type = "application/json";
-
     pub const json_string_size_max = size: {
-        var counting_writer = std.io.countingWriter(std.io.null_writer);
-        std.json.stringify(
-            worse_case(Message),
-            stringify_options,
-            counting_writer.writer(),
-        ) catch unreachable;
-        break :size counting_writer.bytes_written;
-    };
-
-    const stringify_options = std.json.StringifyOptions{
-        .whitespace = .minified,
-        .emit_nonportable_numbers_as_strings = true,
+        @setEvalBranchQuota(20_000);
+        var counting_writer = std.io.Writer.Discarding.init(&.{});
+        counting_writer.writer.print("{f}", .{
+            std.json.fmt(
+                worse_case(Message),
+                .{
+                    .whitespace = .minified,
+                    .emit_nonportable_numbers_as_strings = true,
+                },
+            ),
+        }) catch unreachable;
+        counting_writer.writer.flush() catch unreachable;
+        break :size counting_writer.count;
     };
 
     timestamp: u64,
@@ -1397,12 +1399,18 @@ pub const Message = struct {
             .write = &struct {
                 fn write(context: *const anyopaque, buffer: []u8) usize {
                     const message: *const Message = @ptrCast(@alignCast(context));
-                    var fbs = std.io.fixedBufferStream(buffer);
-                    std.json.stringify(message, .{
-                        .whitespace = .minified,
-                        .emit_nonportable_numbers_as_strings = true,
-                    }, fbs.writer()) catch unreachable;
-                    return fbs.pos;
+                    var writer = std.io.Writer.fixed(buffer);
+                    writer.print("{f}", .{
+                        std.json.fmt(
+                            message,
+                            .{
+                                .whitespace = .minified,
+                                .emit_nonportable_numbers_as_strings = true,
+                            },
+                        ),
+                    }) catch unreachable;
+                    writer.flush() catch unreachable;
+                    return writer.end;
                 }
             }.write,
         };

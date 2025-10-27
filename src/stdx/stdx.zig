@@ -170,7 +170,7 @@ pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, 
 }
 
 test "disjoint_slices" {
-    const a = try std.testing.allocator.alignedAlloc(u8, @sizeOf(u32), 8 * @sizeOf(u32));
+    const a = try std.testing.allocator.alignedAlloc(u8, .of(u32), 8 * @sizeOf(u32));
     defer std.testing.allocator.free(a);
 
     const b = try std.testing.allocator.alloc(u32, 8);
@@ -341,14 +341,14 @@ pub fn log_with_timestamp(
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const date_time = DateTimeUTC.now();
 
-    const stderr = std.io.getStdErr().writer();
-    var buffered_writer = std.io.bufferedWriter(stderr);
-    const writer = buffered_writer.writer();
+    var buffer: [1024]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&buffer);
+    const writer = &stderr.interface;
 
     nosuspend {
-        date_time.format("", .{}, writer) catch return;
+        writer.print("{f}", .{date_time}) catch return;
         writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
-        buffered_writer.flush() catch return;
+        writer.flush() catch return;
     }
 }
 
@@ -359,6 +359,11 @@ pub fn log_with_timestamp(
 ///   - `T` doesn't have any non-deterministic padding,
 ///   - `T` doesn't embed any pointers.
 pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
+    if (true) {
+        // TODO: the stdx implementation sometimes crashes with "general protection exception".
+        return std.mem.eql(u8, std.mem.asBytes(a), std.mem.asBytes(b));
+    }
+
     comptime assert(has_unique_representation(T));
     comptime assert(!has_pointers(T));
     comptime assert(@sizeOf(T) * 8 == @bitSizeOf(T));
@@ -851,20 +856,14 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// Return a Formatter for a u64 value representing a file size.
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
-pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
+pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Alt(u64, format_int_size_bin_exact) {
     comptime assert(value < 1024 or value % 1024 == 0);
     return .{ .data = value };
 }
 
-fn format_int_size_bin_exact(
-    value: u64,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
+fn format_int_size_bin_exact(value: u64, writer: *std.io.Writer) !void {
     if (value == 0) {
-        return std.fmt.formatBuf("0B", options, writer);
+        return writer.writeAll("0B");
     }
 
     // The worst case in terms of space needed is 20 bytes,
@@ -883,7 +882,7 @@ fn format_int_size_bin_exact(
     const suffix = magnitudes_iec[magnitude];
 
     const length: usize = length: {
-        const i = std.fmt.formatIntBuf(&buf, value_unit, 10, .lower, .{});
+        const i = std.fmt.printInt(&buf, value_unit, 10, .lower, .{});
         if (magnitude == 0) {
             buf[i] = suffix;
             break :length i + 1;
@@ -893,17 +892,17 @@ fn format_int_size_bin_exact(
         }
     };
 
-    return std.fmt.formatBuf(buf[0..length], options, writer);
+    return writer.writeAll(buf[0..length]);
 }
 
 test fmt_int_size_bin_exact {
-    try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
-    try std.testing.expectFmt("128B", "{}", .{fmt_int_size_bin_exact(128)});
-    try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
-    try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
-    try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
-    try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
-    try std.testing.expectFmt("18014398509481983KiB", "{}", .{
+    try std.testing.expectFmt("0B", "{f}", .{fmt_int_size_bin_exact(0)});
+    try std.testing.expectFmt("128B", "{f}", .{fmt_int_size_bin_exact(128)});
+    try std.testing.expectFmt("8KiB", "{f}", .{fmt_int_size_bin_exact(8 * 1024)});
+    try std.testing.expectFmt("1025KiB", "{f}", .{fmt_int_size_bin_exact(1025 * 1024)});
+    try std.testing.expectFmt("12345KiB", "{f}", .{fmt_int_size_bin_exact(12345 * 1024)});
+    try std.testing.expectFmt("42MiB", "{f}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
+    try std.testing.expectFmt("18014398509481983KiB", "{f}", .{
         fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
     });
 }

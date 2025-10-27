@@ -572,7 +572,7 @@ pub fn main() !void {
         buffer.print("\n\n", .{});
     }
 
-    try std.io.getStdOut().writeAll(buffer.inner.items);
+    try std.fs.File.stdout().writeAll(buffer.inner.items);
 }
 
 /// Used by client code generation to make clearer APIs: the name of the Event parameter,

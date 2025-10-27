@@ -5,7 +5,7 @@ pub fn main() !void {
     _ = args.skip();
 
     var file_buffer: [150 * 1024]u8 = undefined;
-    var stdout = std.io.getStdOut().writer();
+    var stdout = std.fs.File.stdout().deprecatedWriter();
 
     while (args.next()) |page_path| {
         const html_path = args.next().?;

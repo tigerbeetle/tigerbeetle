@@ -24,7 +24,7 @@ pub const ConnectionProperties = struct {
     pub const default: ConnectionProperties = .{
         .product = "TigerBeetle",
         .version = std.fmt.comptimePrint(
-            "{}",
+            "{f}",
             .{vsr.constants.state_machine_config.release},
         ),
         // By convention, "platform" refers to the programming language.

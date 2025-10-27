@@ -161,7 +161,7 @@ const Section = struct {
             // See
             // https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#grouping-log-lines
             // https://github.com/actions/toolkit/issues/1001
-            try std.io.getStdOut().writer().print("::group::{s}\n", .{name});
+            try std.fs.File.stdout().deprecatedWriter().print("::group::{s}\n", .{name});
         }
 
         return .{
@@ -175,7 +175,7 @@ const Section = struct {
         const elapsed_ns = section.timer.lap();
         std.debug.print("{s}: {}\n", .{ section.name, std.fmt.fmtDuration(elapsed_ns) });
         if (section.ci) {
-            std.io.getStdOut().writer().print("::endgroup::\n", .{}) catch {};
+            std.fs.File.stdout().deprecatedWriter().print("::endgroup::\n", .{}) catch {};
         }
         section.* = undefined;
     }

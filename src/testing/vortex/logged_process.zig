@@ -197,7 +197,7 @@ pub const main =
     if (@import("root") != @This()) {} else struct {
         fn main() !void {
             while (true) {
-                try std.io.getStdOut().writeAll("yep\n");
+                try std.fs.File.stderr().writeAll("yep\n");
             }
         }
     }.main;

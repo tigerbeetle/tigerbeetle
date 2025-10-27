@@ -1122,7 +1122,7 @@ pub fn StateMachineType(
                     }
                     break :max .{ buffer_size_max, batch_count_max };
                 };
-            self.scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, scan_lookup_buffer_size);
+            self.scan_lookup_buffer = try allocator.alignedAlloc(u8, .@"16", scan_lookup_buffer_size);
             errdefer allocator.free(self.scan_lookup_buffer);
 
             self.scan_lookup_results = try std.ArrayListUnmanaged(u32).initCapacity(

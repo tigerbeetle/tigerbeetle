@@ -199,7 +199,7 @@ pub const MessagePool = struct {
     ) error{OutOfMemory}!MessagePool {
         const buffers = try allocator.alignedAlloc(
             [constants.message_size_max]u8,
-            constants.sector_size,
+            .fromByteUnits(constants.sector_size),
             messages_max,
         );
         errdefer allocator.free(buffers);

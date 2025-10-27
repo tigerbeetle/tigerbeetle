@@ -119,7 +119,7 @@ pub fn main() !void {
     }
 
     var tracer = try Tracer.init(gpa, time, .unknown, .{
-        .writer = if (trace_file) |file| file.writer().any() else null,
+        .writer = if (trace_file) |file| file.deprecatedWriter().any() else null,
         .statsd_options = if (statsd_address) |address| .{
             .udp = .{
                 .io = &io,
@@ -164,23 +164,23 @@ pub fn main() !void {
         .benchmark => |*args| try benchmark_driver.command_benchmark(gpa, &io, time, args),
         .inspect => |*args| try inspect.command_inspect(gpa, &io, &tracer, args),
         .multiversion => |*args| {
-            var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-            var stdout_writer = stdout_buffer.writer();
-            const stdout = stdout_writer.any();
+            var stdout_buffer: [1024]u8 = undefined;
+            var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+            const stdout = &stdout_writer.interface;
 
             try vsr.multiversion.print_information(gpa, args.path, stdout);
-            try stdout_buffer.flush();
+            try stdout.flush();
         },
         .amqp => |*args| try command_amqp(gpa, time, args),
     }
 }
 
 fn command_version(gpa: mem.Allocator, verbose: bool) !void {
-    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-    var stdout_writer = stdout_buffer.writer();
-    const stdout = stdout_writer.any();
+    var buffer: [1024]u8 = undefined;
+    var writer_buffered = std.fs.File.stdout().writer(&buffer);
+    const stdout = &writer_buffered.interface;
 
-    try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
+    try stdout.print("TigerBeetle version {f}\n", .{constants.semver});
 
     if (verbose) {
         try stdout.writeAll("\n");
@@ -213,7 +213,7 @@ fn command_version(gpa: mem.Allocator, verbose: bool) !void {
 
         vsr.multiversion.print_information(gpa, self_exe_path, stdout) catch {};
     }
-    try stdout_buffer.flush();
+    try stdout.flush();
 }
 
 fn command_format(
@@ -307,7 +307,7 @@ fn command_start(
         if (constants.config.process.release.value ==
             vsr.multiversion.Release.minimum.value)
         {
-            log.info("multiversioning: upgrades disabled for development ({}) release.", .{
+            log.info("multiversioning: upgrades disabled for development ({f}) release.", .{
                 constants.config.process.release,
             });
             break :blk .single_release(constants.config.process.release);
@@ -336,8 +336,8 @@ fn command_start(
         break :blk multiversion_os.?.multiversion();
     };
 
-    log.info("release={}", .{config.process.release});
-    log.info("release_client_min={}", .{config.process.release_client_min});
+    log.info("release={f}", .{config.process.release});
+    log.info("release_client_min={f}", .{config.process.release_client_min});
     log.info("releases_bundled={any}", .{multiversion.releases_bundled().slice()});
     log.info("git_commit={?s}", .{config.process.git_commit});
 
@@ -420,7 +420,7 @@ fn command_start(
         @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, MiB),
     });
 
-    log.info("{}: cluster={}: listening on {}", .{
+    log.info("{}: cluster={}: listening on {f}", .{
         replica.replica,
         replica.cluster,
         replica.message_bus.process.accept_address,
@@ -454,8 +454,8 @@ fn command_start(
     // - tigerbeetle process exits when its stdin gets closed.
     if (args.addresses_zero) {
         const port_actual = replica.message_bus.process.accept_address.getPort();
-        const stdout = std.io.getStdOut();
-        try stdout.writer().print("{}\n", .{port_actual});
+        const stdout = std.fs.File.stdout();
+        try stdout.deprecatedWriter().print("{}\n", .{port_actual});
         stdout.close();
 
         // While it is possible to integrate stdin with our io_uring loop, using a dedicated
@@ -464,7 +464,7 @@ fn command_start(
         const watchdog = try std.Thread.spawn(.{}, struct {
             fn thread_main() void {
                 var buf: [1]u8 = .{0};
-                _ = std.io.getStdIn().read(&buf) catch {};
+                _ = std.fs.File.stdin().read(&buf) catch {};
                 log.info("stdin closed, exiting", .{});
                 std.process.exit(0);
             }
@@ -610,13 +610,13 @@ fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !
 }
 
 fn print_value(
-    writer: anytype,
+    writer: *std.io.Writer,
     field: []const u8,
     value: anytype,
 ) !void {
     if (@TypeOf(value) == ?[40]u8) {
         assert(std.mem.eql(u8, field, "process.git_commit"));
-        return std.fmt.format(writer, "{s}=\"{?s}\"\n", .{
+        return writer.print("{s}=\"{?s}\"\n", .{
             field,
             value,
         });
@@ -624,11 +624,11 @@ fn print_value(
 
     switch (@typeInfo(@TypeOf(value))) {
         .@"fn" => {}, // Ignore the log() function.
-        .pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+        .pointer => try writer.print("{s}=\"{f}\"\n", .{
             field,
-            std.fmt.fmtSliceEscapeLower(value),
+            std.ascii.hexEscape(value, .lower),
         }),
-        else => try std.fmt.format(writer, "{s}={any}\n", .{
+        else => try writer.print("{s}={any}\n", .{
             field,
             value,
         }),

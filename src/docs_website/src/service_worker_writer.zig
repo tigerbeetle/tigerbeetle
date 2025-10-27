@@ -57,5 +57,5 @@ fn write_service_worker(
         .files_to_cache = file_paths_json,
     });
 
-    try std.io.getStdOut().writer().print("{s}", .{html.string()});
+    try std.fs.File.stdout().writer().print("{s}", .{html.string()});
 }

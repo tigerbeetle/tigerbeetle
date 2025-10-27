@@ -57,7 +57,7 @@ const TimeIt = struct {
 /// dbg prints the value with the prefix, while also returning the value, which makes it convenient
 /// to drop it in the middle of a complex expression.
 pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
-    std.debug.print("{s} = {any}\n", .{
+    std.debug.print("{s} = {f}\n", .{
         prefix,
         std.json.fmt(value, .{ .whitespace = .indent_2 }),
     });

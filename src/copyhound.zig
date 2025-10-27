@@ -62,7 +62,7 @@ pub fn main() !void {
     var buf_reader = std.io.bufferedReader(stdin.reader());
     var in_stream = buf_reader.reader();
 
-    const stdout = std.io.getStdOut();
+    const stdout = std.fs.File.stdout();
     var buf_writer = std.io.bufferedWriter(stdout.writer());
     defer buf_writer.flush() catch {};
 
@@ -196,7 +196,7 @@ test "extract_memcpy_size" {
 /// Format and print an error message followed by the usage string to stderr,
 /// then exit with an exit code of 1.
 pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
-    const stderr = std.io.getStdErr().writer();
+    const stderr = std.fs.File.stderr().deprecatedWriter();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
     std.posix.exit(1);
 }

@@ -43,8 +43,8 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
 
 const zig_version = std.SemanticVersion{
     .major = 0,
-    .minor = 14,
-    .patch = 1,
+    .minor = 15,
+    .patch = 2,
 };
 
 comptime {
@@ -54,7 +54,7 @@ comptime {
         (zig_version.patch == builtin.zig_version.patch);
     if (!zig_version_eq) {
         @compileError(std.fmt.comptimePrint(
-            "unsupported zig version: expected {}, found {}",
+            "unsupported zig version: expected {f}, found {f}",
             .{ zig_version, builtin.zig_version },
         ));
     }
@@ -677,6 +677,7 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     const tigerbeetle = b.addExecutable(.{
         .name = "tigerbeetle",
         .root_module = root_module,
+        .use_llvm = null, // TODO: Zig or LLVM backend for debug?
     });
 
     return tigerbeetle;
@@ -1800,7 +1801,7 @@ fn build_clients_c_sample(
         static_lib.linkSystemLibrary("advapi32");
 
         // TODO: Illegal instruction on Windows:
-        sample.root_module.sanitize_c = false;
+        sample.root_module.sanitize_c = .off;
     }
 
     const install_step = b.addInstallArtifact(sample, .{});
@@ -1841,7 +1842,7 @@ fn print_or_install(b: *std.Build, compile: *std.Build.Step.Compile, print: bool
         fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
             const print_step: *@This() = @fieldParentPtr("step", step);
             const path = print_step.compile.getEmittedBin().getPath2(step.owner, step);
-            try std.io.getStdOut().writer().print("{s}\n", .{path});
+            try std.fs.File.stdout().deprecatedWriter().print("{s}\n", .{path});
         }
     };
 
