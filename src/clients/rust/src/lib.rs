@@ -412,9 +412,9 @@ impl Client {
     /// The results of events are represented individually. There are two
     /// related event result types: `CreateAccountStatus` is the enum of
     /// possible outcomes, and `CreateAccountResult` which includes both the
-    /// `result` enum and the `timestamp` when the event was processed.
+    /// `status` enum and the `timestamp` when the event was processed.
     ///
-    /// Note that a result of `CreateAccountStatus::Exists` should often be treated
+    /// Note that a status of `CreateAccountStatus::Exists` should often be treated
     /// the same as `CreateAccountStatus::Created`, as it also returns the same `timestamp`
     //  of the original account. This result can happen in cases of application crashes
     /// or other scenarios where requests have been replayed.
@@ -518,9 +518,9 @@ impl Client {
     /// The results of events are represented individually. There are two
     /// related event result types: `CreateTransferStatus` is the enum of
     /// possible outcomes, and `CreateTransferResult` which includes both the
-    /// `result` enum and the `timestamp` when the event was processed.
+    /// `status` enum and the `timestamp` when the event was processed.
     ///
-    /// Note that a result of `CreateTransferStatus::Exists` should often be treated
+    /// Note that a status of `CreateTransferStatus::Exists` should often be treated
     /// the same as `CreateTransferStatus::Created`, as it also returns the same `timestamp`
     /// of the original transfer. This result can happen in cases of application crashes
     /// or other scenarios where requests have been replayed.

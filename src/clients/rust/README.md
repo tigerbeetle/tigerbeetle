@@ -100,7 +100,7 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account).
 
 ```rust
-let account_errors = client
+let account_results = client
     .create_accounts(&[tb::Account {
         id: tb::id(),
         ledger: 1,
@@ -108,7 +108,7 @@ let account_errors = client
         ..Default::default()
     }])
     .await?;
-// Error handling omitted.
+// Result handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -149,8 +149,8 @@ let account1 = tb::Account {
     ..Default::default()
 };
 
-let account_errors = client.create_accounts(&[account0, account1]).await?;
-// Error handling omitted.
+let account_results = client.create_accounts(&[account0, account1]).await?;
+// Result handling omitted.
 ```
 
 ### Response and Errors
@@ -187,31 +187,34 @@ let account2 = tb::Account {
     ..Default::default()
 };
 
-let account_errors = client
+let account_results = client
     .create_accounts(&[account0, account1, account2])
     .await?;
 
-assert!(account_errors.len() <= 3);
-
-for err in account_errors {
-    match err.result {
-        tb::CreateAccountResult::Exists => {
-            println!("Batch account at {} already exists.", err.index);
+assert!(account_results.len() == 3);
+for (index, result) in account_results.into_iter().enumerate() {
+    match result.status {
+        tb::CreateAccountStatus::Created => {
+            println!(
+                "Batch account at {} successfully created with timestamp {}",
+                index, result.timestamp
+            );
+        }
+        tb::CreateAccountStatus::Exists => {
+            println!(
+                "Batch account at {} already exists with timestamp {}.",
+                index, result.timestamp
+            );
         }
         _ => {
             println!(
                 "Batch account at {} failed to create: {:?}",
-                err.index, err.result
+                index, result.status
             );
         }
     }
 }
 ```
-
-To handle errors, iterate over the `Vec<CreateAccountsResult>` returned
-from `client.create_accounts()`. Each result contains an `index` field
-to map back to the input account and a `result` field with the
-`CreateAccountResult` enum.
 
 ## Account Lookup
 
@@ -246,8 +249,8 @@ let transfers = vec![tb::Transfer {
     ..Default::default()
 }];
 
-let transfer_errors = client.create_transfers(&transfers).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&transfers).await?;
+// Result handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -298,27 +301,31 @@ let transfers = vec![
     },
 ];
 
-let transfer_errors = client.create_transfers(&transfers).await?;
-
-for err in transfer_errors {
-    match err.result {
-        tb::CreateTransferResult::Exists => {
-            println!("Batch transfer at {} already exists.", err.index);
+let transfer_results = client.create_transfers(&transfers).await?;
+assert!(transfer_results.len() == transfers.len());
+for (index, result) in transfer_results.into_iter().enumerate() {
+    match result.status {
+        tb::CreateTransferStatus::Created => {
+            println!(
+                "Batch transfer at {} successfully created with timestamp {}",
+                index, result.timestamp
+            );
+        }
+        tb::CreateTransferStatus::Exists => {
+            println!(
+                "Batch transfer at {} already exists with timestamp {}.",
+                index, result.timestamp
+            );
         }
         _ => {
             println!(
                 "Batch transfer at {} failed to create: {:?}",
-                err.index, err.result
+                index, result.status
             );
         }
     }
 }
 ```
-
-To handle transfer errors, iterate over the `Vec<CreateTransfersResult>`
-returned from `client.create_transfers()`. Each result contains an
-`index` field to map back to the input transfer and a `result` field
-with the `CreateTransferResult` enum.
 
 ## Batching
 
@@ -332,15 +339,6 @@ as possible in a single call.
 For example, if you insert 1 million transfers sequentially, one at a time,
 the insert rate will be a *fraction* of the potential, because the client will
 wait for a reply between each one.
-
-```rust
-let batch: Vec<tb::Transfer> = vec![];
-for transfer in &batch {
-    let transfer_errors = client.create_transfers(&[*transfer]).await?;
-    // Error handling omitted.
-}
-```
-
 Instead, **always batch as much as you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default is 8189.
@@ -349,8 +347,8 @@ The maximum batch size is set in the TigerBeetle server. The default is 8189.
 let transfers: Vec<tb::Transfer> = vec![];
 const BATCH_SIZE: usize = 8189;
 for batch in transfers.chunks(BATCH_SIZE) {
-    let transfer_errors = client.create_transfers(batch).await?;
-    // Error handling omitted.
+    let transfer_results = client.create_transfers(batch).await?;
+    // Result handling omitted.
 }
 ```
 
@@ -401,8 +399,8 @@ let transfer1 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_errors = client.create_transfers(&[transfer0, transfer1]).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&[transfer0, transfer1]).await?;
+// Result handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -432,8 +430,8 @@ let transfer0 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_errors = client.create_transfers(&[transfer0]).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&[transfer0]).await?;
+// Result handling omitted.
 
 let transfer1 = tb::Transfer {
     id: 7,
@@ -443,8 +441,8 @@ let transfer1 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_errors = client.create_transfers(&[transfer1]).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&[transfer1]).await?;
+// Result handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -466,8 +464,8 @@ let transfer0 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_errors = client.create_transfers(&[transfer0]).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&[transfer0]).await?;
+// Result handling omitted.
 
 let transfer1 = tb::Transfer {
     id: 9,
@@ -477,8 +475,8 @@ let transfer1 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_errors = client.create_transfers(&[transfer1]).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&[transfer1]).await?;
+// Result handling omitted.
 ```
 
 ## Transfer Lookup
@@ -695,8 +693,8 @@ batch.push(tb::Transfer {
     ..Default::default()
 });
 
-let transfer_errors = client.create_transfers(&batch).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&batch).await?;
+// Result handling omitted.
 ```
 
 ## Imported Events
@@ -734,8 +732,8 @@ for (index, mut account) in historical_accounts.into_iter().enumerate() {
     accounts_batch.push(account);
 }
 
-let account_errors = client.create_accounts(&accounts_batch).await?;
-// Error handling omitted.
+let account_results = client.create_accounts(&accounts_batch).await?;
+// Result handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
 let mut transfers_batch = vec![];
@@ -753,8 +751,8 @@ for (index, mut transfer) in historical_transfers.into_iter().enumerate() {
     transfers_batch.push(transfer);
 }
 
-let transfer_errors = client.create_transfers(&transfers_batch).await?;
-// Error handling omitted.
+let transfer_results = client.create_transfers(&transfers_batch).await?;
+// Result handling omitted.
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
 ```
