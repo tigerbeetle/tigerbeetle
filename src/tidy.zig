@@ -214,6 +214,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "switch on error to avoid silent anyerror upcast";
     }
 
+    if (std.mem.indexOf(u8, source, "posix." ++ "send(") != null) {
+        return "use posix.sendto() to avoid connection race condition";
+    }
+
     return null;
 }
 

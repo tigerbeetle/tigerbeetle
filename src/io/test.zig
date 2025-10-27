@@ -581,45 +581,8 @@ test "tick to wait" {
             self.received = true;
         }
 
-        // TODO: use posix.send() instead when it gets fixed for windows.
         fn os_send(sock: posix.socket_t, buf: []const u8, flags: u32) !usize {
-            if (builtin.target.os.tag != .windows) {
-                return posix.send(sock, buf, flags);
-            }
-
-            const rc = os.windows.sendto(sock, buf.ptr, buf.len, flags, null, 0);
-            if (rc == os.windows.ws2_32.SOCKET_ERROR) {
-                switch (os.windows.ws2_32.WSAGetLastError()) {
-                    .WSAEACCES => return error.AccessDenied,
-                    .WSAEADDRNOTAVAIL => return error.AddressNotAvailable,
-                    .WSAECONNRESET => return error.ConnectionResetByPeer,
-                    .WSAEMSGSIZE => return error.MessageTooBig,
-                    .WSAENOBUFS => return error.SystemResources,
-                    .WSAENOTSOCK => return error.FileDescriptorNotASocket,
-                    .WSAEAFNOSUPPORT => return error.AddressFamilyNotSupported,
-                    .WSAEDESTADDRREQ => unreachable, // A destination address is required.
-                    // The lpBuffers, lpTo, lpOverlapped, lpNumberOfBytesSent,
-                    // or lpCompletionRoutine parameters are not part of the user address space,
-                    // or the lpTo parameter is too small.
-                    .WSAEFAULT => unreachable,
-                    .WSAEHOSTUNREACH => return error.NetworkUnreachable,
-                    // TODO: WSAEINPROGRESS, WSAEINTR
-                    .WSAEINVAL => unreachable,
-                    .WSAENETDOWN => return error.NetworkSubsystemFailed,
-                    .WSAENETRESET => return error.ConnectionResetByPeer,
-                    .WSAENETUNREACH => return error.NetworkUnreachable,
-                    .WSAENOTCONN => return error.SocketNotConnected,
-                    // The socket has been shut down; it is not possible to WSASendTo on a socket
-                    // after shutdown has been invoked with how set to SD_SEND or SD_BOTH.
-                    .WSAESHUTDOWN => unreachable,
-                    .WSAEWOULDBLOCK => return error.WouldBlock,
-                    // A successful WSAStartup call must occur before using this function.
-                    .WSANOTINITIALISED => unreachable,
-                    else => |err| return os.windows.unexpectedWSAError(err),
-                }
-            } else {
-                return @intCast(rc);
-            }
+            return posix.sendto(sock, buf, flags, null, 0);
         }
     }.run_test();
 }

@@ -198,7 +198,7 @@ pub fn linux_ip_link_loopback() !void {
     };
 
     const msg_buf = std.mem.asBytes(&msg);
-    const sent_len = std.posix.send(sock, msg_buf, 0) catch |err| {
+    const sent_len = std.posix.sendto(sock, msg_buf, 0, null, 0) catch |err| {
         log.err("failed to send netlink message: {}", .{err});
         return error.IpLink;
     };
