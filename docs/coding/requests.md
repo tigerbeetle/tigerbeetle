@@ -35,7 +35,7 @@ Each request has a corresponding _event_ and _result_ type:
 | Request Type            | Event                                                                 | Result                                                                              |
 | ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `create_accounts`       | [`Account`](../reference/requests/create_accounts.md#event)           | [`CreateAccountResult`](../reference/requests/create_accounts.md#result)            |
-| `create_transfers`      | [`Transfer`](../reference/requests/create_transfers.md#event)         | [`CreateAccountResult`](../reference/requests/create_transfers.md#result)           |
+| `create_transfers`      | [`Transfer`](../reference/requests/create_transfers.md#event)         | [`CreateTransferResult`](../reference/requests/create_transfers.md#result)          |
 | `lookup_accounts`       | [`Account.id`](../reference/requests/lookup_accounts.md#event)        | [`Account`](../reference/requests/lookup_accounts.md#result) or nothing             |
 | `lookup_transfers`      | [`Transfer.id`](../reference/requests/lookup_transfers.md#event)      | [`Transfer`](../reference/requests/lookup_transfers.md#result) or nothing           |
 | `get_account_transfers` | [`AccountFilter`](../reference/account-filter.md)                     | [`Transfer`](../reference/requests/get_account_transfers.md#result) or nothing      |
