@@ -1160,10 +1160,16 @@ pub const IO = struct {
     /// Best effort to synchronously transfer bytes to the kernel.
     pub fn send_now(self: *IO, socket: socket_t, buffer: []const u8) ?usize {
         _ = self;
-        return posix.send(
+        // posix.send is a thin wrapper around posix.sendto() that assumes the socket is connected
+        // and has an `unreachable` on eg NetworkUnreachable and a few others. Tring to check this
+        // before using the socket is race prone, so rather use sendto() directly to correctly
+        // handle those cases.
+        return posix.sendto(
             socket,
             buffer,
             posix.MSG.DONTWAIT | posix.MSG.NOSIGNAL,
+            null,
+            0,
         ) catch |err| switch (err) {
             error.WouldBlock => return null,
             // To avoid duplicating error handling, force the caller to fallback to normal send.
