@@ -303,7 +303,7 @@ fn emit_struct_dataclass(
     buffer: *Buffer,
     comptime type_info: anytype,
     comptime python_name: []const u8,
-    skip_initialization: bool,
+    has_default_initialization: bool,
 ) !void {
     buffer.print("@dataclass\n", .{});
     buffer.print("class {s}:\n", .{python_name});
@@ -317,28 +317,27 @@ fn emit_struct_dataclass(
                 .python_type = python_type,
             });
 
-            if (skip_initialization) {
-                buffer.print("\n", .{});
-            } else {
+            if (has_default_initialization) {
                 buffer.print(" = ", .{});
                 if (field_type_info == .@"struct" and
                     field_type_info.@"struct".layout == .@"packed")
                 {
                     // Flags:
-                    buffer.print("{s}.NONE\n", .{python_type});
+                    buffer.print("{s}.NONE", .{python_type});
                 } else {
                     if (field_type_info == .@"enum") {
                         // Enums - initialized with the default value.
-                        buffer.print("{s}.{s}\n", .{
+                        buffer.print("{s}.{s}", .{
                             python_type,
                             to_uppercase(@tagName(@as(field.type, @enumFromInt(0)))),
                         });
                     } else {
                         // Simple integer types:
-                        buffer.print("0\n", .{});
+                        buffer.print("0", .{});
                     }
                 }
             }
+            buffer.print("\n", .{});
         }
     }
 
@@ -465,9 +464,9 @@ pub fn main() !void {
     // Emit dataclass declarations
     inline for (mappings_state_machine) |type_mapping| {
         const ZigType, const python_name = type_mapping;
-        const skip_initialization = switch (ZigType) {
-            tb.CreateAccountResult, tb.CreateTransferResult, tb.AccountBalance => true,
-            else => false,
+        const has_default_initialization = switch (ZigType) {
+            tb.CreateAccountResult, tb.CreateTransferResult, tb.AccountBalance => false,
+            else => true,
         };
 
         // Enums, non-extern structs and everything else have been emitted by the first pass.
@@ -477,7 +476,7 @@ pub fn main() !void {
                     &buffer,
                     info,
                     python_name,
-                    skip_initialization,
+                    has_default_initialization,
                 ),
                 else => {},
             },

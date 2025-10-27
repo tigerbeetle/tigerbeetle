@@ -21,8 +21,7 @@
 //!    * the results (result count * size of result pair), where each pair holds an index and a
 //!      result enum value (see `src/tigerbeetle.zig`)
 //! 3. The workload receives the results, and expects them to be of the same operation type as
-//!    originally requested. There might be fewer results than events, because clients can omit
-//!    .created results.
+//!    originally requested.
 //!
 //! Additionally, the workload itself sends `Progress` events on its stdout back to the supervisor.
 //! This is used for tracing and liveness checks.
@@ -160,11 +159,11 @@ fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
 fn reconcile(result: Result, command: *const Command, model: *Model) !void {
     switch (result) {
         .create_accounts => |account_results| {
-            const accounts_new = command.create_accounts;
-            assert(account_results.len == accounts_new.len);
+            const accounts = command.create_accounts;
+            assert(account_results.len == accounts.len);
 
             for (
-                accounts_new,
+                accounts,
                 account_results,
                 0..,
             ) |account, account_result, index| {
@@ -182,6 +181,8 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
         },
         .create_transfers => |transfer_results| {
             const transfers = command.create_transfers;
+            assert(transfer_results.len == transfers.len);
+
             // Collect all successful transfer IDs.
             var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
 

@@ -120,7 +120,7 @@ async function main_seeds() {
     } else if (record.fuzzer === "vopr" && is_release(record)) {
       include = true;
     } else {
-      include = (!record.created || pull_request_number(record) !== undefined) &&
+      include = (!record.ok || pull_request_number(record) !== undefined) &&
         !fuzzers_with_failures.has(record.branch + record.fuzzer);
       if (include) fuzzers_with_failures.add(record.branch + record.fuzzer);
     }
@@ -140,7 +140,7 @@ async function main_seeds() {
 
     const row_dom = document.createElement("tr");
 
-    let seed_success = record.fuzzer === "canary" ? !record.created : record.created;
+    let seed_success = record.fuzzer === "canary" ? !record.ok : record.ok;
     if (canery_is_stale) seed_success = false;
     if (seed_success) {
       row_dom.classList.add("success");
@@ -196,7 +196,7 @@ async function main_seeds() {
     if (is_main(record)) {
       if (record.fuzzer === "canary") {
         main_branch_canary += record.count;
-      } else if (record.created) {
+      } else if (record.ok) {
         main_branch_ok += record.count;
       } else {
         main_branch_fail += record.count;
