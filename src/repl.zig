@@ -57,6 +57,8 @@ pub fn ReplType(comptime MessageBus: type) type {
         message_pool: *MessagePool,
         io: *IO,
 
+        statement_buffer: std.ArrayListUnmanaged(u8),
+
         static_allocator: StaticAllocator,
 
         const Repl = @This();
@@ -110,8 +112,6 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
         }
 
-        const prompt = "> ";
-
         fn redraw_line(repl: *const Repl, prompt_str: []const u8) !void {
             const buf = repl.line_editor.get_buffer();
             const prompt_len = prompt_str.len;
@@ -136,6 +136,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn read_until_newline_or_eof(
             repl: *Repl,
+            prompt_str: []const u8,
         ) !?[]const u8 {
             repl.line_editor.clear();
             repl.buffer_outside_history.clear();
@@ -156,19 +157,19 @@ pub fn ReplType(comptime MessageBus: type) type {
                             return null;
                         }
                         repl.line_editor.delete();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrlc => {
                         // Move to end of line, print "^C" and abort the command.
                         repl.line_editor.move_end();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                         try repl.terminal.print("^C\n", .{});
                         repl.line_editor.clear();
                         return &.{};
                     },
                     .newline => {
                         repl.line_editor.move_end();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                         try repl.terminal.print("\n", .{});
                         return repl.line_editor.get_buffer();
                     },
@@ -177,30 +178,30 @@ pub fn ReplType(comptime MessageBus: type) type {
                             continue;
                         }
                         repl.line_editor.insert_char(character);
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .backspace => {
                         repl.line_editor.backspace();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .delete => {
                         repl.line_editor.delete();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     // Tab completion skipped for this implementation
                     .tab => {},
                     .left, .ctrlb => {
                         repl.line_editor.move_left();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .right, .ctrlf => {
                         repl.line_editor.move_right();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .up, .ctrlp => if (history_index > 0) {
                         const history_index_next = history_index - 1;
                         const buffer_next_full = repl.history.get_ptr(history_index_next).?;
-                        const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
+                        const buffer_next = std.mem.sliceTo(buffer_next_full, 0);
 
                         if (history_index == repl.history.count) {
                             repl.buffer_outside_history.clear();
@@ -208,7 +209,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                         try repl.line_editor.set_content(buffer_next);
                         history_index = history_index_next;
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .down, .ctrln => if (history_index < repl.history.count) {
                         const history_index_next = history_index + 1;
@@ -217,30 +218,30 @@ pub fn ReplType(comptime MessageBus: type) type {
                             repl.buffer_outside_history.const_slice()
                         else brk: {
                             const buffer_next_full = repl.history.get_ptr(history_index_next).?;
-                            const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
+                            const buffer_next = std.mem.sliceTo(buffer_next_full, 0);
                             break :brk buffer_next;
                         };
 
                         history_index = history_index_next;
 
                         try repl.line_editor.set_content(buffer_next);
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .altf, .ctrlright => {
                         repl.line_editor.move_forward_by_word();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .altb, .ctrlleft => {
                         repl.line_editor.move_backward_by_word();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrla, .home => {
                         repl.line_editor.move_home();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrle, .end => {
                         repl.line_editor.move_end();
-                        try redraw_line(repl, prompt);
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrlk => {
                         // Clear screen from cursor.
@@ -250,7 +251,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // Move to 0,0 and clear the screen from cursor, print the prompt, then ask
                         // the terminal for the new position.
                         try repl.terminal.print("\x1b[0;0H\x1b[J", .{});
-                        try repl.terminal.print(prompt, .{});
+                        try repl.terminal.print_string(prompt_str);
                         terminal_screen = try repl.terminal.get_screen();
 
                         // Print whatever is in the buffer and move the cursor back to cursor.
@@ -296,8 +297,10 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
-            try repl.terminal.print(prompt, .{});
-            const input = repl.read_until_newline_or_eof() catch |err| {
+            const prompt_str = if (repl.statement_buffer.items.len == 0) "> " else "... ";
+            try repl.terminal.print_string(prompt_str);
+
+            const input = repl.read_until_newline_or_eof(prompt_str) catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -307,74 +310,88 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             };
 
-            if (input.len > 0) {
-                const add_to_history = brk: {
-                    const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
-                    const last_entry_str = std.mem.sliceTo(last_entry, '\x00');
-                    break :brk !std.mem.eql(u8, last_entry_str, input);
-                };
+            const allocator = repl.static_allocator.allocator();
+            try repl.statement_buffer.appendSlice(allocator, input);
+            try repl.statement_buffer.append(allocator, '\n');
 
-                if (add_to_history) {
-                    // NB: Avoiding big stack allocations below.
+            if (std.mem.indexOf(u8, repl.statement_buffer.items, ";")) |_| {
+                // Parse the accumulated statement
+                const statement = Parser.parse_statement(
+                    repl.statement_buffer.items,
+                    &repl.terminal,
+                    arguments,
+                ) catch |err| {
+                    switch (err) {
+                        // These are parsing errors, so the REPL should
+                        // not continue to execute this statement but can
+                        // still accept new statements.
+                        Parser.Error.IdentifierBad,
+                        Parser.Error.OperationBad,
+                        Parser.Error.ValueBad,
+                        Parser.Error.KeyValuePairBad,
+                        Parser.Error.KeyValuePairEqualMissing,
+                        Parser.Error.SyntaxMatchNone,
+                        Parser.Error.SliceOperationUnsupported,
+                        => {
+                            repl.statement_buffer.clearRetainingCapacity();
+                            return;
+                        },
 
-                    assert(input.len < repl_history_entry_bytes_with_nul);
-
-                    if (repl.history.full()) {
-                        repl.history.advance_head();
+                        // An unexpected error for which we do
+                        // want the stacktrace.
+                        error.AccessDenied,
+                        error.BrokenPipe,
+                        error.ConnectionResetByPeer,
+                        error.DeviceBusy,
+                        error.DiskQuota,
+                        error.FileTooBig,
+                        error.InputOutput,
+                        error.InvalidArgument,
+                        error.LockViolation,
+                        error.NoSpaceLeft,
+                        error.NotOpenForWriting,
+                        error.OperationAborted,
+                        error.OutOfMemory,
+                        error.SystemResources,
+                        error.Unexpected,
+                        error.WouldBlock,
+                        error.NoDevice,
+                        error.ProcessNotFound,
+                        => {
+                            repl.statement_buffer.clearRetainingCapacity();
+                            return err;
+                        },
                     }
-                    const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
-                        repl.history.next_tail_ptr().?;
-                    @memset(history_tail, '\x00');
-                    stdx.copy_left(.inexact, u8, history_tail, input);
-                    repl.history.advance_tail();
+                };
+                try repl.do_statement(statement);
+                // Add to history if successful
+                if (repl.statement_buffer.items.len > 0) {
+                    const history_input = std.mem.trimRight(u8, repl.statement_buffer.items, "\n");
+                    if (history_input.len > 0) {
+                        const add_to_history = brk: {
+                            const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
+                            const last_entry_str = std.mem.sliceTo(last_entry, 0);
+                            break :brk !std.mem.eql(u8, last_entry_str, history_input);
+                        };
+
+                        if (add_to_history) {
+                            // NB: Avoiding big stack allocations below.
+
+                            if (history_input.len < repl_history_entry_bytes_with_nul) {
+                                if (repl.history.full()) {
+                                    repl.history.advance_head();
+                                }
+                                const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
+                                    repl.history.next_tail_ptr().?;
+                                @memset(history_tail, 0);
+                                stdx.copy_left(.inexact, u8, history_tail, history_input);
+                                repl.history.advance_tail();
+                            }
+                        }
+                    }
                 }
+                repl.statement_buffer.clearRetainingCapacity();
             }
-
-            const statement = Parser.parse_statement(
-                input,
-                &repl.terminal,
-                arguments,
-            ) catch |err| {
-                switch (err) {
-                    // These are parsing errors, so the REPL should
-                    // not continue to execute this statement but can
-                    // still accept new statements.
-                    Parser.Error.IdentifierBad,
-                    Parser.Error.OperationBad,
-                    Parser.Error.ValueBad,
-                    Parser.Error.KeyValuePairBad,
-                    Parser.Error.KeyValuePairEqualMissing,
-                    Parser.Error.SyntaxMatchNone,
-                    Parser.Error.SliceOperationUnsupported,
-                    // TODO(zig): This will be more convenient to express
-                    // once https://github.com/ziglang/zig/issues/2473 is
-                    // in.
-                    => return,
-
-                    // An unexpected error for which we do
-                    // want the stacktrace.
-                    error.AccessDenied,
-                    error.BrokenPipe,
-                    error.ConnectionResetByPeer,
-                    error.DeviceBusy,
-                    error.DiskQuota,
-                    error.FileTooBig,
-                    error.InputOutput,
-                    error.InvalidArgument,
-                    error.LockViolation,
-                    error.NoSpaceLeft,
-                    error.NotOpenForWriting,
-                    error.OperationAborted,
-                    error.OutOfMemory,
-                    error.SystemResources,
-                    error.Unexpected,
-                    error.WouldBlock,
-                    error.NoDevice,
-                    error.ProcessNotFound,
-                    => return err,
-                }
-            };
-            try repl.do_statement(statement);
         }
 
         fn display_help(repl: *Repl) !void {
@@ -412,6 +429,12 @@ pub fn ReplType(comptime MessageBus: type) type {
                 constants.message_body_size_max,
             );
             errdefer arguments.deinit(allocator);
+
+            var statement_buffer = try std.ArrayListUnmanaged(u8).initCapacity(
+                allocator,
+                constants.message_body_size_max,
+            );
+            errdefer statement_buffer.deinit(allocator);
 
             var message_pool = try allocator.create(MessagePool);
             errdefer allocator.destroy(message_pool);
@@ -456,6 +479,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .arguments = arguments,
                 .message_pool = message_pool,
                 .io = io,
+                .statement_buffer = statement_buffer,
                 .static_allocator = static_allocator,
             };
         }
@@ -468,6 +492,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl.message_pool.deinit(allocator);
             allocator.destroy(repl.message_pool);
             repl.arguments.deinit(allocator);
+            repl.statement_buffer.deinit(allocator);
         }
 
         pub fn run(repl: *Repl, statements: []const u8) !void {
