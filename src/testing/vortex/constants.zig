@@ -23,13 +23,4 @@ pub const vortex = struct {
         }
         break :brk ports;
     };
-
-    pub const replica_ports_proxied = brk: {
-        var ports: [constants.vsr.replicas_max]u16 = undefined;
-        var replica_num: u16 = 0;
-        while (replica_num < constants.vsr.replicas_max) : (replica_num += 1) {
-            ports[replica_num] = 3000 + replica_num;
-        }
-        break :brk ports;
-    };
 };

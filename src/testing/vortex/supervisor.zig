@@ -12,7 +12,7 @@
 //! If the workload exits successfully, or is actively terminated, the whole vortex exits
 //! successfully.
 //!
-//! To launch a one-minute smoke test, run this command from the repository root:
+//! To launch a one-second smoke test, run this command from the repository root:
 //!
 //!     $ zig build test:integration -- "vortex smoke"
 //!
@@ -55,65 +55,6 @@ const Shell = @import("../../shell.zig");
 const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
-
-const replica_ports_actual = constants.vortex.replica_ports_actual;
-const replica_ports_proxied = constants.vortex.replica_ports_proxied;
-
-// Calculate replica ports for each replica. Because
-// we want replicas to communicate over the proxies, we use those ports
-// for their peers, but we must use the replica's actual port for itself
-// (because that's the port it listens to).
-const replica_ports_for_replicas = blk: {
-    var result: [constants.vsr.replicas_max][constants.vsr.replicas_max]u16 = undefined;
-    for (0..constants.vsr.replicas_max) |replica_self| {
-        var ports: [constants.vsr.replicas_max]u16 = undefined;
-        for (0..constants.vsr.replicas_max) |replica_other| {
-            ports[replica_other] = if (replica_self == replica_other)
-                replica_ports_actual[replica_other]
-            else
-                replica_ports_proxied[replica_other];
-        }
-        result[replica_self] = ports;
-    }
-    break :blk result;
-};
-
-fn replica_addresses_for_replica(
-    allocator: std.mem.Allocator,
-    replica_count: u8,
-    replica_index: u8,
-) ![]const u8 {
-    return try comma_separate_ports(
-        allocator,
-        replica_ports_for_replicas[replica_index][0..replica_count],
-    );
-}
-
-fn replica_addresses_for_clients(
-    allocator: std.mem.Allocator,
-    replica_count: u8,
-) ![]const u8 {
-    return try comma_separate_ports(allocator, replica_ports_proxied[0..replica_count]);
-}
-
-// For the Chrome trace file, we need to assign process IDs to all logical
-// processes in the Vortex test. The replicas get their replica indices, and
-// the other ones are assigned manually here.
-const vortex_process_ids = .{
-    .supervisor = constants.vsr.replicas_max,
-    .workload = constants.vsr.replicas_max + 1,
-    .network = constants.vsr.replicas_max + 2,
-};
-comptime {
-    // Check that the assigned process IDs are sequential and start at the right number.
-    for (
-        std.meta.fields(@TypeOf(vortex_process_ids)),
-        constants.vsr.replicas_max..,
-    ) |field, value_expected| {
-        const value_actual = @field(vortex_process_ids, field.name);
-        assert(value_actual == value_expected);
-    }
-}
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
@@ -159,23 +100,18 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         }
     }
     log.info("output directory: {s}", .{output_directory});
-
-    var trace_file_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const trace_file = try std.fmt.bufPrint(
-        &trace_file_buffer,
-        "{s}/vortex.trace",
-        .{output_directory},
-    );
-    var trace = try TraceWriter.from_file(trace_file);
-    defer trace.deinit();
-
-    inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
-        try trace.process_name_assign(@field(vortex_process_ids, field.name), field.name);
-    }
     log.info("starting test with target runtime of {}", .{args.test_duration});
 
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
+
+    var network = try faulty_network.Network.listen(
+        allocator,
+        &prng,
+        &io,
+        constants.vortex.replica_ports_actual[0..args.replica_count],
+    );
+    defer network.destroy(allocator);
 
     var replicas: [constants.vsr.replicas_max]*Replica = undefined;
     var replicas_initialized: usize = 0;
@@ -215,12 +151,21 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             std.process.exit(1);
         };
 
-        // Start replica.
+        var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
+        for (replica_ports[0..args.replica_count], 0..) |*replica_port, i| {
+            if (replica_index == i) {
+                replica_port.* = network.proxies[i].remote_address.getPort();
+            } else {
+                replica_port.* = network.proxies[i].origin_address.getPort();
+            }
+        }
+
         var replica = try Replica.create(
             allocator,
             args.tigerbeetle_executable,
             args.replica_count,
             @intCast(replica_index),
+            replica_ports,
             datafile,
             args.log_debug,
         );
@@ -228,42 +173,15 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         replicas[replica_index] = replica;
         replicas_initialized += 1;
 
-        const process_name = try std.fmt.allocPrint(allocator, "replica {d}", .{replica_index});
-        defer allocator.free(process_name);
-
-        try trace.process_name_assign(
-            @as(u8, @intCast(replica_index)),
-            process_name,
-        );
-
         try replica.start();
     }
 
-    // Construct mappings between proxy and underlying replicas.
-    var mappings: [constants.vsr.replicas_max]faulty_network.Mapping = undefined;
-    for (0..args.replica_count) |replica_index| {
-        mappings[replica_index] = .{
-            .origin = .{ .in = std.net.Ip4Address.init(
-                .{ 0, 0, 0, 0 },
-                replica_ports_proxied[replica_index],
-            ) },
-            .remote = .{ .in = std.net.Ip4Address.init(
-                .{ 0, 0, 0, 0 },
-                replica_ports_actual[replica_index],
-            ) },
-        };
+    var proxy_ports: [constants.vsr.replicas_max]u16 = undefined;
+    for (proxy_ports[0..args.replica_count], 0..) |*port, i| {
+        port.* = network.proxies[i].origin_address.getPort();
     }
 
-    // Start fault-injecting network (a set of proxies).
-    var network = try faulty_network.Network.listen(
-        allocator,
-        &io,
-        mappings[0..args.replica_count],
-        &prng,
-    );
-    defer network.destroy(allocator);
-
-    const workload = try Workload.spawn(allocator, args, &io, &trace);
+    const workload = try Workload.spawn(allocator, &io, proxy_ports[0..args.replica_count], args);
     defer {
         if (workload.process.state() == .running) {
             _ = workload.process.terminate() catch {};
@@ -276,7 +194,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .network = network,
         .replicas = replicas[0..args.replica_count],
         .workload = workload,
-        .trace = &trace,
         .prng = &prng,
         .test_duration = args.test_duration,
         .disable_faults = args.disable_faults,
@@ -291,21 +208,15 @@ const Supervisor = struct {
     network: *faulty_network.Network,
     replicas: []*Replica,
     workload: *Workload,
-    trace: *TraceWriter,
     prng: *stdx.PRNG,
     test_deadline: i128,
     disable_faults: bool,
-
-    running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
-    terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
-    stopped_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
 
     fn create(allocator: std.mem.Allocator, options: struct {
         io: *IO,
         network: *faulty_network.Network,
         replicas: []*Replica,
         workload: *Workload,
-        trace: *TraceWriter,
         prng: *stdx.PRNG,
         test_duration: stdx.Duration,
         disable_faults: bool,
@@ -318,7 +229,6 @@ const Supervisor = struct {
             .network = options.network,
             .replicas = options.replicas,
             .workload = options.workload,
-            .trace = options.trace,
             .prng = options.prng,
             .test_deadline = std.time.nanoTimestamp() + options.test_duration.ns,
             .disable_faults = options.disable_faults,
@@ -330,6 +240,10 @@ const Supervisor = struct {
     }
 
     fn run(supervisor: *Supervisor) !void {
+        var running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+        var terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+        var paused_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+
         var sleep_deadline: u64 = 0;
         // This represents the start timestamp of a period where we have an acceptable number of
         // process faults, such that we require liveness (that requests are finished within a
@@ -344,23 +258,14 @@ const Supervisor = struct {
             try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
             const now: u64 = @intCast(std.time.nanoTimestamp());
 
-            const running_replicas = replicas_in_state(
-                supervisor.replicas,
-                &supervisor.running_replicas_buffer,
-                .running,
-            );
-            const terminated_replicas = replicas_in_state(
-                supervisor.replicas,
-                &supervisor.terminated_replicas_buffer,
-                .terminated,
-            );
-            const stopped_replicas = replicas_in_state(
-                supervisor.replicas,
-                &supervisor.stopped_replicas_buffer,
-                .stopped,
-            );
+            const running_replicas =
+                replicas_in_state(supervisor.replicas, &running_replicas_buffer, .running);
+            const terminated_replicas =
+                replicas_in_state(supervisor.replicas, &terminated_replicas_buffer, .terminated);
+            const paused_replicas =
+                replicas_in_state(supervisor.replicas, &paused_replicas_buffer, .paused);
 
-            const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
+            const faulty_replica_count = terminated_replicas.len + paused_replicas.len;
 
             if (acceptable_faults_start_ns) |start_ns| {
                 const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
@@ -372,22 +277,6 @@ const Supervisor = struct {
                 // Also, those that do finish should not have too long durations, counting from the
                 // start of the acceptably-faulty period.
                 const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
-
-                errdefer {
-                    const start_us = @divFloor(start_ns, std.time.ns_per_us);
-                    supervisor.trace.write(.{
-                        .name = .liveness_required,
-                        .timestamp_micros = start_us,
-                        .duration = @as(u64, @intCast(std.time.microTimestamp())) - start_us,
-                        .process_id = vortex_process_ids.supervisor,
-                        .phase = .complete,
-                    }, .{}) catch {};
-                    supervisor.trace.write(.{
-                        .name = .test_failure,
-                        .process_id = vortex_process_ids.supervisor,
-                        .phase = .instant,
-                    }, .{}) catch {};
-                }
 
                 if (no_finished_requests) {
                     log.err("liveness check: no finished requests after {d} seconds", .{
@@ -415,23 +304,9 @@ const Supervisor = struct {
                 }
             } else {
                 // We have too many faults to require liveness.
-                if (acceptable_faults_start_ns) |start_ns| {
+                if (acceptable_faults_start_ns) |_| {
                     acceptable_faults_start_ns = null;
                     supervisor.workload.requests_finished.clear();
-
-                    // Record the previously passed liveness requirement period in the trace:
-                    const duration_ns = @as(u64, @intCast(std.time.nanoTimestamp())) - start_ns;
-                    if (@divFloor(duration_ns, std.time.ns_per_s) >
-                        constants.vortex.liveness_requirement_seconds)
-                    {
-                        try supervisor.trace.write(.{
-                            .name = .liveness_required,
-                            .timestamp_micros = @divFloor(start_ns, std.time.ns_per_us),
-                            .duration = @divFloor(duration_ns, std.time.ns_per_us),
-                            .process_id = vortex_process_ids.supervisor,
-                            .phase = .complete,
-                        }, .{});
-                    }
                 }
             }
 
@@ -442,7 +317,7 @@ const Supervisor = struct {
                     sleep,
                     replica_terminate,
                     replica_restart,
-                    replica_stop,
+                    replica_pause,
                     replica_resume,
                     network_delay,
                     network_lose,
@@ -455,8 +330,8 @@ const Supervisor = struct {
                     .sleep = 10,
                     .replica_terminate = if (running_replicas.len > 0) 4 else 0,
                     .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
-                    .replica_stop = if (running_replicas.len > 0) 3 else 0,
-                    .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
+                    .replica_pause = if (running_replicas.len > 0) 3 else 0,
+                    .replica_resume = if (paused_replicas.len > 0) 10 else 0,
                     .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
                     .network_lose = if (supervisor.network.faults.lose == null) 3 else 0,
                     .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
@@ -473,115 +348,46 @@ const Supervisor = struct {
                     .replica_terminate => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        log.info("{}: terminating replica", .{pick.index});
-                        try supervisor.trace.write(.{
-                            .name = .terminated,
-                            .process_id = pick.index,
-                            .phase = .begin,
-                        }, .{});
                         _ = try pick.replica.terminate();
                     },
                     .replica_restart => {
                         const pick =
                             terminated_replicas[supervisor.prng.index(terminated_replicas)];
-                        log.info("{}: restarting replica", .{pick.index});
-                        try supervisor.trace.write(.{
-                            .name = .terminated,
-                            .process_id = pick.index,
-                            .phase = .end,
-                        }, .{});
-                        _ = try pick.replica.start();
+                        try pick.replica.start();
                     },
-                    .replica_stop => {
+                    .replica_pause => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        log.info("{}: stopping replica", .{pick.index});
-                        try supervisor.trace.write(.{
-                            .name = .stopped,
-                            .process_id = pick.index,
-                            .phase = .begin,
-                        }, .{});
-                        _ = try pick.replica.stop();
+                        try pick.replica.pause();
                     },
                     .replica_resume => {
                         const pick =
-                            stopped_replicas[supervisor.prng.index(stopped_replicas)];
-                        log.info("{}: resuming replica", .{pick.index});
-                        try supervisor.trace.write(.{
-                            .name = .stopped,
-                            .process_id = pick.index,
-                            .phase = .end,
-                        }, .{});
-                        _ = try pick.replica.cont();
+                            paused_replicas[supervisor.prng.index(paused_replicas)];
+                        try pick.replica.unpause();
                     },
                     .network_delay => {
-                        if (!supervisor.network.faults.is_healed()) {
-                            try supervisor.trace.write(.{
-                                .name = .network_faults,
-                                .process_id = vortex_process_ids.network,
-                                .phase = .end,
-                            }, .{});
-                        }
                         const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
                         supervisor.network.faults.delay = .{
                             .time_ms = time_ms,
                             .jitter_ms = @min(time_ms, 50),
                         };
                         log.info("injecting network delays: {any}", .{supervisor.network.faults});
-                        try supervisor.trace.write(.{
-                            .name = .network_faults,
-                            .process_id = vortex_process_ids.network,
-                            .phase = .begin,
-                        }, supervisor.network.faults);
                     },
                     .network_lose => {
-                        if (!supervisor.network.faults.is_healed()) {
-                            try supervisor.trace.write(.{
-                                .name = .network_faults,
-                                .process_id = vortex_process_ids.network,
-                                .phase = .end,
-                            }, .{});
-                        }
-                        supervisor.network.faults.lose = ratio(
-                            supervisor.prng.range_inclusive(u8, 1, 10),
-                            100,
-                        );
+                        supervisor.network.faults.lose =
+                            ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
                         log.info("injecting network loss: {any}", .{supervisor.network.faults});
-                        try supervisor.trace.write(.{
-                            .name = .network_faults,
-                            .process_id = vortex_process_ids.network,
-                            .phase = .begin,
-                        }, supervisor.network.faults);
                     },
                     .network_corrupt => {
-                        if (!supervisor.network.faults.is_healed()) {
-                            try supervisor.trace.write(.{
-                                .name = .network_faults,
-                                .process_id = vortex_process_ids.network,
-                                .phase = .end,
-                            }, .{});
-                        }
-                        supervisor.network.faults.corrupt = ratio(
-                            supervisor.prng.range_inclusive(u8, 1, 10),
-                            100,
-                        );
+                        supervisor.network.faults.corrupt =
+                            ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
                         log.info("injecting network corruption: {any}", .{
                             supervisor.network.faults,
                         });
-                        try supervisor.trace.write(.{
-                            .name = .network_faults,
-                            .process_id = vortex_process_ids.network,
-                            .phase = .begin,
-                        }, supervisor.network.faults);
                     },
                     .network_heal => {
                         log.info("healing network", .{});
                         supervisor.network.faults.heal();
-                        try supervisor.trace.write(.{
-                            .name = .network_faults,
-                            .process_id = vortex_process_ids.network,
-                            .phase = .end,
-                        }, .{});
                     },
                     .quiesce => {
                         const duration = supervisor.prng.range_inclusive(
@@ -592,27 +398,8 @@ const Supervisor = struct {
                         sleep_deadline = now + duration;
 
                         supervisor.network.faults.heal();
-                        try supervisor.trace.write(.{
-                            .name = .network_faults,
-                            .process_id = vortex_process_ids.network,
-                            .phase = .end,
-                        }, .{});
-                        for (stopped_replicas) |stopped| {
-                            _ = try stopped.replica.cont();
-                            try supervisor.trace.write(.{
-                                .name = .stopped,
-                                .process_id = stopped.index,
-                                .phase = .end,
-                            }, .{});
-                        }
-                        for (terminated_replicas) |terminated| {
-                            _ = try terminated.replica.start();
-                            try supervisor.trace.write(.{
-                                .name = .terminated,
-                                .process_id = terminated.index,
-                                .phase = .end,
-                            }, .{});
-                        }
+                        for (paused_replicas) |paused| try paused.replica.unpause();
+                        for (terminated_replicas) |terminated| try terminated.replica.start();
 
                         log.info("going into {} quiescence (no faults)", .{
                             std.fmt.fmtDuration(duration),
@@ -723,12 +510,13 @@ test comma_separate_ports {
 }
 
 const Replica = struct {
-    pub const State = enum(u8) { initial, running, stopped, terminated };
+    pub const State = enum(u8) { initial, running, paused, terminated };
 
     allocator: std.mem.Allocator,
     executable_path: []const u8,
     replica_count: u8,
     replica_index: u8,
+    replica_ports: [constants.vsr.replicas_max]u16,
     datafile: []const u8,
     log_debug: bool,
     process: ?*LoggedProcess,
@@ -738,9 +526,12 @@ const Replica = struct {
         executable_path: []const u8,
         replica_count: u8,
         replica_index: u8,
+        replica_ports: [constants.vsr.replicas_max]u16,
         datafile: []const u8,
         log_debug: bool,
     ) !*Replica {
+        assert(replica_index < replica_count);
+
         const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
 
@@ -749,6 +540,7 @@ const Replica = struct {
             .executable_path = executable_path,
             .replica_count = replica_count,
             .replica_index = replica_index,
+            .replica_ports = replica_ports,
             .datafile = datafile,
             .log_debug = log_debug,
             .process = null,
@@ -769,7 +561,7 @@ const Replica = struct {
         if (self.process) |process| {
             switch (process.state()) {
                 .running => return .running,
-                .stopped => return .stopped,
+                .paused => return .paused,
                 .terminated => return .terminated,
             }
         } else return .initial;
@@ -783,13 +575,11 @@ const Replica = struct {
             process.destroy(self.allocator);
         }
 
-        var addresses_buffer: [128]u8 = undefined;
-        const replica_addresses = try replica_addresses_for_replica(
-            self.allocator,
-            self.replica_count,
-            self.replica_index,
-        );
+        const replica_addresses =
+            try comma_separate_ports(self.allocator, self.replica_ports[0..self.replica_count]);
         defer self.allocator.free(replica_addresses);
+
+        var addresses_buffer: [128]u8 = undefined;
         const addresses_arg = try std.fmt.bufPrint(
             addresses_buffer[0..],
             "--addresses={s}",
@@ -803,37 +593,32 @@ const Replica = struct {
         }
         argv.push_slice(&.{ addresses_arg, self.datafile });
 
+        log.info("{}: starting replica", .{self.replica_index});
         self.process = try LoggedProcess.spawn(self.allocator, argv.const_slice(), .{});
     }
 
-    pub fn terminate(
-        self: *Replica,
-    ) !std.process.Child.Term {
-        assert(self.state() == .running or self.state() == .stopped);
+    pub fn terminate(self: *Replica) !std.process.Child.Term {
+        assert(self.state() == .running or self.state() == .paused);
         defer assert(self.state() == .terminated);
 
-        assert(self.process != null);
+        log.info("{}: terminating replica", .{self.replica_index});
         return try self.process.?.terminate();
     }
 
-    pub fn stop(
-        self: *Replica,
-    ) !void {
+    pub fn pause(self: *Replica) !void {
         assert(self.state() == .running);
-        defer assert(self.state() == .stopped);
+        defer assert(self.state() == .paused);
 
-        assert(self.process != null);
-        return try self.process.?.stop();
+        log.info("{}: pausing replica", .{self.replica_index});
+        try self.process.?.pause();
     }
 
-    pub fn cont(
-        self: *Replica,
-    ) !void {
-        assert(self.state() == .stopped);
+    pub fn unpause(self: *Replica) !void {
+        assert(self.state() == .paused);
         defer assert(self.state() == .running);
 
-        assert(self.process != null);
-        return try self.process.?.cont();
+        log.info("{}: unpausing replica", .{self.replica_index});
+        try self.process.?.unpause();
     }
 };
 
@@ -849,7 +634,6 @@ const Workload = struct {
 
     io: *IO,
     process: *LoggedProcess,
-    trace: *TraceWriter,
 
     read_buffer: [@sizeOf(Progress)]u8 = undefined,
     read_completion: IO.Completion = undefined,
@@ -859,9 +643,9 @@ const Workload = struct {
 
     pub fn spawn(
         allocator: std.mem.Allocator,
-        args: CLIArgs,
         io: *IO,
-        trace: *TraceWriter,
+        proxy_ports: []u16,
+        args: CLIArgs,
     ) !*Workload {
         var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
@@ -883,13 +667,11 @@ const Workload = struct {
             .{driver_command_selected},
         );
 
-        const replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
-        defer allocator.free(replica_addresses);
-        const arg_addresses = try std.fmt.allocPrint(
-            allocator,
-            "--addresses={s}",
-            .{replica_addresses},
-        );
+        const proxy_addresses = try comma_separate_ports(allocator, proxy_ports);
+        defer allocator.free(proxy_addresses);
+
+        const arg_addresses =
+            try std.fmt.allocPrint(allocator, "--addresses={s}", .{proxy_addresses});
         defer allocator.free(arg_addresses);
 
         const argv = &.{
@@ -911,7 +693,6 @@ const Workload = struct {
         workload.* = .{
             .io = io,
             .process = process,
-            .trace = trace,
         };
 
         // Kick off read loop.
@@ -964,13 +745,10 @@ const Workload = struct {
             workload.requests_finished.push(request_info) catch
                 log.warn("requests_finished is full", .{});
 
-            workload.trace.write(.{
-                .name = .request,
-                .process_id = vortex_process_ids.workload,
-                .timestamp_micros = progress.timestamp_start_micros,
-                .duration = progress.timestamp_end_micros - progress.timestamp_start_micros,
-                .phase = .complete,
-            }, .{ .event_count = progress.event_count }) catch {};
+            log.debug("workload: request done duration={}us events={}", .{
+                progress.timestamp_end_micros - progress.timestamp_start_micros,
+                progress.event_count,
+            });
         }
 
         workload.read();
@@ -989,118 +767,5 @@ const Workload = struct {
             }
         }
         return null;
-    }
-};
-
-// Based on:
-// https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview?tab=t.0
-const TraceEvent = struct {
-    const EventName = enum {
-        terminated,
-        stopped,
-        network_faults,
-        request,
-        liveness_required,
-        test_failure,
-    };
-    const Phase = enum { instant, complete, begin, end };
-
-    process_id: u8,
-    thread_id: u32 = 0,
-    timestamp_micros: ?u64 = null,
-    duration: ?u64 = null,
-    phase: Phase,
-    name: ?EventName = null,
-};
-
-const TraceWriter = struct {
-    trace_file: std.fs.File,
-    stream: std.json.WriteStream(
-        std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, std.fs.File.write),
-        .{ .checked_to_fixed_depth = 16 },
-    ),
-    timestamp_start: u64,
-
-    fn from_file(trace_file_path: []const u8) !TraceWriter {
-        const trace_file = try std.fs.cwd().createFile(trace_file_path, .{ .mode = 0o666 });
-        errdefer trace_file.close();
-
-        var stream = std.json.writeStreamMaxDepth(trace_file.writer(), .{}, 16);
-        try stream.beginArray();
-
-        return .{
-            .trace_file = trace_file,
-            .stream = stream,
-            .timestamp_start = @intCast(std.time.microTimestamp()),
-        };
-    }
-
-    fn deinit(writer: *TraceWriter) void {
-        writer.stream.endArray() catch {};
-        writer.trace_file.close();
-    }
-
-    fn process_name_assign(writer: *TraceWriter, process_id: u8, name: []const u8) !void {
-        try writer.stream.beginObject();
-
-        try writer.stream.objectField("ph");
-        try writer.stream.write("M");
-
-        try writer.stream.objectField("pid");
-        try writer.stream.write(process_id);
-
-        try writer.stream.objectField("name");
-        try writer.stream.write("process_name");
-
-        try writer.stream.objectField("args");
-        try writer.stream.write(.{ .name = name });
-
-        try writer.stream.endObject();
-    }
-
-    fn write(writer: *TraceWriter, event: TraceEvent, metadata: anytype) !void {
-        try writer.stream.beginObject();
-
-        try writer.stream.objectField("pid");
-        try writer.stream.write(event.process_id);
-
-        try writer.stream.objectField("tid");
-        try writer.stream.write(event.thread_id);
-
-        try writer.stream.objectField("ts");
-        const timestamp = event.timestamp_micros orelse
-            @as(u64, @intCast(std.time.microTimestamp()));
-        try writer.stream.write(timestamp - writer.timestamp_start);
-
-        if (event.duration) |dur| {
-            try writer.stream.objectField("dur");
-            try writer.stream.write(dur);
-        }
-
-        try writer.stream.objectField("ph");
-        try writer.stream.write(switch (event.phase) {
-            .instant => "i",
-            .complete => "X",
-            .begin => "B",
-            .end => "E",
-        });
-
-        if (event.name) |name| {
-            try writer.stream.objectField("name");
-            try writer.stream.write(@tagName(name));
-        }
-
-        const datetime = stdx.DateTimeUTC.from_timestamp_ms(timestamp / 1000);
-        var datetime_buffer: [24]u8 = undefined;
-        var datetime_stream = std.io.fixedBufferStream(&datetime_buffer);
-        stdx.DateTimeUTC.format(datetime, "", .{}, datetime_stream.writer()) catch return;
-
-        try writer.stream.objectField("args");
-        try writer.stream.write(.{
-            .metadata = metadata,
-            .timestamp = datetime_stream.getWritten(),
-        });
-
-        try writer.stream.endObject();
     }
 };

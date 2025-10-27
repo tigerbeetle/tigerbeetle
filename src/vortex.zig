@@ -29,13 +29,13 @@ pub const std_options: std.Options = .{
 pub const CLIArgs = union(enum) {
     supervisor: Supervisor.CLIArgs,
     driver: ZigDriver.CLIArgs,
-    workload: DriverArgs,
+    workload: WorkloadArgs,
 };
 
-const DriverArgs = struct {
-    @"cluster-id": u128,
+const WorkloadArgs = struct {
+    cluster_id: u128,
     addresses: []const u8,
-    @"driver-command": []const u8,
+    driver_command: []const u8,
 };
 
 pub fn main() !void {
@@ -76,19 +76,19 @@ pub fn main() !void {
     }
 }
 
-fn start_driver(allocator: std.mem.Allocator, args: DriverArgs) !std.process.Child {
+fn start_driver(allocator: std.mem.Allocator, args: WorkloadArgs) !std.process.Child {
     var argv = std.ArrayList([]const u8).init(allocator);
     defer argv.deinit();
 
-    assert(std.mem.indexOfScalar(u8, args.@"driver-command", '"') == null);
-    var cmd_parts = std.mem.splitScalar(u8, args.@"driver-command", ' ');
+    assert(std.mem.indexOfScalar(u8, args.driver_command, '"') == null);
+    var cmd_parts = std.mem.splitScalar(u8, args.driver_command, ' ');
 
     while (cmd_parts.next()) |part| {
         try argv.append(part);
     }
 
     var cluster_id_argument: [32]u8 = undefined;
-    const cluster_id = try std.fmt.bufPrint(cluster_id_argument[0..], "{d}", .{args.@"cluster-id"});
+    const cluster_id = try std.fmt.bufPrint(cluster_id_argument[0..], "{d}", .{args.cluster_id});
 
     try argv.append(cluster_id);
     try argv.append(args.addresses);
