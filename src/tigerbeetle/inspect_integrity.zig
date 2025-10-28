@@ -124,8 +124,8 @@ forest: Forest,
 grid_scrubber: GridScrubber,
 grid_blocks_scrubbed: std.bit_set.DynamicBitSetUnmanaged,
 
-buffer_headers: []u8,
-buffer_prepare: []u8,
+buffer_headers: []align(constants.sector_size) u8,
+buffer_prepare: []align(constants.sector_size) u8,
 
 fn init(
     integrity: *Integrity,
