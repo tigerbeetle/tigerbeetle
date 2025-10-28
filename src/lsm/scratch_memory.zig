@@ -9,6 +9,8 @@ state: enum { free, busy },
 pub const ScratchMemory = @This();
 
 pub fn init(gpa: std.mem.Allocator, size: usize) !ScratchMemory {
+    assert(size > 0);
+
     var scratch: ScratchMemory = .{
         .buffer = undefined,
         .state = .free,
