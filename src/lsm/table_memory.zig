@@ -305,8 +305,8 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn init(
             table: *TableMemory,
             allocator: mem.Allocator,
-            mutability: std.meta.Tag(Mutability),
             radix_scratch: *ScratchMemory,
+            mutability: std.meta.Tag(Mutability),
             name: []const u8,
             options: struct {
                 value_count_limit: u32,
@@ -666,8 +666,8 @@ const TestHelper = struct {
         var table_immutable: TableType = undefined;
         try table_immutable.init(
             gpa,
-            .immutable,
             radix_scratch,
+            .immutable,
             "immutable",
             .{ .value_count_limit = value_count_limit },
         );
@@ -683,8 +683,8 @@ const TestHelper = struct {
         var table_mutable: TableType = undefined;
         try table_mutable.init(
             gpa,
-            .mutable,
             radix_scratch,
+            .mutable,
             "mutable",
             .{ .value_count_limit = value_count_limit },
         );

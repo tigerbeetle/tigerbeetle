@@ -179,17 +179,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const Grid = GridType(_Storage);
 
-    const radix_scratch_size: usize = comptime blk: {
-        var max_size: usize = 0;
-
-        for (std.enums.values(_TreeID)) |tree_id| {
-            const tree = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];
-            const size = tree.Tree.Table.value_count_max * @sizeOf(tree.Tree.Value);
-            max_size = @max(max_size, size);
-        }
-        break :blk max_size;
-    };
-
     return struct {
         const Forest = @This();
 
@@ -299,6 +288,17 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     const groove: *Groove = &@field(forest.grooves, field.name);
                     groove.deinit(allocator);
                 }
+            };
+
+            const radix_scratch_size: usize = comptime blk: {
+                var max_size: usize = 0;
+                for (std.enums.values(_TreeID)) |tree_id| {
+                    const tree = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];
+                    const size = tree.Tree.Table.value_count_max * @sizeOf(tree.Tree.Value);
+                    assert(size > 0);
+                    max_size = @max(max_size, size);
+                }
+                break :blk max_size;
             };
 
             forest.radix_scratch = try ScratchMemory.init(allocator, radix_scratch_size);
