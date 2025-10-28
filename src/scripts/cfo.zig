@@ -540,6 +540,7 @@ const Tasks = struct {
 
     /// Pick a task to run next.
     /// Returns the task with the minimal virtual runtime.
+    /// Break ties by choosing the task with the greater weight.
     pub fn sample(tasks: *const Tasks) *Task {
         assert(tasks.list.items.len == tasks.map.count());
         assert(tasks.list.items.len > 0);
@@ -551,7 +552,9 @@ const Tasks = struct {
 
             if (task.generation == tasks.generation) {
                 if (task_best == null or
-                    task_best.?.runtime_virtual > task.runtime_virtual)
+                    task_best.?.runtime_virtual > task.runtime_virtual or
+                    (task_best.?.runtime_virtual == task.runtime_virtual and
+                    task_best.?.weight < task.weight))
                 {
                     task_best = task;
                 }
