@@ -306,9 +306,8 @@ fn check_wal(integrity: *Integrity) !u64 {
     );
     assert(headers_bytes_read == integrity.buffer_headers.len);
 
-    const wal_headers: []vsr.Header.Prepare align(16) = @alignCast(
-        std.mem.bytesAsSlice(vsr.Header.Prepare, integrity.buffer_headers),
-    );
+    const wal_headers: []vsr.Header.Prepare align(16) =
+        std.mem.bytesAsSlice(vsr.Header.Prepare, integrity.buffer_headers);
 
     for (wal_headers, 0..) |*wal_header, slot| {
         const offset = slot * constants.message_size_max;
@@ -319,10 +318,10 @@ fn check_wal(integrity: *Integrity) !u64 {
         );
         assert(bytes_read == integrity.buffer_prepare.len);
 
-        const wal_prepare: *align(16) vsr.Header.Prepare = @alignCast(std.mem.bytesAsValue(
+        const wal_prepare: *align(16) vsr.Header.Prepare = std.mem.bytesAsValue(
             vsr.Header.Prepare,
             integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
-        ));
+        );
 
         const wal_prepare_body_valid =
             wal_prepare.valid_checksum() and
@@ -356,10 +355,10 @@ fn check_client_replies(integrity: *Integrity) !u64 {
         );
         assert(bytes_read == integrity.buffer_prepare.len);
 
-        const reply: *align(16) vsr.Header.Reply = @alignCast(std.mem.bytesAsValue(
+        const reply: *align(16) vsr.Header.Reply = std.mem.bytesAsValue(
             vsr.Header.Reply,
             integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
-        ));
+        );
 
         const reply_empty = reply.checksum == 0 and reply.checksum_body == 0;
         const reply_valid = reply.valid_checksum() and
