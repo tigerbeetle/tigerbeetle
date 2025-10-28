@@ -19,6 +19,8 @@ const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
 
+const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
+
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 fn ObjectTreeHelperType(comptime Object: type) type {
@@ -608,10 +610,12 @@ pub fn GrooveType(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
+            radix_buffer: *ScratchMemory,
             options: Options,
         ) !void {
             assert(options.tree_options_object.batch_value_count_limit *
                 constants.lsm_compaction_ops <= ObjectTree.Table.value_count_max);
+            assert(radix_buffer.state == .free);
 
             groove.* = .{
                 .grid = grid,
@@ -656,6 +660,7 @@ pub fn GrooveType(
                 allocator,
                 node_pool,
                 grid,
+                radix_buffer,
                 .{
                     .id = @field(groove_options.ids, "timestamp"),
                     .name = ObjectTree.tree_name(),
@@ -668,6 +673,7 @@ pub fn GrooveType(
                 allocator,
                 node_pool,
                 grid,
+                radix_buffer,
                 .{
                     .id = @field(groove_options.ids, "id"),
                     .name = ObjectTree.tree_name() ++ ".id",
@@ -694,6 +700,7 @@ pub fn GrooveType(
                     allocator,
                     node_pool,
                     grid,
+                    radix_buffer,
                     .{
                         .id = @field(groove_options.ids, field.name),
                         .name = ObjectTree.tree_name() ++ "." ++ field.name,
