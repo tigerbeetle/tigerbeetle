@@ -1,4 +1,8 @@
-//! ScratchMemory is a TODO
+//! ScratchMemory is a page-aligned scratch buffer meant for situations where a buffer is required
+//! (e.g., radix sort) and can be shared between components.
+//! The buffer is page-aligned so that smaller alignments are trivially satisfied. See:
+//! https://ziglang.org/documentation/0.7.0/#Alignment
+//!
 const std = @import("std");
 const stdx = @import("stdx");
 const assert = std.debug.assert;
