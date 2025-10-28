@@ -32,10 +32,10 @@ pub fn deinit(scratch: *ScratchMemory, gpa: std.mem.Allocator) void {
 }
 
 pub fn acquire(scratch: *ScratchMemory, T: type, count: usize) []T {
+    // A pointer with a larger alignment can be cast into one with a smaller alignment.
+    comptime assert(@alignOf(T) < std.heap.page_size_min);
     assert(scratch.state == .free);
     assert(count * @sizeOf(T) <= scratch.buffer.len);
-    // A pointer with a larger alignment can be cast into one with a smaller alignment.
-    assert(@alignOf(T) <= std.heap.page_size_min);
     defer assert(scratch.state == .busy);
 
     scratch.state = .busy;
@@ -50,6 +50,7 @@ pub fn acquire(scratch: *ScratchMemory, T: type, count: usize) []T {
 }
 
 pub fn release(scratch: *ScratchMemory, T: type, slice: []T) void {
+    comptime assert(@alignOf(T) < std.heap.page_size_min);
     assert(scratch.state == .busy);
     assert(std.mem.isAligned(@intFromPtr(slice.ptr), @alignOf(T)));
     defer assert(scratch.state == .free);
