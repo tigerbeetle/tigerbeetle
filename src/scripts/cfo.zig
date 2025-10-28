@@ -544,17 +544,15 @@ const Tasks = struct {
         assert(tasks.list.items.len == tasks.map.count());
         assert(tasks.list.items.len > 0);
 
-        var task_best_runtime_virtual: ?u64 = null;
         var task_best: ?*Task = null;
         for (tasks.list.items) |*task| {
             assert(task.runtime_virtual > 0);
             assert(task.generation <= tasks.generation);
 
             if (task.generation == tasks.generation) {
-                if (task_best_runtime_virtual == null or
-                    task_best_runtime_virtual.? > task.runtime_virtual)
+                if (task_best == null or
+                    task_best.?.runtime_virtual > task.runtime_virtual)
                 {
-                    task_best_runtime_virtual = task.runtime_virtual;
                     task_best = task;
                 }
             }
