@@ -291,14 +291,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             };
 
             const radix_buffer_size: usize = comptime blk: {
-                var max_size: usize = 0;
+                var size_max: usize = 0;
                 for (std.enums.values(_TreeID)) |tree_id| {
                     const tree = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];
                     const size = tree.Tree.Table.value_count_max * @sizeOf(tree.Tree.Value);
                     assert(size > 0);
-                    max_size = @max(max_size, size);
+                    size_max = @max(size_max, size);
                 }
-                break :blk max_size;
+                break :blk size_max;
             };
 
             forest.radix_buffer = try .init(allocator, radix_buffer_size);
