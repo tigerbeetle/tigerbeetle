@@ -29,6 +29,7 @@ pub fn init(gpa: std.mem.Allocator, size: usize) !ScratchMemory {
 pub fn deinit(scratch: *ScratchMemory, gpa: std.mem.Allocator) void {
     assert(scratch.state == .free);
     gpa.free(scratch.buffer);
+    scratch.* = undefined;
 }
 
 pub fn acquire(scratch: *ScratchMemory, T: type, count: usize) []T {
