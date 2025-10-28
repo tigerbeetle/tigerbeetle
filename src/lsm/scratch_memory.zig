@@ -53,6 +53,8 @@ pub fn acquire(scratch: *ScratchMemory, T: type, count: usize) []T {
 pub fn release(scratch: *ScratchMemory, T: type, slice: []T) void {
     comptime assert(@alignOf(T) < std.heap.page_size_min);
     assert(scratch.state == .busy);
+    assert(@intFromPtr(slice.ptr) == @intFromPtr(scratch.buffer.ptr));
+    assert(slice.len * @sizeOf(T) <= scratch.buffer.len);
     assert(std.mem.isAligned(@intFromPtr(slice.ptr), @alignOf(T)));
     defer assert(scratch.state == .free);
 
