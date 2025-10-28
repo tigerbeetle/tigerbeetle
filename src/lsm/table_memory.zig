@@ -313,6 +313,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             },
         ) !void {
             assert(options.value_count_limit <= Table.value_count_max);
+            assert(radix_scratch.state == .free);
 
             table.* = .{
                 .value_context = .{

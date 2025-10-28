@@ -615,6 +615,7 @@ pub fn GrooveType(
         ) !void {
             assert(options.tree_options_object.batch_value_count_limit *
                 constants.lsm_compaction_ops <= ObjectTree.Table.value_count_max);
+            assert(radix_scratch.state == .free);
 
             groove.* = .{
                 .grid = grid,

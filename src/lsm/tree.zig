@@ -111,6 +111,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
+            assert(radix_scratch.state == .free);
 
             const value_count_limit =
                 options.batch_value_count_limit * constants.lsm_compaction_ops;
