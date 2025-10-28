@@ -12,7 +12,7 @@ const schema = @import("schema.zig");
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
-const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
+const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
 pub const ScopeCloseMode = enum { persist, discard };
 
@@ -104,7 +104,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            radix_scratch: *RadixBuffer,
+            radix_scratch: *ScratchMemory,
             config: Config,
             options: Options,
         ) !void {

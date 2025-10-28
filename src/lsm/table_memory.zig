@@ -31,7 +31,7 @@ const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
-const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
+const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
@@ -58,7 +58,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             mutable: struct {
                 // This buffer is shared between all `Tables` for the radix sort.
                 // It is passed down from the forest.
-                radix_scratch: *RadixBuffer,
+                radix_scratch: *ScratchMemory,
             },
             immutable: struct {
                 // An empty table has nothing to flush.
@@ -306,7 +306,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             table: *TableMemory,
             allocator: mem.Allocator,
             mutability: std.meta.Tag(Mutability),
-            radix_scratch: *RadixBuffer,
+            radix_scratch: *ScratchMemory,
             name: []const u8,
             options: struct {
                 value_count_limit: u32,
@@ -575,25 +575,15 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(offset == 0 or offset == table.value_context.run_tracker.last().?.max);
             assert(offset <= table.count());
 
-            assert(!table.mutability.mutable.radix_scratch.in_use);
-            table.mutability.mutable.radix_scratch.in_use = true;
-            defer {
-                table.mutability.mutable.radix_scratch.in_use = false;
-                assert(!table.mutability.mutable.radix_scratch.in_use);
-            }
-
-            const radix_scratch_size = @sizeOf(Value) * Table.value_count_max;
-            const radix_scratch_values = stdx.bytes_as_slice(
-                .exact,
+            const radix_scratch_values = table.mutability.mutable.radix_scratch.acquire(
                 Value,
-                table.mutability.mutable.radix_scratch.buffer[0..radix_scratch_size],
+                table.count(),
             );
-            assert(@as(usize, @intFromPtr(radix_scratch_values.ptr)) % @alignOf(Value) == 0);
-            assert(radix_scratch_values.len == table.values.len);
+            defer table.mutability.mutable.radix_scratch.release(Value, radix_scratch_values);
 
             const target_count = sort_suffix_from_offset(
                 table.values_used(),
-                radix_scratch_values[0..table.count()],
+                radix_scratch_values,
                 offset,
             );
             table.value_context.count = target_count;
@@ -671,7 +661,7 @@ const TestHelper = struct {
         comptime TableType: type,
         gpa: std.mem.Allocator,
         value_count_limit: u32,
-        radix_scratch: *RadixBuffer,
+        radix_scratch: *ScratchMemory,
     ) !TableType {
         var table_immutable: TableType = undefined;
         try table_immutable.init(
@@ -688,7 +678,7 @@ const TestHelper = struct {
         comptime TableType: type,
         gpa: std.mem.Allocator,
         value_count_limit: u32,
-        radix_scratch: *RadixBuffer,
+        radix_scratch: *ScratchMemory,
     ) !TableType {
         var table_mutable: TableType = undefined;
         try table_mutable.init(
@@ -713,15 +703,8 @@ test "table_memory: merge and absorb (last wins across streams)" {
 
     const alloc = testing.allocator;
 
-    var radix_scratch = RadixBuffer{
-        .buffer = try alloc.alignedAlloc(
-            u8,
-            @alignOf(Value),
-            @sizeOf(Value) * Table.value_count_max,
-        ),
-        .in_use = false,
-    };
-    defer alloc.free(@as([]align(@alignOf(Value)) u8, @alignCast(radix_scratch.buffer)));
+    var radix_scratch = try ScratchMemory.init(alloc, Table.value_count_max * @sizeOf(Value));
+    defer radix_scratch.deinit(alloc);
 
     var table_immutable: TableMemory = try TestHelper.create_table_immutable(
         TableMemory,
@@ -779,15 +762,8 @@ test "table_memory: compact and deduplicate across runs" {
 
     const alloc = testing.allocator;
 
-    var radix_scratch = RadixBuffer{
-        .buffer = try alloc.alignedAlloc(
-            u8,
-            @alignOf(Value),
-            @sizeOf(Value) * Table.value_count_max,
-        ),
-        .in_use = false,
-    };
-    defer alloc.free(@as([]align(@alignOf(Value)) u8, @alignCast(radix_scratch.buffer)));
+    var radix_scratch = try ScratchMemory.init(alloc, Table.value_count_max * @sizeOf(Value));
+    defer radix_scratch.deinit(alloc);
 
     var table_immutable: TableMemory = try TestHelper.create_table_immutable(
         TableMemory,
@@ -838,15 +814,8 @@ test "table_memory (secondary): annhiliation yields zero after deduplicate" {
 
     const alloc = testing.allocator;
 
-    var radix_scratch = RadixBuffer{
-        .buffer = try alloc.alignedAlloc(
-            u8,
-            @alignOf(Value),
-            @sizeOf(Value) * Table.value_count_max,
-        ),
-        .in_use = false,
-    };
-    defer alloc.free(@as([]align(@alignOf(Value)) u8, @alignCast(radix_scratch.buffer)));
+    var radix_scratch = try ScratchMemory.init(alloc, Table.value_count_max * @sizeOf(Value));
+    defer radix_scratch.deinit(alloc);
 
     var table_immutable: TableMemory = try TestHelper.create_table_immutable(
         TableMemory,

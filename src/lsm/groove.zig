@@ -19,7 +19,7 @@ const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
 
-const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
+const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
@@ -610,7 +610,7 @@ pub fn GrooveType(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            radix_scratch: *RadixBuffer,
+            radix_scratch: *ScratchMemory,
             options: Options,
         ) !void {
             assert(options.tree_options_object.batch_value_count_limit *

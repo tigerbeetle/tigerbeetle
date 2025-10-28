@@ -12,7 +12,7 @@ const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 
-const RadixBuffer = @import("radix_buffer.zig").RadixBuffer;
+const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 const Direction = @import("../direction.zig").Direction;
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -145,7 +145,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_results_count: u32,
         scan_results_model: []Value,
         compaction_exhausted: bool = false,
-        radix_scratch: RadixBuffer,
+        radix_scratch: ScratchMemory,
 
         pool: ResourcePool,
 
@@ -203,13 +203,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.pool = try ResourcePool.init(gpa, block_count);
             defer env.pool.deinit(gpa);
 
-            env.radix_scratch.in_use = false;
-            env.radix_scratch.buffer = try gpa.alignedAlloc(
-                u8,
-                @alignOf(Value),
-                value_count_max * @sizeOf(Value),
-            );
-            defer gpa.free(@as([]align(@alignOf(Value)) u8, @alignCast(env.radix_scratch.buffer)));
+            env.radix_scratch = try ScratchMemory.init(gpa, value_count_max);
+            defer env.radix_scratch.deinit(gpa);
 
             try env.open_then_apply(gpa, fuzz_ops);
         }

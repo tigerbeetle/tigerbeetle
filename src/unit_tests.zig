@@ -22,6 +22,7 @@ comptime {
     _ = @import("lsm/k_way_merge.zig");
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
+    _ = @import("lsm/scratch_memory.zig");
     _ = @import("lsm/segmented_array.zig");
     _ = @import("lsm/segmented_array_benchmark.zig");
     _ = @import("lsm/set_associative_cache.zig");
