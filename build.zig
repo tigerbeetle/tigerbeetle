@@ -1273,7 +1273,15 @@ fn build_rust_client(
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    step_clients_rust.dependOn(b.getInstallStep());
     step_clients_rust.dependOn(&options.tb_client_header.step);
+
+    // Copy the generated header file to the Rust client assets directory:
+    const tb_client_header_copy = Generated.file_copy(b, .{
+        .from = options.tb_client_header.path,
+        .path = "./src/clients/rust/assets/tb_client.h",
+    });
+    step_clients_rust.dependOn(&tb_client_header_copy.step);
 
     inline for (platforms) |platform| {
         const query = Query.parse(.{
