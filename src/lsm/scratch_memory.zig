@@ -57,7 +57,7 @@ test "ScratchMemory basic" {
     const gpa = testing.allocator;
     const size = @sizeOf(u64) * 10;
 
-    var scratch = try ScratchMemory.init(
+    var scratch: ScratchMemory = try .init(
         gpa,
         size,
     );

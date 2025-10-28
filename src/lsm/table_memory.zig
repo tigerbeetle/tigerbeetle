@@ -703,7 +703,7 @@ test "table_memory: merge and absorb (last wins across streams)" {
 
     const alloc = testing.allocator;
 
-    var radix_scratch = try ScratchMemory.init(alloc, Table.value_count_max * @sizeOf(Value));
+    var radix_scratch: ScratchMemory = try .init(alloc, Table.value_count_max * @sizeOf(Value));
     defer radix_scratch.deinit(alloc);
 
     var table_immutable: TableMemory = try TestHelper.create_table_immutable(
@@ -762,7 +762,7 @@ test "table_memory: compact and deduplicate across runs" {
 
     const alloc = testing.allocator;
 
-    var radix_scratch = try ScratchMemory.init(alloc, Table.value_count_max * @sizeOf(Value));
+    var radix_scratch: ScratchMemory = try .init(alloc, Table.value_count_max * @sizeOf(Value));
     defer radix_scratch.deinit(alloc);
 
     var table_immutable: TableMemory = try TestHelper.create_table_immutable(
@@ -814,7 +814,7 @@ test "table_memory (secondary): annhiliation yields zero after deduplicate" {
 
     const alloc = testing.allocator;
 
-    var radix_scratch = try ScratchMemory.init(alloc, Table.value_count_max * @sizeOf(Value));
+    var radix_scratch: ScratchMemory = try .init(alloc, Table.value_count_max * @sizeOf(Value));
     defer radix_scratch.deinit(alloc);
 
     var table_immutable: TableMemory = try TestHelper.create_table_immutable(

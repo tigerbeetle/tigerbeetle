@@ -301,7 +301,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 break :blk max_size;
             };
 
-            forest.radix_scratch = try ScratchMemory.init(allocator, radix_scratch_size);
+            forest.radix_scratch = try .init(allocator, radix_scratch_size);
             errdefer forest.radix_scratch.deinit(allocator);
 
             inline for (std.meta.fields(Grooves)) |field| {

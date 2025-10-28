@@ -203,7 +203,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.pool = try ResourcePool.init(gpa, block_count);
             defer env.pool.deinit(gpa);
 
-            env.radix_scratch = try ScratchMemory.init(gpa, value_count_max);
+            env.radix_scratch = try .init(gpa, value_count_max);
             defer env.radix_scratch.deinit(gpa);
 
             try env.open_then_apply(gpa, fuzz_ops);
