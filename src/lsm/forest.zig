@@ -249,7 +249,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         scan_buffer_pool: ScanBufferPool,
 
-        radix_scratch: ScratchMemory,
+        radix_buffer: ScratchMemory,
 
         pub fn init(
             forest: *Forest,
@@ -267,7 +267,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .manifest_log = undefined,
                 .compaction_schedule = undefined,
                 .scan_buffer_pool = undefined,
-                .radix_scratch = undefined,
+                .radix_buffer = undefined,
             };
 
             // TODO: look into using lsm_table_size_max for the node_count.
@@ -290,7 +290,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 }
             };
 
-            const radix_scratch_size: usize = comptime blk: {
+            const radix_buffer_size: usize = comptime blk: {
                 var max_size: usize = 0;
                 for (std.enums.values(_TreeID)) |tree_id| {
                     const tree = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];
@@ -301,8 +301,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 break :blk max_size;
             };
 
-            forest.radix_scratch = try .init(allocator, radix_scratch_size);
-            errdefer forest.radix_scratch.deinit(allocator);
+            forest.radix_buffer = try .init(allocator, radix_buffer_size);
+            errdefer forest.radix_buffer.deinit(allocator);
 
             inline for (std.meta.fields(Grooves)) |field| {
                 const Groove = field.type;
@@ -313,7 +313,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     allocator,
                     &forest.node_pool,
                     grid,
-                    &forest.radix_scratch,
+                    &forest.radix_buffer,
                     groove_options,
                 );
                 grooves_initialized += 1;
@@ -341,7 +341,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
 
-            forest.radix_scratch.deinit(allocator);
+            forest.radix_buffer.deinit(allocator);
 
             forest.compaction_schedule.deinit(allocator);
             forest.scan_buffer_pool.deinit(allocator);
@@ -372,7 +372,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .compaction_schedule = forest.compaction_schedule,
 
                 .scan_buffer_pool = forest.scan_buffer_pool,
-                .radix_scratch = forest.radix_scratch,
+                .radix_buffer = forest.radix_buffer,
             };
         }
 

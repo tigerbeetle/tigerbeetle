@@ -610,12 +610,12 @@ pub fn GrooveType(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            radix_scratch: *ScratchMemory,
+            radix_buffer: *ScratchMemory,
             options: Options,
         ) !void {
             assert(options.tree_options_object.batch_value_count_limit *
                 constants.lsm_compaction_ops <= ObjectTree.Table.value_count_max);
-            assert(radix_scratch.state == .free);
+            assert(radix_buffer.state == .free);
 
             groove.* = .{
                 .grid = grid,
@@ -660,7 +660,7 @@ pub fn GrooveType(
                 allocator,
                 node_pool,
                 grid,
-                radix_scratch,
+                radix_buffer,
                 .{
                     .id = @field(groove_options.ids, "timestamp"),
                     .name = ObjectTree.tree_name(),
@@ -673,7 +673,7 @@ pub fn GrooveType(
                 allocator,
                 node_pool,
                 grid,
-                radix_scratch,
+                radix_buffer,
                 .{
                     .id = @field(groove_options.ids, "id"),
                     .name = ObjectTree.tree_name() ++ ".id",
@@ -700,7 +700,7 @@ pub fn GrooveType(
                     allocator,
                     node_pool,
                     grid,
-                    radix_scratch,
+                    radix_buffer,
                     .{
                         .id = @field(groove_options.ids, field.name),
                         .name = ObjectTree.tree_name() ++ "." ++ field.name,

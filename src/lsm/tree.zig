@@ -104,14 +104,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            radix_scratch: *ScratchMemory,
+            radix_buffer: *ScratchMemory,
             config: Config,
             options: Options,
         ) !void {
             assert(grid.superblock.opened);
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
-            assert(radix_scratch.state == .free);
+            assert(radix_buffer.state == .free);
 
             const value_count_limit =
                 options.batch_value_count_limit * constants.lsm_compaction_ops;
@@ -129,12 +129,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .compactions = undefined,
             };
 
-            try tree.table_mutable.init(allocator, radix_scratch, .mutable, config.name, .{
+            try tree.table_mutable.init(allocator, radix_buffer, .mutable, config.name, .{
                 .value_count_limit = value_count_limit,
             });
             errdefer tree.table_mutable.deinit(allocator);
 
-            try tree.table_immutable.init(allocator, radix_scratch, .immutable, config.name, .{
+            try tree.table_immutable.init(allocator, radix_buffer, .immutable, config.name, .{
                 .value_count_limit = value_count_limit,
             });
             errdefer tree.table_immutable.deinit(allocator);
