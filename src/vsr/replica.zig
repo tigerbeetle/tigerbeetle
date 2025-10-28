@@ -2831,16 +2831,6 @@ pub fn ReplicaType(
                 // messages might be beyond its prepare_max.
                 maybe(view_headers[0].op > self.op_prepare_max_sync());
 
-                // It is crucial to truncate ops past the prepare_max for this checkpoint, to uphold
-                // the invariant that a backup is able to apply at least one header from the SV
-                // headers. This is safe, since we are guaranteed to have not prepare_ok'd these ops
-                // (we do so when we transition to the next checkpoint, see `op_prepare_ok_max`).
-                if (self.op > self.op_prepare_max()) {
-                    assert(vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max));
-                    self.op = self.op_prepare_max();
-                    self.journal.remove_entries_from(self.op + 1);
-                }
-
                 // Find the first message that fits, make it our new head.
                 for (view_headers) |*header| {
                     assert(header.commit <= message.header.commit_max);
@@ -2859,7 +2849,11 @@ pub fn ReplicaType(
                             break;
                         }
                     }
-                } else unreachable;
+                } else {
+                    assert(self.log_view == self.view);
+                    assert(self.op > self.op_prepare_max_sync());
+                    self.advance_commit_max(message.header.commit_max, @src());
+                }
 
                 for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -9495,9 +9489,12 @@ pub fn ReplicaType(
             maybe(op >= self.commit_max);
             maybe(op >= commit_max);
 
-            if (op < self.op) {
-                // Uncommitted ops may not survive a view change, but never truncate committed ops.
+            // Uncommitted ops may not survive a view change, but never truncate committed ops.
+            // However, it is safe to truncate committed ops past prepare_max, since we are
+            // guaranteed to not have sent a prepare_ok for them (see `op_prepare_ok_max`).
+            if (op < @min(self.op, self.op_prepare_max_sync())) {
                 assert(op >= @max(commit_max, self.commit_max));
+                assert(self.op <= op + constants.pipeline_prepare_queue_max);
             }
 
             // We expect that our commit numbers may also be greater even than `commit_max` because
@@ -9518,8 +9515,7 @@ pub fn ReplicaType(
             }
 
             assert(self.commit_min <= self.commit_max);
-            assert(self.op >= self.commit_max or self.op < self.commit_max);
-            assert(self.op <= op + constants.pipeline_prepare_queue_max);
+            maybe(self.op < self.commit_max);
 
             const previous_op = self.op;
             const previous_commit_max = self.commit_max;
