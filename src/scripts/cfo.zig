@@ -55,7 +55,7 @@ const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
 const MiB = stdx.MiB;
-const log_size_max = 16 * stdx.KiB;
+const log_size_max = 64 * stdx.KiB;
 
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
@@ -85,6 +85,7 @@ const Fuzzer = enum {
     vopr_testing_lite,
     vopr_testing,
     vopr,
+    vortex,
     vsr_free_set,
     vsr_superblock_quorums,
     vsr_superblock,
@@ -109,6 +110,7 @@ const Fuzzer = enum {
         .vopr_testing_lite = 8,
         .vopr_testing = 8,
         .vopr = 8,
+        .vortex = 16,
         .vsr_free_set = 1,
         .vsr_superblock_quorums = 1,
         .vsr_superblock = 1,
@@ -127,6 +129,10 @@ const Fuzzer = enum {
             .vopr_testing,
             .vopr_testing_lite,
             => &.{ "vopr:build", "-Drelease", "-Dvopr-state-machine=testing" },
+            // TODO Once release builds have stack traces, add -Drelease so that we are testing
+            // release binaries (to test as close as possible to a real cluster).
+            // (Likewise in args_run()).
+            .vortex => &.{"vortex:build"},
             else => &.{ "fuzz:build", "-Drelease" },
         };
     }
@@ -138,6 +144,7 @@ const Fuzzer = enum {
             .vopr_testing,
             .vopr_testing_lite,
             => .{ "vopr", "-Drelease", "-Dvopr-state-machine=testing" },
+            .vortex => .{"vortex"},
             else => .{ "fuzz", "-Drelease" },
         } ++ .{"--"} ++ args_exec(fuzzer);
     }
@@ -146,14 +153,18 @@ const Fuzzer = enum {
         return comptime switch (fuzzer) {
             .vopr, .vopr_debug, .vopr_testing => &.{},
             .vopr_lite, .vopr_testing_lite => &.{"--lite"},
+            .vortex => &.{
+                "supervisor",
+                "--log-debug",
+                "--replica-count=3",
+                "--test-duration=10m",
+            },
             else => |f| &.{@tagName(f)},
         };
     }
 
     fn capture_logs(fuzzer: Fuzzer) bool {
-        _ = fuzzer;
-        // TODO
-        return false;
+        return fuzzer == .vortex;
     }
 };
 
@@ -560,7 +571,7 @@ const Tasks = struct {
                 if (task_best == null or
                     task_best.?.runtime_virtual > task.runtime_virtual or
                     (task_best.?.runtime_virtual == task.runtime_virtual and
-                    task_best.?.weight < task.weight))
+                        task_best.?.weight < task.weight))
                 {
                     task_best = task;
                 }
@@ -1262,7 +1273,7 @@ const LogTail = struct {
     pub fn append(log_tail: *LogTail, bytes: []const u8) void {
         const capacity = log_tail.ring.buffer.len;
         const available = log_tail.ring.spare_capacity();
-        const bytes_suffix = if (bytes.len < capacity) bytes else bytes[bytes.len - capacity..];
+        const bytes_suffix = if (bytes.len < capacity) bytes else bytes[bytes.len - capacity ..];
         assert(bytes_suffix.len <= capacity);
 
         log_tail.ring.advance_head_many(bytes_suffix.len -| available);
