@@ -227,7 +227,12 @@ fn run_fuzzers(
     defer seeds.deinit();
 
     var seed_logs = std.ArrayList(?[]const u8).init(gpa);
-    defer seed_logs.deinit();
+    defer {
+        for (seed_logs.items) |log_or_null| {
+            if (log_or_null) |log_buffer| gpa.free(log_buffer);
+        }
+        seed_logs.deinit();
+    }
 
     const random = std.crypto.random;
 
@@ -405,8 +410,9 @@ fn run_fuzzers(
                         if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
                             try seed_logs.append(null);
                         } else {
-                            const log_data = try shell.arena.allocator()
-                                .alloc(u8, fuzzer_log.size());
+                            const log_data = try gpa.alloc(u8, fuzzer_log.size());
+                            errdefer gpa.free(log_data);
+
                             fuzzer_log.write_to(log_data);
                             try seed_logs.append(log_data);
                             seed_record.log = try create_log_path(shell.arena.allocator());
@@ -447,6 +453,10 @@ fn run_fuzzers(
                     log.info("{s}", .{seed_record_json});
                 }
             }
+            for (seed_logs.items) |log_or_null| {
+                if (log_or_null) |log_buffer| gpa.free(log_buffer);
+            }
+            seed_logs.clearRetainingCapacity();
             seeds.clearRetainingCapacity();
         }
 
