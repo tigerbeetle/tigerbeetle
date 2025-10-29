@@ -7,6 +7,7 @@
 //! unified.
 const std = @import("std");
 const builtin = @import("builtin");
+const stdx = @import("stdx");
 
 const assert = std.debug.assert;
 const log = std.log.scoped(.logged_process);
@@ -110,7 +111,7 @@ pub fn wait(
 
 /// If the process has exited, reap it and return the exit code.
 /// Otherwise, return null.
-pub fn wait_nonblocking(self: *LoggedProcess) ?u8 {
+pub fn wait_nonblocking(self: *LoggedProcess) ?std.process.Child.Term {
     self.expect_state_in(.{ .running, .paused });
 
     const result = std.posix.waitpid(self.child.id, std.posix.W.NOHANG);
@@ -118,9 +119,7 @@ pub fn wait_nonblocking(self: *LoggedProcess) ?u8 {
     assert(result.pid == self.child.id);
 
     self.state = .terminated;
-
-    const result_code = @as(i32, @bitCast(result.status));
-    return @intCast(result_code);
+    return stdx.term_from_status(result.status);
 }
 
 fn expect_state_in(self: *LoggedProcess, comptime valid_states: anytype) void {
@@ -209,6 +208,6 @@ test "LoggedProcess: starts and stops" {
     var process = try LoggedProcess.spawn(allocator, argv, .{});
     defer process.destroy(allocator);
 
-    std.time.sleep(10 * std.time.ns_per_ms);
+    std.Thread.sleep(10 * std.time.ns_per_ms);
     _ = try process.terminate();
 }

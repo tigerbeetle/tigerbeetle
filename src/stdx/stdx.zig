@@ -1119,6 +1119,19 @@ test "fastrange not modulo" {
     ).diff_fmt("{d}", .{distribution});
 }
 
+/// `status` is a waitpid() status result.
+pub fn term_from_status(status: u32) std.process.Child.Term {
+    const Term = std.process.Child.Term;
+    return if (std.posix.W.IFEXITED(status))
+        Term{ .Exited = std.posix.W.EXITSTATUS(status) }
+    else if (std.posix.W.IFSIGNALED(status))
+        Term{ .Signal = std.posix.W.TERMSIG(status) }
+    else if (std.posix.W.IFSTOPPED(status))
+        Term{ .Stopped = std.posix.W.STOPSIG(status) }
+    else
+        Term{ .Unknown = status };
+}
+
 comptime {
     _ = @import("aegis.zig");
     _ = @import("bit_set.zig");

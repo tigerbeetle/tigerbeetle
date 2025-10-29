@@ -409,13 +409,13 @@ const Supervisor = struct {
             // Check for replicas that have exited.
             for (supervisor.replicas, 0..) |replica, replica_index| {
                 if (replica.state() != .terminated) {
-                    if (replica.process.?.wait_nonblocking()) |code| {
+                    if (replica.process.?.wait_nonblocking()) |term| {
                         // Replicas shouldn't exit on their own, even with code=0.
-                        maybe(code == 0);
+                        maybe(std.meta.eql(term, .{ .Exited = 0 }));
 
                         log.err(
-                            "{}: replica terminated unexpectedly with code {d}",
-                            .{ replica_index, code },
+                            "{}: replica terminated unexpectedly with {}",
+                            .{ replica_index, term },
                         );
                         return error.TestFailed;
                     }
