@@ -16,13 +16,11 @@
 //!
 //!     $ zig build test:integration -- "vortex smoke"
 //!
-//! If you need more control, you can run this program directly. Using `unshare` is recommended to
-//! be sure all child processes are killed, and to get network sandboxing.
+//! If you need more control, you can run this program directly.
 //!
 //!     $ zig build
 //!     $ zig build vortex:build
-//!     $ unshare --net --fork --map-root-user --pid bash -c 'ip link set up dev lo ; \
-//!         ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle'
+//!     $ ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle
 //!
 //! Other options:
 //!
@@ -55,6 +53,7 @@ const Shell = @import("../../shell.zig");
 const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
@@ -148,7 +147,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             .datafile = datafile,
         }) catch |err| {
             log.err("failed formatting datafile: {}", .{err});
-            std.process.exit(1);
+            return error.SetupFailed;
         };
 
         var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
@@ -183,7 +182,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     const workload = try Workload.spawn(allocator, &io, proxy_ports[0..args.replica_count], args);
     defer {
-        if (workload.process.state() == .running) {
+        if (workload.process.state == .running) {
             _ = workload.process.terminate() catch {};
         }
         workload.destroy(allocator);
@@ -235,6 +234,7 @@ const Supervisor = struct {
         };
         return supervisor;
     }
+
     fn destroy(supervisor: *Supervisor, allocator: std.mem.Allocator) void {
         allocator.destroy(supervisor);
     }
@@ -310,9 +310,7 @@ const Supervisor = struct {
                 }
             }
 
-            if (now < sleep_deadline) continue;
-
-            if (!supervisor.disable_faults) {
+            if (sleep_deadline < now and !supervisor.disable_faults) {
                 const Action = enum {
                     sleep,
                     replica_terminate,
@@ -408,49 +406,29 @@ const Supervisor = struct {
                 }
             }
 
-            // Check for terminated replicas. Any other termination reason
-            // than SIGKILL is considered unexpected and fails the test.
-            for (supervisor.replicas, 0..) |replica, index| {
-                if (replica.state() == .terminated) {
-                    const replica_result = try replica.process.?.wait();
-                    switch (replica_result) {
-                        .Signal => |signal| {
-                            switch (signal) {
-                                std.posix.SIG.KILL => {},
-                                else => {
-                                    log.err(
-                                        "{}: replica terminated unexpectedly with signal {d}",
-                                        .{ index, signal },
-                                    );
-                                    std.process.exit(1);
-                                },
-                            }
-                        },
-                        else => {
-                            log.err(
-                                "{} unexpected replica result: {any}",
-                                .{ index, replica_result },
-                            );
-                            return error.TestFailed;
-                        },
+            // Check for replicas that have exited.
+            for (supervisor.replicas, 0..) |replica, replica_index| {
+                if (replica.state() != .terminated) {
+                    if (replica.process.?.wait_nonblocking()) |term| {
+                        // Replicas shouldn't exit on their own, even with code=0.
+                        maybe(std.meta.eql(term, .{ .Exited = 0 }));
+
+                        log.err(
+                            "{}: replica terminated unexpectedly with {}",
+                            .{ replica_index, term },
+                        );
+                        return error.TestFailed;
                     }
                 }
             }
 
-            // We do not expect the workload to terminate on its own, but if it does,
-            // we end the test.
-            if (supervisor.workload.process.state() == .terminated) {
-                log.info("workload terminated by itself", .{});
-                break try supervisor.workload.process.wait();
+            if (supervisor.workload.process.wait_nonblocking()) |code| {
+                log.err("workload terminated by itself: code={}", .{code});
+                return error.TestFailed;
             }
         } else blk: {
-            // If the workload doesn't terminate by itself, we terminate it after we've run for the
-            // required duration.
             log.info("terminating workload due to max duration", .{});
-            break :blk if (supervisor.workload.process.state() == .running)
-                try supervisor.workload.process.terminate()
-            else
-                try supervisor.workload.process.wait();
+            break :blk try supervisor.workload.process.terminate();
         };
 
         switch (workload_result) {
@@ -459,7 +437,7 @@ const Supervisor = struct {
                     std.posix.SIG.KILL => log.info("workload terminated as requested", .{}),
                     else => {
                         log.err("workload exited unexpectedly with signal {d}", .{signal});
-                        std.process.exit(1);
+                        return error.TestFailed;
                     },
                 }
             },
@@ -559,7 +537,7 @@ const Replica = struct {
 
     pub fn state(self: *Replica) State {
         if (self.process) |process| {
-            switch (process.state()) {
+            switch (process.state) {
                 .running => return .running,
                 .paused => return .paused,
                 .terminated => return .terminated,
@@ -702,13 +680,13 @@ const Workload = struct {
     }
 
     pub fn destroy(workload: *Workload, allocator: std.mem.Allocator) void {
-        assert(workload.process.state() == .terminated);
+        assert(workload.process.state == .terminated);
         workload.process.destroy(allocator);
         allocator.destroy(workload);
     }
 
     fn read(workload: *Workload) void {
-        assert(workload.process.state() == .running);
+        assert(workload.process.state == .running);
 
         workload.io.read(
             *Workload,
@@ -726,7 +704,7 @@ const Workload = struct {
         _: *IO.Completion,
         result: IO.ReadError!usize,
     ) void {
-        if (workload.process.state() != .running) return;
+        if (workload.process.state != .running) return;
 
         const count = result catch |err| {
             log.err("couldn't read from workload stdout: {}", .{err});
