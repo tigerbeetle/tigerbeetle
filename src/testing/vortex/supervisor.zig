@@ -62,6 +62,10 @@ pub const CLIArgs = struct {
     disable_faults: bool = false,
     output_directory: ?[]const u8 = null,
     log_debug: bool = false,
+    positional: struct {
+        /// Vortex is non-deterministic, but providing a seed can still help constrain the scenario.
+        seed: ?u64 = null,
+    },
 };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
@@ -101,7 +105,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     log.info("output directory: {s}", .{output_directory});
     log.info("starting test with target runtime of {}", .{args.test_duration});
 
-    const seed = std.crypto.random.int(u64);
+    const seed = args.positional.seed orelse std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
     var network = try faulty_network.Network.listen(
