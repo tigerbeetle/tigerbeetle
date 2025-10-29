@@ -19,15 +19,15 @@
 //! running fuzzers for completion every second in a fuzzing loop. A fuzzer fails if it returns
 //! non-zero error code.
 //!
-//! The fuzzing loop runs for `args.budget_minutes`. Any fuzzer that runs for longer than
-//! `args.timeout_minutes` is terminated and recorded as a failure. At the end of the fuzzing loop,
+//! The fuzzing loop runs for `args.budget`. Any fuzzer that runs for longer than
+//! `args.timeout` is terminated and recorded as a failure. At the end of the fuzzing loop,
 //! any fuzzers that are still running are cancelled. Cancelled seeds are not recorded.
 //!
 //! Note that the budget/refresh timers do not count time spent cloning or compiling code.
 //!
 //! The CFO uses Linux's process namespaces to ensure that all descendant processes are reaped.
 //!
-//! Every `args.refresh_minutes`, and at the end of the fuzzing loop:
+//! Every `args.refresh`, and at the end of the fuzzing loop:
 //! 1. CFO collects a list of seeds (some of which are failing),
 //! 2. merges this list into the previous set of seeds,
 //! 3. pushes the new list to https://github.com/tigerbeetle/devhubdb/
@@ -59,12 +59,12 @@ const log_size_max = 16 * stdx.KiB;
 
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
-    budget_minutes: u64 = 60,
+    budget: stdx.Duration = .minutes(60),
     /// The interval for flushing accumulated seeds to the devhub.
     /// In addition to this interval, any remaining seeds will be uploaded at the end of the budget.
-    refresh_minutes: u64 = 5,
+    refresh: stdx.Duration = .minutes(5),
     /// A fuzzer which takes longer than this timeout is killed and counts as a failure.
-    timeout_minutes: u64 = 30,
+    timeout: stdx.Duration = .minutes(30),
     concurrency: ?u32 = null,
 };
 
@@ -163,14 +163,14 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         return error.NotSupported;
     }
 
-    if (cli_args.budget_minutes == 0) fatal("--budget-minutes: must be greater than zero", .{});
-    if (cli_args.refresh_minutes == 0) fatal("--refresh-minutes: must be greater than zero", .{});
-    if (cli_args.timeout_minutes == 0) fatal("--timeout-minutes: must be greater than zero", .{});
+    if (cli_args.budget.ns == 0) fatal("--budget: must be greater than zero", .{});
+    if (cli_args.refresh.ns == 0) fatal("--refresh: must be greater than zero", .{});
+    if (cli_args.timeout.ns == 0) fatal("--timeout: must be greater than zero", .{});
 
-    if (cli_args.budget_minutes < cli_args.timeout_minutes) {
-        log.warn("budget={}m is less than timeout={}m; no seeds will time out", .{
-            cli_args.budget_minutes,
-            cli_args.timeout_minutes,
+    if (cli_args.budget.ns < cli_args.timeout.ns) {
+        log.warn("budget={} is less than timeout={}; no seeds will time out", .{
+            cli_args.budget,
+            cli_args.timeout,
         });
     }
 
@@ -195,9 +195,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     try run_fuzzers(shell, gpa, gh_token_option, .{
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
-        .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
-        .refresh_seconds = cli_args.refresh_minutes * std.time.s_per_min,
-        .timeout_seconds = cli_args.timeout_minutes * std.time.s_per_min,
+        .budget = cli_args.budget,
+        .refresh = cli_args.refresh,
+        .timeout = cli_args.timeout,
         .devhub_token = devhub_token_option,
     });
 
@@ -217,9 +217,9 @@ fn run_fuzzers(
     gh_token: ?[]const u8,
     options: struct {
         concurrency: usize,
-        budget_seconds: u64,
-        refresh_seconds: u64,
-        timeout_seconds: u64,
+        budget: stdx.Duration,
+        refresh: stdx.Duration,
+        timeout: stdx.Duration,
         devhub_token: ?[]const u8,
     },
 ) !void {
@@ -262,20 +262,16 @@ fn run_fuzzers(
     var tasks = Tasks.init(shell.arena.allocator());
     defer tasks.deinit();
 
-    const budget_ns = options.budget_seconds * std.time.ns_per_s;
     var budget_timer = try std.time.Timer.start();
 
-    const refresh_ns = options.refresh_seconds * std.time.ns_per_s;
     var refresh_timer = try std.time.Timer.start();
     var refresh_first = true;
 
-    const timeout_ns = options.timeout_seconds * std.time.ns_per_s;
-
     while (true) {
-        const iteration_refresh = refresh_first or refresh_timer.read() >= refresh_ns;
+        const iteration_refresh = refresh_first or refresh_timer.read() >= options.refresh.ns;
         if (iteration_refresh) refresh_timer.reset();
 
-        const iteration_last = budget_timer.read() >= budget_ns;
+        const iteration_last = budget_timer.read() >= options.budget.ns;
         const iteration_push = (iteration_refresh and !refresh_first) or iteration_last;
         refresh_first = false;
 
@@ -374,7 +370,7 @@ fn run_fuzzers(
                 const seed_timestamp_start_ns = fuzzer.seed.seed_timestamp_start;
                 const seed_duration_ns =
                     @as(u64, @intCast(std.time.nanoTimestamp())) - seed_timestamp_start_ns;
-                const seed_expired = !fuzzer_done and seed_duration_ns > timeout_ns;
+                const seed_expired = !fuzzer_done and seed_duration_ns > options.timeout.ns;
 
                 if (fuzzer_done or seed_expired or iteration_last) {
                     log.debug("will reap '{s}' after {}ms{s}", .{
