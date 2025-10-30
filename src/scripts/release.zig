@@ -480,7 +480,7 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         "npm version --no-git-tag-version {tag}",
         .{ .tag = info.tag },
     );
-    try shell.exec("npm install", .{});
+    try shell.exec("npm ci", .{});
     try shell.exec("npm pack --quiet", .{});
 
     try Shell.copy_path(
