@@ -929,7 +929,7 @@ fn build_test_integration(
         .stdx_module = options.stdx_module,
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
-        .config_release = "0.16.99",
+        .config_release = "65535.0.0",
         .config_release_client_min = "0.16.4",
         .config_aof_recovery = false,
     });

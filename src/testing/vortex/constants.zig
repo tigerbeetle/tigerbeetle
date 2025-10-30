@@ -4,7 +4,7 @@ const constants = @This();
 pub const vsr = @import("../../constants.zig");
 
 pub const vortex = struct {
-    pub const cluster_id = 1;
+    pub const cluster_id = 0;
     pub const connections_count_max = @divFloor(
         constants.vsr.clients_max,
         constants.vsr.replicas_max,

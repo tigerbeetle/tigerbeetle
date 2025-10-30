@@ -738,6 +738,12 @@ pub fn ReplicaType(
             assert(release_target.value >= self.superblock.working.release_format.value);
             log.info("superblock release={}", .{release_target});
 
+            if (self.superblock.working.cluster != 0) {
+                if (self.release.triple().major == vsr.Release.development_major) {
+                    @panic("Test builds must only be used with test clusters. (cluster=0)");
+                }
+            }
+
             if (release_target.value != self.release.value) {
                 self.release_transition(@src());
                 return;
