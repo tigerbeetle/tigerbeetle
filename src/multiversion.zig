@@ -183,6 +183,12 @@ pub const Release = extern struct {
     // Minimum is used for all development builds, to distinguish them from production deployments.
     pub const minimum = Release.from(.{ .major = 0, .minor = 0, .patch = 1 });
 
+    /// The 65535.x.x releases are reserved for cluster=0.
+    /// This way, when testing multiversion binaries (either manually or with the integration tests'
+    /// or Vortex's build) it isn't possible to use the test's multiversion build to upgrade a
+    /// production cluster to non-production code.
+    pub const development_major: u16 = std.math.maxInt(u16);
+
     pub fn from(release_triple: ReleaseTriple) Release {
         return std.mem.bytesAsValue(Release, std.mem.asBytes(&release_triple)).*;
     }
