@@ -10,7 +10,7 @@ set -eu
 # (In particular, this will kill all descendent processes that have not changed groups.)
 #
 # We must unset the trap before killing, otherwise the signal will recurse and we segfault.
-trap 'trap - SIGINT SIGTERM EXIT; kill 0' SIGINT SIGTERM EXIT
+trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT
 
 git --version
 
