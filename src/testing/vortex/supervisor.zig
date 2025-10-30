@@ -18,9 +18,7 @@
 //!
 //! If you need more control, you can run this program directly.
 //!
-//!     $ zig build
-//!     $ zig build vortex:build
-//!     $ ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle
+//!     $ zig build vortex -- supervisor
 //!
 //! Other options:
 //!
@@ -51,12 +49,13 @@ const ratio = stdx.PRNG.ratio;
 const Shell = @import("../../shell.zig");
 
 const log = std.log.scoped(.supervisor);
+const tigerbeetle_exe_default: []const u8 = @import("vortex_options").tigerbeetle_exe;
 
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 pub const CLIArgs = struct {
-    tigerbeetle_executable: []const u8,
+    tigerbeetle_executable: ?[]const u8 = null,
     test_duration: stdx.Duration = .minutes(1),
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
@@ -90,6 +89,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     var io = try IO.init(128, 0);
 
+    const tigerbeetle_executable = args.tigerbeetle_executable orelse tigerbeetle_exe_default;
     const output_directory = args.output_directory orelse try shell.create_tmp_dir();
     defer {
         if (args.output_directory == null) {
@@ -140,7 +140,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             \\    --replica-count={replica_count}
             \\    {datafile}
         , .{
-            .tigerbeetle_executable = args.tigerbeetle_executable,
+            .tigerbeetle_executable = tigerbeetle_executable,
             .cluster = constants.vortex.cluster_id,
             .replica_index = replica_index,
             .replica_count = args.replica_count,
@@ -161,7 +161,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         var replica = try Replica.create(
             allocator,
-            args.tigerbeetle_executable,
+            tigerbeetle_executable,
             args.replica_count,
             @intCast(replica_index),
             replica_ports,

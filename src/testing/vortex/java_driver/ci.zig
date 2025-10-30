@@ -16,7 +16,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // NB: This expects the vortex bin to be available.
     if (builtin.target.os.tag == .linux) {
         const base_path = "../../../../";
-        const tigerbeetle_bin = base_path ++ "zig-out/bin/tigerbeetle";
         const vortex_bin = base_path ++ "zig-out/bin/vortex";
         const class_path_driver = base_path ++
             "src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar";
@@ -26,14 +25,12 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.exec(
             "{vortex_bin} " ++
                 "supervisor --driver-command={driver_command} " ++
-                "--tigerbeetle-executable={tigerbeetle_bin} " ++
                 "--replica-count=1 " ++
                 "--disable-faults " ++
                 "--test-duration=1s",
             .{
                 .vortex_bin = vortex_bin,
                 .driver_command = driver_command,
-                .tigerbeetle_bin = tigerbeetle_bin,
             },
         );
     } else {

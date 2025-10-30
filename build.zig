@@ -1227,6 +1227,16 @@ fn build_vortex_executable(
         tb_client.linkSystemLibrary("advapi32");
     }
 
+    const tigerbeetle = build_tigerbeetle_executable(b, .{
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+        .target = options.target,
+        .mode = options.mode,
+    });
+
+    const vortex_options = b.addOptions();
+    vortex_options.addOptionPath("tigerbeetle_exe", tigerbeetle.getEmittedBin());
+
     const vortex = b.addExecutable(.{
         .name = "vortex",
         .root_module = b.createModule(.{
@@ -1241,6 +1251,7 @@ fn build_vortex_executable(
     vortex.linkLibrary(tb_client);
     vortex.addIncludePath(options.tb_client_header.dirname());
     vortex.root_module.addOptions("vsr_options", options.vsr_options);
+    vortex.root_module.addOptions("vortex_options", vortex_options);
     return vortex;
 }
 
