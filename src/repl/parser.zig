@@ -5,10 +5,7 @@ const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
 const IO = vsr.io.IO;
 const Storage = vsr.storage.StorageType(IO);
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    constants.state_machine_config,
-);
+const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const tb = vsr.tigerbeetle;
 
 const Terminal = @import("terminal.zig").Terminal;
@@ -292,7 +289,7 @@ pub const Parser = struct {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     operation_comptime.state_machine_op(),
-                    StateMachine.machine_constants.message_body_size_max,
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -312,7 +309,7 @@ pub const Parser = struct {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     operation_comptime.state_machine_op(),
-                    StateMachine.machine_constants.message_body_size_max,
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,
@@ -887,7 +884,7 @@ test "parser.zig: Parser account filter successfully" {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     .get_account_transfers,
-                    StateMachine.machine_constants.message_body_size_max,
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -965,7 +962,7 @@ test "parser.zig: Parser query filter successfully" {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     .query_transfers,
-                    StateMachine.machine_constants.message_body_size_max,
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,

@@ -3,11 +3,9 @@ const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const assert = std.debug.assert;
 
-const constants = vsr.constants;
 const IO = vsr.io.IO;
-
 const Storage = vsr.storage.StorageType(IO);
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const tb = vsr.tigerbeetle;
 
 /// VSR type mappings: these will always be the same regardless of state machine.

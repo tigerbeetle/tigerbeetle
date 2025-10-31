@@ -263,10 +263,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             options: Options,
         ) !Workload {
             assert(options.accounts_batch_size_span + options.accounts_batch_size_min <=
-                AccountingStateMachine.machine_constants.batch_max.create_accounts);
+                AccountingStateMachine.batch_max.create_accounts);
             assert(options.accounts_batch_size_span >= 1);
             assert(options.transfers_batch_size_span + options.transfers_batch_size_min <=
-                AccountingStateMachine.machine_constants.batch_max.create_transfers);
+                AccountingStateMachine.batch_max.create_transfers);
             assert(options.transfers_batch_size_span >= 1);
 
             var auditor = try Auditor.init(allocator, prng, options.auditor_options);
@@ -372,7 +372,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 self.options.batch_size_limit,
             );
             assert(result_max > 0);
-            assert(AccountingStateMachine.machine_constants.message_body_size_max >=
+            assert(constants.message_body_size_max >=
                 result_size * result_max);
 
             if (!AccountingStateMachine.operation_is_multi_batch(operation)) {
@@ -428,9 +428,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 const reply_message_size: u32 =
                     ((result_count + result_count_expected) * result_size) +
                     reply_trailer_size;
-                if (reply_message_size >
-                    AccountingStateMachine.machine_constants.message_body_size_max)
-                {
+                if (reply_message_size > constants.message_body_size_max) {
                     // For operations that produce 1:1 result per event
                     // (e.g., `create_*` and `lookup_*`), this was already validated
                     // when checking if `event_count` fits within the multi-batch request.
@@ -1990,9 +1988,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
             client_count: usize,
             in_flight_max: usize,
         }) Options {
-            assert(
-                options.batch_size_limit <= StateMachine.machine_constants.message_body_size_max,
-            );
+            assert(options.batch_size_limit <= constants.message_body_size_max);
 
             const batch_create_accounts_limit = @min(
                 StateMachine.operation_event_max(
@@ -2005,8 +2001,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                 ),
             );
             assert(batch_create_accounts_limit > 0);
-            assert(batch_create_accounts_limit <=
-                StateMachine.machine_constants.batch_max.create_accounts);
+            assert(batch_create_accounts_limit <= StateMachine.batch_max.create_accounts);
 
             const batch_create_transfers_limit = @min(
                 StateMachine.operation_event_max(
@@ -2019,8 +2014,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                 ),
             );
             assert(batch_create_transfers_limit > 0);
-            assert(batch_create_transfers_limit <=
-                StateMachine.machine_constants.batch_max.create_transfers);
+            assert(batch_create_transfers_limit <= StateMachine.batch_max.create_transfers);
             return .{
                 .batch_size_limit = options.batch_size_limit,
                 .multi_batch_per_request_limit = options.multi_batch_per_request_limit,

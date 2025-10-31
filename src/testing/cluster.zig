@@ -66,7 +66,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Tracer = Storage.Tracer;
         pub const SuperBlock = vsr.SuperBlockType(Storage);
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
-        pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
+        pub const StateMachine = StateMachineType(Storage);
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
         pub const ReplicaReformat =
             vsr.ReplicaReformatType(StateMachine, MessageBus, Storage);

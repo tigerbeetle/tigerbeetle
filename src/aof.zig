@@ -297,10 +297,7 @@ pub fn AOFType(comptime IO: type) type {
 
         pub const ReplayClient = struct {
             const Storage = vsr.storage.StorageType(IO);
-            const StateMachine = vsr.state_machine.StateMachineType(
-                Storage,
-                constants.state_machine_config,
-            );
+            const StateMachine = vsr.state_machine.StateMachineType(Storage);
             const Client = vsr.ClientType(StateMachine, MessageBus);
 
             client: *Client,
