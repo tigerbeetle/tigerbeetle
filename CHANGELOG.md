@@ -5,11 +5,12 @@ to receive notifications about breaking changes!
 
 ## TigerBeetle 0.16.63
 
-Released: 2025-10-24
+Released: 2025-10-31
 
 ### Safety And Performance
 
-- [#3294](https://github.com/tigerbeetle/tigerbeetle/pull/3294)
+- [#3294](https://github.com/tigerbeetle/tigerbeetle/pull/3294),
+  [#3336](https://github.com/tigerbeetle/tigerbeetle/pull/3336)
 
   Allow backups to accept prepares from the next checkpoint when they replace already committed
   prepares.
@@ -22,6 +23,20 @@ Released: 2025-10-24
 
   Correctly reset the `pulse_next_timestamp`.
 
+- [#3316](https://github.com/tigerbeetle/tigerbeetle/pull/3316)
+
+  Disable `config.verify` in release builds, while promoting several assertions gated by `verify`
+  to regular assertions.
+
+- [#3335](https://github.com/tigerbeetle/tigerbeetle/pull/3335)
+
+  Fix an unhandled error on unreachable networks that could cause liveness issues.
+  Also ban all usage of `posix.send()` in favor of `posix.sendto()`.
+
+- [#3334](https://github.com/tigerbeetle/tigerbeetle/pull/3334)
+
+  Free up about 300MiB of memory by sharing the same buffer for in-place radix sort.
+
 ### Features
 
 - [#3302](https://github.com/tigerbeetle/tigerbeetle/pull/3302)
@@ -31,6 +46,10 @@ Released: 2025-10-24
 - [#3291](https://github.com/tigerbeetle/tigerbeetle/pull/3291)
 
   Introduces `tigerbeetle inspect integrity` to verify offline that a datafile is uncorrupted.
+
+- [#3254](https://github.com/tigerbeetle/tigerbeetle/pull/3254)
+
+  Prepare the Rust client for publication.
 
 ### Internals
 
@@ -46,6 +65,34 @@ Released: 2025-10-24
 - [#3311](https://github.com/tigerbeetle/tigerbeetle/pull/3311)
 
   Clarify the release process in case a version of TigerBeetle is skipped.
+
+- [#3317](https://github.com/tigerbeetle/tigerbeetle/pull/3317)
+
+  Fix invalid payload references after modifying the active tag in a tagged union.
+
+- [#3339](https://github.com/tigerbeetle/tigerbeetle/pull/3339)
+
+  Remove unnecessary deduplication logic when scanning from memory tables,
+  since [#2592](https://github.com/tigerbeetle/tigerbeetle/pull/2592) already
+  introduced deduplication during sorting.
+
+- [#3346](https://github.com/tigerbeetle/tigerbeetle/pull/3346)
+
+  Reserve the maximum release version (65535.x.x) for testing clusters (`cluster_id` zero).
+
+- [#3342](https://github.com/tigerbeetle/tigerbeetle/pull/3342),
+  [#3338](https://github.com/tigerbeetle/tigerbeetle/pull/3338),
+  [#3330](https://github.com/tigerbeetle/tigerbeetle/pull/3330),
+  [#3347](https://github.com/tigerbeetle/tigerbeetle/pull/3347),
+  [#3341](https://github.com/tigerbeetle/tigerbeetle/pull/3341)
+
+  Various Vortex and CFO improvements.
+
+- [#3332](https://github.com/tigerbeetle/tigerbeetle/pull/3332),
+  [#3331](https://github.com/tigerbeetle/tigerbeetle/pull/3331)
+
+  Fix the build command for clients in HACKING.md and other typos.
+  Thanks @gharbi-mohamed-dev!
 
 ### TigerTracks 🎧
 
