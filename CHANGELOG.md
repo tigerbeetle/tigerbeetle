@@ -30,8 +30,12 @@ Released: 2025-10-31
 
 - [#3335](https://github.com/tigerbeetle/tigerbeetle/pull/3335)
 
-  Switch to using `posix.sendto()` instead of `posix.send()` for synchronous network sends.
-  This fixes an unhandled error on unreachable networks that could cause liveness issues.
+  Fix an unhandled error on unreachable networks that could cause liveness issues.
+  Also ban all usage of `posix.send()` in favor of `posix.sendto()`.
+
+- [#3334](https://github.com/tigerbeetle/tigerbeetle/pull/3334)
+
+  Free up about 300MiB of memory by sharing the same buffer for in-place radix sort.
 
 ### Features
 
@@ -71,10 +75,6 @@ Released: 2025-10-31
   Remove unnecessary deduplication logic when scanning from memory tables,
   since [#2592](https://github.com/tigerbeetle/tigerbeetle/pull/2592) already
   introduced deduplication during sorting.
-
-- [#3334](https://github.com/tigerbeetle/tigerbeetle/pull/3334)
-
-  Shared buffer for in-place radix sort.
 
 - [#3346](https://github.com/tigerbeetle/tigerbeetle/pull/3346)
 
