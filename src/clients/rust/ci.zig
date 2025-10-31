@@ -4,6 +4,7 @@ const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+    try shell.exec_zig("build clients:rust -Drelease", .{});
     try shell.exec("cargo test --all", .{});
     try shell.exec("cargo fmt --check", .{});
     try shell.exec("cargo clippy -- -D clippy::all", .{});

@@ -292,7 +292,7 @@ pub fn build(b: *std.Build) !void {
     build_rust_client(b, build_steps.clients_rust, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
-        .tb_client_header = tb_client_header,
+        .tb_client_header = tb_client_header.path,
         .mode = mode,
     });
     build_go_client(b, build_steps.clients_go, .{
@@ -1280,11 +1280,19 @@ fn build_rust_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
-        tb_client_header: *Generated,
+        tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
-    step_clients_rust.dependOn(&options.tb_client_header.step);
+    // The Rust test suite runs tigerbeetle directly. This ensures it is available.
+    step_clients_rust.dependOn(b.getInstallStep());
+
+    // Copy the generated header file to the Rust client assets directory:
+    const tb_client_header_copy = Generated.file_copy(b, .{
+        .from = options.tb_client_header,
+        .path = "./src/clients/rust/assets/tb_client.h",
+    });
+    step_clients_rust.dependOn(&tb_client_header_copy.step);
 
     inline for (platforms) |platform| {
         const query = Query.parse(.{

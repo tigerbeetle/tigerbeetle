@@ -1,9 +1,19 @@
-use std::{env, fs, path::Path};
+use std::{env, path::Path};
 
 fn main() -> anyhow::Result<()> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
 
-    prepare_dependencies(&cargo_manifest_dir)?;
+    if !Path::new(&format!("{cargo_manifest_dir}/assets/tb_client.h")).try_exists()? {
+        panic!(
+            "\n\
+             TigerBeetle assets not found for in-tree build.\n\
+             Run `zig/zig build clients:rust -Drelease` first.\n"
+        );
+    }
+
+    assert!(Path::new(&format!("{cargo_manifest_dir}/src/tb_client.rs")).try_exists()?);
+
+    println!("cargo:rerun-if-changed={cargo_manifest_dir}/assets/tb_client.h");
 
     let unix = env::var("CARGO_CFG_UNIX").is_ok();
     let windows = env::var("CARGO_CFG_WINDOWS").is_ok();
@@ -43,99 +53,12 @@ fn main() -> anyhow::Result<()> {
     };
     let libpath = format!("{libdir}/{libfile}");
 
+    assert!(Path::new(&libpath).try_exists()?);
     println!("cargo:rerun-if-changed={libpath}");
 
     if windows {
         // tb_client needs access to the random number generator in here.
         println!("cargo:rustc-link-lib=advapi32");
-    }
-
-    Ok(())
-}
-
-fn prepare_dependencies(manifest_dir: &str) -> anyhow::Result<()> {
-    let build_in_tree = is_build_in_tree(manifest_dir)?;
-    if build_in_tree {
-        // Build tigerbeetle will place the static libs in assets/lib.
-        build_tigerbeetle(manifest_dir)?;
-
-        let tb_client_h = format!("{manifest_dir}/../c/tb_client.h");
-        let tb_client_dest = format!("{manifest_dir}/assets");
-        let tb_client_h_dest = format!("{manifest_dir}/assets/tb_client.h");
-
-        fs::create_dir_all(tb_client_dest)?;
-        fs::copy(tb_client_h, tb_client_h_dest)?;
-
-        emit_tigerbeetle_rerun_if_changed(manifest_dir)?;
-
-        Ok(())
-    } else {
-        // This is probably a published tigerbeetle crate outside of the
-        // tigerbeetle source tree. Sanity check that we have the pre-built
-        // assets.
-        assert!(Path::new(&format!("{manifest_dir}/assets/tb_client.h")).try_exists()?);
-        Ok(())
-    }
-}
-
-fn is_build_in_tree(manifest_dir: &str) -> anyhow::Result<bool> {
-    Ok(Path::new(&format!("{manifest_dir}/../../../build.zig")).try_exists()?)
-}
-
-fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
-    assert!(is_build_in_tree(manifest_dir)?);
-
-    let tigerbeetle_root = format!("{manifest_dir}/../../..");
-    let zig_compiler = if cfg!(unix) {
-        format!("{tigerbeetle_root}/zig/zig")
-    } else if cfg!(windows) {
-        format!("{tigerbeetle_root}/zig/zig.exe")
-    } else {
-        todo!()
-    };
-
-    if !Path::new(&zig_compiler).try_exists()? {
-        println!("cargo:warning=No zig compiler found at {zig_compiler}.");
-        println!("cargo:warning=You may need to run zig/download.ps1.");
-        panic!("No zig compiler found.");
-    }
-
-    let build_targets = [
-        "clients:rust", // Build the tb_client library, tb_client.h, and tb_client.rs
-        "install",      // Build tigerbeetle binary for testing
-    ];
-
-    for build_target in build_targets {
-        let mut cmd = std::process::Command::new(&zig_compiler);
-        cmd.args(["build", build_target, "-Drelease"]);
-        let result = cmd.status()?;
-
-        if !result.success() {
-            panic!("zig build failed");
-        }
-    }
-
-    Ok(())
-}
-
-fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> anyhow::Result<()> {
-    let tigerbeetle_root = format!("{manifest_dir}/../../..");
-
-    let output = std::process::Command::new("git")
-        .args(["ls-files", "-z"])
-        .current_dir(&tigerbeetle_root)
-        .output()?;
-
-    if !output.status.success() {
-        return Err(anyhow::anyhow!("git ls-files failed"));
-    }
-
-    let stdout = String::from_utf8(output.stdout)?;
-    for file_path in stdout.split('\0') {
-        if !file_path.is_empty() && file_path.ends_with(".zig") {
-            let full_path = format!("{tigerbeetle_root}/{file_path}");
-            println!("cargo:rerun-if-changed={}", full_path);
-        }
     }
 
     Ok(())
