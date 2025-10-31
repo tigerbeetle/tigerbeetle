@@ -434,6 +434,8 @@ pub fn StorageType(comptime IO: type) type {
                 // TODO: It seems like it might be possible for some filesystems to return ETIMEDOUT
                 // here. Consider handling this without panicking.
                 error.NoSpaceLeft => {
+                    // NB: Intentionally crash on physical space exhaustion.
+                    // Low space condition is handled logically, via `--limit-storage` argument.
                     vsr.fatal(
                         .no_space_left,
                         "write failed: no space left on device (offset={} size={})",
