@@ -761,6 +761,17 @@ test "binary search: explicit range" {
         },
     );
 
+    // Inclusive interval with duplicates:
+    try test_binary_search.explicit_range_search(
+        &[_]u32{ 3, 4, 10, 15, 20, 25, 30, 100, 100, 100, 1000 },
+        15,
+        100,
+        .{
+            .start = 3,
+            .count = 7,
+        },
+    );
+
     // Where key_min == key_max:
     try test_binary_search.explicit_range_search(
         &[_]u32{ 3, 4, 10, 15, 20, 25, 30, 100, 1000 },

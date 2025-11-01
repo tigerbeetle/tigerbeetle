@@ -127,6 +127,64 @@ pub fn ScanTreeType(
             );
         };
 
+        const DummyIterator = struct {
+            // We can simply reslice as in the old one.
+            // So we need the immutable values as values.
+            values: []const Value,
+            direction: Direction,
+            key_end: Key,
+            pub fn init(table_immutable_values: []const Value, key_end: Key, direction: Direction) DummyIterator {
+                return .{
+                    .values = table_immutable_values,
+                    .direction = direction,
+                    .key_end = key_end,
+                };
+            }
+
+            pub fn peek(iterator: *const DummyIterator) error{ Drained, Empty }!Key {
+                if (iterator.values.len == 0) return error.Empty;
+
+                const value: *const Value = switch (iterator.direction) {
+                    .ascending => &iterator.values[0],
+                    .descending => &iterator.values[iterator.values.len - 1],
+                };
+
+                const key = key_from_value(value);
+
+                switch (iterator.direction) {
+                    .ascending => if (key > iterator.key_end) return error.Empty else return key,
+                    .descending => if (key < iterator.key_end) return error.Empty else return key,
+                }
+            }
+            pub fn pop(iterator: *DummyIterator) Value {
+                assert(iterator.values.len > 0);
+
+                // TableMemory already deduplicates.
+                switch (iterator.direction) {
+                    .ascending => {
+                        assert(iterator.values.len <= 1 or
+                            key_from_value(&iterator.values[0]) !=
+                                key_from_value(&iterator.values[1]));
+
+                        const value_first = iterator.values[0];
+                        iterator.values = iterator.values[1..];
+                        assert(key_from_value(&value_first) <= iterator.key_end);
+                        return value_first;
+                    },
+                    .descending => {
+                        assert(iterator.values.len <= 1 or
+                            key_from_value(&iterator.values[iterator.values.len - 1]) !=
+                                key_from_value(&iterator.values[iterator.values.len - 2]));
+
+                        const value_last = iterator.values[iterator.values.len - 1];
+                        iterator.values = iterator.values[0 .. iterator.values.len - 1];
+                        assert(key_from_value(&value_last) >= iterator.key_end);
+                        return value_last;
+                    },
+                }
+            }
+        };
+
         tree: *Tree,
         buffer: *const ScanBuffer,
 
@@ -137,6 +195,7 @@ pub fn ScanTreeType(
 
         table_mutable_values: []const Value,
         table_immutable_values: []const Value,
+        table_immutable_iterator: DummyIterator,
 
         state: union(ScanState) {
             /// The scan has not been executed yet.
@@ -195,6 +254,32 @@ pub fn ScanTreeType(
                 break :blk values[range.start..][0..range.count];
             };
 
+            const table_immutable_values_iterator: []const Value = blk: {
+                if (snapshot < tree.table_immutable.mutability.immutable.snapshot_min) {
+                    break :blk &.{};
+                } else break :blk tree.table_immutable.values_used();
+            };
+
+            var table_immutable_iterator: DummyIterator = .init(
+                table_immutable_values_iterator,
+                if (direction == .ascending) key_max else key_min,
+                direction,
+            );
+
+            while (true) {
+                // if the slice is empty we just return here and leave it to handle in the core logic.
+                const key_peek = table_immutable_iterator.peek() catch break;
+                switch (direction) {
+                    .ascending => {
+                        if (key_peek >= key_min) break;
+                    },
+                    .descending => {
+                        if (key_peek <= key_max) break;
+                    },
+                }
+                _ = table_immutable_iterator.pop();
+            }
+
             const table_immutable_values: []const Value = blk: {
                 if (snapshot <
                     tree.table_immutable.mutability.immutable.snapshot_min) break :blk &.{};
@@ -210,6 +295,7 @@ pub fn ScanTreeType(
                 );
                 break :blk values[range.start..][0..range.count];
             };
+            std.debug.print("key_min {} key_max {} \n", .{ key_min, key_max });
 
             return .{
                 .tree = tree,
@@ -221,6 +307,7 @@ pub fn ScanTreeType(
                 .direction = direction,
                 .table_mutable_values = table_mutable_values,
                 .table_immutable_values = table_immutable_values,
+                .table_immutable_iterator = table_immutable_iterator,
                 .levels = undefined,
                 .merge_iterator = null,
             };
@@ -349,11 +436,27 @@ pub fn ScanTreeType(
             }
 
             // Re-slicing the in-memory tables:
+            std.debug.print("reslice now \n", .{});
             inline for (.{ &self.table_mutable_values, &self.table_immutable_values }) |field| {
                 const table_memory = field.*;
                 const slice: []const Value = probe_values(self.direction, table_memory, probe_key);
                 assert(slice.len <= table_memory.len);
                 field.* = slice;
+            }
+            // reslice it now for our iterator too.
+
+            while (true) {
+                // if the slice is empty we just return here and leave it to handle in the core logic.
+                const key_peek = self.table_immutable_iterator.peek() catch break;
+                switch (self.direction) {
+                    .ascending => {
+                        if (key_peek >= probe_key) break;
+                    },
+                    .descending => {
+                        if (key_peek <= probe_key) break;
+                    },
+                }
+                _ = self.table_immutable_iterator.pop();
             }
 
             switch (self.state) {
@@ -420,7 +523,22 @@ pub fn ScanTreeType(
         }
 
         fn merge_table_immutable_peek(self: *const ScanTree) error{ Drained, Empty }!Key {
-            return self.table_memory_peek(self.table_immutable_values);
+            const old = self.table_memory_peek(self.table_immutable_values);
+            const new = self.table_immutable_iterator.peek();
+
+            std.debug.print("direction {} \n", .{self.table_immutable_iterator.direction});
+            // This should crash now.
+            if (old) |ov| {
+                // old is a value; new must also be a value and equal
+                const nv = new catch unreachable;
+                std.debug.print("ov {} nv {}\n", .{ ov, nv });
+                std.debug.assert(ov == nv);
+            } else |e_old| {
+                // old is an error; new must be the same error
+                const e_new = new catch |e| e;
+                std.debug.assert(e_old == e_new);
+            }
+            return new;
         }
 
         fn merge_table_mutable_pop(self: *ScanTree) Value {
@@ -428,7 +546,10 @@ pub fn ScanTreeType(
         }
 
         fn merge_table_immutable_pop(self: *ScanTree) Value {
-            return table_memory_pop(self, &self.table_immutable_values);
+            const old = table_memory_pop(self, &self.table_immutable_values);
+            const new = self.table_immutable_iterator.pop();
+            assert(key_from_value(&old) == key_from_value(&new));
+            return new;
         }
 
         inline fn table_memory_peek(
@@ -499,8 +620,10 @@ pub fn ScanTreeType(
         }
 
         fn probe_values(direction: Direction, values: []const Value, key: Key) []const Value {
+            // Abstract direction away and peek + pop until we find the `key`
             switch (direction) {
                 .ascending => {
+                    // This returns the first index of the match.
                     const start = binary_search.binary_search_values_upsert_index(
                         Key,
                         Value,
@@ -514,6 +637,8 @@ pub fn ScanTreeType(
                 },
                 .descending => {
                     const end = end: {
+                        // This returns the last index of the match.
+                        // e.g. makes sense since it is reversed.
                         const index = binary_search.binary_search_values_upsert_index(
                             Key,
                             Value,
@@ -522,6 +647,10 @@ pub fn ScanTreeType(
                             key,
                             .{ .mode = .upper_bound },
                         );
+                        // What does this do?
+                        // adjust to be exactly one before our search key.
+                        // Ah since slicing is not inclusive!
+                        // that means in the new impl. we can exactly end at where key would be.
                         break :end index + @intFromBool(
                             index < values.len and key_from_value(&values[index]) <= key,
                         );
