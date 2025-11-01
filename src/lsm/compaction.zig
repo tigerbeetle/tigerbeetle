@@ -1524,6 +1524,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             compaction.grid.on_next_tick(merge_callback, &cpu.next_tick);
         }
 
+        // TODO: I think this is the main function I need to touch for now.
         fn merge_callback(next_tick: *Grid.NextTick) void {
             const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
             const compaction: *Compaction = cpu.parent(Compaction);
@@ -1534,6 +1535,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .level_b = compaction.level_b,
             } });
 
+            // This specialies for immutable, but retunrns slice for all.
+            // We need to specialize this to handle iterator.
+            // The other code can be logically at least unchanged I _think_
+            // Because the iterator is equivalent to the current slice!
             const values_source_a, const values_source_b = compaction.merge_inputs();
             assert(values_source_a != null or values_source_b != null);
 
@@ -1553,6 +1558,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
             // Do the actual merge from inputs to the output (table builder).
             const merge_result: MergeResult = if (values_source_a == null) blk: {
+                // This is a simple copy of the other table.
                 const consumed = values_copy(values_target, values_source_b.?);
                 break :blk .{
                     .consumed_a = 0,
@@ -1562,6 +1568,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 };
             } else if (values_source_b == null) blk: {
                 if (compaction.drop_tombstones) {
+                    // I think we need this in addition for our primary tables.
                     const copy_result = values_copy_drop_tombstones(
                         values_target,
                         values_source_a.?,
@@ -1573,6 +1580,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                         .produced = copy_result.produced,
                     };
                 } else {
+                    // I think we need this in addition for our same.
                     const consumed = values_copy(values_target, values_source_a.?);
                     break :blk .{
                         .consumed_a = consumed,
@@ -1581,6 +1589,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                         .produced = consumed,
                     };
                 }
+
+                // we need to specialize this too.
             } else values_merge(
                 values_target,
                 values_source_a.?,

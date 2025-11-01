@@ -41,6 +41,11 @@ const ChangeEventsFilter = tb.ChangeEventsFilter;
 const ChangeEvent = tb.ChangeEvent;
 const ChangeEventType = tb.ChangeEventType;
 
+const Params = struct {
+    name: []const u8 = "scan",
+};
+const PerfEventBlock = @import("lsm/perf_event.zig").PerfEventBlockType(Params);
+
 pub const tree_ids = struct {
     pub const Account = .{
         .id = 1,
@@ -4987,6 +4992,7 @@ fn ChangeEventsScanLookupType(
 
             while (scan_tree.next() catch |err| switch (err) {
                 error.Pending => {
+                    std.debug.print("read again\n", .{});
                     self.scan_tree.read({}, &scan_read_callback);
                     return;
                 },

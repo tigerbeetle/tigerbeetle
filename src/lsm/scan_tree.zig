@@ -49,6 +49,7 @@ pub fn ScanTreeType(
 
         pub const Tree = Tree_;
         const Table = Tree.Table;
+        const ImmutableTableIterator = Tree.TableMemory.ImmutableTableIterator;
         const Key = Table.Key;
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
@@ -186,7 +187,7 @@ pub fn ScanTreeType(
 
         table_mutable_values: []const Value,
         table_immutable_values: []const Value,
-        table_immutable_iterator: DummyIterator,
+        table_immutable_iterator: ImmutableTableIterator,
 
         state: union(ScanState) {
             /// The scan has not been executed yet.
@@ -245,14 +246,16 @@ pub fn ScanTreeType(
                 break :blk values[range.start..][0..range.count];
             };
 
-            const table_immutable_values_iterator: []const Value = blk: {
-                if (snapshot < tree.table_immutable.mutability.immutable.snapshot_min) {
-                    break :blk &.{};
-                } else break :blk tree.table_immutable.values_used();
-            };
+            //const table_immutable_values_iterator: []const Value = blk: {
+            //if (snapshot < tree.table_immutable.mutability.immutable.snapshot_min) {
+            //TZ: it seems that we never hit this case.
+            //std.debug.print("hit this case\n", .{});
+            //break :blk &.{};
+            //} else break :blk tree.table_immutable.values_used();
+            //};
 
-            var table_immutable_iterator: DummyIterator = .init(
-                table_immutable_values_iterator,
+            var table_immutable_iterator: ImmutableTableIterator = .init(
+                tree.table_immutable.mutability.immutable.merge_context,
                 if (direction == .ascending) key_max else key_min,
                 direction,
             );
@@ -268,7 +271,7 @@ pub fn ScanTreeType(
                         if (key_peek <= key_max) break;
                     },
                 }
-                _ = table_immutable_iterator.pop();
+                _ = table_immutable_iterator.pop() catch unreachable;
             }
 
             const table_immutable_values: []const Value = blk: {
@@ -286,7 +289,6 @@ pub fn ScanTreeType(
                 );
                 break :blk values[range.start..][0..range.count];
             };
-            std.debug.print("key_min {} key_max {} \n", .{ key_min, key_max });
 
             return .{
                 .tree = tree,
@@ -411,7 +413,6 @@ pub fn ScanTreeType(
             self.key_lower = probe_key;
 
             // Re-slicing the in-memory tables:
-            std.debug.print("reslice now \n", .{});
             inline for (.{ &self.table_mutable_values, &self.table_immutable_values }) |field| {
                 const table_memory = field.*;
                 const slice: []const Value = self.direction.slice_lower_bound(
@@ -437,7 +438,7 @@ pub fn ScanTreeType(
                         if (key_peek <= probe_key) break;
                     },
                 }
-                _ = self.table_immutable_iterator.pop();
+                _ = self.table_immutable_iterator.pop() catch unreachable;
             }
 
             switch (self.state) {
@@ -500,23 +501,8 @@ pub fn ScanTreeType(
             return self.table_memory_peek(self.table_mutable_values);
         }
 
-        fn merge_table_immutable_peek(self: *const ScanTree) Pending!?Key {
-            const old = self.table_memory_peek(self.table_immutable_values);
-            const new = self.table_immutable_iterator.peek();
-
-            std.debug.print("direction {} \n", .{self.table_immutable_iterator.direction});
-            // This should crash now.
-            if (old) |ov| {
-                // old is a value; new must also be a value and equal
-                const nv = new catch unreachable;
-                std.debug.print("ov {} nv {}\n", .{ ov, nv });
-                std.debug.assert(ov == nv);
-            } else |e_old| {
-                // old is an error; new must be the same error
-                const e_new = new catch |e| e;
-                std.debug.assert(e_old == e_new);
-            }
-            return new;
+        fn merge_table_immutable_peek(self: *ScanTree) Pending!?Key {
+            return self.table_immutable_iterator.peek();
         }
 
         fn merge_table_mutable_pop(self: *ScanTree) Value {
@@ -524,10 +510,7 @@ pub fn ScanTreeType(
         }
 
         fn merge_table_immutable_pop(self: *ScanTree) Value {
-            const old = table_memory_pop(self, &self.table_immutable_values);
-            const new = self.table_immutable_iterator.pop();
-            assert(key_from_value(&old) == key_from_value(&new));
-            return new;
+            return self.table_immutable_iterator.pop() catch unreachable;
         }
 
         inline fn table_memory_peek(
