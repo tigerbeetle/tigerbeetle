@@ -30,6 +30,7 @@ const binary_search = @import("binary_search.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
+const Direction = @import("../direction.zig").Direction;
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
@@ -67,6 +68,9 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // mutable table immediately prior to checkpoint.
                 absorbed: bool = false,
                 snapshot_min: u64 = 0,
+                // both dependt on each other.
+                values_shadow: []Value,
+                merge_context: MergeContext,
             },
         };
 
@@ -85,10 +89,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         const sorted_runs_max = constants.lsm_compaction_ops + 2;
 
         // Merge context for the k-way iterator across all runs in the tracker.
-        const MergeContext = struct {
+        pub const MergeContext = struct {
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
             stream_origins: [sorted_runs_max]RunOrigin,
+            direction: Direction = .ascending,
 
             fn stream_peek(
                 context: *const MergeContext,
@@ -98,15 +103,27 @@ pub fn TableMemoryType(comptime Table: type) type {
                 //assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
                 if (stream.len == 0) return error.Empty;
-                return key_from_value(&stream[0]);
+                const value: *const Value = switch (context.direction) {
+                    .ascending => &stream[0],
+                    .descending => &stream[stream.len - 1],
+                };
+                return key_from_value(value);
             }
 
             fn stream_pop(context: *MergeContext, stream_index: u32) Value {
                 // TODO: Enable the asserts once `constants.verify` is disabled on release.
                 //assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
-                context.streams[stream_index] = stream[1..];
-                return stream[0];
+                return switch (context.direction) {
+                    .ascending => blk: {
+                        context.streams[stream_index] = stream[1..];
+                        break :blk stream[0];
+                    },
+                    .descending => blk: {
+                        context.streams[stream_index] = stream[0 .. stream.len - 1];
+                        break :blk stream[stream.len - 1];
+                    },
+                };
             }
 
             // Prefer immutable over mutable on ties; otherwise stable by index.
@@ -195,6 +212,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .streams = undefined,
                     .streams_count = undefined,
                     .stream_origins = undefined,
+                    .direction = .ascending,
                 };
 
                 for (tracker.runs[0..tracker.count()], 0..) |run, i| {
@@ -228,6 +246,134 @@ pub fn TableMemoryType(comptime Table: type) type {
                     immutable_runs += @intFromBool(run.origin == .immutable);
                 }
                 assert(immutable_runs == 0 or immutable_runs == 1);
+            }
+        };
+
+        pub const ImmutableTableIterator = struct {
+            merge_context: MergeContext,
+            k_way_iterator: KWayMergeIterator,
+            direction: Direction,
+            maybe_key_end: ?Key,
+            pending: ?Value,
+            maybe_value_next: ?Value,
+            end_reached: bool,
+            initialized: bool,
+
+            pub fn init(
+                merge_context: MergeContext,
+                maybe_key_end: ?Key,
+                direction: Direction,
+            ) ImmutableTableIterator {
+                var context = merge_context;
+                context.direction = direction;
+                return .{
+                    .merge_context = context,
+                    .k_way_iterator = undefined,
+                    .direction = direction,
+                    .maybe_key_end = maybe_key_end,
+                    .pending = null,
+                    .maybe_value_next = null,
+                    .end_reached = false,
+                    .initialized = false,
+                };
+            }
+
+            fn ensure_initialized(iterator: *ImmutableTableIterator) void {
+                if (iterator.initialized) {
+                    // Iterator structs are frequently copied; rebind the context pointer after moves.
+                    iterator.k_way_iterator.context = &iterator.merge_context;
+                    return;
+                }
+                iterator.k_way_iterator = KWayMergeIterator.init(
+                    &iterator.merge_context,
+                    @intCast(iterator.merge_context.streams_count),
+                    iterator.direction,
+                );
+                iterator.initialized = true;
+            }
+
+            pub fn peek(iterator: *ImmutableTableIterator) error{ Empty, Drained }!Key {
+                try iterator.ensure_next();
+                const value = iterator.maybe_value_next orelse return error.Empty;
+                return key_from_value(&value);
+            }
+
+            pub fn pop(iterator: *ImmutableTableIterator) error{ Empty, Drained }!Value {
+                try iterator.ensure_next();
+                const value = iterator.maybe_value_next orelse return error.Empty;
+                iterator.maybe_value_next = null;
+                return value;
+            }
+
+            fn ensure_next(iterator: *ImmutableTableIterator) error{ Empty, Drained }!void {
+                if (iterator.maybe_value_next != null) return;
+                if (iterator.end_reached) return error.Empty;
+
+                iterator.ensure_initialized();
+
+                while (true) {
+                    const maybe_value = try iterator.k_way_iterator.pop();
+
+                    if (maybe_value == null) {
+                        if (iterator.pending) |pending_value| {
+                            iterator.maybe_value_next = pending_value;
+                            iterator.pending = null;
+                            iterator.end_reached = true;
+                            return;
+                        }
+
+                        iterator.end_reached = true;
+                        return error.Empty;
+                    }
+
+                    const value = maybe_value.?;
+                    const key = key_from_value(&value);
+
+                    if (iterator.pending) |pending_value| {
+                        const pending_key = key_from_value(&pending_value);
+
+                        if (key == pending_key) {
+                            iterator.pending = dedup_same_key(pending_value, value);
+                            if (iterator.pending == null) continue;
+                            continue;
+                        }
+
+                        iterator.maybe_value_next = pending_value;
+
+                        if (!iterator.within_range(key)) {
+                            iterator.pending = null;
+                            iterator.end_reached = true;
+                            return;
+                        }
+
+                        iterator.pending = value;
+                        return;
+                    } else {
+                        if (!iterator.within_range(key)) {
+                            iterator.end_reached = true;
+                            return error.Empty;
+                        }
+
+                        iterator.pending = value;
+                    }
+                }
+            }
+
+            inline fn dedup_same_key(pending: Value, value: Value) ?Value {
+                if (Table.usage == .secondary_index) {
+                    assert(Table.tombstone(&pending) != Table.tombstone(&value));
+                    return null;
+                }
+                return value;
+            }
+
+            inline fn within_range(iterator: *ImmutableTableIterator, key: Key) bool {
+                const key_end = iterator.maybe_key_end orelse return true;
+
+                return switch (iterator.direction) {
+                    .ascending => key <= key_end,
+                    .descending => key >= key_end,
+                };
             }
         };
 
@@ -323,7 +469,10 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .mutable => .{ .mutable = .{
                         .radix_buffer = radix_buffer,
                     } },
-                    .immutable => .{ .immutable = .{} },
+                    .immutable => .{ .immutable = .{
+                        .merge_context = undefined,
+                        .values_shadow = undefined,
+                    } },
                 },
                 .name = name,
                 .values = undefined,
@@ -333,6 +482,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
+
+            if (mutability == .immutable) {
+                table.mutability.immutable.values_shadow = try allocator.alloc(Value, Table.value_count_max);
+            }
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -341,7 +494,10 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn reset(table: *TableMemory) void {
             const mutability: Mutability = switch (table.mutability) {
-                .immutable => .{ .immutable = .{} },
+                .immutable => .{ .immutable = .{
+                    .values_shadow = table.mutability.immutable.values_shadow,
+                    .merge_context = undefined,
+                } },
                 .mutable => .{ .mutable = .{
                     .radix_buffer = table.mutability.mutable.radix_buffer,
                 } },
@@ -409,10 +565,15 @@ pub fn TableMemoryType(comptime Table: type) type {
         fn finalize(table_immutable: *TableMemory, snapshot_min: u64) void {
             assert(table_immutable.mutability == .immutable);
 
-            table_immutable.mutability = .{ .immutable = .{
-                .flushed = table_immutable.count() == 0,
-                .snapshot_min = snapshot_min,
-            } };
+            table_immutable.mutability = .{
+                .immutable = .{
+                    .flushed = table_immutable.count() == 0,
+                    .snapshot_min = snapshot_min,
+                    // TZ: this simply takes it over.
+                    .merge_context = table_immutable.mutability.immutable.merge_context,
+                    .values_shadow = table_immutable.mutability.immutable.values_shadow,
+                },
+            };
             table_immutable.value_context.run_tracker.reset();
             table_immutable.value_context.run_tracker.add(.{
                 .min = 0,
@@ -437,6 +598,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_mutable.value_context.run_tracker.assert_invariants(table_mutable.count());
 
             if (table_mutable.sorted()) {
+
                 // Fast-path: single contiguous sorted run: swap buffers.
                 assert(table_mutable.values.len == table_immutable.values.len);
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
@@ -459,9 +621,67 @@ pub fn TableMemoryType(comptime Table: type) type {
                 table_immutable.value_context.count = dedup_sink.finish();
             }
 
+            const immutable_count = table_immutable.value_context.count;
+            const values_shadow = table_immutable.mutability.immutable.values_shadow;
+            var merge_context_shadow = MergeContext{
+                .streams = undefined,
+                .streams_count = 0,
+                .stream_origins = undefined,
+                .direction = .ascending,
+            };
+
+            if (immutable_count > 0) {
+                assert(immutable_count <= values_shadow.len);
+                stdx.copy_disjoint(
+                    .exact,
+                    Value,
+                    values_shadow[0..immutable_count],
+                    table_immutable.values[0..immutable_count],
+                );
+                merge_context_shadow.streams[0] = values_shadow[0..immutable_count];
+                merge_context_shadow.stream_origins[0] = .immutable;
+                merge_context_shadow.streams_count = 1;
+            }
+
+            table_immutable.mutability.immutable.merge_context = merge_context_shadow;
+
             table_mutable.reset();
             table_immutable.finalize(snapshot_min);
             assert(table_immutable.sorted());
+
+            // TZ Test here with shadow copy again!
+            //var immutable_table_iterator: ImmutableTableIterator = ImmutableTableIterator.init(
+            //table_immutable.mutability.immutable.merge_context,
+            //null,
+            //.ascending,
+            //);
+
+            //if (constants.verify) {
+            //std.debug.print(
+            //"immutable verify: count={} ctx_count={} stream_len={}\n",
+            //.{
+            //table_immutable.value_context.count,
+            //table_immutable.mutability.immutable.merge_context.streams_count,
+            //if (table_immutable.mutability.immutable.merge_context.streams_count > 0)
+            //table_immutable.mutability.immutable.merge_context.streams[0].len
+            //else
+            //0,
+            //},
+            //);
+            //for (table_immutable.values_used()) |gold| {
+            //const key_peek = immutable_table_iterator.peek() catch unreachable;
+            //assert(key_peek == key_from_value(&gold));
+            //const value_pop = immutable_table_iterator.pop() catch unreachable;
+            //assert(std.meta.eql(value_pop, gold));
+            //}
+
+            //if (immutable_table_iterator.peek()) |_| {
+            //unreachable;
+            //} else |err| switch (err) {
+            //error.Empty => {},
+            //error.Drained => unreachable,
+            //}
+            //}
         }
 
         // Absorb the current immutable table into the mutable one,
