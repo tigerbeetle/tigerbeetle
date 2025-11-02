@@ -271,28 +271,6 @@ pub fn ReplType(comptime MessageBus: type) type {
             unreachable;
         }
 
-        fn move_forward_by_word(buffer: []const u8, buffer_index: usize) usize {
-            var cur_pos = buffer_index;
-            while (cur_pos < buffer.len and std.ascii.isWhitespace(buffer[cur_pos])) {
-                cur_pos += 1;
-            }
-            while (cur_pos < buffer.len and !std.ascii.isWhitespace(buffer[cur_pos])) {
-                cur_pos += 1;
-            }
-            return cur_pos;
-        }
-
-        fn move_backward_by_word(buffer: []const u8, buffer_index: usize) usize {
-            var cur_pos = buffer_index;
-            while (cur_pos > 0 and std.ascii.isWhitespace(buffer[cur_pos - 1])) {
-                cur_pos -= 1;
-            }
-            while (cur_pos > 0 and !std.ascii.isWhitespace(buffer[cur_pos - 1])) {
-                cur_pos -= 1;
-            }
-            return cur_pos;
-        }
-
         fn do_repl(
             repl: *Repl,
             arguments: *std.ArrayListUnmanaged(u8),
