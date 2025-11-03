@@ -1704,6 +1704,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         self.batch_size_limit,
                     ),
                 );
+                assert(limit > 0);
                 assert(scan_buffer.len >= limit);
                 scan_lookup.read(
                     scan_buffer[0..limit],
@@ -1823,6 +1824,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                                 self.batch_size_limit,
                             ),
                         );
+                        assert(limit > 0);
                         assert(scan_buffer.len >= limit);
                         scan_lookup.read(
                             scan_buffer[0..limit],
@@ -2073,6 +2075,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         self.batch_size_limit,
                     ),
                 );
+                assert(limit > 0);
                 assert(scan_buffer.len >= limit);
                 scan_lookup.read(
                     scan_buffer[0..limit],
@@ -2163,6 +2166,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         self.batch_size_limit,
                     ),
                 );
+                assert(limit > 0);
                 assert(scan_buffer.len >= limit);
                 scan_lookup.read(
                     scan_buffer[0..limit],
@@ -2445,6 +2449,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // Limiting the buffer size according to the query limit.
                 // TODO: Prevent clients from setting the limit larger than the buffer size.
                 const limit = @min(filter.limit, limit_max);
+                assert(limit > 0);
                 assert(scan_buffer.len >= limit);
                 scan_lookup.read(
                     scan_buffer[0..limit],
