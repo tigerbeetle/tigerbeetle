@@ -702,7 +702,7 @@ const VSRContext = struct {
     io: vsr.io.IO,
     message_pool: MessagePool,
     busy: bool,
-    event_array: []tb.ChangeEvent,
+    event_buffer: []tb.ChangeEvent,
     event_count: ?u32,
 
     pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
@@ -729,29 +729,30 @@ const VSRContext = struct {
         );
         errdefer self.client.deinit(gpa);
 
-        self.event_array = undefined;
+        self.event_buffer = undefined;
         self.event_count = null;
         self.busy = true;
         self.client.register(register_callback, @intFromPtr(self));
         self.wait();
 
-        self.event_array = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
+        self.event_buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
             .get_change_events,
             @divFloor(
                 vsr.constants.message_body_size_max,
                 @sizeOf(tb.ChangeEvent),
             ),
         ));
-        errdefer gpa.free(self.event_array);
+        errdefer gpa.free(self.event_buffer);
         assert(!self.busy);
     }
 
     pub fn deinit(self: *VSRContext, gpa: std.mem.Allocator) void {
         assert(!self.busy);
-        gpa.free(self.event_array);
+        gpa.free(self.event_buffer);
         self.client.deinit(gpa);
         self.message_pool.deinit(gpa);
         self.io.deinit();
+        self.* = undefined;
     }
 
     pub fn get_change_events(self: *VSRContext, timestamp_min: u64) ![]tb.ChangeEvent {
@@ -774,9 +775,9 @@ const VSRContext = struct {
         self.wait();
         assert(!self.busy);
         assert(self.event_count != null);
-        assert(self.event_count.? <= self.event_array.len);
+        assert(self.event_count.? <= self.event_buffer.len);
 
-        return self.event_array[0..self.event_count.?];
+        return self.event_buffer[0..self.event_count.?];
     }
 
     fn wait(self: *VSRContext) void {
@@ -816,12 +817,12 @@ const VSRContext = struct {
             tb.ChangeEvent,
             result,
         );
-        assert(events.len <= self.event_array.len);
+        assert(events.len <= self.event_buffer.len);
         self.event_count = @intCast(events.len);
         stdx.copy_disjoint(
             .inexact,
             tb.ChangeEvent,
-            self.event_array,
+            self.event_buffer,
             events,
         );
         self.busy = false;
