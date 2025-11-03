@@ -23,6 +23,7 @@ const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
+const Duration = stdx.Duration;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = @import("./main.zig").StateMachine;
@@ -175,7 +176,7 @@ pub fn main(
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
         .transfer_batch_size = cli_args.transfer_batch_size,
-        .transfer_batch_delay_us = cli_args.transfer_batch_delay_us,
+        .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
         .transfer_hot_percent = cli_args.transfer_hot_percent,
         .transfer_pending = cli_args.transfer_pending,
@@ -252,18 +253,18 @@ const Benchmark = struct {
 
     // Configuration:
     account_id_permutation: IdPermutation,
-    account_batch_size: usize,
-    account_count: usize,
-    account_count_hot: usize,
+    account_batch_size: u32,
+    account_count: u32,
+    account_count_hot: u32,
     account_generator: Generator,
     account_generator_hot: Generator,
     transfer_id_permutation: IdPermutation,
-    transfer_batch_size: usize,
-    transfer_batch_delay_us: usize,
-    transfer_count: usize,
-    transfer_hot_percent: usize,
+    transfer_batch_size: u32,
+    transfer_batch_delay: Duration,
+    transfer_count: u32,
+    transfer_hot_percent: u32,
     transfer_pending: bool,
-    query_count: usize,
+    query_count: u32,
     flag_history: bool,
     flag_imported: bool,
     validate: bool,
@@ -465,7 +466,7 @@ const Benchmark = struct {
             &b.client_timeouts[client_index],
             create_transfers_next,
             &b.client_timeouts[client_index].completion,
-            @intCast(b.transfer_batch_delay_us * std.time.ns_per_us),
+            @intCast(b.transfer_batch_delay.ns),
         );
     }
 
@@ -493,15 +494,18 @@ const Benchmark = struct {
         b.output.print(
             \\{[batch_count]} batches in {[batch_duration_s]d:.2} s
             \\transfer batch size = {[batch_size]} txs
-            \\transfer batch delay = {[batch_delay_us]} us
+            \\transfer batch delay = {[batch_delay]}
             \\load accepted = {[transfer_rate]} tx/s
             \\
         , .{
             .batch_count = b.request_index,
             .batch_duration_s = @as(f64, @floatFromInt(b.timer.read())) / std.time.ns_per_s,
             .batch_size = b.transfer_batch_size,
-            .batch_delay_us = b.transfer_batch_delay_us,
-            .transfer_rate = @divTrunc(b.transfer_count * std.time.ns_per_s, b.timer.read()),
+            .batch_delay = b.transfer_batch_delay,
+            .transfer_rate = @divTrunc(
+                @as(u64, b.transfer_count) * std.time.ns_per_s,
+                b.timer.read(),
+            ),
         }) catch unreachable;
         print_percentiles_histogram(b.output, "batch", b.request_latency_histogram);
 
