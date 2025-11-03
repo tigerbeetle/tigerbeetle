@@ -230,7 +230,7 @@ comptime {
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const message_size_max = config.cluster.message_size_max;
+pub const message_size_max: u32 = config.cluster.message_size_max;
 pub const message_body_size_max = message_size_max - @sizeOf(vsr.Header);
 
 comptime {

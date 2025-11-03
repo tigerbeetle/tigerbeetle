@@ -654,12 +654,12 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             if (!operation_is_multi_batch(operation)) {
                 return if (event_size == 0)
-                    @intCast(@divFloor(constants.message_body_size_max, result_size))
+                    @divFloor(constants.message_body_size_max, result_size)
                 else
-                    @intCast(@min(
+                    @min(
                         @divFloor(batch_size_limit, event_size),
                         @divFloor(constants.message_body_size_max, result_size),
-                    ));
+                    );
             }
             assert(operation_is_multi_batch(operation));
 
@@ -671,10 +671,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(reply_trailer_size_min < batch_size_limit);
 
             if (event_size == 0) {
-                return @intCast(@divFloor(
+                return @divFloor(
                     constants.message_body_size_max - reply_trailer_size_min,
                     result_size,
-                ));
+                );
             } else {
                 const request_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
                     .element_size = event_size,
@@ -712,7 +712,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(result_size > 0);
 
             if (!operation_is_multi_batch(operation)) {
-                return @intCast(@divFloor(constants.message_body_size_max, result_size));
+                return @divFloor(constants.message_body_size_max, result_size);
             }
             assert(operation_is_multi_batch(operation));
 
@@ -720,10 +720,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .element_size = result_size,
                 .batch_count = 1,
             });
-            return @intCast(@divFloor(
+            return @divFloor(
                 constants.message_body_size_max - reply_trailer_size_min,
                 result_size,
-            ));
+            );
         }
 
         /// Returns the expected number of results for a given batch.
