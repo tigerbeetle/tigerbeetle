@@ -115,12 +115,14 @@ pub const TestContext = struct {
         ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
         errdefer ctx.grid.deinit(allocator);
 
+        const batch_size_limit = 30 * @max(@sizeOf(Account), @sizeOf(Transfer));
+        assert(batch_size_limit <= constants.message_body_size_max);
         try ctx.state_machine.init(
             allocator,
             ctx.time_sim.time(),
             &ctx.grid,
             .{
-                .batch_size_limit = constants.message_body_size_max,
+                .batch_size_limit = batch_size_limit,
                 .lsm_forest_compaction_block_count = StateMachine.Forest.Options
                     .compaction_block_count_min,
                 .lsm_forest_node_count = 1,
