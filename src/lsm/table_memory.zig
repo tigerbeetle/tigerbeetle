@@ -249,6 +249,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
         };
 
+        // TODO:
+        // - needs to track how much consumed
+        // - needs to track how much dropped
+        // - needs to track how much are left. (max - consumed)
+        // - damn this must be resetted per iteration for compaction.
         pub const ImmutableTableIterator = struct {
             merge_context: MergeContext,
             k_way_iterator: KWayMergeIterator,
@@ -258,7 +263,12 @@ pub fn TableMemoryType(comptime Table: type) type {
             maybe_value_next: ?Value,
             end_reached: bool,
             initialized: bool,
-            count_input: u32,
+
+            counters: struct {
+                input: u32 = 0, // This is the input count of the immutabl table.
+                dropped: u32 = 0, // Tombstones.
+                out: u32 = 0, // How many we handed out. input - (dropped + out ) is how much is still remaning.
+            } = .{},
 
             pub fn init(
                 merge_context: MergeContext,
@@ -277,12 +287,22 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .maybe_value_next = null,
                     .end_reached = false,
                     .initialized = false,
-                    .count_input = count_input,
+                    .counters = .{
+                        .input = count_input,
+                    },
                 };
             }
 
-            fn count_max(iterator: *const ImmutableTableIterator) u32 {
-                return iterator.count_input;
+            pub fn count_max(iterator: *const ImmutableTableIterator) u32 {
+                return iterator.counters.input;
+            }
+
+            pub fn count_dropped(iterator: *const ImmutableTableIterator) u32 {
+                return iterator.counters.dropped;
+            }
+
+            pub fn count_remaining(iterator: *const ImmutableTableIterator) u32 {
+                return iterator.counters.input - (iterator.counters.out + iterator.counters.dropped);
             }
 
             fn ensure_initialized(iterator: *ImmutableTableIterator) void {
@@ -308,13 +328,16 @@ pub fn TableMemoryType(comptime Table: type) type {
             pub fn pop(iterator: *ImmutableTableIterator) error{ Empty, Drained }!Value {
                 try iterator.ensure_next();
                 const value = iterator.maybe_value_next orelse return error.Empty;
+                iterator.counters.out += 1;
                 iterator.maybe_value_next = null;
                 return value;
             }
 
             fn ensure_next(iterator: *ImmutableTableIterator) error{ Empty, Drained }!void {
                 if (iterator.maybe_value_next != null) return;
-                if (iterator.end_reached) return error.Empty;
+                if (iterator.end_reached) {
+                    return error.Empty;
+                }
 
                 iterator.ensure_initialized();
 
@@ -328,6 +351,10 @@ pub fn TableMemoryType(comptime Table: type) type {
                             iterator.end_reached = true;
                             return;
                         }
+                        // Here we really reached the end and not the end of the range.
+                        assert(
+                            iterator.counters.input == (iterator.counters.out + iterator.counters.dropped),
+                        );
 
                         iterator.end_reached = true;
                         return error.Empty;
@@ -340,8 +367,14 @@ pub fn TableMemoryType(comptime Table: type) type {
                         const pending_key = key_from_value(&pending_value);
 
                         if (key == pending_key) {
-                            iterator.pending = dedup_same_key(pending_value, value);
-                            if (iterator.pending == null) continue;
+                            iterator.pending = dedup: {
+                                if (Table.usage == .secondary_index) {
+                                    assert(Table.tombstone(&pending_value) !=
+                                        Table.tombstone(&value));
+                                    iterator.counters.dropped += 1;
+                                    break :dedup null;
+                                } else break :dedup value;
+                            };
                             continue;
                         }
 
