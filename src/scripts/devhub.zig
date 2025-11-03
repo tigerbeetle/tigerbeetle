@@ -8,6 +8,26 @@
 //! - The results of all measurements are serialized as a single JSON object, `Run`.
 //! - The key part: this JSON is then stored in a "distributed database" for our visualization
 //!   front-end to pick up. This "database" is just a newline-delimited JSON file in a git repo
+//!
+//! To generate a DEVHUBDB_PAT (used by cfo and CI):
+//! 1. Go to https://github.com/settings/personal-access-tokens/new
+//! 2. Fill out token name (e.g. "cfo/ci devhubdb token").
+//! 3. Resource owner: "tigerbeetle"
+//! 4. Expiry: "366 days" (maximum available)
+//! 5. Repository access: "Only select repositories"
+//! 6. Select repositories: "tigerbeetle/devhubdb"
+//! 7. Add permissions: "Metadata"
+//! 8. Add permissions: "Contents"; Access: "Read and write".
+//! 9. "Generate token".
+//! 10. (Copy token.)
+//!
+//! To update token in TigerBeetle CI:
+//! 1. https://github.com/tigerbeetle/tigerbeetle/settings/environments
+//! 2. Click "devhub".
+//! 3. Environment Secrets > Edit DEVHUBDB_PAT
+//! 4. Paste token; "Update secret"
+//!
+//! (Also need to update the DEVHUBDB_PAT environment variable passed to the CFO supervisors.)
 const std = @import("std");
 const assert = std.debug.assert;
 
