@@ -653,8 +653,12 @@ const Environment = struct {
                 env.forest.grooves.things.scan_builder.reset();
             }
 
-            const query_results_max =
-                env.prng.range_inclusive(usize, 1, env.scan_lookup_buffer.len);
+            const query_results_max: u32 = env.prng.range_inclusive(
+                u32,
+                1,
+                @intCast(env.scan_lookup_buffer.len),
+            );
+            assert(query_results_max > 0);
             const query_results = results: {
                 const scan = env.scan_from_condition(query_spec, timestamp_previous);
                 env.scan_lookup = ScanLookup.init(&env.forest.grooves.things, scan);
