@@ -1261,6 +1261,7 @@ const LogTail = struct {
 
     pub fn deinit(log_tail: *LogTail, gpa: std.mem.Allocator) void {
         log_tail.ring.deinit(gpa);
+        log_tail.* = undefined;
     }
 
     pub fn reset(log_tail: *LogTail) void {
