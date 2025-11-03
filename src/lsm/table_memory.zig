@@ -258,11 +258,13 @@ pub fn TableMemoryType(comptime Table: type) type {
             maybe_value_next: ?Value,
             end_reached: bool,
             initialized: bool,
+            count_input: u32,
 
             pub fn init(
                 merge_context: MergeContext,
                 maybe_key_end: ?Key,
                 direction: Direction,
+                count_input: u32,
             ) ImmutableTableIterator {
                 var context = merge_context;
                 context.direction = direction;
@@ -275,7 +277,12 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .maybe_value_next = null,
                     .end_reached = false,
                     .initialized = false,
+                    .count_input = count_input,
                 };
+            }
+
+            fn count_max(iterator: *const ImmutableTableIterator) u32 {
+                return iterator.count_input;
             }
 
             fn ensure_initialized(iterator: *ImmutableTableIterator) void {
