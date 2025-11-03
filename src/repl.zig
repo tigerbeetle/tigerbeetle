@@ -8,10 +8,7 @@ const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const StaticAllocator = @import("static_allocator.zig");
 const Storage = vsr.storage.StorageType(IO);
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    constants.state_machine_config,
-);
+const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const MessagePool = vsr.message_pool.MessagePool;
 const RingBufferType = stdx.RingBufferType;
 

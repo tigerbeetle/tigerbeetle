@@ -3,7 +3,7 @@ const stdx = @import("stdx");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const TestingStorage = @import("../storage.zig").Storage;
-const StateMachine = StateMachineType(TestingStorage, constants.state_machine_config);
+const StateMachine = StateMachineType(TestingStorage);
 
 // We could have used the idiomatic Zig API exposed by `vsr.tb_client`,
 // but we want to test the actual FFI exposed by `libtb_client`.

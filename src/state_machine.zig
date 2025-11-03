@@ -92,12 +92,9 @@ pub const tree_ids = struct {
     };
 };
 
-pub fn StateMachineType(
-    comptime Storage: type,
-    comptime config: constants.StateMachineConfig,
-) type {
-    assert(config.message_body_size_max > 0);
-    assert(config.lsm_compaction_ops > 0);
+pub fn StateMachineType(comptime Storage: type) type {
+    assert(constants.message_body_size_max > 0);
+    assert(constants.lsm_compaction_ops > 0);
     assert(constants.vsr_operations_reserved > 0);
 
     return struct {
@@ -105,49 +102,45 @@ pub fn StateMachineType(
         const Grid = @import("vsr/grid.zig").GridType(Storage);
         pub const Operation = tb.Operation;
 
-        pub const machine_constants = struct {
-            pub const message_body_size_max = config.message_body_size_max;
+        pub const batch_max = struct {
+            pub const create_accounts: u32 = @max(
+                operation_event_max(.create_accounts, constants.message_body_size_max),
+                operation_event_max(
+                    .deprecated_create_accounts_unbatched,
+                    constants.message_body_size_max,
+                ),
+            );
+            pub const create_transfers: u32 = @max(
+                operation_event_max(.create_transfers, constants.message_body_size_max),
+                operation_event_max(
+                    .deprecated_create_transfers_unbatched,
+                    constants.message_body_size_max,
+                ),
+            );
+            pub const lookup_accounts: u32 = @max(
+                operation_event_max(.lookup_accounts, constants.message_body_size_max),
+                operation_event_max(
+                    .deprecated_lookup_accounts_unbatched,
+                    constants.message_body_size_max,
+                ),
+            );
+            pub const lookup_transfers: u32 = @max(
+                operation_event_max(.lookup_transfers, constants.message_body_size_max),
+                operation_event_max(
+                    .deprecated_lookup_transfers_unbatched,
+                    constants.message_body_size_max,
+                ),
+            );
 
-            pub const batch_max = struct {
-                pub const create_accounts: u32 = @max(
-                    operation_event_max(.create_accounts, message_body_size_max),
-                    operation_event_max(
-                        .deprecated_create_accounts_unbatched,
-                        message_body_size_max,
-                    ),
-                );
-                pub const create_transfers: u32 = @max(
-                    operation_event_max(.create_transfers, message_body_size_max),
-                    operation_event_max(
-                        .deprecated_create_transfers_unbatched,
-                        message_body_size_max,
-                    ),
-                );
-                pub const lookup_accounts: u32 = @max(
-                    operation_event_max(.lookup_accounts, message_body_size_max),
-                    operation_event_max(
-                        .deprecated_lookup_accounts_unbatched,
-                        message_body_size_max,
-                    ),
-                );
-                pub const lookup_transfers: u32 = @max(
-                    operation_event_max(.lookup_transfers, message_body_size_max),
-                    operation_event_max(
-                        .deprecated_lookup_transfers_unbatched,
-                        message_body_size_max,
-                    ),
-                );
-
-                comptime {
-                    assert(create_accounts > 0);
-                    assert(create_transfers > 0);
-                    assert(lookup_accounts > 0);
-                    assert(lookup_transfers > 0);
-                }
-            };
+            comptime {
+                assert(create_accounts > 0);
+                assert(create_transfers > 0);
+                assert(lookup_accounts > 0);
+                assert(lookup_transfers > 0);
+            }
         };
 
-        const tree_values_count_max = tree_values_count(config.message_body_size_max);
+        const tree_values_count_max = tree_values_count(constants.message_body_size_max);
 
         const AccountsGroove = GrooveType(
             Storage,
@@ -652,7 +645,7 @@ pub fn StateMachineType(
         /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
         pub inline fn operation_event_max(operation: Operation, batch_size_limit: u32) u32 {
             assert(batch_size_limit > 0);
-            assert(batch_size_limit <= machine_constants.message_body_size_max);
+            assert(batch_size_limit <= constants.message_body_size_max);
 
             const event_size = event_size_bytes(operation);
             maybe(event_size == 0); // Zeroed event size is allowed.
@@ -661,12 +654,12 @@ pub fn StateMachineType(
 
             if (!operation_is_multi_batch(operation)) {
                 return if (event_size == 0)
-                    @divFloor(machine_constants.message_body_size_max, result_size)
+                    @intCast(@divFloor(constants.message_body_size_max, result_size))
                 else
-                    @min(
+                    @intCast(@min(
                         @divFloor(batch_size_limit, event_size),
-                        @divFloor(machine_constants.message_body_size_max, result_size),
-                    );
+                        @divFloor(constants.message_body_size_max, result_size),
+                    ));
             }
             assert(operation_is_multi_batch(operation));
 
@@ -678,22 +671,22 @@ pub fn StateMachineType(
             assert(reply_trailer_size_min < batch_size_limit);
 
             if (event_size == 0) {
-                return @divFloor(
-                    machine_constants.message_body_size_max - reply_trailer_size_min,
+                return @intCast(@divFloor(
+                    constants.message_body_size_max - reply_trailer_size_min,
                     result_size,
-                );
+                ));
             } else {
                 const request_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
                     .element_size = event_size,
                     .batch_count = 1,
                 });
                 assert(request_trailer_size_min > 0);
-                assert(request_trailer_size_min < machine_constants.message_body_size_max);
+                assert(request_trailer_size_min < constants.message_body_size_max);
 
                 return @min(
                     @divFloor(batch_size_limit - request_trailer_size_min, event_size),
                     @divFloor(
-                        machine_constants.message_body_size_max - reply_trailer_size_min,
+                        constants.message_body_size_max - reply_trailer_size_min,
                         result_size,
                     ),
                 );
@@ -706,7 +699,7 @@ pub fn StateMachineType(
         /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
         pub inline fn operation_result_max(operation: Operation, batch_size_limit: u32) u32 {
             assert(batch_size_limit > 0);
-            assert(batch_size_limit <= machine_constants.message_body_size_max);
+            assert(batch_size_limit <= constants.message_body_size_max);
             if (operation_is_batchable(operation)) {
                 return operation_event_max(
                     operation,
@@ -719,7 +712,7 @@ pub fn StateMachineType(
             assert(result_size > 0);
 
             if (!operation_is_multi_batch(operation)) {
-                return @divFloor(machine_constants.message_body_size_max, result_size);
+                return @intCast(@divFloor(constants.message_body_size_max, result_size));
             }
             assert(operation_is_multi_batch(operation));
 
@@ -727,10 +720,10 @@ pub fn StateMachineType(
                 .element_size = result_size,
                 .batch_count = 1,
             });
-            return @divFloor(
-                machine_constants.message_body_size_max - reply_trailer_size_min,
+            return @intCast(@divFloor(
+                constants.message_body_size_max - reply_trailer_size_min,
                 result_size,
-            );
+            ));
         }
 
         /// Returns the expected number of results for a given batch.
@@ -790,7 +783,7 @@ pub fn StateMachineType(
                     // TODO: Handle `TooMuchData` at the client side instead of capping the limit.
                     break :count @min(filter.limit, operation_result_max(
                         operation_comptime,
-                        machine_constants.message_body_size_max,
+                        constants.message_body_size_max,
                     ));
                 },
             };
@@ -1029,7 +1022,7 @@ pub fn StateMachineType(
             grid: *Grid,
             options: Options,
         ) !void {
-            assert(options.batch_size_limit <= config.message_body_size_max);
+            assert(options.batch_size_limit <= constants.message_body_size_max);
             inline for (comptime std.enums.values(Operation)) |operation| {
                 assert(options.batch_size_limit >= @sizeOf(EventType(operation)));
             }
@@ -1214,7 +1207,7 @@ pub fn StateMachineType(
                 .batch_count = body_decoder.batch_count(),
             });
             // Checking if the expected number of results will fit the reply.
-            if (machine_constants.message_body_size_max <
+            if (constants.message_body_size_max <
                 (result_count_expected * result_size) +
                     reply_trailer_size)
             {
@@ -1249,14 +1242,14 @@ pub fn StateMachineType(
                     maybe(batch.len == 0);
                     if (batch.len % event_size != 0) return false;
 
-                    const batch_max: u32 = operation_event_max(
+                    const event_max: u32 = operation_event_max(
                         operation_comptime,
                         self.batch_size_limit,
                     );
-                    assert(batch_max > 0);
+                    assert(event_max > 0);
 
                     const event_count: u32 = @intCast(@divExact(batch.len, event_size));
-                    if (event_count > batch_max) return false;
+                    if (event_count > event_max) return false;
                     return true;
                 },
             }
@@ -1306,7 +1299,7 @@ pub fn StateMachineType(
         ) u64 {
             assert(batch.len <= self.batch_size_limit);
             return switch (operation) {
-                .pulse => machine_constants.batch_max.create_transfers, // Max transfers to expire.
+                .pulse => batch_max.create_transfers, // Max transfers to expire.
                 .create_accounts => @divExact(batch.len, @sizeOf(Account)),
                 .create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
                 .lookup_accounts => 0,
@@ -2739,7 +2732,7 @@ pub fn StateMachineType(
             timestamp: u64,
             operation: Operation,
             message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [machine_constants.message_body_size_max]u8,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
@@ -2842,7 +2835,7 @@ pub fn StateMachineType(
             timestamp: u64,
             comptime operation: Operation,
             message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [machine_constants.message_body_size_max]u8,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(!operation_is_multi_batch(operation));
             comptime assert(operation_is_batchable(operation));
@@ -2873,7 +2866,7 @@ pub fn StateMachineType(
             timestamp: u64,
             comptime operation: Operation,
             message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [machine_constants.message_body_size_max]u8,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(operation_is_multi_batch(operation));
             comptime assert(operation_is_batchable(operation));
@@ -2932,7 +2925,7 @@ pub fn StateMachineType(
             self: *StateMachine,
             comptime operation: Operation,
             message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [machine_constants.message_body_size_max]u8,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(!operation_is_multi_batch(operation));
             comptime assert(!operation_is_batchable(operation));
@@ -2992,7 +2985,7 @@ pub fn StateMachineType(
             self: *StateMachine,
             comptime operation: Operation,
             message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [machine_constants.message_body_size_max]u8,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(operation_is_multi_batch(operation));
             comptime assert(!operation_is_batchable(operation));
@@ -4624,7 +4617,7 @@ pub fn StateMachineType(
                 ),
             );
             assert(prefetch_create_accounts_limit > 0);
-            assert(prefetch_create_accounts_limit <= machine_constants.batch_max.create_accounts);
+            assert(prefetch_create_accounts_limit <= batch_max.create_accounts);
 
             const prefetch_lookup_accounts_limit: u32 = @max(
                 operation_event_max(.lookup_accounts, options.batch_size_limit),
@@ -4634,8 +4627,8 @@ pub fn StateMachineType(
                 ),
             );
             assert(prefetch_lookup_accounts_limit > 0);
-            assert(prefetch_lookup_accounts_limit <= machine_constants.batch_max.lookup_accounts);
-            assert(prefetch_create_accounts_limit <= machine_constants.batch_max.lookup_accounts);
+            assert(prefetch_lookup_accounts_limit <= batch_max.lookup_accounts);
+            assert(prefetch_create_accounts_limit <= batch_max.lookup_accounts);
 
             const prefetch_create_transfers_limit: u32 = @max(
                 operation_event_max(.create_transfers, options.batch_size_limit),
@@ -4645,7 +4638,7 @@ pub fn StateMachineType(
                 ),
             );
             assert(prefetch_create_transfers_limit > 0);
-            assert(prefetch_create_transfers_limit <= machine_constants.batch_max.create_transfers);
+            assert(prefetch_create_transfers_limit <= batch_max.create_transfers);
 
             const prefetch_lookup_transfers_limit: u32 = @max(
                 operation_event_max(.lookup_transfers, options.batch_size_limit),
@@ -4655,9 +4648,9 @@ pub fn StateMachineType(
                 ),
             );
             assert(prefetch_lookup_transfers_limit > 0);
-            assert(prefetch_lookup_transfers_limit <= machine_constants.batch_max.lookup_transfers);
-            assert(prefetch_create_accounts_limit <= machine_constants.batch_max.lookup_transfers);
-            assert(prefetch_create_transfers_limit <= machine_constants.batch_max.lookup_transfers);
+            assert(prefetch_lookup_transfers_limit <= batch_max.lookup_transfers);
+            assert(prefetch_create_accounts_limit <= batch_max.lookup_transfers);
+            assert(prefetch_create_transfers_limit <= batch_max.lookup_transfers);
 
             // Inputs are bounded by the runtime-known `batch_size_limit`,
             // while replies are only limited by the constant `message_body_size_max`.
@@ -4800,21 +4793,21 @@ pub fn StateMachineType(
                 prunable: u32,
             },
         } {
-            assert(batch_size_limit <= machine_constants.message_body_size_max);
+            assert(batch_size_limit <= constants.message_body_size_max);
 
             const batch_create_accounts: u32 = @max(
                 operation_event_max(.create_accounts, batch_size_limit),
                 operation_event_max(.deprecated_create_accounts_unbatched, batch_size_limit),
             );
             assert(batch_create_accounts > 0);
-            assert(batch_create_accounts <= machine_constants.batch_max.create_accounts);
+            assert(batch_create_accounts <= batch_max.create_accounts);
 
             const batch_create_transfers: u32 = @max(
                 operation_event_max(.create_transfers, batch_size_limit),
                 operation_event_max(.deprecated_create_transfers_unbatched, batch_size_limit),
             );
             assert(batch_create_transfers > 0);
-            assert(batch_create_transfers <= machine_constants.batch_max.create_transfers);
+            assert(batch_create_transfers <= batch_max.create_transfers);
 
             return .{
                 .accounts = .{

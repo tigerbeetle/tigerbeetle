@@ -692,10 +692,7 @@ const VSRContext = struct {
     const MessagePool = vsr.message_pool.MessagePool;
     const Message = MessagePool.Message;
     const Storage = vsr.storage.StorageType(vsr.io.IO);
-    const StateMachine = vsr.state_machine.StateMachineType(
-        Storage,
-        vsr.constants.state_machine_config,
-    );
+    const StateMachine = vsr.state_machine.StateMachineType(Storage);
     const Client = vsr.ClientType(
         StateMachine,
         vsr.message_bus.MessageBusClient,
@@ -741,7 +738,7 @@ const VSRContext = struct {
         self.buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
             .get_change_events,
             @divFloor(
-                StateMachine.machine_constants.message_body_size_max,
+                vsr.constants.message_body_size_max,
                 @sizeOf(tb.ChangeEvent),
             ),
         ));

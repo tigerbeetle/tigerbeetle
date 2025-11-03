@@ -25,7 +25,7 @@ pub const ConnectionProperties = struct {
         .product = "TigerBeetle",
         .version = std.fmt.comptimePrint(
             "{}",
-            .{vsr.constants.state_machine_config.release},
+            .{vsr.constants.config.process.release},
         ),
         // By convention, "platform" refers to the programming language.
         // e.g., Erlang, Java, Go, etc.

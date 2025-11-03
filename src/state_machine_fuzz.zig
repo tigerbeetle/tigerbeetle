@@ -4,6 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const vsr = @import("vsr.zig");
+const constants = vsr.constants;
 const stdx = @import("stdx");
 
 const tb = @import("tigerbeetle.zig");
@@ -43,14 +44,14 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const request_buffer = try allocator.alignedAlloc(
         u8,
         16,
-        TestContext.message_body_size_max,
+        constants.message_body_size_max,
     );
     defer allocator.free(request_buffer);
 
     const reply_buffer = try allocator.alignedAlloc(
         u8,
         16,
-        TestContext.message_body_size_max,
+        constants.message_body_size_max,
     );
     defer allocator.free(reply_buffer);
 

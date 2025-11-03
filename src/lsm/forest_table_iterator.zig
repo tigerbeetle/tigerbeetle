@@ -194,7 +194,7 @@ fn TreeTableIteratorType(comptime Tree: type) type {
 test "ForestTableIterator: refAllDecls" {
     const Storage = @import("../testing/storage.zig").Storage;
     const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
-    const StateMachine = StateMachineType(Storage, constants.state_machine_config);
+    const StateMachine = StateMachineType(Storage);
 
     std.testing.refAllDecls(ForestTableIteratorType(StateMachine.Forest));
 }

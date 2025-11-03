@@ -14,7 +14,7 @@ const QueryFilter = tb.QueryFilter;
 
 const vsr = @import("vsr");
 const Storage = vsr.storage.StorageType(vsr.io.IO);
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const Operation = StateMachine.Operation;
 const constants = vsr.constants;
 const stdx = vsr.stdx;

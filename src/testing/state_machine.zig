@@ -7,10 +7,7 @@ const constants = @import("../constants.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
 const ForestType = @import("../lsm/forest.zig").ForestType;
 
-pub fn StateMachineType(
-    comptime Storage: type,
-    comptime config: constants.StateMachineConfig,
-) type {
+pub fn StateMachineType(comptime Storage: type) type {
     return struct {
         const StateMachine = @This();
         const Grid = @import("../vsr/grid.zig").GridType(Storage);
@@ -26,10 +23,6 @@ pub fn StateMachineType(
 
             return vsr.Operation.to(StateMachine, operation);
         }
-
-        pub const machine_constants = struct {
-            pub const message_body_size_max = config.message_body_size_max;
-        };
 
         pub fn EventType(comptime _: Operation) type {
             return u8; // Must be non-zero-sized for sliceAsBytes().
@@ -213,7 +206,7 @@ pub fn StateMachineType(
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
-            output: *align(16) [machine_constants.message_body_size_max]u8,
+            output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             assert(op != 0);
 
@@ -283,7 +276,6 @@ pub fn StateMachineType(
 fn WorkloadType(comptime StateMachine: type) type {
     return struct {
         const Workload = @This();
-        const constants = StateMachine.machine_constants;
 
         prng: *stdx.PRNG,
         options: Options,

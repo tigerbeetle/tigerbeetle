@@ -16,8 +16,7 @@ const tb = @import("../tigerbeetle.zig");
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine = @import("../state_machine.zig")
-    .StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const Reservation = @import("../vsr/free_set.zig").Reservation;
 const GridType = @import("../vsr/grid.zig").GridType;
 const ScanRangeType = @import("../lsm/scan_range.zig").ScanRangeType;
@@ -132,7 +131,7 @@ const Environment = struct {
 
         env.scan_lookup_buffer = try gpa.alloc(
             tb.Account,
-            StateMachine.machine_constants.batch_max.create_accounts,
+            StateMachine.batch_max.create_accounts,
         );
 
         env.forest = undefined;

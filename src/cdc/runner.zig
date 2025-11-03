@@ -12,10 +12,7 @@ const Time = vsr.time.Time;
 const Storage = vsr.storage.StorageType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    vsr.constants.state_machine_config,
-);
+const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const Client = vsr.ClientType(StateMachine, MessageBus);
 const TimestampRange = vsr.lsm.TimestampRange;
 const tb = vsr.tigerbeetle;
@@ -491,13 +488,13 @@ pub const Runner = struct {
                                         assert(TimestampRange.valid(progress_tracker.timestamp));
 
                                         // Downgrading the CDC job is not allowed.
-                                        if (vsr.constants.state_machine_config.release.value <
+                                        if (vsr.constants.config.process.release.value <
                                             progress_tracker.release.value)
                                         {
                                             fatal("The last event was published using a newer " ++
                                                 "release (event={} current={}).", .{
                                                 progress_tracker.release,
-                                                vsr.constants.state_machine_config.release,
+                                                vsr.constants.config.process.release,
                                             });
                                         }
 
@@ -861,7 +858,7 @@ pub const Runner = struct {
                     assert(events.len > 0);
                     break :progress .{
                         .timestamp = events[events.len - 1].timestamp,
-                        .release = vsr.constants.state_machine_config.release,
+                        .release = vsr.constants.config.process.release,
                     };
                 };
                 self.amqp_client.publish_enqueue(.{
