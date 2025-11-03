@@ -702,8 +702,8 @@ const VSRContext = struct {
     io: vsr.io.IO,
     message_pool: MessagePool,
     busy: bool,
-    buffer: []tb.ChangeEvent,
-    results: ?usize,
+    event_array: []tb.ChangeEvent,
+    event_count: ?u32,
 
     pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
         self.io = try vsr.io.IO.init(32, 0);
@@ -729,26 +729,26 @@ const VSRContext = struct {
         );
         errdefer self.client.deinit(gpa);
 
-        self.buffer = undefined;
-        self.results = null;
+        self.event_array = undefined;
+        self.event_count = null;
         self.busy = true;
         self.client.register(register_callback, @intFromPtr(self));
         self.wait();
 
-        self.buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
+        self.event_array = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
             .get_change_events,
             @divFloor(
                 vsr.constants.message_body_size_max,
                 @sizeOf(tb.ChangeEvent),
             ),
         ));
-        errdefer gpa.free(self.buffer);
+        errdefer gpa.free(self.event_array);
         assert(!self.busy);
     }
 
     pub fn deinit(self: *VSRContext, gpa: std.mem.Allocator) void {
         assert(!self.busy);
-        gpa.free(self.buffer);
+        gpa.free(self.event_array);
         self.client.deinit(gpa);
         self.message_pool.deinit(gpa);
         self.io.deinit();
@@ -756,8 +756,8 @@ const VSRContext = struct {
 
     pub fn get_change_events(self: *VSRContext, timestamp_min: u64) ![]tb.ChangeEvent {
         assert(!self.busy);
-        assert(self.results == null);
-        defer self.results = null;
+        assert(self.event_count == null);
+        defer self.event_count = null;
 
         const filter: tb.ChangeEventsFilter = .{
             .limit = std.math.maxInt(u32),
@@ -773,10 +773,10 @@ const VSRContext = struct {
         );
         self.wait();
         assert(!self.busy);
-        assert(self.results != null);
-        assert(self.results.? <= self.buffer.len);
+        assert(self.event_count != null);
+        assert(self.event_count.? <= self.event_array.len);
 
-        return self.buffer[0..self.results.?];
+        return self.event_array[0..self.event_count.?];
     }
 
     fn wait(self: *VSRContext) void {
@@ -809,19 +809,19 @@ const VSRContext = struct {
 
         const self: *VSRContext = @ptrFromInt(@as(usize, @intCast(user_data)));
         assert(self.busy);
-        assert(self.results == null);
+        assert(self.event_count == null);
 
         const events = stdx.bytes_as_slice(
             .exact,
             tb.ChangeEvent,
             result,
         );
-        assert(events.len <= self.buffer.len);
-        self.results = events.len;
+        assert(events.len <= self.event_array.len);
+        self.event_count = @intCast(events.len);
         stdx.copy_disjoint(
             .inexact,
             tb.ChangeEvent,
-            self.buffer,
+            self.event_array,
             events,
         );
         self.busy = false;
