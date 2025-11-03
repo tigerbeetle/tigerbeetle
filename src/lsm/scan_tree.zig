@@ -267,6 +267,7 @@ pub fn ScanTreeType(
                 tree.table_immutable.mutability.immutable.merge_context,
                 if (direction == .ascending) key_max else key_min,
                 direction,
+                tree.table_immutable.count(),
             );
 
             while (true) {

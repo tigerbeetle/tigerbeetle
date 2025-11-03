@@ -1534,28 +1534,16 @@ pub fn CompactionType(
             compaction.grid.on_next_tick(merge_callback, &cpu.next_tick);
         }
 
-        // TODO: I think this is the main function I need to touch for now.
-        fn merge_callback(next_tick: *Grid.NextTick) void {
-            const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
-            const compaction: *Compaction = cpu.parent(Compaction);
-            compaction.pool.?.cpus.release(cpu);
-            assert(compaction.table_builder.state == .index_and_value_block);
-
-            compaction.grid.trace.start(.{ .compact_beat_merge = .{
-                .tree = @enumFromInt(compaction.tree.config.id),
-                .level_b = compaction.level_b,
-            } });
-
-            // This specialies for immutable, but retunrns slice for all.
-            // We need to specialize this to handle iterator.
-            // The other code can be logically at least unchanged I _think_
-            // Because the iterator is equivalent to the current slice!
+        // TODO specialize for immutable and disk
+        fn merge_placeholder(compaction: *Compaction) MergeResult {
+            // this must be specialized
             const values_source_a, const values_source_b = compaction.merge_inputs();
             assert(values_source_a != null or values_source_b != null);
 
             const values_target = compaction.table_builder
                 .value_block_values()[compaction.table_builder.value_count..];
 
+            // This check is fine.
             inline for ([_]?[]const Value{
                 values_source_a,
                 values_source_b,
@@ -1608,6 +1596,43 @@ pub fn CompactionType(
                 values_source_b.?,
                 compaction.drop_tombstones,
             );
+            return merge_result;
+        }
+
+        // TODO: I think this is the main function I need to touch for now.
+        fn merge_callback(next_tick: *Grid.NextTick) void {
+            const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
+            const compaction: *Compaction = cpu.parent(Compaction);
+            compaction.pool.?.cpus.release(cpu);
+            assert(compaction.table_builder.state == .index_and_value_block);
+
+            compaction.grid.trace.start(.{ .compact_beat_merge = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
+                .level_b = compaction.level_b,
+            } });
+
+            // This specialies for immutable, but retunrns slice for all.
+            // We need to specialize this to handle iterator.
+            // The other code can be logically at least unchanged I _think_
+            // Because the iterator is equivalent to the current slice!
+            const values_source_a, const values_source_b = compaction.merge_inputs();
+            assert(values_source_a != null or values_source_b != null);
+
+            const values_target = compaction.table_builder
+                .value_block_values()[compaction.table_builder.value_count..];
+
+            inline for ([_]?[]const Value{
+                values_source_a,
+                values_source_b,
+                values_target,
+            }) |values_maybe| {
+                if (values_maybe) |values| {
+                    assert(values.len > 0);
+                    assert(values.len <= Table.data.value_count_max);
+                }
+            }
+
+            const merge_result: MergeResult = compaction.merge_placeholder();
 
             compaction.level_a_position.value += merge_result.consumed_a;
             compaction.level_b_position.value += merge_result.consumed_b;
