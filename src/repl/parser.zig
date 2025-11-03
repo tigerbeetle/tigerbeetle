@@ -287,8 +287,7 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    operation_comptime.state_machine_op(),
+                .limit = operation_comptime.state_machine_op().result_max(
                     constants.message_body_size_max,
                 ),
                 .flags = .{
@@ -307,8 +306,7 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    operation_comptime.state_machine_op(),
+                .limit = operation_comptime.state_machine_op().result_max(
                     constants.message_body_size_max,
                 ),
                 .flags = .{
@@ -337,7 +335,7 @@ pub const Parser = struct {
                 }
 
                 const state_machine_op = operation.state_machine_op();
-                if (!StateMachine.operation_is_batchable(state_machine_op)) {
+                if (!state_machine_op.is_batchable()) {
                     try parser.print_current_position();
                     try parser.terminal.print_error(
                         "{s} expects a single {s} but received multiple.\n",
@@ -882,8 +880,7 @@ test "parser.zig: Parser account filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    .get_account_transfers,
+                .limit = StateMachine.Operation.get_account_transfers.result_max(
                     constants.message_body_size_max,
                 ),
                 .flags = .{
@@ -960,8 +957,7 @@ test "parser.zig: Parser query filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    .query_transfers,
+                .limit = StateMachine.Operation.query_transfers.result_max(
                     constants.message_body_size_max,
                 ),
                 .flags = .{

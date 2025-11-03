@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
+const tb = vsr.tigerbeetle;
 
 const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
@@ -296,9 +297,7 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub const ReplayClient = struct {
-            const Storage = vsr.storage.StorageType(IO);
-            const StateMachine = vsr.state_machine.StateMachineType(Storage);
-            const Client = vsr.ClientType(StateMachine, MessageBus);
+            const Client = vsr.ClientType(tb.Operation, MessageBus);
 
             client: *Client,
             io: *IO,
@@ -410,7 +409,7 @@ pub fn AOFType(comptime IO: type) type {
             /// a lot of time when replaying.
             pub fn replay_message(header: *Header.Prepare) bool {
                 if (header.operation.vsr_reserved()) return false;
-                const state_machine_operation = header.operation.cast(StateMachine);
+                const state_machine_operation = header.operation.cast(tb.Operation);
                 switch (state_machine_operation) {
                     .create_accounts, .create_transfers => return true,
 

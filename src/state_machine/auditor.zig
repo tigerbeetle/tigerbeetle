@@ -14,8 +14,7 @@ const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 
 const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine =
-    @import("../state_machine.zig").StateMachineType(Storage);
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 
 pub const CreateAccountResultSet = std.enums.EnumSet(tb.CreateAccountResult);
 // TODO(zig): See `Ordered` comments.

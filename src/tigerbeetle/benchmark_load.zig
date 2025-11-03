@@ -16,6 +16,7 @@ const panic = std.debug.panic;
 const log = std.log.scoped(.benchmark);
 
 const vsr = @import("vsr");
+const tb = vsr.tigerbeetle;
 const constants = vsr.constants;
 const stdx = vsr.stdx;
 const ratio = stdx.PRNG.ratio;
@@ -26,9 +27,7 @@ const Time = vsr.time.Time;
 const Duration = stdx.Duration;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const StateMachine = @import("./main.zig").StateMachine;
-const Client = vsr.ClientType(StateMachine, MessageBus);
-const tb = vsr.tigerbeetle;
+const Client = vsr.ClientType(tb.Operation, MessageBus);
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
 const ZipfianShuffled = stdx.ZipfianShuffled;
@@ -760,7 +759,7 @@ const Benchmark = struct {
     fn request(
         b: *Benchmark,
         client_index: usize,
-        operation: StateMachine.Operation,
+        operation: tb.Operation,
         options: struct {
             batch_count: u32,
             event_size: u32,
@@ -799,7 +798,7 @@ const Benchmark = struct {
         timestamp: u64,
         result: []u8,
     ) void {
-        const operation = operation_vsr.cast(StateMachine);
+        const operation = operation_vsr.cast(tb.Operation);
         const context: RequestContext = @bitCast(user_data);
         const client = context.client_index;
         const b: *Benchmark = context.benchmark;
@@ -814,10 +813,10 @@ const Benchmark = struct {
         b.request_latency_histogram[@min(duration_ms, b.request_latency_histogram.len - 1)] += 1;
 
         const input: []const u8 = input: {
-            assert(StateMachine.operation_is_multi_batch(operation));
+            assert(operation.is_multi_batch());
             var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(
                 result,
-                .{ .element_size = StateMachine.result_size_bytes(operation) },
+                .{ .element_size = operation.result_size() },
             ) catch unreachable;
             assert(reply_decoder.batch_count() == 1);
             break :input reply_decoder.peek();

@@ -10,16 +10,13 @@ const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const Time = vsr.time.Time;
 
-pub fn EchoClientType(
-    comptime StateMachine_: type,
-    comptime MessageBus: type,
-) type {
+pub fn EchoClientType(comptime MessageBus: type) type {
     return struct {
         const EchoClient = @This();
 
         // Exposing the same types the real client does:
-        const VSRClient = vsr.ClientType(StateMachine_, MessageBus);
-        pub const StateMachine = EchoStateMachineType(VSRClient.StateMachine);
+        const VSRClient = vsr.ClientType(EchoOperation, MessageBus);
+        pub const Operation = VSRClient.Operation;
         pub const Request = VSRClient.Request;
 
         id: u128,
@@ -136,12 +133,12 @@ pub fn EchoClientType(
             self: *EchoClient,
             callback: Request.Callback,
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: Operation,
             events: []const u8,
         ) void {
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(
-                    StateMachine.EventType(operation_comptime),
+                    operation_comptime.EventType(),
                 ),
             };
             assert(events.len <= constants.message_body_size_max);
@@ -156,7 +153,7 @@ pub fn EchoClientType(
                 .cluster = self.cluster,
                 .command = .request,
                 .release = vsr.Release.minimum,
-                .operation = vsr.Operation.from(StateMachine, operation),
+                .operation = operation.to_vsr(),
                 .size = @intCast(@sizeOf(Header) + events.len),
                 .previous_request_latency = 0,
             };
@@ -199,22 +196,93 @@ pub fn EchoClientType(
     };
 }
 
-/// Re-exports all StateMachine symbols used by the client, but making `Event` and `Result`
-/// the same types.
-fn EchoStateMachineType(comptime StateMachine: type) type {
-    return struct {
-        pub const Operation = StateMachine.Operation;
-        pub const operation_from_vsr = StateMachine.operation_from_vsr;
+/// Mocks the Accounting StateMachine operation, but replaces
+/// all `Result`s with `Event`s, since the echo client replies
+/// with the same content of the input.
+pub const EchoOperation = enum(u8) {
+    const Operation = vsr.tigerbeetle.Operation;
 
-        pub const EventType = StateMachine.EventType;
-        pub const operation_event_max = StateMachine.operation_event_max;
-        pub const operation_result_max = StateMachine.operation_result_max;
-        pub const operation_result_count_expected = StateMachine.operation_result_count_expected;
-        pub const operation_is_multi_batch = StateMachine.operation_is_multi_batch;
+    pulse = @intFromEnum(Operation.pulse),
 
-        // Re-exporting functions where results are equal to events.
-        pub const ResultType = StateMachine.EventType;
-        pub const event_size_bytes = StateMachine.event_size_bytes;
-        pub const result_size_bytes = StateMachine.event_size_bytes;
-    };
-}
+    get_change_events = @intFromEnum(Operation.get_change_events),
+
+    create_accounts = @intFromEnum(Operation.create_accounts),
+    create_transfers = @intFromEnum(Operation.create_transfers),
+    lookup_accounts = @intFromEnum(Operation.lookup_accounts),
+    lookup_transfers = @intFromEnum(Operation.lookup_transfers),
+    get_account_transfers = @intFromEnum(Operation.get_account_transfers),
+    get_account_balances = @intFromEnum(Operation.get_account_balances),
+    query_accounts = @intFromEnum(Operation.query_accounts),
+    query_transfers = @intFromEnum(Operation.query_transfers),
+
+    comptime {
+        const operation_type_info = @typeInfo(Operation).@"enum";
+        const echo_type_info = @typeInfo(EchoOperation).@"enum";
+        assert(echo_type_info.tag_type == operation_type_info.tag_type);
+        assert(echo_type_info.is_exhaustive);
+        assert(echo_type_info.fields.len <= operation_type_info.fields.len);
+        for (echo_type_info.fields) |field| {
+            assert(@hasField(Operation, field.name));
+
+            const a = @field(Operation, field.name);
+            const b = @field(EchoOperation, field.name);
+            assert(@intFromEnum(a) == @intFromEnum(b));
+        }
+    }
+
+    inline fn cast(operation: EchoOperation) Operation {
+        return @enumFromInt(@intFromEnum(operation));
+    }
+
+    pub fn EventType(comptime operation: EchoOperation) type {
+        return operation.cast().EventType();
+    }
+
+    pub inline fn event_size(operation: EchoOperation) u32 {
+        return operation.cast().event_size();
+    }
+
+    pub inline fn is_batchable(operation: EchoOperation) bool {
+        return operation.cast().is_batchable();
+    }
+
+    pub inline fn is_multi_batch(operation: EchoOperation) bool {
+        return operation.cast().is_multi_batch();
+    }
+
+    pub inline fn event_max(operation: EchoOperation, batch_size_limit: u32) u32 {
+        return operation.cast().event_max(batch_size_limit);
+    }
+
+    pub inline fn result_count_expected(
+        operation: EchoOperation,
+        batch: []const u8,
+    ) u32 {
+        return operation.cast().result_count_expected(batch);
+    }
+
+    pub fn from_vsr(operation: vsr.Operation) ?EchoOperation {
+        if (operation == .pulse) return .pulse;
+        if (operation.vsr_reserved()) return null;
+
+        return vsr.Operation.to(EchoOperation, operation);
+    }
+
+    pub fn to_vsr(operation: EchoOperation) vsr.Operation {
+        return vsr.Operation.from(EchoOperation, operation);
+    }
+
+    // Re-exporting functions where results are equal to events.
+
+    pub fn ResultType(comptime operation: EchoOperation) type {
+        return operation.EventType();
+    }
+
+    pub inline fn result_size(operation: EchoOperation) u32 {
+        return operation.event_size();
+    }
+
+    pub inline fn result_max(operation: EchoOperation, batch_size_limit: u32) u32 {
+        return operation.event_max(batch_size_limit);
+    }
+};

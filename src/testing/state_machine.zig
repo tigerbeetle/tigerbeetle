@@ -16,21 +16,24 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub const Operation = enum(u8) {
             echo = constants.vsr_operations_reserved + 0,
+
+            pub fn EventType(comptime _: Operation) type {
+                return u8; // Must be non-zero-sized for sliceAsBytes().
+            }
+
+            pub fn ResultType(comptime _: Operation) type {
+                return u8; // Must be non-zero-sized for sliceAsBytes().
+            }
+
+            pub fn from_vsr(operation: vsr.Operation) ?Operation {
+                if (operation.vsr_reserved()) return null;
+                return vsr.Operation.to(Operation, operation);
+            }
+
+            pub fn to_vsr(operation: Operation) vsr.Operation {
+                return vsr.Operation.from(Operation, operation);
+            }
         };
-
-        pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
-            if (operation.vsr_reserved()) return null;
-
-            return vsr.Operation.to(StateMachine, operation);
-        }
-
-        pub fn EventType(comptime _: Operation) type {
-            return u8; // Must be non-zero-sized for sliceAsBytes().
-        }
-
-        pub fn ResultType(comptime _: Operation) type {
-            return u8; // Must be non-zero-sized for sliceAsBytes().
-        }
 
         pub const Options = struct {
             batch_size_limit: u32,

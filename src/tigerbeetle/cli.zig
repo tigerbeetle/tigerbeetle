@@ -25,7 +25,13 @@ const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
 const Ratio = stdx.PRNG.Ratio;
 const ByteSize = stdx.ByteSize;
+const Operation = tigerbeetle.Operation;
 const Duration = stdx.Duration;
+
+comptime {
+    // Make sure we are running the Accounting StateMachine.
+    assert(StateMachine.Operation == tigerbeetle.Operation);
+}
 
 const KiB = stdx.KiB;
 const GiB = stdx.GiB;
@@ -131,15 +137,13 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
-        account_batch_size: u32 = StateMachine.operation_event_max(
-            .create_accounts,
+        account_batch_size: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
         ),
         transfer_count: u32 = 10_000_000,
         transfer_hot_percent: u32 = 100,
         transfer_pending: bool = false,
-        transfer_batch_size: u32 = StateMachine.operation_event_max(
-            .create_transfers,
+        transfer_batch_size: u32 = Operation.create_transfers.event_max(
             constants.message_body_size_max,
         ),
         transfer_batch_delay: Duration = .ms(0),
@@ -1020,7 +1024,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             "--cache-transfers",
         ),
         .cache_transfers_pending = parse_cache_size_to_count(
-            StateMachine.TransferPending,
+            vsr.state_machine.TransferPending,
             TransfersPendingValuesCache,
             start.cache_transfers_pending orelse defaults.cache_transfers_pending,
             "--cache-transfers-pending",
