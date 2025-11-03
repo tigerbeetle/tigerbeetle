@@ -173,9 +173,10 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     try shell.exec("git --version", .{});
 
     // Read-write token for <https://github.com/tigerbeetle/devhubdb>.
+    // See `src/scripts/devhub.zig` for generation instructions.
     const devhub_token_option = shell.env_get_option("DEVHUBDB_PAT");
     if (devhub_token_option == null) {
-        log.err("'DEVHUB_PAT' environmental variable is not set, will not upload results", .{});
+        log.err("'DEVHUBDB_PAT' environmental variable is not set, will not upload results", .{});
     }
 
     // Readonly token for PR metadata of <https://github.com/tigerbeetle/tigerbeetle>.
