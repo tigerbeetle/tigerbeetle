@@ -1243,10 +1243,7 @@ const SeedRecord = struct {
 
 fn create_log_path(arena: std.mem.Allocator) ![]const u8 {
     const name = std.crypto.random.int(u128);
-    const buffer = try arena.alloc(u8, 256);
-    var stream = std.io.fixedBufferStream(buffer);
-    try stream.writer().print("./fuzzing/logs/{x:0>32}.vopr", .{name});
-    return stream.getWritten();
+    return std.fmt.allocPrint(arena, "./fuzzing/logs/{x:0>32}.vopr", .{name});
 }
 
 // TODO(Zig) This should probably be redone once zig's new reader/writer api's are available.
