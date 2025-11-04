@@ -234,15 +234,15 @@ fn run_fuzzers(
         devhub_token: ?[]const u8,
     },
 ) !void {
-    var seeds = std.ArrayList(SeedRecord).init(gpa);
-    defer seeds.deinit();
+    var seeds = std.ArrayListUnmanaged(SeedRecord){};
+    defer seeds.deinit(gpa);
 
-    var seed_logs = std.ArrayList(?[]const u8).init(gpa);
+    var seed_logs = std.ArrayListUnmanaged(?[]const u8){};
     defer {
         for (seed_logs.items) |log_or_null| {
             if (log_or_null) |log_buffer| gpa.free(log_buffer);
         }
-        seed_logs.deinit();
+        seed_logs.deinit(gpa);
     }
 
     const random = std.crypto.random;
@@ -422,16 +422,16 @@ fn run_fuzzers(
                         }
 
                         if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
-                            try seed_logs.append(null);
+                            try seed_logs.append(gpa, null);
                         } else {
                             const log_data = try gpa.alloc(u8, fuzzer_log.size());
                             errdefer gpa.free(log_data);
 
                             fuzzer_log.write_to(log_data);
-                            try seed_logs.append(log_data);
+                            try seed_logs.append(gpa, log_data);
                             seed_record.log = try create_log_path(shell.arena.allocator());
                         }
-                        try seeds.append(seed_record);
+                        try seeds.append(gpa, seed_record);
                     }
 
                     if (std.meta.eql(term, .{ .Signal = std.posix.SIG.ABRT })) {
@@ -446,7 +446,7 @@ fn run_fuzzers(
                     task.runtime_total_ns += seed_duration_ns;
                     task.runtime_virtual += @divFloor(seed_duration_ns, task.weight);
 
-                    fuzzer_log.reset();
+                    fuzzer_log.clear();
                     fuzzer_or_null.* = null;
                 }
             }
@@ -1280,7 +1280,7 @@ const LogTail = struct {
         log_tail.* = undefined;
     }
 
-    pub fn reset(log_tail: *LogTail) void {
+    pub fn clear(log_tail: *LogTail) void {
         log_tail.ring.clear();
     }
 
