@@ -346,17 +346,24 @@ fn run_fuzzers(
         // Wait 100ms before polling for completion, to avoid hogging the CPU.
         std.time.sleep(100 * std.time.ns_per_ms);
 
-        // Flush stdout into the log tail.
+        // Flush stderr/stdout into the log tail.
         for (children, children_logs) |*fuzzer_or_null, *fuzzer_log| {
             if (fuzzer_or_null.*) |*fuzzer| {
                 assert((fuzzer.child.stdout == null) != fuzzer.fuzzer.capture_logs());
-                if (fuzzer.child.stdout) |stdout| {
-                    var read_size: ?usize = null;
-                    while (read_size == null or read_size.? == read_buffer.len) {
-                        read_size = stdout.readAll(read_buffer) catch |err| {
-                            std.debug.panic("error: {}", .{err});
-                        };
-                        fuzzer_log.append(read_buffer[0..read_size.?]);
+                assert((fuzzer.child.stderr == null) != fuzzer.fuzzer.capture_logs());
+                for (&[_]?std.fs.File{
+                    fuzzer.child.stdout,
+                    fuzzer.child.stderr,
+                }) |stream_or_null| {
+                    if (stream_or_null) |stream| {
+                        var read_size: ?usize = null;
+                        while (read_size == null or read_size.? > 0) {
+                            read_size = stream.read(read_buffer) catch |err| switch (err) {
+                                error.WouldBlock => break,
+                                else => std.debug.panic("error: {}", .{err}),
+                            };
+                            fuzzer_log.append(read_buffer[0..read_size.?]);
+                        }
                     }
                 }
             }
@@ -929,8 +936,17 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     );
 
     if (options.fuzzer.capture_logs()) {
-        // Redirect stderr to stdout, so that we only need to read the latter.
-        try std.posix.dup2(process.stderr.?.handle, process.stdout.?.handle);
+        for (&[_]?std.fs.File{
+            process.stdout.?,
+            process.stderr.?,
+        }) |file| {
+            const flags = try std.posix.fcntl(file.?.handle, std.posix.F.GETFL, 0);
+            _ = try std.posix.fcntl(
+                file.?.handle,
+                std.posix.F.SETFL,
+                flags | @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
+            );
+        }
     }
 
     // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
