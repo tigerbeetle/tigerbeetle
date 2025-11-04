@@ -795,7 +795,7 @@ pub const Operation = enum(u8) {
 
         if (!operation.is_multi_batch()) {
             return if (event_size_bytes == 0)
-                @intCast(@divFloor(constants.message_body_size_max, result_size_bytes))
+                @divFloor(constants.message_body_size_max, result_size_bytes)
             else
                 @min(
                     @divFloor(batch_size_limit, event_size_bytes),
@@ -812,10 +812,10 @@ pub const Operation = enum(u8) {
         assert(reply_trailer_size_min < batch_size_limit);
 
         if (event_size_bytes == 0) {
-            return @intCast(@divFloor(
+            return @divFloor(
                 constants.message_body_size_max - reply_trailer_size_min,
                 result_size_bytes,
-            ));
+            );
         } else {
             const request_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
                 .element_size = event_size_bytes,
@@ -850,7 +850,7 @@ pub const Operation = enum(u8) {
         assert(result_size_bytes > 0);
 
         if (!operation.is_multi_batch()) {
-            return @intCast(@divFloor(constants.message_body_size_max, result_size_bytes));
+            return @divFloor(constants.message_body_size_max, result_size_bytes);
         }
         assert(operation.is_multi_batch());
 
@@ -858,10 +858,10 @@ pub const Operation = enum(u8) {
             .element_size = result_size_bytes,
             .batch_count = 1,
         });
-        return @intCast(@divFloor(
+        return @divFloor(
             constants.message_body_size_max - reply_trailer_size_min,
             result_size_bytes,
-        ));
+        );
     }
 
     /// Returns the expected number of results for a given batch.
