@@ -889,7 +889,7 @@ pub const Operation = enum(u8) {
                 // and even the simulator can generate requests with no events.
                 if (batch.len == 0) return 0;
 
-                const event_size_bytes: u32 = @sizeOf(operation_comptime.EventType());
+                const event_size_bytes: u32 = operation_comptime.event_size();
                 comptime assert(event_size_bytes > 0);
                 assert(batch.len % event_size_bytes == 0); // Input has already been validated.
 

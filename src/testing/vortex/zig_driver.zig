@@ -17,7 +17,7 @@ const events_count_max = 8189;
 const events_buffer_size_max = size: {
     var event_size_max = 0;
     for (std.enums.values(Operation)) |operation| {
-        event_size_max = @max(event_size_max, @sizeOf(operation.EventType()));
+        event_size_max = @max(event_size_max, operation.event_size());
     }
     break :size event_size_max * events_count_max;
 };
@@ -135,15 +135,15 @@ fn write_results(
 ) !void {
     switch (operation) {
         inline else => |operation_comptime| {
-            const size = @sizeOf(operation_comptime.ResultType());
-            if (size > 0) {
-                const count = @divExact(result.len, size);
+            const result_size = operation_comptime.result_size();
+            if (result_size > 0) {
+                const count = @divExact(result.len, result_size);
                 try writer.writeInt(u32, @intCast(count), .little);
                 try writer.writeAll(result);
             } else {
                 log.err(
                     "unexpected size {d} for op: {s}",
-                    .{ size, @tagName(operation_comptime) },
+                    .{ result_size, @tagName(operation_comptime) },
                 );
                 unreachable;
             }
@@ -159,11 +159,13 @@ fn receive(reader: std.io.AnyReader, buffer: []u8) !struct { Operation, []const 
         inline else => |operation_comptime| {
             assert(count <= events_count_max);
 
-            const events_size = @sizeOf(operation_comptime.EventType()) * count;
-            assert(buffer.len >= events_size);
-            assert(try reader.readAtLeast(buffer, events_size) == events_size);
+            const response_size = operation_comptime.event_size() * count;
+            assert(buffer.len >= response_size);
 
-            return .{ operation_comptime, buffer[0..events_size] };
+            const read_total_size = try reader.readAtLeast(buffer, response_size);
+            assert(read_total_size == response_size);
+
+            return .{ operation_comptime, buffer[0..response_size] };
         },
     };
 }

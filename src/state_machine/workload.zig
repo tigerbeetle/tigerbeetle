@@ -465,7 +465,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         action_comptime,
                     );
                     const Event = operation_comptime.EventType();
-                    const event_size: u32 = @sizeOf(Event);
+                    const event_size: u32 = operation_comptime.event_size();
                     const batchable: []Event = self.batch(
                         Event,
                         action_comptime,

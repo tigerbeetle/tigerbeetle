@@ -307,14 +307,11 @@ pub fn ClientType(
             operation: Operation,
             events: []const u8,
         ) void {
-            const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(
-                    operation_comptime.EventType(),
-                ),
-            };
             assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
+
+            const event_size = operation.event_size();
             assert(events.len <= constants.message_body_size_max);
             assert(events.len <= self.batch_size_limit.?);
             assert(events.len % event_size == 0);

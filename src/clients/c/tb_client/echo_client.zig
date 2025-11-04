@@ -136,11 +136,7 @@ pub fn EchoClientType(comptime MessageBus: type) type {
             operation: Operation,
             events: []const u8,
         ) void {
-            const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(
-                    operation_comptime.EventType(),
-                ),
-            };
+            const event_size = operation.event_size();
             assert(events.len <= constants.message_body_size_max);
             assert(events.len % event_size == 0);
 
