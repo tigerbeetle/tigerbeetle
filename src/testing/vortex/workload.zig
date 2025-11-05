@@ -30,15 +30,13 @@
 const std = @import("std");
 const stdx = @import("stdx");
 const tb = @import("../../tigerbeetle.zig");
-const StateMachineType = @import("../../state_machine.zig").StateMachineType;
+const Operation = tb.Operation;
 const RingBufferType = stdx.RingBufferType;
-const TestingStorage = @import("../storage.zig").Storage;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
 const testing = std.testing;
-const StateMachine = StateMachineType(TestingStorage);
 
 const events_count_max = 8189;
 const pending_transfers_count_max = 1024;
@@ -147,7 +145,7 @@ fn execute(command: Command, driver: *const DriverStdio) !?Result {
 
 /// State machine operations and Vortex workload commands are not 1:1. This function maps the
 /// enum values from command to operation.
-fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
+fn operation_from_command(tag: std.meta.Tag(Command)) Operation {
     return switch (tag) {
         .create_accounts => .create_accounts,
         .create_transfers => .create_transfers,
@@ -502,14 +500,14 @@ fn FixedSizeBuffersType(Union: type) type {
 
 pub fn send(
     driver: *const DriverStdio,
-    comptime op: StateMachine.Operation,
-    events: []const StateMachine.EventType(op),
+    comptime operation: Operation,
+    events: []const operation.EventType(),
 ) !void {
     assert(events.len <= events_count_max);
 
     const writer = driver.input.writer().any();
 
-    try writer.writeInt(u8, @intFromEnum(op), .little);
+    try writer.writeInt(u8, @intFromEnum(operation), .little);
     try writer.writeInt(u32, @intCast(events.len), .little);
 
     const bytes: []const u8 = std.mem.sliceAsBytes(events);
@@ -518,9 +516,9 @@ pub fn send(
 
 pub fn receive(
     driver: *const DriverStdio,
-    comptime op: StateMachine.Operation,
-    results: []StateMachine.ResultType(op),
-) ![]StateMachine.ResultType(op) {
+    comptime operation: Operation,
+    results: []operation.ResultType(),
+) ![]operation.ResultType() {
     assert(results.len <= events_count_max);
     const reader = driver.output.reader();
 

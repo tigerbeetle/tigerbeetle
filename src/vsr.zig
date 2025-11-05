@@ -298,27 +298,27 @@ pub const Operation = enum(u8) {
     /// Operations ≥vsr_operations_reserved are available for the state machine.
     _,
 
-    pub fn from(comptime StateMachine: type, operation: StateMachine.Operation) Operation {
-        check_state_machine_operations(StateMachine);
+    pub fn from(comptime StateMachineOperation: type, operation: StateMachineOperation) Operation {
+        comptime check_state_machine_operations(StateMachineOperation);
         return @as(Operation, @enumFromInt(@intFromEnum(operation)));
     }
 
-    pub fn to(comptime StateMachine: type, operation: Operation) StateMachine.Operation {
-        check_state_machine_operations(StateMachine);
-        assert(operation.valid(StateMachine));
+    pub fn to(comptime StateMachineOperation: type, operation: Operation) StateMachineOperation {
+        comptime check_state_machine_operations(StateMachineOperation);
+        assert(operation.valid(StateMachineOperation));
         assert(!operation.vsr_reserved());
-        return @as(StateMachine.Operation, @enumFromInt(@intFromEnum(operation)));
+        return @as(StateMachineOperation, @enumFromInt(@intFromEnum(operation)));
     }
 
-    pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
-        check_state_machine_operations(StateMachine);
-        return StateMachine.operation_from_vsr(self).?;
+    pub fn cast(self: Operation, comptime StateMachineOperation: type) StateMachineOperation {
+        comptime check_state_machine_operations(StateMachineOperation);
+        return StateMachineOperation.from_vsr(self).?;
     }
 
-    pub fn valid(self: Operation, comptime StateMachine: type) bool {
-        check_state_machine_operations(StateMachine);
+    pub fn valid(self: Operation, comptime StateMachineOperation: type) bool {
+        comptime check_state_machine_operations(StateMachineOperation);
 
-        inline for (.{ Operation, StateMachine.Operation }) |Enum| {
+        inline for (.{ Operation, StateMachineOperation }) |Enum| {
             const ops = comptime std.enums.values(Enum);
             inline for (ops) |op| {
                 if (@intFromEnum(self) == @intFromEnum(op)) {
@@ -334,9 +334,9 @@ pub const Operation = enum(u8) {
         return @intFromEnum(self) < constants.vsr_operations_reserved;
     }
 
-    pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
-        assert(self.valid(StateMachine));
-        inline for (.{ Operation, StateMachine.Operation }) |Enum| {
+    pub fn tag_name(self: Operation, comptime StateMachineOperation: type) []const u8 {
+        assert(self.valid(StateMachineOperation));
+        inline for (.{ Operation, StateMachineOperation }) |Enum| {
             inline for (@typeInfo(Enum).@"enum".fields) |field| {
                 const op = @field(Enum, field.name);
                 if (@intFromEnum(self) == @intFromEnum(op)) {
@@ -347,23 +347,25 @@ pub const Operation = enum(u8) {
         unreachable;
     }
 
-    fn check_state_machine_operations(comptime StateMachine: type) void {
+    fn check_state_machine_operations(comptime StateMachineOperation: type) void {
         comptime {
-            assert(@typeInfo(StateMachine.Operation).@"enum".is_exhaustive);
-            assert(@typeInfo(StateMachine.Operation).@"enum".tag_type ==
+            assert(@typeInfo(StateMachineOperation) == .@"enum");
+            assert(@typeInfo(StateMachineOperation).@"enum".is_exhaustive);
+            assert(@typeInfo(StateMachineOperation).@"enum".tag_type ==
                 @typeInfo(Operation).@"enum".tag_type);
-            for (@typeInfo(StateMachine.Operation).@"enum".fields) |field| {
-                const operation = @field(StateMachine.Operation, field.name);
+            for (@typeInfo(StateMachineOperation).@"enum".fields) |field| {
+                const operation = @field(StateMachineOperation, field.name);
                 if (@intFromEnum(operation) < constants.vsr_operations_reserved) {
-                    @compileError("StateMachine.Operation is reserved");
+                    @compileError("StateMachine Operation is reserved");
                 }
             }
             for (@typeInfo(Operation).@"enum".fields) |field| {
                 const vsr_operation = @field(Operation, field.name);
                 switch (vsr_operation) {
-                    // The StateMachine can convert a `vsr.Operation.pulse` into a valid operation.
-                    .pulse => maybe(StateMachine.operation_from_vsr(vsr_operation) == null),
-                    else => assert(StateMachine.operation_from_vsr(vsr_operation) == null),
+                    // The StateMachine Operation can convert
+                    // a `vsr.Operation.pulse` into a valid operation.
+                    .pulse => maybe(StateMachineOperation.from_vsr(vsr_operation) == null),
+                    else => assert(StateMachineOperation.from_vsr(vsr_operation) == null),
                 }
             }
         }

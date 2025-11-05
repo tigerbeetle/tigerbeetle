@@ -4653,7 +4653,7 @@ pub fn ReplicaType(
                 @panic("Cannot commit prepare; batch limit too low.");
             }
 
-            if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
+            if (StateMachine.Operation.from_vsr(prepare.header.operation)) |prepare_operation| {
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_prefetch_callback,
@@ -5174,7 +5174,7 @@ pub fn ReplicaType(
                     self.log_prefix(),
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
-                    self.commit_prepare.?.header.operation.tag_name(StateMachine),
+                    self.commit_prepare.?.header.operation.tag_name(StateMachine.Operation),
                     commit_completion_time_local.to_ms(),
                 });
             }
@@ -5196,7 +5196,7 @@ pub fn ReplicaType(
             if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                 self.status == .normal)
             {
-                if (StateMachine.operation_from_vsr(
+                if (StateMachine.Operation.from_vsr(
                     self.commit_prepare.?.header.operation,
                 )) |operation| {
                     self.trace.timing(
@@ -5282,7 +5282,7 @@ pub fn ReplicaType(
                 self.primary_index(self.view) == self.replica,
                 prepare.header.op,
                 prepare.header.checksum,
-                prepare.header.operation.tag_name(StateMachine),
+                prepare.header.operation.tag_name(StateMachine.Operation),
             });
 
             const reply = self.message_bus.get_message(.reply);
@@ -5334,7 +5334,7 @@ pub fn ReplicaType(
                     prepare.header.client,
                     prepare.header.op,
                     prepare.header.timestamp,
-                    prepare.header.operation.cast(StateMachine),
+                    prepare.header.operation.cast(StateMachine.Operation),
                     prepare.body_used(),
                     reply.buffer[@sizeOf(Header)..],
                 ),
@@ -5440,7 +5440,7 @@ pub fn ReplicaType(
                     if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                         self.status == .normal)
                     {
-                        if (StateMachine.operation_from_vsr(
+                        if (StateMachine.Operation.from_vsr(
                             self.commit_prepare.?.header.operation,
                         )) |operation| {
                             self.trace.timing(
@@ -6192,7 +6192,7 @@ pub fn ReplicaType(
             // - client bug
             // - client memory corruption
             // - client/replica version mismatch
-            if (!message.header.operation.valid(StateMachine)) {
+            if (!message.header.operation.valid(StateMachine.Operation)) {
                 log.warn("{}: on_request: ignoring invalid operation (client={} operation={})", .{
                     self.log_prefix(),
                     message.header.client,
@@ -6204,7 +6204,7 @@ pub fn ReplicaType(
                 );
                 return true;
             }
-            if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
+            if (StateMachine.Operation.from_vsr(message.header.operation)) |operation| {
                 if (!self.state_machine.input_valid(
                     operation,
                     message.body_used(),
@@ -7151,7 +7151,7 @@ pub fn ReplicaType(
                 if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                     self.status == .normal)
                 {
-                    if (StateMachine.operation_from_vsr(
+                    if (StateMachine.Operation.from_vsr(
                         request.message.header.operation,
                     )) |operation| {
                         self.trace.timing(
@@ -7194,7 +7194,7 @@ pub fn ReplicaType(
                 .noop => {},
                 else => {
                     self.state_machine.prepare(
-                        request.message.header.operation.cast(StateMachine),
+                        request.message.header.operation.cast(StateMachine.Operation),
                         request.message.body_used(),
                     );
                 },

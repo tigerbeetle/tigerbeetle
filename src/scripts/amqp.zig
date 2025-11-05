@@ -691,10 +691,8 @@ const AmqpContext = struct {
 const VSRContext = struct {
     const MessagePool = vsr.message_pool.MessagePool;
     const Message = MessagePool.Message;
-    const Storage = vsr.storage.StorageType(vsr.io.IO);
-    const StateMachine = vsr.state_machine.StateMachineType(Storage);
     const Client = vsr.ClientType(
-        StateMachine,
+        tb.Operation,
         vsr.message_bus.MessageBusClient,
     );
 
@@ -735,12 +733,9 @@ const VSRContext = struct {
         self.client.register(register_callback, @intFromPtr(self));
         self.wait();
 
-        self.event_buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
-            .get_change_events,
-            @divFloor(
-                vsr.constants.message_body_size_max,
-                @sizeOf(tb.ChangeEvent),
-            ),
+        self.event_buffer = try gpa.alloc(tb.ChangeEvent, @divFloor(
+            tb.Operation.get_change_events.result_max(vsr.constants.message_body_size_max),
+            @sizeOf(tb.ChangeEvent),
         ));
         errdefer gpa.free(self.event_buffer);
         assert(!self.busy);
@@ -805,7 +800,7 @@ const VSRContext = struct {
         result: []u8,
     ) void {
         _ = timestamp;
-        const operation = operation_vsr.cast(StateMachine);
+        const operation = operation_vsr.cast(tb.Operation);
         assert(operation == .get_change_events);
 
         const self: *VSRContext = @ptrFromInt(@as(usize, @intCast(user_data)));

@@ -44,14 +44,14 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const request_buffer = try allocator.alignedAlloc(
         u8,
         16,
-        constants.message_body_size_max,
+        vsr.constants.message_body_size_max,
     );
     defer allocator.free(request_buffer);
 
     const reply_buffer = try allocator.alignedAlloc(
         u8,
         16,
-        constants.message_body_size_max,
+        vsr.constants.message_body_size_max,
     );
     defer allocator.free(reply_buffer);
 
@@ -62,13 +62,13 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     for (0..args.events_max orelse 50_000) |_| {
         const operation = prng.enum_uniform(TestContext.StateMachine.Operation);
         const size: usize = size: {
-            if (!TestContext.StateMachine.operation_is_multi_batch(operation)) {
+            if (!operation.is_multi_batch()) {
                 break :size build_batch(&prng, operation, request_buffer);
             }
-            assert(TestContext.StateMachine.operation_is_multi_batch(operation));
+            assert(operation.is_multi_batch());
 
             var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(request_buffer, .{
-                .element_size = TestContext.StateMachine.event_size_bytes(operation),
+                .element_size = operation.event_size(),
             });
 
             const batch_count = prng.enum_uniform(enum { one, random, max });
@@ -98,10 +98,10 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 @ptrCast(reply_buffer),
             );
             stdx.maybe(reply_size == 0);
-            if (TestContext.StateMachine.operation_is_multi_batch(operation)) {
+            if (operation.is_multi_batch()) {
                 assert(reply_size > 0);
                 _ = vsr.multi_batch.MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
-                    .element_size = TestContext.StateMachine.result_size_bytes(operation),
+                    .element_size = operation.result_size(),
                 }) catch |err| switch (err) {
                     error.MultiBatchInvalid => unreachable,
                 };

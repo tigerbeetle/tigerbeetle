@@ -70,7 +70,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
         pub const ReplicaReformat =
             vsr.ReplicaReformatType(StateMachine, MessageBus, Storage);
-        pub const Client = vsr.ClientType(StateMachine, MessageBus);
+        pub const Client = vsr.ClientType(StateMachine.Operation, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
         pub const JournalChecker = JournalCheckerType(Replica);
@@ -920,7 +920,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .request = 0, // Set by client.raw_request.
                 .cluster = client.cluster,
                 .command = .request,
-                .operation = vsr.Operation.from(StateMachine, request_operation),
+                .operation = request_operation.to_vsr(),
                 .size = @intCast(@sizeOf(vsr.Header) + request_body_size),
                 .previous_request_latency = cluster.prng.int(u32),
             };

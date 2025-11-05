@@ -171,13 +171,11 @@ pub const TestContext = struct {
         output_buffer: *align(16) [constants.message_body_size_max]u8,
     ) []const u8 {
         const message_body: []align(16) const u8 = message_body: {
-            if (!TestContext.StateMachine.operation_is_multi_batch(operation)) {
+            if (!operation.is_multi_batch()) {
                 break :message_body input_buffer[0..input_size];
             }
-            assert(TestContext.StateMachine.operation_is_multi_batch(operation));
-            const event_size = TestContext.StateMachine.event_size_bytes(
-                operation,
-            );
+            assert(operation.is_multi_batch());
+            const event_size = operation.event_size();
             var body_encoder = MultiBatchEncoder.init(input_buffer, .{
                 .element_size = event_size,
             });
@@ -203,14 +201,12 @@ pub const TestContext = struct {
             output_buffer,
         );
 
-        if (!TestContext.StateMachine.operation_is_multi_batch(operation)) {
+        if (!operation.is_multi_batch()) {
             return output_buffer[0..reply_actual_size];
         }
-        assert(TestContext.StateMachine.operation_is_multi_batch(operation));
+        assert(operation.is_multi_batch());
 
-        const result_size = TestContext.StateMachine.result_size_bytes(
-            operation,
-        );
+        const result_size = operation.result_size();
         var reply_decoder = MultiBatchDecoder.init(
             output_buffer[0..reply_actual_size],
             .{ .element_size = result_size },
@@ -234,7 +230,7 @@ pub const TestContext = struct {
 
     fn pulse(context: *TestContext) void {
         if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
-            const operation = vsr.Operation.pulse.cast(TestContext.StateMachine);
+            const operation = vsr.Operation.pulse.cast(TestContext.StateMachine.Operation);
             context.prepare(operation, &.{});
             const pulse_size = context.execute(
                 context.op,
@@ -964,9 +960,7 @@ fn check_version(
 
                 switch (operation_actual) {
                     inline else => |operation_actual_comptime| {
-                        const Result = TestContext.StateMachine.ResultType(
-                            operation_actual_comptime,
-                        );
+                        const Result = operation_actual_comptime.ResultType();
                         try testing.expectEqualSlices(
                             Result,
                             stdx.bytes_as_slice(.exact, Result, reply.items),
@@ -2827,10 +2821,10 @@ test "get_change_events" {
     );
 }
 
-// Sanity test to check the maximum batch size on a 1MiB message.
+// Sanity test to check the maximum batch size.
 // For a comprehensive test of all operations, see the `input_valid` test.
 test "StateMachine: batch_elements_max" {
-    const StateMachine = StateMachineType(TestContext.Storage);
+    const Operation = vsr.tigerbeetle.Operation;
 
     const events_max: u32 = @divExact(
         constants.message_body_size_max,
@@ -2838,38 +2832,30 @@ test "StateMachine: batch_elements_max" {
     );
 
     // No multi-batch encode.
-    try testing.expectEqual(events_max, StateMachine.operation_event_max(
-        .deprecated_create_accounts_unbatched,
+    try testing.expectEqual(events_max, Operation.deprecated_create_accounts_unbatched.event_max(
         constants.message_body_size_max,
     ));
-    try testing.expectEqual(events_max, StateMachine.operation_event_max(
-        .deprecated_lookup_accounts_unbatched,
+    try testing.expectEqual(events_max, Operation.deprecated_lookup_accounts_unbatched.event_max(
         constants.message_body_size_max,
     ));
-    try testing.expectEqual(events_max, StateMachine.operation_event_max(
-        .deprecated_create_transfers_unbatched,
+    try testing.expectEqual(events_max, Operation.deprecated_create_transfers_unbatched.event_max(
         constants.message_body_size_max,
     ));
-    try testing.expectEqual(events_max, StateMachine.operation_event_max(
-        .deprecated_lookup_transfers_unbatched,
+    try testing.expectEqual(events_max, Operation.deprecated_lookup_transfers_unbatched.event_max(
         constants.message_body_size_max,
     ));
 
     // Multi-batch encoded (the size corresponding to one element is occupied by the trailer).
-    try testing.expectEqual(events_max - 1, StateMachine.operation_event_max(
-        .create_accounts,
+    try testing.expectEqual(events_max - 1, Operation.create_accounts.event_max(
         constants.message_body_size_max,
     ));
-    try testing.expectEqual(events_max - 1, StateMachine.operation_event_max(
-        .lookup_accounts,
+    try testing.expectEqual(events_max - 1, Operation.create_transfers.event_max(
         constants.message_body_size_max,
     ));
-    try testing.expectEqual(events_max - 1, StateMachine.operation_event_max(
-        .create_transfers,
+    try testing.expectEqual(events_max - 1, Operation.lookup_accounts.event_max(
         constants.message_body_size_max,
     ));
-    try testing.expectEqual(events_max - 1, StateMachine.operation_event_max(
-        .lookup_transfers,
+    try testing.expectEqual(events_max - 1, Operation.lookup_transfers.event_max(
         constants.message_body_size_max,
     ));
 }
@@ -2886,9 +2872,9 @@ test "StateMachine: input_valid" {
             operation: TestContext.StateMachine.Operation,
             event_count: u32,
         }) []align(16) const u8 {
-            const event_size = TestContext.StateMachine.event_size_bytes(options.operation);
+            const event_size = options.operation.event_size();
             const payload_size: u32 = options.event_count * event_size;
-            if (TestContext.StateMachine.operation_is_multi_batch(options.operation)) {
+            if (options.operation.is_multi_batch()) {
                 var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
                     .element_size = event_size,
                 });
@@ -2910,22 +2896,19 @@ test "StateMachine: input_valid" {
     const operations = std.enums.values(TestContext.StateMachine.Operation);
     for (operations) |operation| {
         if (operation == .pulse) continue;
-        const event_size = TestContext.StateMachine.event_size_bytes(operation);
+        const event_size = operation.event_size();
         maybe(event_size == 0);
 
         const event_min: u32, const event_max: u32 = limits: {
             if (event_size == 0) {
                 break :limits .{ 0, 0 };
             }
-            if (!TestContext.StateMachine.operation_is_batchable(operation)) {
+            if (!operation.is_batchable()) {
                 break :limits .{ 1, 1 };
             }
             break :limits .{
                 0,
-                TestContext.StateMachine.operation_event_max(
-                    operation,
-                    context.state_machine.batch_size_limit,
-                ),
+                operation.event_max(context.state_machine.batch_size_limit),
             };
         };
         assert(event_min <= event_max);
@@ -3065,10 +3048,7 @@ test "StateMachine: query multi-batch input_valid" {
     };
 
     for (operations) |operation| {
-        const batch_max = TestContext.StateMachine.operation_result_max(
-            operation,
-            context.state_machine.batch_size_limit,
-        );
+        const batch_max = operation.result_max(context.state_machine.batch_size_limit);
 
         // Valid inputs:
         try std.testing.expect(context.state_machine.input_valid(

@@ -33,9 +33,6 @@ const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
 const TransferPendingStatus = tb.TransferPendingStatus;
 
-const CreateAccountsResult = tb.CreateAccountsResult;
-const CreateTransfersResult = tb.CreateTransfersResult;
-
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
 
@@ -92,42 +89,225 @@ pub const tree_ids = struct {
     };
 };
 
+pub const TransferPending = extern struct {
+    timestamp: u64,
+    status: TransferPendingStatus,
+    padding: [7]u8 = @splat(0),
+
+    comptime {
+        // Assert that there is no implicit padding.
+        assert(@sizeOf(TransferPending) == 16);
+        assert(stdx.no_padding(TransferPending));
+    }
+};
+
+pub const AccountEvent = extern struct {
+    dr_account_id: u128,
+    dr_debits_pending: u128,
+    dr_debits_posted: u128,
+    dr_credits_pending: u128,
+    dr_credits_posted: u128,
+    cr_account_id: u128,
+    cr_debits_pending: u128,
+    cr_debits_posted: u128,
+    cr_credits_pending: u128,
+    cr_credits_posted: u128,
+    timestamp: u64,
+    dr_account_timestamp: u64,
+    cr_account_timestamp: u64,
+    dr_account_flags: AccountFlags,
+    cr_account_flags: AccountFlags,
+    transfer_flags: TransferFlags,
+    transfer_pending_flags: TransferFlags,
+    transfer_pending_id: u128,
+    amount_requested: u128,
+    amount: u128,
+    ledger: u32,
+
+    /// Although similar to `TransferPending.status`, this index tracks the event,
+    /// not the original pending transfer.
+    /// Examples: (No such index exists in `Transfers.flags`)
+    ///   "All voided or expired events today."
+    ///   "All single-phase or posted events today."
+    ///
+    ///  Value   | Description
+    /// ---------|-----------------------------------------------------
+    /// `none`   | This event is a regular transfer.
+    /// `pending`| This event is a pending transfer.
+    /// `posted` | This event posted a pending transfer.
+    /// `voided` | This event voided a pending transfer.
+    /// `expired`| This event expired a pending transfer,
+    ///            the `timestamp` does not relate to a transfer.
+    ///
+    /// See `transfer_pending_id` for tracking the pending transfer.
+    /// It will be `zero` for `none` and `pending`.
+    transfer_pending_status: TransferPendingStatus,
+    reserved: [11]u8 = @splat(0),
+
+    /// Previous schema before the changes introduced by PR #2507.
+    const Former = extern struct {
+        dr_account_id: u128,
+        dr_debits_pending: u128,
+        dr_debits_posted: u128,
+        dr_credits_pending: u128,
+        dr_credits_posted: u128,
+        cr_account_id: u128,
+        cr_debits_pending: u128,
+        cr_debits_posted: u128,
+        cr_credits_pending: u128,
+        cr_credits_posted: u128,
+        timestamp: u64,
+        reserved: [88]u8 = @splat(0),
+
+        comptime {
+            assert(stdx.no_padding(Former));
+            assert(@sizeOf(Former) == @sizeOf(AccountEvent));
+            assert(@alignOf(Former) == @alignOf(AccountEvent));
+
+            // Asserting the fields are identical.
+            for (std.meta.fields(Former)) |field_former| {
+                if (std.mem.eql(u8, field_former.name, "reserved")) continue;
+                const field = std.meta.fields(AccountEvent)[
+                    std.meta.fieldIndex(
+                        AccountEvent,
+                        field_former.name,
+                    ).?
+                ];
+                assert(field_former.type == field.type);
+                assert(field_former.alignment == field.alignment);
+                assert(@offsetOf(AccountEvent, field_former.name) ==
+                    @offsetOf(Former, field_former.name));
+            }
+        }
+    };
+
+    /// Checks the object and returns whether it was created
+    /// using the current or the former schema.
+    fn schema(self: *const AccountEvent) union(enum) {
+        current,
+        former: *const AccountEvent.Former,
+    } {
+        assert(self.timestamp != 0);
+
+        const former: *const AccountEvent.Former = @ptrCast(self);
+        if (stdx.zeroed(&former.reserved)) {
+            // In the former schema:
+            // Balances for accounts without the `history` flag weren’t stored.
+            // If neither side had the `history` flag, the entire object wasn’t stored.
+            assert(former.dr_account_id != 0 or former.cr_account_id != 0);
+
+            return .{ .former = former };
+        }
+
+        assert(self.dr_account_timestamp != 0);
+        assert(self.dr_account_id != 0);
+        assert(self.cr_account_timestamp != 0);
+        assert(self.cr_account_id != 0);
+        assert(self.ledger != 0);
+        switch (self.transfer_pending_status) {
+            .none, .pending => assert(self.transfer_pending_id == 0),
+            .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
+        }
+        assert(stdx.zeroed(&self.reserved));
+        return .current;
+    }
+
+    comptime {
+        assert(stdx.no_padding(AccountEvent));
+        assert(@sizeOf(AccountEvent) == 256);
+        assert(@alignOf(AccountEvent) == 16);
+    }
+};
+
 pub fn StateMachineType(comptime Storage: type) type {
     assert(constants.message_body_size_max > 0);
     assert(constants.lsm_compaction_ops > 0);
     assert(constants.vsr_operations_reserved > 0);
 
     return struct {
+        batch_size_limit: u32,
+        prefetch_timestamp: u64,
+        prepare_timestamp: u64,
+        commit_timestamp: u64,
+        forest: Forest,
+
+        prefetch_operation: ?Operation = null,
+        prefetch_input: ?[]const u8 = null,
+        prefetch_callback: ?*const fn (*StateMachine) void = null,
+        prefetch_context: PrefetchContext = .null,
+
+        scan_lookup: ScanLookup = .null,
+        scan_lookup_buffer: []align(16) u8,
+        scan_lookup_buffer_index: u32 = 0,
+        scan_lookup_results: std.ArrayListUnmanaged(u32),
+        scan_lookup_next_tick: Grid.NextTick = undefined,
+
+        expire_pending_transfers: ExpirePendingTransfers = .{},
+
+        open_callback: ?*const fn (*StateMachine) void = null,
+        compact_callback: ?*const fn (*StateMachine) void = null,
+        checkpoint_callback: ?*const fn (*StateMachine) void = null,
+
+        /// Temporary metrics, until proper ones are merged.
+        metrics: Metrics,
+        log_trace: bool,
+
         const StateMachine = @This();
         const Grid = @import("vsr/grid.zig").GridType(Storage);
+
+        /// Re-exports the `Contract` declarations, so it can be interchangeable
+        /// with a concrete state machine type.
         pub const Operation = tb.Operation;
+
+        pub const Options = struct {
+            batch_size_limit: u32,
+            lsm_forest_compaction_block_count: u32,
+            lsm_forest_node_count: u32,
+            cache_entries_accounts: u32,
+            cache_entries_transfers: u32,
+            cache_entries_transfers_pending: u32,
+            log_trace: bool,
+        };
+
+        pub const Workload = WorkloadType(StateMachine);
+
+        pub const Forest = ForestType(Storage, .{
+            .accounts = AccountsGroove,
+            .transfers = TransfersGroove,
+            .transfers_pending = TransfersPendingGroove,
+            .account_events = AccountEventsGroove,
+        });
 
         pub const batch_max = struct {
             pub const create_accounts: u32 = @max(
-                operation_event_max(.create_accounts, constants.message_body_size_max),
-                operation_event_max(
-                    .deprecated_create_accounts_unbatched,
+                Operation.create_accounts.event_max(
+                    constants.message_body_size_max,
+                ),
+                Operation.deprecated_create_accounts_unbatched.event_max(
                     constants.message_body_size_max,
                 ),
             );
             pub const create_transfers: u32 = @max(
-                operation_event_max(.create_transfers, constants.message_body_size_max),
-                operation_event_max(
-                    .deprecated_create_transfers_unbatched,
+                Operation.create_transfers.event_max(
+                    constants.message_body_size_max,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
                     constants.message_body_size_max,
                 ),
             );
             pub const lookup_accounts: u32 = @max(
-                operation_event_max(.lookup_accounts, constants.message_body_size_max),
-                operation_event_max(
-                    .deprecated_lookup_accounts_unbatched,
+                Operation.lookup_accounts.event_max(
+                    constants.message_body_size_max,
+                ),
+                Operation.deprecated_lookup_accounts_unbatched.event_max(
                     constants.message_body_size_max,
                 ),
             );
             pub const lookup_transfers: u32 = @max(
-                operation_event_max(.lookup_transfers, constants.message_body_size_max),
-                operation_event_max(
-                    .deprecated_lookup_transfers_unbatched,
+                Operation.lookup_transfers.event_max(
+                    constants.message_body_size_max,
+                ),
+                Operation.deprecated_lookup_transfers_unbatched.event_max(
                     constants.message_body_size_max,
                 ),
             );
@@ -239,18 +419,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .objects_cache = true,
             },
         );
-
-        pub const TransferPending = extern struct {
-            timestamp: u64,
-            status: TransferPendingStatus,
-            padding: [7]u8 = @splat(0),
-
-            comptime {
-                // Assert that there is no implicit padding.
-                assert(@sizeOf(TransferPending) == 16);
-                assert(stdx.no_padding(TransferPending));
-            }
-        };
 
         const AccountEventsGroove = GrooveType(
             Storage,
@@ -365,133 +533,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             },
         );
 
-        pub const AccountEvent = extern struct {
-            dr_account_id: u128,
-            dr_debits_pending: u128,
-            dr_debits_posted: u128,
-            dr_credits_pending: u128,
-            dr_credits_posted: u128,
-            cr_account_id: u128,
-            cr_debits_pending: u128,
-            cr_debits_posted: u128,
-            cr_credits_pending: u128,
-            cr_credits_posted: u128,
-            timestamp: u64,
-            dr_account_timestamp: u64,
-            cr_account_timestamp: u64,
-            dr_account_flags: AccountFlags,
-            cr_account_flags: AccountFlags,
-            transfer_flags: TransferFlags,
-            transfer_pending_flags: TransferFlags,
-            transfer_pending_id: u128,
-            amount_requested: u128,
-            amount: u128,
-            ledger: u32,
-
-            /// Although similar to `TransferPending.status`, this index tracks the event,
-            /// not the original pending transfer.
-            /// Examples: (No such index exists in `Transfers.flags`)
-            ///   "All voided or expired events today."
-            ///   "All single-phase or posted events today."
-            ///
-            ///  Value   | Description
-            /// ---------|-----------------------------------------------------
-            /// `none`   | This event is a regular transfer.
-            /// `pending`| This event is a pending transfer.
-            /// `posted` | This event posted a pending transfer.
-            /// `voided` | This event voided a pending transfer.
-            /// `expired`| This event expired a pending transfer,
-            ///            the `timestamp` does not relate to a transfer.
-            ///
-            /// See `transfer_pending_id` for tracking the pending transfer.
-            /// It will be `zero` for `none` and `pending`.
-            transfer_pending_status: TransferPendingStatus,
-            reserved: [11]u8 = @splat(0),
-
-            /// Previous schema before the changes introduced by PR #2507.
-            const Former = extern struct {
-                dr_account_id: u128,
-                dr_debits_pending: u128,
-                dr_debits_posted: u128,
-                dr_credits_pending: u128,
-                dr_credits_posted: u128,
-                cr_account_id: u128,
-                cr_debits_pending: u128,
-                cr_debits_posted: u128,
-                cr_credits_pending: u128,
-                cr_credits_posted: u128,
-                timestamp: u64,
-                reserved: [88]u8 = @splat(0),
-
-                comptime {
-                    assert(stdx.no_padding(Former));
-                    assert(@sizeOf(Former) == @sizeOf(AccountEvent));
-                    assert(@alignOf(Former) == @alignOf(AccountEvent));
-
-                    // Asserting the fields are identical.
-                    for (std.meta.fields(Former)) |field_former| {
-                        if (std.mem.eql(u8, field_former.name, "reserved")) continue;
-                        const field = std.meta.fields(AccountEvent)[
-                            std.meta.fieldIndex(
-                                AccountEvent,
-                                field_former.name,
-                            ).?
-                        ];
-                        assert(field_former.type == field.type);
-                        assert(field_former.alignment == field.alignment);
-                        assert(@offsetOf(AccountEvent, field_former.name) ==
-                            @offsetOf(Former, field_former.name));
-                    }
-                }
-            };
-
-            /// Checks the object and returns whether it was created
-            /// using the current or the former schema.
-            fn schema(self: *const AccountEvent) union(enum) {
-                current,
-                former: *const AccountEvent.Former,
-            } {
-                assert(self.timestamp != 0);
-
-                const former: *const AccountEvent.Former = @ptrCast(self);
-                if (stdx.zeroed(&former.reserved)) {
-                    // In the former schema:
-                    // Balances for accounts without the `history` flag weren’t stored.
-                    // If neither side had the `history` flag, the entire object wasn’t stored.
-                    assert(former.dr_account_id != 0 or former.cr_account_id != 0);
-
-                    return .{ .former = former };
-                }
-
-                assert(self.dr_account_timestamp != 0);
-                assert(self.dr_account_id != 0);
-                assert(self.cr_account_timestamp != 0);
-                assert(self.cr_account_id != 0);
-                assert(self.ledger != 0);
-                switch (self.transfer_pending_status) {
-                    .none, .pending => assert(self.transfer_pending_id == 0),
-                    .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
-                }
-                assert(stdx.zeroed(&self.reserved));
-                return .current;
-            }
-
-            comptime {
-                assert(stdx.no_padding(AccountEvent));
-                assert(@sizeOf(AccountEvent) == 256);
-                assert(@alignOf(AccountEvent) == 16);
-            }
-        };
-
-        pub const Workload = WorkloadType(StateMachine);
-
-        pub const Forest = ForestType(Storage, .{
-            .accounts = AccountsGroove,
-            .transfers = TransfersGroove,
-            .transfers_pending = TransfersPendingGroove,
-            .account_events = AccountEventsGroove,
-        });
-
         const AccountsScanLookup = ScanLookupType(
             AccountsGroove,
             AccountsGroove.ScanBuilder.Scan,
@@ -512,292 +553,6 @@ pub fn StateMachineType(comptime Storage: type) type {
         );
 
         const ChangeEventsScanLookup = ChangeEventsScanLookupType(AccountEventsGroove, Storage);
-
-        pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
-            if (operation == .pulse) return .pulse;
-            if (operation.vsr_reserved()) return null;
-
-            return vsr.Operation.to(StateMachine, operation);
-        }
-
-        pub fn EventType(comptime operation: Operation) type {
-            return switch (operation) {
-                .pulse => void,
-                .create_accounts => Account,
-                .create_transfers => Transfer,
-                .lookup_accounts => u128,
-                .lookup_transfers => u128,
-                .get_account_transfers => AccountFilter,
-                .get_account_balances => AccountFilter,
-                .query_accounts => QueryFilter,
-                .query_transfers => QueryFilter,
-                .get_change_events => ChangeEventsFilter,
-
-                .deprecated_create_accounts_unbatched => Account,
-                .deprecated_create_transfers_unbatched => Transfer,
-                .deprecated_lookup_accounts_unbatched => u128,
-                .deprecated_lookup_transfers_unbatched => u128,
-                .deprecated_get_account_transfers_unbatched => AccountFilter,
-                .deprecated_get_account_balances_unbatched => AccountFilter,
-                .deprecated_query_accounts_unbatched => QueryFilter,
-                .deprecated_query_transfers_unbatched => QueryFilter,
-            };
-        }
-
-        pub fn ResultType(comptime operation: Operation) type {
-            return switch (operation) {
-                .pulse => void,
-                .create_accounts => CreateAccountsResult,
-                .create_transfers => CreateTransfersResult,
-                .lookup_accounts => Account,
-                .lookup_transfers => Transfer,
-                .get_account_transfers => Transfer,
-                .get_account_balances => AccountBalance,
-                .query_accounts => Account,
-                .query_transfers => Transfer,
-                .get_change_events => ChangeEvent,
-
-                .deprecated_create_accounts_unbatched => CreateAccountsResult,
-                .deprecated_create_transfers_unbatched => CreateTransfersResult,
-                .deprecated_lookup_accounts_unbatched => Account,
-                .deprecated_lookup_transfers_unbatched => Transfer,
-                .deprecated_get_account_transfers_unbatched => Transfer,
-                .deprecated_get_account_balances_unbatched => AccountBalance,
-                .deprecated_query_accounts_unbatched => Account,
-                .deprecated_query_transfers_unbatched => Transfer,
-            };
-        }
-
-        /// Inline function so that `operation` can be known at comptime.
-        pub inline fn event_size_bytes(operation: Operation) u32 {
-            return switch (operation) {
-                inline else => |operation_comptime| @sizeOf(EventType(operation_comptime)),
-            };
-        }
-
-        /// Inline function so that `operation` can be known at comptime.
-        pub inline fn result_size_bytes(operation: Operation) u32 {
-            return switch (operation) {
-                inline else => |operation_comptime| @sizeOf(ResultType(operation_comptime)),
-            };
-        }
-
-        /// Whether the operation supports multiple events per batch.
-        /// If not, multi-batch requests are still supported, but with a single event per batch.
-        pub inline fn operation_is_batchable(operation: Operation) bool {
-            return switch (operation) {
-                // Pulse does not take any input.
-                .pulse => false,
-                // Operations that take multiple events as input:
-                .create_accounts => true,
-                .create_transfers => true,
-                .lookup_accounts => true,
-                .lookup_transfers => true,
-                // Operations that take a single event as input:
-                .get_account_transfers => false,
-                .get_account_balances => false,
-                .query_accounts => false,
-                .query_transfers => false,
-                .get_change_events => false,
-
-                .deprecated_create_accounts_unbatched => true,
-                .deprecated_create_transfers_unbatched => true,
-                .deprecated_lookup_accounts_unbatched => true,
-                .deprecated_lookup_transfers_unbatched => true,
-                .deprecated_get_account_transfers_unbatched => false,
-                .deprecated_get_account_balances_unbatched => false,
-                .deprecated_query_accounts_unbatched => false,
-                .deprecated_query_transfers_unbatched => false,
-            };
-        }
-
-        /// Whether the operation is multi-batch encoded.
-        /// Inline function so that `operation` can be known at comptime.
-        pub inline fn operation_is_multi_batch(operation: Operation) bool {
-            return switch (operation) {
-                .pulse => false,
-
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-                => true,
-
-                .get_change_events => false,
-
-                .deprecated_create_accounts_unbatched,
-                .deprecated_create_transfers_unbatched,
-                .deprecated_lookup_accounts_unbatched,
-                .deprecated_lookup_transfers_unbatched,
-                .deprecated_get_account_transfers_unbatched,
-                .deprecated_get_account_balances_unbatched,
-                .deprecated_query_accounts_unbatched,
-                .deprecated_query_transfers_unbatched,
-                => false,
-            };
-        }
-
-        /// The maximum number of events per batch.
-        /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
-        pub inline fn operation_event_max(operation: Operation, batch_size_limit: u32) u32 {
-            assert(batch_size_limit > 0);
-            assert(batch_size_limit <= constants.message_body_size_max);
-
-            const event_size = event_size_bytes(operation);
-            maybe(event_size == 0); // Zeroed event size is allowed.
-            const result_size = result_size_bytes(operation);
-            assert(result_size > 0);
-
-            if (!operation_is_multi_batch(operation)) {
-                return if (event_size == 0)
-                    @divFloor(constants.message_body_size_max, result_size)
-                else
-                    @min(
-                        @divFloor(batch_size_limit, event_size),
-                        @divFloor(constants.message_body_size_max, result_size),
-                    );
-            }
-            assert(operation_is_multi_batch(operation));
-
-            const reply_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
-                .element_size = result_size,
-                .batch_count = 1,
-            });
-            assert(reply_trailer_size_min > 0);
-            assert(reply_trailer_size_min < batch_size_limit);
-
-            if (event_size == 0) {
-                return @divFloor(
-                    constants.message_body_size_max - reply_trailer_size_min,
-                    result_size,
-                );
-            } else {
-                const request_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
-                    .element_size = event_size,
-                    .batch_count = 1,
-                });
-                assert(request_trailer_size_min > 0);
-                assert(request_trailer_size_min < constants.message_body_size_max);
-
-                return @min(
-                    @divFloor(batch_size_limit - request_trailer_size_min, event_size),
-                    @divFloor(
-                        constants.message_body_size_max - reply_trailer_size_min,
-                        result_size,
-                    ),
-                );
-            }
-        }
-
-        /// The maximum number of results per batch.
-        /// If the number of results is defined by the number of events (`operation_is_batchable()`
-        /// is true) then `operation_result_max() == operation_event_max()`.
-        /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
-        pub inline fn operation_result_max(operation: Operation, batch_size_limit: u32) u32 {
-            assert(batch_size_limit > 0);
-            assert(batch_size_limit <= constants.message_body_size_max);
-            if (operation_is_batchable(operation)) {
-                return operation_event_max(
-                    operation,
-                    batch_size_limit,
-                );
-            }
-            assert(!operation_is_batchable(operation));
-
-            const result_size = result_size_bytes(operation);
-            assert(result_size > 0);
-
-            if (!operation_is_multi_batch(operation)) {
-                return @divFloor(constants.message_body_size_max, result_size);
-            }
-            assert(operation_is_multi_batch(operation));
-
-            const reply_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
-                .element_size = result_size,
-                .batch_count = 1,
-            });
-            return @divFloor(
-                constants.message_body_size_max - reply_trailer_size_min,
-                result_size,
-            );
-        }
-
-        /// Returns the expected number of results for a given batch.
-        /// For multi-batch requests, this function expects a single, already decoded batch.
-        /// Inline function so that `operation` can be known at comptime.
-        pub inline fn operation_result_count_expected(
-            operation: StateMachine.Operation,
-            batch: []const u8,
-        ) u32 {
-            return switch (operation) {
-                .pulse => 0,
-                inline .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                .deprecated_create_accounts_unbatched,
-                .deprecated_create_transfers_unbatched,
-                .deprecated_lookup_accounts_unbatched,
-                .deprecated_lookup_transfers_unbatched,
-                => |operation_comptime| count: {
-                    // For these types of operations, each event produces at most one result.
-                    comptime assert(StateMachine.operation_is_batchable(operation_comptime));
-
-                    // Clients do not validate batch size == 0,
-                    // and even the simulator can generate requests with no events.
-                    if (batch.len == 0) return 0;
-
-                    const event_size: u32 = @sizeOf(EventType(operation_comptime));
-                    comptime assert(event_size > 0);
-                    assert(batch.len % event_size == 0); // Input has already been validated.
-
-                    break :count @intCast(@divExact(batch.len, event_size));
-                },
-                inline .get_account_transfers,
-                .get_account_balances,
-                .query_accounts,
-                .query_transfers,
-                .deprecated_get_account_transfers_unbatched,
-                .deprecated_get_account_balances_unbatched,
-                .deprecated_query_accounts_unbatched,
-                .deprecated_query_transfers_unbatched,
-                .get_change_events,
-                => |operation_comptime| count: {
-                    // For queries, each event produces up to `limit` events.
-                    comptime assert(!StateMachine.operation_is_batchable(operation_comptime));
-
-                    const Filter = EventType(operation_comptime);
-                    comptime assert(@sizeOf(Filter) > 0);
-                    assert(batch.len == @sizeOf(Filter));
-                    // This function is used by the client,
-                    // so the input may come from unaligned memory.
-                    maybe(!std.mem.isAligned(@intFromPtr(batch.ptr), @alignOf(Filter)));
-
-                    const filter: Filter = std.mem.bytesToValue(Filter, batch);
-                    maybe(filter.limit == 0);
-
-                    // TODO: Handle `TooMuchData` at the client side instead of capping the limit.
-                    break :count @min(filter.limit, operation_result_max(
-                        operation_comptime,
-                        constants.message_body_size_max,
-                    ));
-                },
-            };
-        }
-
-        pub const Options = struct {
-            batch_size_limit: u32,
-            lsm_forest_compaction_block_count: u32,
-            lsm_forest_node_count: u32,
-            cache_entries_accounts: u32,
-            cache_entries_transfers: u32,
-            cache_entries_transfers_pending: u32,
-            log_trace: bool,
-        };
 
         /// Since prefetch contexts are used one at a time, it's safe to access
         /// the union's fields and reuse the same memory for all context instances.
@@ -868,21 +623,6 @@ pub fn StateMachineType(comptime Storage: type) type {
         };
 
         const Metrics = struct {
-            const TimingSummary = struct {
-                duration_min_us: ?u64 = null,
-                duration_max_us: ?u64 = null,
-                duration_sum_us: u64 = 0,
-
-                count: u64 = 0,
-
-                /// If an operation supports batching (eg, lookup_accounts) this is a count of the
-                /// number of internal operations.
-                count_batch: u64 = 0,
-            };
-
-            /// Technically 'timer' can't be used, but that'll error out at comptime.
-            const MetricEnum = std.meta.FieldEnum(Metrics);
-
             create_accounts: TimingSummary = .{},
             create_transfers: TimingSummary = .{},
             lookup_accounts: TimingSummary = .{},
@@ -897,6 +637,21 @@ pub fn StateMachineType(comptime Storage: type) type {
             checkpoint: TimingSummary = .{},
 
             timer: vsr.time.Timer,
+
+            const TimingSummary = struct {
+                duration_min_us: ?u64 = null,
+                duration_max_us: ?u64 = null,
+                duration_sum_us: u64 = 0,
+
+                count: u64 = 0,
+
+                /// If an operation supports batching (eg, lookup_accounts) this is a count of the
+                /// number of internal operations.
+                count_batch: u64 = 0,
+            };
+
+            /// Technically 'timer' can't be used, but that'll error out at comptime.
+            const MetricEnum = std.meta.FieldEnum(Metrics);
 
             pub fn log_and_reset(metrics: *Metrics) void {
                 inline for (comptime std.meta.fieldNames(Metrics)) |field_name| {
@@ -988,33 +743,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
         };
 
-        batch_size_limit: u32,
-        prefetch_timestamp: u64,
-        prepare_timestamp: u64,
-        commit_timestamp: u64,
-        forest: Forest,
-
-        prefetch_operation: ?Operation = null,
-        prefetch_input: ?[]const u8 = null,
-        prefetch_callback: ?*const fn (*StateMachine) void = null,
-        prefetch_context: PrefetchContext = .null,
-
-        scan_lookup: ScanLookup = .null,
-        scan_lookup_buffer: []align(16) u8,
-        scan_lookup_buffer_index: u32 = 0,
-        scan_lookup_results: std.ArrayListUnmanaged(u32),
-        scan_lookup_next_tick: Grid.NextTick = undefined,
-
-        expire_pending_transfers: ExpirePendingTransfers = .{},
-
-        open_callback: ?*const fn (*StateMachine) void = null,
-        compact_callback: ?*const fn (*StateMachine) void = null,
-        checkpoint_callback: ?*const fn (*StateMachine) void = null,
-
-        /// Temporary metrics, until proper ones are merged.
-        metrics: Metrics,
-        log_trace: bool,
-
         pub fn init(
             self: *StateMachine,
             allocator: mem.Allocator,
@@ -1024,7 +752,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) !void {
             assert(options.batch_size_limit <= constants.message_body_size_max);
             inline for (comptime std.enums.values(Operation)) |operation| {
-                assert(options.batch_size_limit >= @sizeOf(EventType(operation)));
+                assert(options.batch_size_limit >= operation.event_size());
             }
 
             self.* = .{
@@ -1094,8 +822,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         };
                         buffer_size_max = @max(
                             buffer_size_max,
-                            operation_result_max(
-                                operation,
+                            operation.result_max(
                                 self.batch_size_limit,
                             ) * object_size,
                         );
@@ -1104,9 +831,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                         // is stored in a list and used as the offset into `scan_lookup_buffer`.
                         batch_count_max = @max(
                             batch_count_max,
-                            if (operation_is_multi_batch(operation))
+                            if (operation.is_multi_batch())
                                 vsr.multi_batch.multi_batch_count_max(.{
-                                    .batch_size_min = @sizeOf(EventType(operation)),
+                                    .batch_size_min = operation.event_size(),
                                     .batch_size_limit = options.batch_size_limit,
                                 })
                             else
@@ -1177,14 +904,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(message_body_used.len <= self.batch_size_limit);
 
-            if (!operation_is_multi_batch(operation)) {
+            if (!operation.is_multi_batch()) {
                 return self.batch_valid(operation, message_body_used);
             }
-            assert(operation_is_multi_batch(operation));
+            assert(operation.is_multi_batch());
 
-            const event_size: u32 = event_size_bytes(operation);
+            const event_size: u32 = operation.event_size();
             maybe(event_size == 0);
-            const result_size: u32 = result_size_bytes(operation);
+            const result_size: u32 = operation.result_size();
             assert(result_size > 0);
 
             // Verifying whether the multi-batch message is properly encoded.
@@ -1197,10 +924,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             var result_count_expected: u32 = 0;
             while (body_decoder.pop()) |batch| {
                 if (!self.batch_valid(operation, batch)) return false;
-                result_count_expected += operation_result_count_expected(
-                    operation,
-                    batch,
-                );
+                result_count_expected += operation.result_count_expected(batch);
             }
             const reply_trailer_size: u32 = vsr.multi_batch.trailer_total_size(.{
                 .element_size = result_size,
@@ -1229,23 +953,20 @@ pub fn StateMachineType(comptime Storage: type) type {
             switch (operation) {
                 .pulse => return batch.len == 0,
                 inline else => |operation_comptime| {
-                    const event_size = event_size_bytes(operation_comptime);
+                    const event_size = operation_comptime.event_size();
                     assert(event_size > 0);
 
-                    if (comptime !operation_is_batchable(operation_comptime)) {
+                    if (comptime !operation_comptime.is_batchable()) {
                         return batch.len == event_size;
                     }
-                    comptime assert(operation_is_batchable(operation_comptime));
+                    comptime assert(operation_comptime.is_batchable());
 
                     // Clients do not validate batch size == 0,
                     // and even the simulator can generate requests with no events.
                     maybe(batch.len == 0);
                     if (batch.len % event_size != 0) return false;
 
-                    const event_max: u32 = operation_event_max(
-                        operation_comptime,
-                        self.batch_size_limit,
-                    );
+                    const event_max: u32 = operation_comptime.event_max(self.batch_size_limit);
                     assert(event_max > 0);
 
                     const event_count: u32 = @intCast(@divExact(batch.len, event_size));
@@ -1263,16 +984,16 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) void {
             assert(message_body_used.len <= self.batch_size_limit);
             const delta: u64 = delta: {
-                if (!operation_is_multi_batch(operation)) {
+                if (!operation.is_multi_batch()) {
                     break :delta self.prepare_delta_nanoseconds(
                         operation,
                         message_body_used,
                     );
                 }
-                assert(operation_is_multi_batch(operation));
+                assert(operation.is_multi_batch());
 
                 var body_decoder = MultiBatchDecoder.init(message_body_used, .{
-                    .element_size = event_size_bytes(operation),
+                    .element_size = operation.event_size(),
                 }) catch unreachable; // Already validated by `input_valid()`.
 
                 var delta: u64 = 0;
@@ -1348,16 +1069,16 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.scan_lookup_results.items.len == 0);
 
             const prefetch_input: []const u8 = input: {
-                if (!operation_is_multi_batch(operation)) {
+                if (!operation.is_multi_batch()) {
                     assert(self.batch_valid(operation, message_body_used));
                     break :input message_body_used;
                 }
-                assert(operation_is_multi_batch(operation));
+                assert(operation.is_multi_batch());
 
                 var body_decoder = MultiBatchDecoder.init(
                     message_body_used,
                     .{
-                        .element_size = event_size_bytes(operation),
+                        .element_size = operation.event_size(),
                     },
                 ) catch unreachable; // Already validated by `input_valid()`.
                 while (body_decoder.pop()) |input| {
@@ -1699,10 +1420,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // TODO: Prevent clients from setting the limit larger than the buffer size.
                 const limit = @min(
                     filter.limit,
-                    operation_result_max(
-                        self.prefetch_operation.?,
-                        self.batch_size_limit,
-                    ),
+                    self.prefetch_operation.?.result_max(self.batch_size_limit),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -1756,7 +1474,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_input.?,
             );
             assert(filters.len > 0);
-            assert(filters.len == 1 or operation_is_multi_batch(self.prefetch_operation.?));
+            assert(filters.len == 1 or self.prefetch_operation.?.is_multi_batch());
             for (filters) |*filter| {
                 self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
             }
@@ -1819,10 +1537,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         // TODO: Prevent clients from setting the limit larger than the buffer size.
                         const limit = @min(
                             filter.limit,
-                            operation_result_max(
-                                self.prefetch_operation.?,
-                                self.batch_size_limit,
-                            ),
+                            self.prefetch_operation.?.result_max(self.batch_size_limit),
                         );
                         assert(limit > 0);
                         assert(scan_buffer.len >= limit);
@@ -2070,10 +1785,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // failing with `TooMuchData`.
                 const limit = @min(
                     filter.limit,
-                    operation_result_max(
-                        self.prefetch_operation.?,
-                        self.batch_size_limit,
-                    ),
+                    self.prefetch_operation.?.result_max(self.batch_size_limit),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -2161,10 +1873,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // TODO: Prevent clients from setting the limit larger than the buffer size.
                 const limit = @min(
                     filter.limit,
-                    operation_result_max(
-                        self.prefetch_operation.?,
-                        self.batch_size_limit,
-                    ),
+                    self.prefetch_operation.?.result_max(self.batch_size_limit),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -2418,22 +2127,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // - Or, make the `operation_{event,result}_max(...)` functions aware of the number
                 //   of prefetches.
                 const limit_max: u32 = limit_max: {
-                    const result_max = operation_result_max(
-                        self.prefetch_operation.?,
-                        self.batch_size_limit,
-                    );
+                    const result_max = self.prefetch_operation.?.result_max(self.batch_size_limit);
                     // Also constrained by the maximum number of available prefetches.
                     const prefetch_transfers = @max(
-                        operation_event_max(.lookup_transfers, self.batch_size_limit),
-                        operation_event_max(
-                            .deprecated_lookup_transfers_unbatched,
+                        Operation.lookup_transfers.event_max(self.batch_size_limit),
+                        Operation.deprecated_lookup_transfers_unbatched.event_max(
                             self.batch_size_limit,
                         ),
                     );
                     const prefetch_accounts = @max(
-                        operation_event_max(.lookup_accounts, self.batch_size_limit),
-                        operation_event_max(
-                            .deprecated_lookup_accounts_unbatched,
+                        Operation.lookup_accounts.event_max(self.batch_size_limit),
+                        Operation.deprecated_lookup_accounts_unbatched.event_max(
                             self.batch_size_limit,
                         ),
                     );
@@ -2614,8 +2318,8 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
-                operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
+                Operation.create_transfers.event_max(self.batch_size_limit),
+                Operation.deprecated_create_transfers_unbatched.event_max(self.batch_size_limit),
             ) * @sizeOf(Transfer);
 
             const scan_lookup_buffer = stdx.bytes_as_slice(
@@ -2676,8 +2380,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (result_count == 0) return self.prefetch_finish();
 
             const result_max: u32 = @max(
-                operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
+                Operation.create_transfers.event_max(self.batch_size_limit),
+                Operation.deprecated_create_transfers_unbatched.event_max(self.batch_size_limit),
             );
             assert(result_count <= result_max);
             assert(self.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
@@ -2805,15 +2509,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             switch (operation) {
                 .pulse => {},
                 inline else => |operation_comptime| {
-                    const event_size: u32 = event_size_bytes(operation_comptime);
+                    const event_size: u32 = operation_comptime.event_size();
                     const batch_count: u32 = batch_count: {
-                        if (!operation_is_multi_batch(operation_comptime)) {
+                        if (!operation_comptime.is_multi_batch()) {
                             break :batch_count @intCast(@divExact(
                                 message_body_used.len,
                                 event_size,
                             ));
                         }
-                        comptime assert(operation_is_multi_batch(operation_comptime));
+                        comptime assert(operation_comptime.is_multi_batch());
 
                         const body_decoder = MultiBatchDecoder.init(message_body_used, .{
                             .element_size = event_size,
@@ -2842,8 +2546,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             message_body_used: []align(16) const u8,
             output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(!operation_is_multi_batch(operation));
-            comptime assert(operation_is_batchable(operation));
+            comptime assert(!operation.is_multi_batch());
+            comptime assert(operation.is_batchable());
 
             switch (operation) {
                 .deprecated_create_accounts_unbatched,
@@ -2873,15 +2577,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             message_body_used: []align(16) const u8,
             output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(operation_is_multi_batch(operation));
-            comptime assert(operation_is_batchable(operation));
+            comptime assert(operation.is_multi_batch());
+            comptime assert(operation.is_batchable());
 
             var body_decoder = MultiBatchDecoder.init(message_body_used, .{
-                .element_size = event_size_bytes(operation),
+                .element_size = operation.event_size(),
             }) catch unreachable; // Already validated by `input_valid()`.
             assert(body_decoder.batch_count() >= 1);
             var reply_encoder = MultiBatchEncoder.init(output_buffer, .{
-                .element_size = result_size_bytes(operation),
+                .element_size = operation.result_size(),
             });
 
             var execute_timestamp: u64 = timestamp -
@@ -2932,8 +2636,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             message_body_used: []align(16) const u8,
             output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(!operation_is_multi_batch(operation));
-            comptime assert(!operation_is_batchable(operation));
+            comptime assert(!operation.is_multi_batch());
+            comptime assert(!operation.is_batchable());
             assert(self.scan_lookup_results.items.len > 0);
             maybe(self.scan_lookup_buffer_index == 0);
             defer {
@@ -2959,7 +2663,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
                 ),
-
                 .deprecated_get_account_transfers_unbatched => self.execute_get_account_transfers(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
@@ -2992,8 +2695,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             message_body_used: []align(16) const u8,
             output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(operation_is_multi_batch(operation));
-            comptime assert(!operation_is_batchable(operation));
+            comptime assert(operation.is_multi_batch());
+            comptime assert(!operation.is_batchable());
             assert(self.scan_lookup_results.items.len > 0);
             maybe(self.scan_lookup_buffer_index == 0);
             defer {
@@ -3003,11 +2706,11 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             var offset: u32 = 0;
             var body_decoder = MultiBatchDecoder.init(message_body_used, .{
-                .element_size = event_size_bytes(operation),
+                .element_size = operation.event_size(),
             }) catch unreachable; // Already validated by `input_valid()`.
             assert(body_decoder.batch_count() == self.scan_lookup_results.items.len);
             var reply_encoder = MultiBatchEncoder.init(output_buffer, .{
-                .element_size = result_size_bytes(operation),
+                .element_size = operation.result_size(),
             });
             for (self.scan_lookup_results.items) |result_count| {
                 const batch: []const u8 = body_decoder.pop().?;
@@ -3169,8 +2872,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                 operation == .deprecated_create_accounts_unbatched or
                 operation == .deprecated_create_transfers_unbatched);
 
-            const Event = EventType(operation);
-            const Result = ResultType(operation);
+            const Event = operation.EventType();
+            const Result = operation.ResultType();
             const events = stdx.bytes_as_slice(.exact, Event, batch);
             const results = stdx.bytes_as_slice(.inexact, Result, output_buffer);
             assert(events.len <= results.len);
@@ -3279,7 +2982,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(chain == null);
             assert(chain_broken == false);
 
-            return @sizeOf(ResultType(operation)) * count;
+            return @sizeOf(Result) * count;
         }
 
         fn transient_error(
@@ -4512,8 +4215,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (result_count == 0) return 0;
 
             const result_max: u32 = @max(
-                operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
+                Operation.create_transfers.event_max(self.batch_size_limit),
+                Operation.deprecated_create_transfers_unbatched.event_max(self.batch_size_limit),
             );
             assert(result_count <= result_max);
 
@@ -4615,42 +4318,30 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
             const prefetch_create_accounts_limit: u32 = @max(
-                operation_event_max(.create_accounts, options.batch_size_limit),
-                operation_event_max(
-                    .deprecated_create_accounts_unbatched,
-                    options.batch_size_limit,
-                ),
+                Operation.create_accounts.event_max(options.batch_size_limit),
+                Operation.deprecated_create_accounts_unbatched.event_max(options.batch_size_limit),
             );
             assert(prefetch_create_accounts_limit > 0);
             assert(prefetch_create_accounts_limit <= batch_max.create_accounts);
 
             const prefetch_lookup_accounts_limit: u32 = @max(
-                operation_event_max(.lookup_accounts, options.batch_size_limit),
-                operation_event_max(
-                    .deprecated_lookup_accounts_unbatched,
-                    options.batch_size_limit,
-                ),
+                Operation.lookup_accounts.event_max(options.batch_size_limit),
+                Operation.deprecated_lookup_accounts_unbatched.event_max(options.batch_size_limit),
             );
             assert(prefetch_lookup_accounts_limit > 0);
             assert(prefetch_lookup_accounts_limit <= batch_max.lookup_accounts);
             assert(prefetch_create_accounts_limit <= batch_max.lookup_accounts);
 
             const prefetch_create_transfers_limit: u32 = @max(
-                operation_event_max(.create_transfers, options.batch_size_limit),
-                operation_event_max(
-                    .deprecated_create_transfers_unbatched,
-                    options.batch_size_limit,
-                ),
+                Operation.create_transfers.event_max(options.batch_size_limit),
+                Operation.deprecated_create_transfers_unbatched.event_max(options.batch_size_limit),
             );
             assert(prefetch_create_transfers_limit > 0);
             assert(prefetch_create_transfers_limit <= batch_max.create_transfers);
 
             const prefetch_lookup_transfers_limit: u32 = @max(
-                operation_event_max(.lookup_transfers, options.batch_size_limit),
-                operation_event_max(
-                    .deprecated_lookup_transfers_unbatched,
-                    options.batch_size_limit,
-                ),
+                Operation.lookup_transfers.event_max(options.batch_size_limit),
+                Operation.deprecated_lookup_transfers_unbatched.event_max(options.batch_size_limit),
             );
             assert(prefetch_lookup_transfers_limit > 0);
             assert(prefetch_lookup_transfers_limit <= batch_max.lookup_transfers);
@@ -4801,15 +4492,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(batch_size_limit <= constants.message_body_size_max);
 
             const batch_create_accounts: u32 = @max(
-                operation_event_max(.create_accounts, batch_size_limit),
-                operation_event_max(.deprecated_create_accounts_unbatched, batch_size_limit),
+                Operation.create_accounts.event_max(batch_size_limit),
+                Operation.deprecated_create_accounts_unbatched.event_max(batch_size_limit),
             );
             assert(batch_create_accounts > 0);
             assert(batch_create_accounts <= batch_max.create_accounts);
 
             const batch_create_transfers: u32 = @max(
-                operation_event_max(.create_transfers, batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, batch_size_limit),
+                Operation.create_transfers.event_max(batch_size_limit),
+                Operation.deprecated_create_transfers_unbatched.event_max(batch_size_limit),
             );
             assert(batch_create_transfers > 0);
             assert(batch_create_transfers <= batch_max.create_transfers);
@@ -5039,7 +4730,6 @@ fn ChangeEventsScanLookupType(
 
     return struct {
         const AccountEventsLookup = @This();
-        const AccountEvent = AccountEventsGroove.ObjectTree.Table.Value;
         const ScanTree = ScanTreeType(
             void,
             AccountEventsGroove.ObjectTree,

@@ -16,13 +16,13 @@ const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const log = stdx.log.scoped(.client);
 
 pub fn ClientType(
-    comptime StateMachine_: type,
+    comptime StateMachineOperation: type,
     comptime MessageBus: type,
 ) type {
     return struct {
         const Client = @This();
 
-        pub const StateMachine = StateMachine_;
+        pub const Operation = StateMachineOperation;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
@@ -304,17 +304,14 @@ pub fn ClientType(
             self: *Client,
             callback: Request.Callback,
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: Operation,
             events: []const u8,
         ) void {
-            const event_size: usize = switch (operation) {
-                inline else => |operation_comptime| @sizeOf(
-                    StateMachine.EventType(operation_comptime),
-                ),
-            };
             assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
+
+            const event_size = operation.event_size();
             assert(events.len <= constants.message_body_size_max);
             assert(events.len <= self.batch_size_limit.?);
             assert(events.len % event_size == 0);
@@ -328,7 +325,7 @@ pub fn ClientType(
                 .cluster = self.cluster,
                 .command = .request,
                 .release = self.release,
-                .operation = vsr.Operation.from(StateMachine, operation),
+                .operation = operation.to_vsr(),
                 .size = @intCast(@sizeOf(Header) + events.len),
                 .previous_request_latency = 0,
             };
@@ -354,7 +351,7 @@ pub fn ClientType(
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);
             assert(message.header.size <= @sizeOf(Header) + self.batch_size_limit.?);
-            assert(message.header.operation.valid(StateMachine));
+            assert(message.header.operation.valid(Operation));
             assert(message.header.view == 0);
             assert(message.header.parent == 0);
             assert(message.header.session == 0);
@@ -377,7 +374,7 @@ pub fn ClientType(
                 user_data,
                 message.header.request,
                 message.header.size,
-                message.header.operation.tag_name(StateMachine),
+                message.header.operation.tag_name(Operation),
             });
 
             self.request_inflight = .{
@@ -560,7 +557,7 @@ pub fn ClientType(
                 inflight.user_data,
                 reply.header.request,
                 reply.header.size,
-                reply.header.operation.tag_name(StateMachine),
+                reply.header.operation.tag_name(Operation),
             });
 
             assert(reply.header.request_checksum == self.parent);
@@ -577,7 +574,7 @@ pub fn ClientType(
                     inflight.message.header.request,
                     reply.header.op,
                     inflight.message.header.size,
-                    inflight.message.header.operation.tag_name(StateMachine),
+                    inflight.message.header.operation.tag_name(Operation),
                     request_completion_duration.to_ms(),
                 });
             }

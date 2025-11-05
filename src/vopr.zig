@@ -361,8 +361,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
     const batch_size_limit_min = comptime batch_size_limit_min: {
         var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
         for (std.enums.values(StateMachine.Operation)) |operation| {
-            const event_size = @sizeOf(StateMachine.EventType(operation));
-            event_size_max = @max(event_size_max, event_size);
+            event_size_max = @max(event_size_max, operation.event_size());
         }
         break :batch_size_limit_min event_size_max;
     };
@@ -1356,7 +1355,7 @@ pub const Simulator = struct {
 
                 if (prepare_header.operation == .pulse) {
                     simulator.workload.on_pulse(
-                        prepare_header.operation.cast(StateMachine),
+                        prepare_header.operation.cast(StateMachine.Operation),
                         prepare_header.timestamp,
                     );
                 }
@@ -1364,7 +1363,7 @@ pub const Simulator = struct {
                 if (!commit.prepare.header.operation.vsr_reserved()) {
                     simulator.workload.on_reply(
                         commit.client_index.?,
-                        commit.reply.header.operation.cast(StateMachine),
+                        commit.reply.header.operation.cast(StateMachine.Operation),
                         commit.reply.header.timestamp,
                         commit.prepare.body_used(),
                         commit.reply.body_used(),
@@ -1466,7 +1465,7 @@ pub const Simulator = struct {
         // should always queue the request.
         assert(request_message == client.request_inflight.?.message.base());
         assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
-        assert(request_message.header.into(.request).?.operation.cast(StateMachine) ==
+        assert(request_message.header.into(.request).?.operation.cast(StateMachine.Operation) ==
             request_metadata.operation);
 
         simulator.requests_sent += 1;

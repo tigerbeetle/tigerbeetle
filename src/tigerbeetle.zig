@@ -2,8 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const stdx = @import("stdx");
-const constants = @import("constants.zig");
+const vsr = @import("vsr.zig");
+const constants = vsr.constants;
+const stdx = vsr.stdx;
+const maybe = stdx.maybe;
 
 pub const Account = extern struct {
     id: u128,
@@ -658,6 +660,283 @@ pub const Operation = enum(u8) {
     get_account_balances = constants.vsr_operations_reserved + 15,
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
+
+    pub fn EventType(comptime operation: Operation) type {
+        return switch (operation) {
+            .pulse => void,
+            .create_accounts => Account,
+            .create_transfers => Transfer,
+            .lookup_accounts => u128,
+            .lookup_transfers => u128,
+            .get_account_transfers => AccountFilter,
+            .get_account_balances => AccountFilter,
+            .query_accounts => QueryFilter,
+            .query_transfers => QueryFilter,
+            .get_change_events => ChangeEventsFilter,
+
+            .deprecated_create_accounts_unbatched => Account,
+            .deprecated_create_transfers_unbatched => Transfer,
+            .deprecated_lookup_accounts_unbatched => u128,
+            .deprecated_lookup_transfers_unbatched => u128,
+            .deprecated_get_account_transfers_unbatched => AccountFilter,
+            .deprecated_get_account_balances_unbatched => AccountFilter,
+            .deprecated_query_accounts_unbatched => QueryFilter,
+            .deprecated_query_transfers_unbatched => QueryFilter,
+        };
+    }
+
+    pub fn ResultType(comptime operation: Operation) type {
+        return switch (operation) {
+            .pulse => void,
+            .create_accounts => CreateAccountsResult,
+            .create_transfers => CreateTransfersResult,
+            .lookup_accounts => Account,
+            .lookup_transfers => Transfer,
+            .get_account_transfers => Transfer,
+            .get_account_balances => AccountBalance,
+            .query_accounts => Account,
+            .query_transfers => Transfer,
+            .get_change_events => ChangeEvent,
+
+            .deprecated_create_accounts_unbatched => CreateAccountsResult,
+            .deprecated_create_transfers_unbatched => CreateTransfersResult,
+            .deprecated_lookup_accounts_unbatched => Account,
+            .deprecated_lookup_transfers_unbatched => Transfer,
+            .deprecated_get_account_transfers_unbatched => Transfer,
+            .deprecated_get_account_balances_unbatched => AccountBalance,
+            .deprecated_query_accounts_unbatched => Account,
+            .deprecated_query_transfers_unbatched => Transfer,
+        };
+    }
+
+    /// Inline function so that `operation` can be known at comptime.
+    pub inline fn event_size(operation: Operation) u32 {
+        return switch (operation) {
+            inline else => |operation_comptime| @sizeOf(operation_comptime.EventType()),
+        };
+    }
+
+    /// Inline function so that `operation` can be known at comptime.
+    pub inline fn result_size(operation: Operation) u32 {
+        return switch (operation) {
+            inline else => |operation_comptime| @sizeOf(operation_comptime.ResultType()),
+        };
+    }
+
+    /// Whether the operation supports multiple events per batch.
+    /// If not, multi-batch requests are still supported, but with a single event per batch.
+    pub inline fn is_batchable(operation: Operation) bool {
+        return switch (operation) {
+            // Pulse does not take any input.
+            .pulse => false,
+            // Operations that take multiple events as input:
+            .create_accounts => true,
+            .create_transfers => true,
+            .lookup_accounts => true,
+            .lookup_transfers => true,
+            // Operations that take a single event as input:
+            .get_account_transfers => false,
+            .get_account_balances => false,
+            .query_accounts => false,
+            .query_transfers => false,
+            .get_change_events => false,
+
+            .deprecated_create_accounts_unbatched => true,
+            .deprecated_create_transfers_unbatched => true,
+            .deprecated_lookup_accounts_unbatched => true,
+            .deprecated_lookup_transfers_unbatched => true,
+            .deprecated_get_account_transfers_unbatched => false,
+            .deprecated_get_account_balances_unbatched => false,
+            .deprecated_query_accounts_unbatched => false,
+            .deprecated_query_transfers_unbatched => false,
+        };
+    }
+
+    /// Whether the operation is multi-batch encoded.
+    /// Inline function so that `operation` can be known at comptime.
+    pub inline fn is_multi_batch(operation: Operation) bool {
+        return switch (operation) {
+            .pulse => false,
+
+            .create_accounts,
+            .create_transfers,
+            .lookup_accounts,
+            .lookup_transfers,
+            .get_account_transfers,
+            .get_account_balances,
+            .query_accounts,
+            .query_transfers,
+            => true,
+
+            .get_change_events => false,
+
+            .deprecated_create_accounts_unbatched,
+            .deprecated_create_transfers_unbatched,
+            .deprecated_lookup_accounts_unbatched,
+            .deprecated_lookup_transfers_unbatched,
+            .deprecated_get_account_transfers_unbatched,
+            .deprecated_get_account_balances_unbatched,
+            .deprecated_query_accounts_unbatched,
+            .deprecated_query_transfers_unbatched,
+            => false,
+        };
+    }
+
+    /// The maximum number of events per batch.
+    /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
+    pub inline fn event_max(operation: Operation, batch_size_limit: u32) u32 {
+        assert(batch_size_limit > 0);
+        assert(batch_size_limit <= constants.message_body_size_max);
+
+        const event_size_bytes: u32 = operation.event_size();
+        maybe(event_size_bytes == 0); // Zeroed event size is allowed.
+        const result_size_bytes: u32 = operation.result_size();
+        assert(result_size_bytes > 0);
+
+        if (!operation.is_multi_batch()) {
+            return if (event_size_bytes == 0)
+                @divFloor(constants.message_body_size_max, result_size_bytes)
+            else
+                @min(
+                    @divFloor(batch_size_limit, event_size_bytes),
+                    @divFloor(constants.message_body_size_max, result_size_bytes),
+                );
+        }
+        assert(operation.is_multi_batch());
+
+        const reply_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
+            .element_size = result_size_bytes,
+            .batch_count = 1,
+        });
+        assert(reply_trailer_size_min > 0);
+        assert(reply_trailer_size_min < batch_size_limit);
+
+        if (event_size_bytes == 0) {
+            return @divFloor(
+                constants.message_body_size_max - reply_trailer_size_min,
+                result_size_bytes,
+            );
+        } else {
+            const request_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
+                .element_size = event_size_bytes,
+                .batch_count = 1,
+            });
+            assert(request_trailer_size_min > 0);
+            assert(request_trailer_size_min < constants.message_body_size_max);
+
+            return @min(
+                @divFloor(batch_size_limit - request_trailer_size_min, event_size_bytes),
+                @divFloor(
+                    constants.message_body_size_max - reply_trailer_size_min,
+                    result_size_bytes,
+                ),
+            );
+        }
+    }
+
+    /// The maximum number of results per batch.
+    /// If the number of results is defined by the number of events (`is_batchable()`
+    /// is true) then `result_max() == event_max()`.
+    /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
+    pub inline fn result_max(operation: Operation, batch_size_limit: u32) u32 {
+        assert(batch_size_limit > 0);
+        assert(batch_size_limit <= constants.message_body_size_max);
+        if (operation.is_batchable()) {
+            return operation.event_max(batch_size_limit);
+        }
+        assert(!operation.is_batchable());
+
+        const result_size_bytes = operation.result_size();
+        assert(result_size_bytes > 0);
+
+        if (!operation.is_multi_batch()) {
+            return @divFloor(constants.message_body_size_max, result_size_bytes);
+        }
+        assert(operation.is_multi_batch());
+
+        const reply_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
+            .element_size = result_size_bytes,
+            .batch_count = 1,
+        });
+        return @divFloor(
+            constants.message_body_size_max - reply_trailer_size_min,
+            result_size_bytes,
+        );
+    }
+
+    /// Returns the expected number of results for a given batch.
+    /// For multi-batch requests, this function expects a single, already decoded batch.
+    /// Inline function so that `operation` can be known at comptime.
+    pub inline fn result_count_expected(
+        operation: Operation,
+        batch: []const u8,
+    ) u32 {
+        return switch (operation) {
+            .pulse => 0,
+            inline .create_accounts,
+            .create_transfers,
+            .lookup_accounts,
+            .lookup_transfers,
+            .deprecated_create_accounts_unbatched,
+            .deprecated_create_transfers_unbatched,
+            .deprecated_lookup_accounts_unbatched,
+            .deprecated_lookup_transfers_unbatched,
+            => |operation_comptime| count: {
+                // For these types of operations, each event produces at most one result.
+                comptime assert(operation_comptime.is_batchable());
+
+                // Clients do not validate batch size == 0,
+                // and even the simulator can generate requests with no events.
+                if (batch.len == 0) return 0;
+
+                const event_size_bytes: u32 = operation_comptime.event_size();
+                comptime assert(event_size_bytes > 0);
+                assert(batch.len % event_size_bytes == 0); // Input has already been validated.
+
+                break :count @intCast(@divExact(batch.len, event_size_bytes));
+            },
+            inline .get_account_transfers,
+            .get_account_balances,
+            .query_accounts,
+            .query_transfers,
+            .deprecated_get_account_transfers_unbatched,
+            .deprecated_get_account_balances_unbatched,
+            .deprecated_query_accounts_unbatched,
+            .deprecated_query_transfers_unbatched,
+            .get_change_events,
+            => |operation_comptime| count: {
+                // For queries, each event produces up to `limit` events.
+                comptime assert(!operation_comptime.is_batchable());
+
+                const Filter = operation_comptime.EventType();
+                comptime assert(@sizeOf(Filter) > 0);
+                assert(batch.len == @sizeOf(Filter));
+                // This function is used by the client,
+                // so the input may come from unaligned memory.
+                maybe(!std.mem.isAligned(@intFromPtr(batch.ptr), @alignOf(Filter)));
+
+                const filter: Filter = std.mem.bytesToValue(Filter, batch);
+                maybe(filter.limit == 0);
+
+                // TODO: Handle `TooMuchData` at the client side instead of capping the limit.
+                break :count @min(
+                    filter.limit,
+                    operation_comptime.result_max(constants.message_body_size_max),
+                );
+            },
+        };
+    }
+
+    pub fn from_vsr(operation: vsr.Operation) ?Operation {
+        if (operation == .pulse) return .pulse;
+        if (operation.vsr_reserved()) return null;
+
+        return vsr.Operation.to(Operation, operation);
+    }
+
+    pub fn to_vsr(operation: Operation) vsr.Operation {
+        return vsr.Operation.from(Operation, operation);
+    }
 };
 
 comptime {

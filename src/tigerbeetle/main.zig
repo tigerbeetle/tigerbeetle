@@ -27,7 +27,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 pub const StateMachine = vsr.state_machine.StateMachineType(Storage);
 pub const Grid = vsr.GridType(Storage);
 
-const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient);
+const Client = vsr.ClientType(StateMachine.Operation, vsr.message_bus.MessageBusClient);
 pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
 const ReplicaReformat =
     vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage);

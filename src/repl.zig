@@ -7,11 +7,8 @@ const constants = vsr.constants;
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const StaticAllocator = @import("static_allocator.zig");
-const Storage = vsr.storage.StorageType(IO);
-const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const MessagePool = vsr.message_pool.MessagePool;
 const RingBufferType = stdx.RingBufferType;
-
 const tb = vsr.tigerbeetle;
 
 const Terminal = @import("repl/terminal.zig").Terminal;
@@ -25,7 +22,7 @@ const repl_history_entry_bytes_without_nul = 511;
 const ReplBufferBoundedArray = stdx.BoundedArrayType(u8, repl_history_entry_bytes_without_nul);
 
 pub fn ReplType(comptime MessageBus: type) type {
-    const Client = vsr.ClientType(StateMachine, MessageBus);
+    const Client = vsr.ClientType(tb.Operation, MessageBus);
 
     // Requires 512 * 256 == 128KiB of stack space.
     const HistoryBuffer = RingBufferType(
@@ -96,11 +93,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .query_accounts,
                 .query_transfers,
                 => |operation| {
-                    const state_machine_operation =
-                        std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
-                    assert(state_machine_operation != null);
+                    const state_machine_operation = operation.state_machine_op();
                     try repl.send(
-                        state_machine_operation.?,
+                        state_machine_operation,
                         statement.arguments,
                     );
                 },
@@ -819,7 +814,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn send(
             repl: *Repl,
-            operation: StateMachine.Operation,
+            operation: tb.Operation,
             arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
             const operation_type = switch (operation) {
@@ -855,7 +850,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 break :buffer arguments.items;
             };
             var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
-                .element_size = StateMachine.event_size_bytes(operation),
+                .element_size = operation.event_size(),
             });
             body_encoder.add(payload_size);
             const bytes_written = body_encoder.finish();
@@ -916,7 +911,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn client_request_completed(
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: tb.Operation,
             timestamp: u64,
             result: []const u8,
         ) !void {
@@ -1018,9 +1013,9 @@ pub fn ReplType(comptime MessageBus: type) type {
             timestamp: u64,
             result: []u8,
         ) void {
-            const operation = operation_vsr.cast(StateMachine);
+            const operation = operation_vsr.cast(tb.Operation);
             const reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(result, .{
-                .element_size = StateMachine.result_size_bytes(operation),
+                .element_size = operation.result_size(),
             }) catch unreachable;
             assert(reply_decoder.batch_count() == 1);
             client_request_completed(

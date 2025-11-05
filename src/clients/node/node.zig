@@ -6,6 +6,7 @@ const translate = @import("src/translate.zig");
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
 
+const Operation = tb.Operation;
 const Account = tb.Account;
 const Transfer = tb.Transfer;
 const AccountFilter = tb.AccountFilter;
@@ -13,9 +14,6 @@ const AccountBalance = tb.AccountBalance;
 const QueryFilter = tb.QueryFilter;
 
 const vsr = @import("vsr");
-const Storage = vsr.storage.StorageType(vsr.io.IO);
-const StateMachine = vsr.state_machine.StateMachineType(Storage);
-const Operation = StateMachine.Operation;
 const constants = vsr.constants;
 const stdx = vsr.stdx;
 
@@ -74,7 +72,7 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value
     }) catch return null;
 
     const operation_int = translate.u32_from_value(env, args[1], "operation") catch return null;
-    if (!@as(vsr.Operation, @enumFromInt(operation_int)).valid(StateMachine)) {
+    if (!@as(vsr.Operation, @enumFromInt(operation_int)).valid(Operation)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
@@ -216,7 +214,7 @@ fn request(
     const array_length: u32 = try translate.array_length(env, array);
     const packet, const packet_data = switch (operation) {
         inline else => |operation_comptime| blk: {
-            const Event = StateMachine.EventType(operation_comptime);
+            const Event = operation_comptime.EventType();
 
             // Avoid allocating memory for requests that are known to be too large.
             // However, the final validation happens in `tb_client` against the runtime-known
@@ -269,8 +267,8 @@ fn on_completion(
             const operation: Operation = @enumFromInt(packet_extern.operation);
             switch (operation) {
                 inline else => |operation_comptime| {
-                    const Event = StateMachine.EventType(operation_comptime);
-                    const Result = StateMachine.ResultType(operation_comptime);
+                    const Event = operation_comptime.EventType();
+                    const Result = operation_comptime.ResultType();
 
                     const packet = packet_extern.cast();
                     const request_buffer: []align(@alignOf(Event)) u8 =
@@ -353,7 +351,7 @@ fn on_completion_js(
     const operation: Operation = @enumFromInt(packet_extern.operation);
     const array_or_error = switch (operation) {
         inline else => |operation_comptime| blk: {
-            const Result = StateMachine.ResultType(operation_comptime);
+            const Result = operation_comptime.ResultType();
 
             const packet = packet_extern.cast();
             defer global_allocator.destroy(packet);

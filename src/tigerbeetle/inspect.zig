@@ -1328,8 +1328,8 @@ fn print_value(output: std.io.AnyWriter, value: anytype) !void {
     if (Type == u128) return output.print("0x{x:0>32}", .{value});
 
     if (Type == vsr.Operation) {
-        if (value.valid(StateMachine)) {
-            return output.writeAll(value.tag_name(StateMachine));
+        if (value.valid(StateMachine.Operation)) {
+            return output.writeAll(value.tag_name(StateMachine.Operation));
         } else {
             return output.print("{}!", .{@intFromEnum(value)});
         }
@@ -1494,9 +1494,9 @@ const operation_schemas = list: {
     for (std.enums.values(StateMachine.Operation)) |operation| {
         if (operation == .pulse) continue;
         list = list ++ [_]OperationSchema{.{
-            .operation = vsr.Operation.from(StateMachine, operation),
-            .Event = StateMachine.EventType(operation),
-            .Result = StateMachine.ResultType(operation),
+            .operation = operation.to_vsr(),
+            .Event = operation.EventType(),
+            .Result = operation.ResultType(),
         }};
     }
     break :list list;
