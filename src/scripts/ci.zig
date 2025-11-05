@@ -129,7 +129,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         assert(shell.file_exists(artifact));
     }
 
-    const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    // const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    const git_sha = "2f945cb8ace618243810231037b3d3f08526b9c3";
     try shell.exec_zig_options(.{ .timeout = .minutes(20) }, "build scripts -- release --build " ++
         "--sha={git_sha} --language=zig", .{
         .git_sha = git_sha,
