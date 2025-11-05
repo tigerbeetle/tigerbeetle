@@ -25,6 +25,14 @@ pub fn StateMachineType(comptime Storage: type) type {
                 return u8; // Must be non-zero-sized for sliceAsBytes().
             }
 
+            pub fn result_size(_: Operation) u32 {
+                return @sizeOf(u8);
+            }
+
+            pub fn event_size(_: Operation) u32 {
+                return @sizeOf(u8);
+            }
+
             pub fn from_vsr(operation: vsr.Operation) ?Operation {
                 if (operation.vsr_reserved()) return null;
                 return vsr.Operation.to(Operation, operation);
