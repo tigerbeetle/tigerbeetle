@@ -1599,11 +1599,20 @@ pub fn CompactionType(
                 } else {
                     // I think we need this in addition for our same.
                     // TODO we whould probably return copy result here too!
-                    const consumed = values_copy_immutable(values_target, values_source_a.?);
+                    const dropped_before = values_source_a.?.count_dropped();
+                    const remaining_before = values_source_a.?.count_remaining();
+                    const consumed = values_copy_immutable(
+                        values_target,
+                        values_source_a.?,
+                        budget_immutable,
+                    );
+                    const dropped_after = values_source_a.?.count_dropped();
+                    const remaining_after = values_source_a.?.count_remaining();
+                    assert(consumed + (dropped_after - dropped_before) == (remaining_before - remaining_after));
                     break :blk .{
-                        .consumed_a = consumed,
+                        .consumed_a = remaining_before - remaining_after,
                         .consumed_b = 0,
-                        .dropped = 0, // TODO adjust dropped here.
+                        .dropped = dropped_after - dropped_before,
                         .produced = consumed,
                     };
                 }
@@ -1615,6 +1624,7 @@ pub fn CompactionType(
                 values_source_a.?,
                 values_source_b.?,
                 compaction.drop_tombstones,
+                budget_immutable,
             );
             return merge_result;
         }
@@ -2069,11 +2079,11 @@ pub fn CompactionType(
             assert(values_target.len > 0);
             assert(values_target.len <= Table.data.value_count_max);
 
+            const remaining_before_iterator = values_iterator.count_remaining();
+            const dropped_before_iterator = values_iterator.count_dropped();
+
             var index_source: usize = 0;
             var index_target: usize = 0;
-            // Merge as many values as possible.
-            // BUG: here we can use budget.
-            // This is the maximum though and it could end earlier.
             while (index_source < budget_iterator and index_target < values_target.len) {
                 const value_in = values_iterator.pop() catch break;
                 //const value_in = &values_source[index_source];
@@ -2089,10 +2099,13 @@ pub fn CompactionType(
             //      dropped by the immutable table iterator that is.
             // TODO: We take all in account right, how to balance it again// these are the outside iterations should be the same as out // but wait here we also should take the dropped in account right??
             // NOT sure if this holds!
-            assert(values_iterator.count_max() - values_iterator.count_remaining() == index_source);
+
+            const consumed_iterator = remaining_before_iterator - values_iterator.count_remaining();
+            const dropped_iterator = values_iterator.count_dropped() - dropped_before_iterator;
+
             const copy_result: CopyDropTombstonesResult = .{
-                .consumed = values_iterator.count_max() - values_iterator.count_remaining(),
-                .dropped = @as(u32, @intCast(index_source - index_target)) + values_iterator.count_dropped(),
+                .consumed = consumed_iterator,
+                .dropped = @as(u32, @intCast(index_source - index_target)) + dropped_iterator,
                 .produced = @intCast(index_target),
             };
             assert(copy_result.consumed > 0);
@@ -2152,24 +2165,30 @@ pub fn CompactionType(
             iterator_source_a: *ImmutableTableIterator,
             values_source_b: []const Value,
             drop_tombstones: bool,
+            budget_iterator: u32,
         ) MergeResult {
             assert(values_source_b.len > 0);
             assert(values_source_b.len <= Table.data.value_count_max);
             assert(values_target.len > 0);
             assert(values_target.len <= Table.data.value_count_max);
 
+            const remaining_before_iterator = iterator_source_a.count_remaining();
+            const dropped_before_iterator = iterator_source_a.count_dropped();
             var index_source_a: usize = 0;
             var index_source_b: usize = 0;
             var index_target: usize = 0;
 
-            while (index_source_b < values_source_b.len and
+            while (index_source_a < budget_iterator and index_source_b < values_source_b.len and
                 index_target < values_target.len)
             {
-                const value_a = iterator_source_a.pop() catch break;
+                // BUG: This must be peek! We pop later only when the element is the one we choose
+                //const value_a = iterator_source_a.pop() catch break;
+                const key_a = iterator_source_a.peek() catch break;
                 const value_b = &values_source_b[index_source_b];
-                switch (std.math.order(key_from_value(&value_a), key_from_value(value_b))) {
+                switch (std.math.order(key_a, key_from_value(value_b))) {
                     .lt => { // Pick value from level a.
                         index_source_a += 1;
+                        const value_a = iterator_source_a.pop() catch break;
                         if (drop_tombstones and tombstone(&value_a)) {
                             assert(Table.usage != .secondary_index);
                             continue;
@@ -2185,7 +2204,7 @@ pub fn CompactionType(
                     .eq => { // Values have equal keys -- collapse them!
                         index_source_a += 1;
                         index_source_b += 1;
-
+                        const value_a = iterator_source_a.pop() catch break;
                         if (comptime Table.usage == .secondary_index) {
                             // Secondary index optimization --- cancel out put and remove.
                             assert(tombstone(&value_a) != tombstone(value_b));
@@ -2197,14 +2216,17 @@ pub fn CompactionType(
                     },
                 }
             }
+            const remaining_after_iterator = iterator_source_a.count_remaining();
+            const dropped_after_iterator = iterator_source_a.count_dropped();
             // BUG Check dropped etc.
             // TODO: fiz those counters there!
             // Think about dropped here for a second.
             // Should this include the iterator state!
             const merge_result: MergeResult = .{
-                .consumed_a = @intCast(index_source_a),
+                // remaining_before - remaining_after
+                .consumed_a = remaining_before_iterator - remaining_after_iterator,
                 .consumed_b = @intCast(index_source_b),
-                .dropped = @intCast(index_source_a + index_source_b - index_target),
+                .dropped = (dropped_after_iterator - dropped_before_iterator) + @as(u32, @intCast(index_source_a + index_source_b - index_target)),
                 .produced = @intCast(index_target),
             };
             assert(merge_result.consumed_a > 0 or merge_result.consumed_b > 0);
@@ -2212,6 +2234,7 @@ pub fn CompactionType(
             //assert(merge_result.consumed_b <= values_source_b.len);
             assert(merge_result.dropped <= merge_result.consumed_a + merge_result.consumed_b);
             assert(merge_result.produced <= values_target.len);
+
             assert(merge_result.produced ==
                 merge_result.consumed_a + merge_result.consumed_b - merge_result.dropped);
             return merge_result;
