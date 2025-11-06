@@ -44,9 +44,7 @@ pub fn maybe_unshare_and_relaunch(
 ) !void {
     comptime assert(builtin.os.tag == .linux);
 
-    const should_unshare_and_fork = std.posix.getenv("TB_UNSHARED") == null;
-
-    if (should_unshare_and_fork) {
+    if (std.os.linux.getpid() != 1) {
         try linux_unshare(.{
             .pid = options.pid,
             .network = options.network,
@@ -54,7 +52,12 @@ pub fn maybe_unshare_and_relaunch(
         if (options.network) {
             try linux_ip_link_loopback();
         }
-        try fork_and_exit(gpa);
+        if (options.pid) {
+            try fork_and_exit(gpa);
+        }
+    } else {
+        // We are within the pid namespace.
+        assert(options.pid);
     }
 }
 
@@ -239,17 +242,10 @@ fn fork_and_exit(gpa: std.mem.Allocator) !void {
         args_new[arg_index] = std.mem.span(args_ours[arg_index]);
     }
 
-    var env_map = try std.process.getEnvMap(gpa);
-    defer env_map.deinit();
-
-    try env_map.put("TB_UNSHARED", "1");
-
     var child = std.process.Child.init(args_new, gpa);
-
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
-    child.env_map = &env_map;
 
     const result = try child.spawnAndWait();
 
