@@ -26,7 +26,7 @@ jobs:
       # before the next release!
       - run: |
           TAG=$(gh release list --limit 1 | cut -f1)
-          git fetch origin cb22/release-validate-override && git switch -d FETCH_HEAD
+          git fetch origin $TAG && git switch -d FETCH_HEAD
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
