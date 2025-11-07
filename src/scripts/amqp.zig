@@ -587,7 +587,7 @@ const AmqpContext = struct {
     // Uses `deinit() + init()` since graceful disconnection/reconnection is not handled.
     pub fn disconnect(self: *AmqpContext, gpa: std.mem.Allocator) !void {
         assert(!self.busy);
-        assert(self.client.fd != vsr.io.IO.INVALID_SOCKET);
+        assert(self.client.fd != null);
         assert(self.client.awaiter == .none);
         assert(self.client.action == .none);
         assert(self.client.send_buffer.state == .idle);

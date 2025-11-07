@@ -788,7 +788,6 @@ pub const IO = struct {
     }
 
     pub const socket_t = posix.socket_t;
-    pub const INVALID_SOCKET = -1;
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
     pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {

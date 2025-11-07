@@ -201,8 +201,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
             var send_queue_buffer_previous: ?[]*Message = null;
             for (bus.connections) |*connection| {
-                if (connection.fd != IO.INVALID_SOCKET) {
-                    bus.io.close_socket(connection.fd);
+                if (connection.fd) |fd| {
+                    bus.io.close_socket(fd);
                 }
 
                 if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
@@ -470,12 +470,9 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 terminating,
             } = .free,
             /// This is guaranteed to be valid only while state is connected.
-            /// It will be reset to IO.INVALID_SOCKET during the shutdown process and is always
-            /// IO.INVALID_SOCKET if the connection is unused (i.e. peer == .none). We use
-            /// IO.INVALID_SOCKET instead of undefined here for safety to ensure an error if the
-            /// invalid value is ever used, instead of potentially performing an action on an
-            /// active fd.
-            fd: IO.socket_t = IO.INVALID_SOCKET,
+            /// It will be reset to null during the shutdown process and is always null if the
+            /// connection is unused (i.e. peer == .none).
+            fd: ?IO.socket_t = null,
 
             /// This completion is used for all recv operations.
             /// It is also used for the initial connect when establishing a replica connection.
@@ -504,7 +501,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 if (process_type == .replica) assert(replica != bus.process.replica);
 
                 assert(connection.state == .free);
-                assert(connection.fd == IO.INVALID_SOCKET);
+                assert(connection.fd == null);
 
                 const family = bus.configuration[replica].any.family;
                 connection.fd = init_tcp(bus.io, family) catch |err| {
@@ -580,7 +577,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     on_connect,
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                     &connection.recv_completion,
-                    connection.fd,
+                    connection.fd.?,
                     bus.configuration[connection.peer.replica],
                 );
             }
@@ -630,7 +627,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: IO.socket_t) void {
                 assert(connection.peer == .unknown);
                 assert(connection.state == .accepting);
-                assert(connection.fd == IO.INVALID_SOCKET);
+                assert(connection.fd == null);
 
                 connection.state = .connected;
                 connection.fd = fd;
@@ -649,7 +646,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
                 assert(connection.peer == .unknown or connection.peer == .replica);
                 assert(connection.state == .connected);
-                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.fd != null);
 
                 assert(connection.recv_submitted == false);
                 assert(connection.recv_buffer == null);
@@ -699,7 +696,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 how: enum { shutdown, close },
             ) void {
                 assert(connection.state != .free);
-                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.fd != null);
                 switch (how) {
                     .shutdown => {
                         // The shutdown syscall will cause currently in progress send/recv
@@ -707,7 +704,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                         //
                         // TODO: Investigate differences between shutdown() on Linux vs Darwin.
                         // Especially how this interacts with our assumptions around pending I/O.
-                        bus.io.shutdown(connection.fd, .both) catch |err| switch (err) {
+                        bus.io.shutdown(connection.fd.?, .both) catch |err| switch (err) {
                             error.SocketNotConnected => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.
@@ -746,7 +743,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(bus.connections_used > 0);
 
                 assert(connection.state == .connected);
-                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.fd != null);
                 assert(connection.recv_buffer != null);
 
                 switch (vsr.Peer.transition(connection.peer, peer)) {
@@ -859,7 +856,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
             fn recv(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.state == .connected);
-                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.fd != null);
                 assert(connection.recv_buffer != null);
 
                 assert(!connection.recv_submitted);
@@ -870,7 +867,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     bus,
                     on_recv,
                     &connection.recv_completion,
-                    connection.fd,
+                    connection.fd.?,
                     connection.recv_buffer.?.recv_slice(),
                 );
             }
@@ -962,7 +959,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             fn send(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.peer != .unknown);
                 assert(connection.state == .connected);
-                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.fd != null);
                 assert(!connection.send_submitted);
 
                 connection.send_now(bus);
@@ -974,7 +971,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     bus,
                     on_send,
                     &connection.send_completion,
-                    connection.fd,
+                    connection.fd.?,
                     message.buffer[connection.send_progress..message.header.size],
                 );
             }
@@ -983,14 +980,14 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             // send buffer, falling back to asynchronous send if that's not possible.
             fn send_now(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.state == .connected);
-                assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.fd != null);
                 assert(!connection.send_submitted);
 
                 for (0..connection.send_queue.count) |_| {
                     const message = connection.send_queue.head().?;
                     assert(connection.send_progress < message.header.size);
                     const write_size = bus.io.send_now(
-                        connection.fd,
+                        connection.fd.?,
                         message.buffer[connection.send_progress..message.header.size],
                     ) orelse return;
                     connection.send_progress += write_size;
@@ -1062,8 +1059,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 }
                 if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
                 connection.recv_buffer = null;
-                assert(connection.fd != IO.INVALID_SOCKET);
-                defer connection.fd = IO.INVALID_SOCKET;
+                assert(connection.fd != null);
+                defer connection.fd = null;
                 // It's OK to use the send completion here as we know that no send
                 // operation is currently in progress.
                 bus.io.close(
@@ -1071,7 +1068,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     bus,
                     on_close,
                     &connection.send_completion,
-                    connection.fd,
+                    connection.fd.?,
                 );
             }
 

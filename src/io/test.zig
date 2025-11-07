@@ -453,7 +453,7 @@ test "tick to wait" {
         const Context = @This();
 
         io: IO,
-        accepted: posix.socket_t = IO.INVALID_SOCKET,
+        accepted: ?posix.socket_t = null,
         connected: bool = false,
         received: bool = false,
 
@@ -500,14 +500,14 @@ test "tick to wait" {
 
             // Tick the IO to drain the accept & connect completions.
             assert(!self.connected);
-            assert(self.accepted == IO.INVALID_SOCKET);
+            assert(self.accepted == null);
 
-            while (self.accepted == IO.INVALID_SOCKET or !self.connected)
+            while (self.accepted == null or !self.connected)
                 try self.io.run();
 
             assert(self.connected);
-            assert(self.accepted != IO.INVALID_SOCKET);
-            defer self.io.close_socket(self.accepted);
+            assert(self.accepted != null);
+            defer self.io.close_socket(self.accepted.?);
 
             // Start receiving on the client.
             var recv_completion: IO.Completion = undefined;
@@ -531,7 +531,7 @@ test "tick to wait" {
             // Other tests already check .tick() with IO based completions.
             // This simulates IO being completed by an external system.
             var send_buf: [64]u8 = @splat(0);
-            const wrote = try os_send(self.accepted, &send_buf, 0);
+            const wrote = try os_send(self.accepted.?, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
             // Wait for the recv() to complete using only IO.run().
@@ -553,7 +553,7 @@ test "tick to wait" {
         ) void {
             _ = completion;
 
-            assert(self.accepted == IO.INVALID_SOCKET);
+            assert(self.accepted == null);
             self.accepted = result catch @panic("accept error");
         }
 
@@ -598,7 +598,7 @@ test "pipe data over socket" {
 
         const Context = @This();
         const Socket = struct {
-            fd: posix.socket_t = IO.INVALID_SOCKET,
+            fd: ?posix.socket_t = null,
             completion: IO.Completion = undefined,
         };
         const Pipe = struct {
@@ -623,40 +623,40 @@ test "pipe data over socket" {
             defer self.io.deinit();
 
             self.server.fd = try self.io.open_socket_tcp(posix.AF.INET, tcp_options);
-            defer self.io.close_socket(self.server.fd);
+            defer self.io.close_socket(self.server.fd.?);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             try posix.setsockopt(
-                self.server.fd,
+                self.server.fd.?,
                 posix.SOL.SOCKET,
                 posix.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
 
-            try posix.bind(self.server.fd, &address.any, address.getOsSockLen());
-            try posix.listen(self.server.fd, 1);
+            try posix.bind(self.server.fd.?, &address.any, address.getOsSockLen());
+            try posix.listen(self.server.fd.?, 1);
 
             var client_address = std.net.Address.initIp4(undefined, undefined);
             var client_address_len = client_address.getOsSockLen();
-            try posix.getsockname(self.server.fd, &client_address.any, &client_address_len);
+            try posix.getsockname(self.server.fd.?, &client_address.any, &client_address_len);
 
             self.io.accept(
                 *Context,
                 &self,
                 on_accept,
                 &self.server.completion,
-                self.server.fd,
+                self.server.fd.?,
             );
 
             self.tx.socket.fd = try self.io.open_socket_tcp(posix.AF.INET, tcp_options);
-            defer self.io.close_socket(self.tx.socket.fd);
+            defer self.io.close_socket(self.tx.socket.fd.?);
 
             self.io.connect(
                 *Context,
                 &self,
                 on_connect,
                 &self.tx.socket.completion,
-                self.tx.socket.fd,
+                self.tx.socket.fd.?,
                 client_address,
             );
 
@@ -670,10 +670,10 @@ test "pipe data over socket" {
                 }
             }
 
-            try testing.expect(self.server.fd != IO.INVALID_SOCKET);
-            try testing.expect(self.tx.socket.fd != IO.INVALID_SOCKET);
-            try testing.expect(self.rx.socket.fd != IO.INVALID_SOCKET);
-            self.io.close_socket(self.rx.socket.fd);
+            try testing.expect(self.server.fd != null);
+            try testing.expect(self.tx.socket.fd != null);
+            try testing.expect(self.rx.socket.fd != null);
+            self.io.close_socket(self.rx.socket.fd.?);
 
             try testing.expectEqual(self.tx.transferred, buffer_size);
             try testing.expectEqual(self.rx.transferred, buffer_size);
@@ -685,7 +685,7 @@ test "pipe data over socket" {
             completion: *IO.Completion,
             result: IO.AcceptError!posix.socket_t,
         ) void {
-            assert(self.rx.socket.fd == IO.INVALID_SOCKET);
+            assert(self.rx.socket.fd == null);
             assert(&self.server.completion == completion);
             self.rx.socket.fd = result catch |err| std.debug.panic("accept error {}", .{err});
 
@@ -700,7 +700,7 @@ test "pipe data over socket" {
         ) void {
             _ = result catch unreachable;
 
-            assert(self.tx.socket.fd != IO.INVALID_SOCKET);
+            assert(self.tx.socket.fd != null);
             assert(&self.tx.socket.completion == completion);
 
             assert(self.tx.transferred == 0);
@@ -717,7 +717,7 @@ test "pipe data over socket" {
                     self,
                     on_send,
                     &self.tx.socket.completion,
-                    self.tx.socket.fd,
+                    self.tx.socket.fd.?,
                     self.tx.buffer[self.tx.transferred..],
                 );
             }
@@ -743,7 +743,7 @@ test "pipe data over socket" {
                     self,
                     on_recv,
                     &self.rx.socket.completion,
-                    self.rx.socket.fd,
+                    self.rx.socket.fd.?,
                     self.rx.buffer[self.rx.transferred..],
                 );
             }
