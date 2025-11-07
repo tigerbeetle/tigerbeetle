@@ -856,3 +856,146 @@ test "cancel_all" {
         }
     }.run_test();
 }
+
+test "cancel_one" {
+    try struct {
+        const Context = @This();
+
+        io: *IO,
+        server: posix.socket_t,
+        client: posix.socket_t,
+        accepted_sock: posix.socket_t = undefined,
+
+        accepted: bool = false,
+        connected: bool = false,
+        canceled: bool = false,
+
+        recv_result: ?IO.RecvError!usize = null,
+
+        fn run_test() !void {
+            const allocator = std.testing.allocator;
+            var io = try IO.init(32, 0);
+            defer io.deinit();
+            const buffer_size = 512 * KiB;
+
+            const buffer: []u8 = try allocator.alloc(u8, buffer_size);
+            defer allocator.free(buffer);
+
+            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
+
+            const server = try io.open_socket_tcp(address.any.family, tcp_options);
+            defer io.close_socket(server);
+
+            const client = try io.open_socket_tcp(address.any.family, tcp_options);
+            defer io.close_socket(client);
+
+            try posix.setsockopt(
+                server,
+                posix.SOL.SOCKET,
+                posix.SO.REUSEADDR,
+                &std.mem.toBytes(@as(c_int, 1)),
+            );
+            try posix.bind(server, &address.any, address.getOsSockLen());
+            try posix.listen(server, 1);
+
+            var client_address = std.net.Address.initIp4(undefined, undefined);
+            var client_address_len = client_address.getOsSockLen();
+            try posix.getsockname(
+                server,
+                &client_address.any,
+                &client_address_len,
+            );
+
+            var context: Context = .{
+                .io = &io,
+                .server = server,
+                .client = client,
+            };
+
+            var client_completion: IO.Completion = undefined;
+            context.io.connect(
+                *Context,
+                &context,
+                connect_callback,
+                &client_completion,
+                client,
+                client_address,
+            );
+
+            var server_completion: IO.Completion = undefined;
+            context.io.accept(
+                *Context,
+                &context,
+                accept_callback,
+                &server_completion,
+                server,
+            );
+
+            while (!(context.connected and context.accepted)) try context.io.run();
+
+            var recv_completion: IO.Completion = undefined;
+            context.io.recv(
+                *Context,
+                &context,
+                recv_callback,
+                &recv_completion,
+                context.accepted_sock,
+                buffer,
+            );
+            try context.io.run();
+
+            var cancel_completion: IO.Completion = undefined;
+            context.io.cancel(
+                *Context,
+                &context,
+                cancel_callback,
+                .{
+                    .completion = &cancel_completion,
+                    .target = &recv_completion,
+                },
+            );
+
+            while (!context.canceled or context.recv_result == null) try context.io.run();
+
+            try std.testing.expectError(
+                IO.RecvError.Canceled,
+                context.recv_result.?,
+            );
+        }
+
+        fn cancel_callback(
+            self: *Context,
+            _: *IO.Completion,
+            result: IO.CancelError!void,
+        ) void {
+            _ = result catch @panic("cancel error");
+            self.canceled = true;
+        }
+
+        fn connect_callback(
+            self: *Context,
+            _: *IO.Completion,
+            result: IO.ConnectError!void,
+        ) void {
+            _ = result catch @panic("connect error");
+            self.connected = true;
+        }
+
+        fn accept_callback(
+            self: *Context,
+            _: *IO.Completion,
+            result: IO.AcceptError!posix.socket_t,
+        ) void {
+            self.accepted_sock = result catch @panic("accept error");
+            self.accepted = true;
+        }
+
+        fn recv_callback(
+            self: *Context,
+            _: *IO.Completion,
+            result: IO.RecvError!usize,
+        ) void {
+            self.recv_result = result;
+        }
+    }.run_test();
+}

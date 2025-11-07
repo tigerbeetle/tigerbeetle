@@ -318,8 +318,17 @@ pub const IO = struct {
             assert(self.cancel_status == .next);
             assert(target.operation != .cancel);
 
-            self.cancel(target);
-            assert(self.cancel_status == .queued);
+            self.cancel_status = .{ .queued = .{ .target = target } };
+
+            self.cancel(
+                *IO,
+                self,
+                cancel_callback,
+                .{
+                    .completion = &self.cancel_completion,
+                    .target = target,
+                },
+            );
 
             while (self.cancel_status == .queued or self.cancel_status == .wait) {
                 self.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
@@ -333,19 +342,31 @@ pub const IO = struct {
         assert(self.ios_in_kernel == 0);
     }
 
-    fn cancel(self: *IO, target: *Completion) void {
-        self.cancel_completion = .{
+    pub fn cancel(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: CancelError!void,
+        ) void,
+        options: struct {
+            completion: *Completion,
+            target: *Completion,
+        },
+    ) void {
+        options.completion.* = .{
             .io = self,
-            .context = self,
-            .callback = erase_types(*IO, CancelError!void, cancel_callback),
-            .operation = .{ .cancel = .{ .target = target } },
+            .context = context,
+            .callback = erase_types(Context, CancelError!void, callback),
+            .operation = .{ .cancel = .{ .target = options.target } },
         };
 
-        self.cancel_status = .{ .queued = .{ .target = target } };
-        self.enqueue(&self.cancel_completion);
+        self.enqueue(options.completion);
     }
 
-    const CancelError = error{
+    pub const CancelError = error{
         NotRunning,
         NotInterruptable,
     } || posix.UnexpectedError;
@@ -484,6 +505,7 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.FileDescriptorInvalid,
+                                .CANCELED => error.Canceled,
                                 .CONNABORTED => error.ConnectionAborted,
                                 .FAULT => unreachable,
                                 .INVAL => error.SocketNotListening,
@@ -538,6 +560,7 @@ pub const IO = struct {
                                 .AGAIN, .INPROGRESS => error.WouldBlock,
                                 .ALREADY => error.OpenAlreadyInProgress,
                                 .BADF => error.FileDescriptorInvalid,
+                                .CANCELED => error.Canceled,
                                 .CONNREFUSED => error.ConnectionRefused,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .FAULT => unreachable,
@@ -628,6 +651,7 @@ pub const IO = struct {
                                     return;
                                 },
                                 .BADF => error.NotOpenForReading,
+                                .CANCELED => error.Canceled,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .FAULT => unreachable,
                                 .INVAL => error.Alignment,
@@ -658,6 +682,7 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.FileDescriptorInvalid,
+                                .CANCELED => error.Canceled,
                                 .CONNREFUSED => error.ConnectionRefused,
                                 .FAULT => unreachable,
                                 .INVAL => unreachable,
@@ -764,6 +789,7 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.NotOpenForWriting,
+                                .CANCELED => error.Canceled,
                                 .DESTADDRREQ => error.NotConnected,
                                 .DQUOT => error.DiskQuota,
                                 .FAULT => unreachable,
@@ -858,6 +884,7 @@ pub const IO = struct {
         OperationNotSupported,
         PermissionDenied,
         ProtocolFailure,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn accept(
@@ -936,6 +963,7 @@ pub const IO = struct {
         ProtocolNotSupported,
         ConnectionTimedOut,
         SystemResources,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn connect(
@@ -1042,6 +1070,7 @@ pub const IO = struct {
         SystemResources,
         Unseekable,
         ConnectionTimedOut,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn read(
@@ -1083,6 +1112,7 @@ pub const IO = struct {
         ConnectionResetByPeer,
         ConnectionTimedOut,
         OperationNotSupported,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn recv(
@@ -1264,6 +1294,7 @@ pub const IO = struct {
         Unseekable,
         AccessDenied,
         BrokenPipe,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn write(
