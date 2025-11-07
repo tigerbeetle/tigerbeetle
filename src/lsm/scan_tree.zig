@@ -186,7 +186,6 @@ pub fn ScanTreeType(
         snapshot: u64,
 
         table_mutable_values: []const Value,
-        table_immutable_values: []const Value,
         table_immutable_iterator: ImmutableTableIterator,
 
         state: union(ScanState) {
@@ -255,7 +254,7 @@ pub fn ScanTreeType(
             //};
 
             var table_immutable_iterator: ImmutableTableIterator = .init(
-                tree.table_immutable.mutability.immutable.merge_context,
+                tree.table_immutable.iterator_context(),
                 if (direction == .ascending) key_max else key_min,
                 direction,
                 tree.table_immutable.count(),
@@ -275,22 +274,6 @@ pub fn ScanTreeType(
                 _ = table_immutable_iterator.pop() catch unreachable;
             }
 
-            const table_immutable_values: []const Value = blk: {
-                if (snapshot <
-                    tree.table_immutable.mutability.immutable.snapshot_min) break :blk &.{};
-
-                const values = tree.table_immutable.values_used();
-                const range = binary_search.binary_search_values_range(
-                    Key,
-                    Value,
-                    key_from_value,
-                    values,
-                    key_min,
-                    key_max,
-                );
-                break :blk values[range.start..][0..range.count];
-            };
-
             return .{
                 .tree = tree,
                 .buffer = buffer,
@@ -300,7 +283,6 @@ pub fn ScanTreeType(
                 .key_upper = direction.upper(key_min, key_max),
                 .direction = direction,
                 .table_mutable_values = table_mutable_values,
-                .table_immutable_values = table_immutable_values,
                 .table_immutable_iterator = table_immutable_iterator,
                 .levels = undefined,
                 .merge_iterator = null,
@@ -414,7 +396,7 @@ pub fn ScanTreeType(
             self.key_lower = probe_key;
 
             // Re-slicing the in-memory tables:
-            inline for (.{ &self.table_mutable_values, &self.table_immutable_values }) |field| {
+            inline for (.{&self.table_mutable_values}) |field| {
                 const table_memory = field.*;
                 const slice: []const Value = self.direction.slice_lower_bound(
                     Key,
