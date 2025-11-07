@@ -290,6 +290,12 @@ pub fn cut(haystack: []const u8, needle: []const u8) ?struct { []const u8, []con
     return .{ haystack[0..index], haystack[index + needle.len ..] };
 }
 
+test cut {
+    try std.testing.expectEqualStrings("he", cut("hello world", "l").?[0]);
+    try std.testing.expectEqualStrings("lo world", cut("hello world", "l").?[1]);
+    assert(null == cut("hello world", "x"));
+}
+
 pub fn cut_prefix(haystack: []const u8, needle: []const u8) ?[]const u8 {
     if (std.mem.startsWith(u8, haystack, needle)) {
         return haystack[needle.len..];
@@ -297,11 +303,21 @@ pub fn cut_prefix(haystack: []const u8, needle: []const u8) ?[]const u8 {
     return null;
 }
 
+test cut_prefix {
+    try std.testing.expectEqualStrings(" world", cut_prefix("hello world", "hello").?);
+    assert(null == cut_prefix("hello world", "hellnope"));
+}
+
 pub fn cut_suffix(haystack: []const u8, needle: []const u8) ?[]const u8 {
     if (std.mem.endsWith(u8, haystack, needle)) {
-        return haystack[haystack.len - needle.len ..];
+        return haystack[0 .. haystack.len - needle.len];
     }
     return null;
+}
+
+test cut_suffix {
+    try std.testing.expectEqualStrings("hello ", cut_suffix("hello world", "world").?);
+    assert(null == cut_suffix("hello world", "hello"));
 }
 
 /// `maybe` is the dual of `assert`: it signals that condition is sometimes true
