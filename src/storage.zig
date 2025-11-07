@@ -338,7 +338,6 @@ pub fn StorageType(comptime IO: type) type {
                     }
                 },
 
-                error.Canceled,
                 error.WouldBlock,
                 error.NotOpenForReading,
                 error.ConnectionResetByPeer,

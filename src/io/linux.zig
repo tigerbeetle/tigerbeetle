@@ -505,7 +505,6 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.FileDescriptorInvalid,
-                                .CANCELED => error.Canceled,
                                 .CONNABORTED => error.ConnectionAborted,
                                 .FAULT => unreachable,
                                 .INVAL => error.SocketNotListening,
@@ -651,7 +650,6 @@ pub const IO = struct {
                                     return;
                                 },
                                 .BADF => error.NotOpenForReading,
-                                .CANCELED => error.Canceled,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .FAULT => unreachable,
                                 .INVAL => error.Alignment,
@@ -789,7 +787,6 @@ pub const IO = struct {
                                 },
                                 .AGAIN => error.WouldBlock,
                                 .BADF => error.NotOpenForWriting,
-                                .CANCELED => error.Canceled,
                                 .DESTADDRREQ => error.NotConnected,
                                 .DQUOT => error.DiskQuota,
                                 .FAULT => unreachable,
@@ -884,7 +881,6 @@ pub const IO = struct {
         OperationNotSupported,
         PermissionDenied,
         ProtocolFailure,
-        Canceled,
     } || posix.UnexpectedError;
 
     pub fn accept(
@@ -1070,7 +1066,6 @@ pub const IO = struct {
         SystemResources,
         Unseekable,
         ConnectionTimedOut,
-        Canceled,
     } || posix.UnexpectedError;
 
     pub fn read(
@@ -1294,7 +1289,6 @@ pub const IO = struct {
         Unseekable,
         AccessDenied,
         BrokenPipe,
-        Canceled,
     } || posix.UnexpectedError;
 
     pub fn write(

@@ -858,6 +858,7 @@ test "cancel_all" {
 }
 
 test "cancel_one" {
+    if (builtin.target.os.tag != .linux) return;
     try struct {
         const Context = @This();
 
