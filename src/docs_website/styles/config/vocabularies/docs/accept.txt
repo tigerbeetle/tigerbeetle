@@ -119,6 +119,7 @@ goto
 Grande
 Greef
 Hackathon
+Hallo
 hardcodes
 hashchain
 hoc
@@ -169,6 +170,7 @@ Lookin
 lookups
 loopback
 Luftballons
+Maatjie
 makefiles
 matklad
 MEGAHIT
