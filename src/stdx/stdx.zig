@@ -939,8 +939,8 @@ pub fn array_print(
         var args_worst_case: Args = undefined;
         for (ArgsStruct.fields, 0..) |field, index| {
             const arg_worst_case = switch (field.type) {
-                u64 => std.math.maxInt(field.type),
-                else => @compileError("array_print: unhandled type"),
+                u8, u16, u32, u64, u128 => std.math.maxInt(field.type),
+                else => @compileError("array_print: unsupported type: " ++ @typeName(field.type)),
             };
             args_worst_case[index] = arg_worst_case;
         }
