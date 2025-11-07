@@ -624,7 +624,7 @@ pub fn CompactionType(
                 compaction.table_info_a = .{
                     //.immutable = compaction.tree.table_immutable.values_used(),
                     .immutable = .init(
-                        compaction.tree.table_immutable.mutability.immutable.merge_context,
+                        compaction.tree.table_immutable.iterator_context(),
                         null,
                         .ascending,
                         compaction.tree.table_immutable.count(),
@@ -2085,7 +2085,9 @@ pub fn CompactionType(
             var index_source: usize = 0;
             var index_target: usize = 0;
             while (index_source < budget_iterator and index_target < values_target.len) {
-                const value_in = values_iterator.pop() catch break;
+                const value_in = values_iterator.pop() catch {
+                    break;
+                };
                 //const value_in = &values_source[index_source];
                 index_source += 1;
                 if (tombstone(&value_in)) {
@@ -2095,10 +2097,6 @@ pub fn CompactionType(
                 values_target[index_target] = value_in;
                 index_target += 1;
             }
-            // BUG: check about dropped values.
-            //      dropped by the immutable table iterator that is.
-            // TODO: We take all in account right, how to balance it again// these are the outside iterations should be the same as out // but wait here we also should take the dropped in account right??
-            // NOT sure if this holds!
 
             const consumed_iterator = remaining_before_iterator - values_iterator.count_remaining();
             const dropped_iterator = values_iterator.count_dropped() - dropped_before_iterator;
@@ -2108,7 +2106,8 @@ pub fn CompactionType(
                 .dropped = @as(u32, @intCast(index_source - index_target)) + dropped_iterator,
                 .produced = @intCast(index_target),
             };
-            assert(copy_result.consumed > 0);
+            // TODO: we might not need to consume values here because of internal deduplication.
+            //assert(copy_result.consumed > 0);
             assert(copy_result.dropped <= copy_result.consumed);
             assert(copy_result.produced <= values_target.len);
             assert(copy_result.produced == copy_result.consumed - copy_result.dropped);
