@@ -3,6 +3,40 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.64
+
+Released: 2025-11-07
+
+### Internals
+
+- [#3344](https://github.com/tigerbeetle/tigerbeetle/pull/3344),
+  [#3362](https://github.com/tigerbeetle/tigerbeetle/pull/3362)
+
+  Parametrize code over `Operation` rather than the entire `StateMachine`. Previously, client code
+  used to have a dependency on the implementation code of the concrete state machine, whereas it
+  only needs to know the types of the operations involved.
+
+- [#3358](https://github.com/tigerbeetle/tigerbeetle/pull/3358),
+  [#3356](https://github.com/tigerbeetle/tigerbeetle/pull/3356),
+  [#3357](https://github.com/tigerbeetle/tigerbeetle/pull/3357)
+
+  [Remove](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#safety) `usize`
+  from constants, scans and CLI arguments.
+
+- [#3351](https://github.com/tigerbeetle/tigerbeetle/pull/3351)
+
+  Remove `StateMachine`'s dependency on a specific `StateMachineConfig` and rather use the global
+  constants.
+
+- [#3343](https://github.com/tigerbeetle/tigerbeetle/pull/3343)
+
+  Simplify the Rust client's build script and bring it inline with other clients by making it no
+  longer driver TigerBeetle's build.
+
+### TigerTracks 🎧
+
+- [Hallo My Maatjie](https://www.youtube.com/watch?v=t88Abqb1Qp8)
+
 ## TigerBeetle 0.16.63
 
 Released: 2025-10-31
