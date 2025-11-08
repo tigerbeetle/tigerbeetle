@@ -6,6 +6,12 @@
 
 set -eu
 
+# When the supervisor is killed or interrupted, kill all processes in the process group.
+# (In particular, this will kill all descendent processes that have not changed groups.)
+#
+# We must unset the trap before killing, otherwise the signal will recurse and we segfault.
+trap 'trap - INT TERM EXIT; kill 0' INT TERM EXIT
+
 git --version
 
 while true
@@ -24,6 +30,9 @@ do
         git fetch
         git switch --discard-changes --detach origin/main
         ./zig/download.sh
-        unshare --user --pid --fork ./zig/zig build -Drelease scripts -- cfo
+        # Run via `&`/`wait` rather than running directly, to ensure that it runs in the background,
+        # but still allows signal processing, so that `kill`ing the supervisor doesn't just stall.
+        ./zig/zig build scripts -- cfo &
+        wait "$!"
     ) || sleep 10 # Be resilient to cfo bugs and network errors, but avoid busy-loop retries.
 done

@@ -691,13 +691,8 @@ const AmqpContext = struct {
 const VSRContext = struct {
     const MessagePool = vsr.message_pool.MessagePool;
     const Message = MessagePool.Message;
-    const Storage = vsr.storage.StorageType(vsr.io.IO);
-    const StateMachine = vsr.state_machine.StateMachineType(
-        Storage,
-        vsr.constants.state_machine_config,
-    );
     const Client = vsr.ClientType(
-        StateMachine,
+        tb.Operation,
         vsr.message_bus.MessageBusClient,
     );
 
@@ -705,8 +700,8 @@ const VSRContext = struct {
     io: vsr.io.IO,
     message_pool: MessagePool,
     busy: bool,
-    buffer: []tb.ChangeEvent,
-    results: ?usize,
+    event_buffer: []tb.ChangeEvent,
+    event_count: ?u32,
 
     pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
         self.io = try vsr.io.IO.init(32, 0);
@@ -732,35 +727,33 @@ const VSRContext = struct {
         );
         errdefer self.client.deinit(gpa);
 
-        self.buffer = undefined;
-        self.results = null;
+        self.event_buffer = undefined;
+        self.event_count = null;
         self.busy = true;
         self.client.register(register_callback, @intFromPtr(self));
         self.wait();
 
-        self.buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
-            .get_change_events,
-            @divFloor(
-                StateMachine.machine_constants.message_body_size_max,
-                @sizeOf(tb.ChangeEvent),
-            ),
+        self.event_buffer = try gpa.alloc(tb.ChangeEvent, @divFloor(
+            tb.Operation.get_change_events.result_max(vsr.constants.message_body_size_max),
+            @sizeOf(tb.ChangeEvent),
         ));
-        errdefer gpa.free(self.buffer);
+        errdefer gpa.free(self.event_buffer);
         assert(!self.busy);
     }
 
     pub fn deinit(self: *VSRContext, gpa: std.mem.Allocator) void {
         assert(!self.busy);
-        gpa.free(self.buffer);
+        gpa.free(self.event_buffer);
         self.client.deinit(gpa);
         self.message_pool.deinit(gpa);
         self.io.deinit();
+        self.* = undefined;
     }
 
     pub fn get_change_events(self: *VSRContext, timestamp_min: u64) ![]tb.ChangeEvent {
         assert(!self.busy);
-        assert(self.results == null);
-        defer self.results = null;
+        assert(self.event_count == null);
+        defer self.event_count = null;
 
         const filter: tb.ChangeEventsFilter = .{
             .limit = std.math.maxInt(u32),
@@ -776,10 +769,10 @@ const VSRContext = struct {
         );
         self.wait();
         assert(!self.busy);
-        assert(self.results != null);
-        assert(self.results.? <= self.buffer.len);
+        assert(self.event_count != null);
+        assert(self.event_count.? <= self.event_buffer.len);
 
-        return self.buffer[0..self.results.?];
+        return self.event_buffer[0..self.event_count.?];
     }
 
     fn wait(self: *VSRContext) void {
@@ -807,24 +800,24 @@ const VSRContext = struct {
         result: []u8,
     ) void {
         _ = timestamp;
-        const operation = operation_vsr.cast(StateMachine);
+        const operation = operation_vsr.cast(tb.Operation);
         assert(operation == .get_change_events);
 
         const self: *VSRContext = @ptrFromInt(@as(usize, @intCast(user_data)));
         assert(self.busy);
-        assert(self.results == null);
+        assert(self.event_count == null);
 
         const events = stdx.bytes_as_slice(
             .exact,
             tb.ChangeEvent,
             result,
         );
-        assert(events.len <= self.buffer.len);
-        self.results = events.len;
+        assert(events.len <= self.event_buffer.len);
+        self.event_count = @intCast(events.len);
         stdx.copy_disjoint(
             .inexact,
             tb.ChangeEvent,
-            self.buffer,
+            self.event_buffer,
             events,
         );
         self.busy = false;

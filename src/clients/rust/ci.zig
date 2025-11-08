@@ -4,6 +4,7 @@ const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+    try shell.exec_zig("build clients:rust -Drelease", .{});
     try shell.exec("cargo test --all", .{});
     try shell.exec("cargo fmt --check", .{});
     try shell.exec("cargo clippy -- -D clippy::all", .{});
@@ -30,35 +31,40 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     version: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(tmp_dir) catch {};
+    _ = shell;
+    _ = gpa;
+    _ = options;
+    // The Rust client is not yet published.
 
-    try shell.pushd(tmp_dir);
-    defer shell.popd();
+    // const tmp_dir = try shell.create_tmp_dir();
+    // defer shell.cwd.deleteTree(tmp_dir) catch {};
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
-        .development = true,
-        .prebuilt = options.tigerbeetle,
-    });
-    defer tmp_beetle.deinit(gpa);
-    errdefer tmp_beetle.log_stderr();
+    // try shell.pushd(tmp_dir);
+    // defer shell.popd();
 
-    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
+    // var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    //     .development = true,
+    //     .prebuilt = options.tigerbeetle,
+    // });
+    // defer tmp_beetle.deinit(gpa);
+    // errdefer tmp_beetle.log_stderr();
 
-    // Create a new Rust project to test the published crate
-    try shell.exec("cargo init --name test_tigerbeetle", .{});
+    // try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    // Add tigerbeetle dependency to Cargo.toml
-    try shell.exec("cargo add tigerbeetle@{version}", .{ .version = options.version });
-    try shell.exec("cargo add futures@0.3", .{});
+    // // Create a new Rust project to test the published crate
+    // try shell.exec("cargo init --name test_tigerbeetle", .{});
 
-    try Shell.copy_path(
-        shell.project_root,
-        "src/clients/rust/samples/basic/src/main.rs",
-        shell.cwd,
-        "src/main.rs",
-    );
-    try shell.exec("cargo run", .{});
+    // // Add tigerbeetle dependency to Cargo.toml
+    // try shell.exec("cargo add tigerbeetle@{version}", .{ .version = options.version });
+    // try shell.exec("cargo add futures@0.3", .{});
+
+    // try Shell.copy_path(
+    //     shell.project_root,
+    //     "src/clients/rust/samples/basic/src/main.rs",
+    //     shell.cwd,
+    //     "src/main.rs",
+    // );
+    // try shell.exec("cargo run", .{});
 }
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {

@@ -8,15 +8,13 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.test_auditor);
 
-const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 
 const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
-const StateMachine =
-    @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 
 pub const CreateAccountStatusSet = std.enums.EnumSet(tb.CreateAccountStatus);
 // TODO(zig): See `Ordered` comments.
@@ -24,8 +22,8 @@ pub const CreateTransferStatusSet = std.enums.EnumSet(tb.CreateTransferStatus.Or
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
-const accounts_batch_size_max = StateMachine.machine_constants.batch_max.create_accounts;
-const transfers_batch_size_max = StateMachine.machine_constants.batch_max.create_transfers;
+const accounts_batch_size_max = StateMachine.batch_max.create_accounts;
+const transfers_batch_size_max = StateMachine.batch_max.create_transfers;
 
 const InFlightKey = struct {
     client_index: usize,

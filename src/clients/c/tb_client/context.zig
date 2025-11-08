@@ -153,8 +153,8 @@ pub fn ContextType(
             .thread_safe = true,
         });
 
-        const StateMachine = Client.StateMachine;
-        const allowed_operations = [_]StateMachine.Operation{
+        const Operation = Client.Operation;
+        const allowed_operations = [_]Operation{
             .create_accounts,
             .create_transfers,
             .lookup_accounts,
@@ -449,7 +449,7 @@ pub fn ContextType(
                 return self.packet_cancel(packet);
             }
 
-            const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
+            const operation: Operation = operation_from_int(packet.operation) orelse {
                 return self.notify_completion(packet, error.InvalidOperation);
             };
 
@@ -461,10 +461,10 @@ pub fn ContextType(
                 event_count: u32,
                 result_count_expected: u32,
             } = batch: {
-                const event_size: u32 = StateMachine.event_size_bytes(operation);
+                const event_size: u32 = operation.event_size();
                 assert(event_size > 0);
 
-                const result_size: u32 = StateMachine.result_size_bytes(operation);
+                const result_size: u32 = operation.result_size();
                 assert(result_size > 0);
 
                 const slice: []const u8 = packet.slice();
@@ -475,21 +475,12 @@ pub fn ContextType(
                 }
 
                 const event_count: u32 = @intCast(@divExact(slice.len, event_size));
-                const event_max: u32 = StateMachine.operation_event_max(
-                    operation,
-                    self.batch_size_limit.?,
-                );
+                const event_max: u32 = operation.event_max(self.batch_size_limit.?);
                 if (event_count > event_max) {
                     return self.notify_completion(packet, error.TooMuchData);
                 }
-                const result_max: u32 = StateMachine.operation_result_max(
-                    operation,
-                    self.batch_size_limit.?,
-                );
-                const result_count_expected: u32 = StateMachine.operation_result_count_expected(
-                    operation,
-                    slice,
-                );
+                const result_max: u32 = operation.result_max(self.batch_size_limit.?);
+                const result_count_expected: u32 = operation.result_count_expected(slice);
                 if (result_count_expected > result_max) {
                     return self.notify_completion(packet, error.TooMuchData);
                 }
@@ -598,10 +589,10 @@ pub fn ContextType(
                 packet_list.assert_phase(.sent);
             }
 
-            const operation: StateMachine.Operation = operation_from_int(packet_list.operation).?;
-            const event_size: u32 = StateMachine.event_size_bytes(operation);
+            const operation: Operation = operation_from_int(packet_list.operation).?;
+            const event_size: u32 = operation.event_size();
             const request_size: u32 = request_size: {
-                if (!StateMachine.operation_is_multi_batch(operation)) {
+                if (!operation.is_multi_batch()) {
                     assert(packet_list.multi_batch_next == null);
                     const source: []const u8 = packet_list.slice();
                     stdx.copy_disjoint(
@@ -612,7 +603,7 @@ pub fn ContextType(
                     );
                     break :request_size @intCast(source.len);
                 }
-                assert(StateMachine.operation_is_multi_batch(operation));
+                assert(operation.is_multi_batch());
 
                 var message_encoder = MultiBatchEncoder.init(message.buffer[@sizeOf(Header)..], .{
                     .element_size = event_size,
@@ -642,7 +633,7 @@ pub fn ContextType(
                 assert(message_encoder.batch_count == packet_list.multi_batch_count);
 
                 // Check if the reply has enough space for the maximum expected number of results.
-                const result_size: u32 = StateMachine.result_size_bytes(operation);
+                const result_size: u32 = operation.result_size();
                 const trailer_size = vsr.multi_batch.trailer_total_size(.{
                     .element_size = result_size,
                     .batch_count = packet_list.multi_batch_count,
@@ -666,7 +657,7 @@ pub fn ContextType(
                 .request = 0, // Set by client.raw_request.
                 .cluster = self.client.cluster,
                 .command = .request,
-                .operation = vsr.Operation.from(StateMachine, operation),
+                .operation = operation.to_vsr(),
                 .size = @sizeOf(vsr.Header) + request_size,
                 .previous_request_latency = @intCast(@min(
                     previous_request_latency.ns,
@@ -773,7 +764,7 @@ pub fn ContextType(
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
-            const operation = operation_vsr.cast(Client.StateMachine);
+            const operation = operation_vsr.cast(Client.Operation);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
@@ -793,16 +784,16 @@ pub fn ContextType(
             // This also guards from sending an unsupported operation.
             assert(operation_from_int(@intFromEnum(operation)) != null);
 
-            if (!StateMachine.operation_is_multi_batch(operation)) {
+            if (!operation.is_multi_batch()) {
                 assert(packet_list.multi_batch_next == null);
                 return self.notify_completion(packet_list, .{
                     .timestamp = timestamp,
                     .reply = reply,
                 });
             }
-            assert(StateMachine.operation_is_multi_batch(operation));
+            assert(operation.is_multi_batch());
 
-            const result_size: u32 = StateMachine.result_size_bytes(operation);
+            const result_size: u32 = operation.result_size();
             assert(result_size > 0);
             var reply_decoder = MultiBatchDecoder.init(reply, .{
                 .element_size = result_size,
@@ -949,7 +940,7 @@ pub fn ContextType(
             out_parameters.addresses_len = self.addresses_copy.len;
         }
 
-        fn operation_from_int(op: u8) ?StateMachine.Operation {
+        fn operation_from_int(op: u8) ?Operation {
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return operation;

@@ -7,18 +7,14 @@ const maybe = vsr.stdx.maybe;
 const fatal = @import("amqp/protocol.zig").fatal;
 
 const stdx = vsr.stdx;
+const tb = vsr.tigerbeetle;
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Storage = vsr.storage.StorageType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    vsr.constants.state_machine_config,
-);
-const Client = vsr.ClientType(StateMachine, MessageBus);
+const Operation = vsr.tigerbeetle.Operation;
+const Client = vsr.ClientType(Operation, MessageBus);
 const TimestampRange = vsr.lsm.TimestampRange;
-const tb = vsr.tigerbeetle;
 
 pub const amqp = @import("amqp.zig");
 
@@ -43,8 +39,7 @@ pub const Runner = struct {
         const app_id = "tigerbeetle";
         const progress_tracker_queue = "tigerbeetle.internal.progress";
         const locker_queue = "tigerbeetle.internal.locker";
-        const event_count_max: u32 = Client.StateMachine.operation_result_max(
-            .get_change_events,
+        const event_count_max: u32 = Operation.get_change_events.result_max(
             vsr.constants.message_body_size_max,
         );
     };
@@ -491,13 +486,13 @@ pub const Runner = struct {
                                         assert(TimestampRange.valid(progress_tracker.timestamp));
 
                                         // Downgrading the CDC job is not allowed.
-                                        if (vsr.constants.state_machine_config.release.value <
+                                        if (vsr.constants.config.process.release.value <
                                             progress_tracker.release.value)
                                         {
                                             fatal("The last event was published using a newer " ++
                                                 "release (event={} current={}).", .{
                                                 progress_tracker.release,
-                                                vsr.constants.state_machine_config.release,
+                                                vsr.constants.config.process.release,
                                             });
                                         }
 
@@ -724,7 +719,7 @@ pub const Runner = struct {
         timestamp: u64,
         result: []u8,
     ) void {
-        const operation = operation_vsr.cast(Client.StateMachine);
+        const operation = operation_vsr.cast(tb.Operation);
         assert(operation == .get_change_events);
         assert(timestamp != 0);
         const runner: *Runner = @ptrFromInt(@as(usize, @intCast(context)));
@@ -861,7 +856,7 @@ pub const Runner = struct {
                     assert(events.len > 0);
                     break :progress .{
                         .timestamp = events[events.len - 1].timestamp,
-                        .release = vsr.constants.state_machine_config.release,
+                        .release = vsr.constants.config.process.release,
                     };
                 };
                 self.amqp_client.publish_enqueue(.{

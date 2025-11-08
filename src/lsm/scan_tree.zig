@@ -460,29 +460,22 @@ pub fn ScanTreeType(
             defer field_reference.* = values;
 
             assert(values.len > 0);
-            // Discarding duplicated entries from TableMemory, last entry wins:
+
+            // TableMemory already deduplicates.
             switch (self.direction) {
                 .ascending => {
-                    while (values.len > 1 and
-                        key_from_value(&values[0]) ==
-                            key_from_value(&values[1]))
-                    {
-                        values = values[1..];
-                    }
+                    assert(values.len <= 1 or
+                        key_from_value(&values[0]) != key_from_value(&values[1]));
 
                     const value_first = values[0];
                     values = values[1..];
                     return value_first;
                 },
                 .descending => {
-                    const value_last = values[values.len - 1];
-                    while (values.len > 1 and
-                        key_from_value(&values[values.len - 1]) ==
-                            key_from_value(&values[values.len - 2]))
-                    {
-                        values = values[0 .. values.len - 1];
-                    }
+                    assert(values.len <= 1 or key_from_value(&values[values.len - 1]) !=
+                        key_from_value(&values[values.len - 2]));
 
+                    const value_last = values[values.len - 1];
                     values = values[0 .. values.len - 1];
                     return value_last;
                 },

@@ -230,7 +230,7 @@ comptime {
 /// However, this impacts bufferbloat and head-of-line blocking latency for pipelined requests.
 /// For a 1 Gbps NIC = 125 MiB/s throughput: 2 MiB / 125 * 1000ms = 16ms for the next request.
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const message_size_max = config.cluster.message_size_max;
+pub const message_size_max: u32 = config.cluster.message_size_max;
 pub const message_body_size_max = message_size_max - @sizeOf(vsr.Header);
 
 comptime {
@@ -757,18 +757,6 @@ pub const clock_synchronization_window_min_ms = config.process.clock_synchroniza
 /// This eliminates the impact of gradual clock drift on our clock offset (clock skew) measurements.
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
 pub const clock_synchronization_window_max_ms = config.process.clock_synchronization_window_max_ms;
-
-pub const StateMachineConfig = struct {
-    release: vsr.Release,
-    message_body_size_max: comptime_int,
-    lsm_compaction_ops: comptime_int,
-};
-
-pub const state_machine_config = StateMachineConfig{
-    .release = config.process.release,
-    .message_body_size_max = message_body_size_max,
-    .lsm_compaction_ops = lsm_compaction_ops,
-};
 
 /// TigerBeetle uses asserts proactively, unless they severely degrade performance. For production,
 /// 5% slow down might be deemed critical, tests tolerate slowdowns up to 5x. Tests should be

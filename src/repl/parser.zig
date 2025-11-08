@@ -5,10 +5,7 @@ const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
 const IO = vsr.io.IO;
 const Storage = vsr.storage.StorageType(IO);
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    constants.state_machine_config,
-);
+const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const tb = vsr.tigerbeetle;
 
 const Terminal = @import("terminal.zig").Terminal;
@@ -290,9 +287,8 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    operation_comptime.state_machine_op(),
-                    StateMachine.machine_constants.message_body_size_max,
+                .limit = operation_comptime.state_machine_op().result_max(
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -310,9 +306,8 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    operation_comptime.state_machine_op(),
-                    StateMachine.machine_constants.message_body_size_max,
+                .limit = operation_comptime.state_machine_op().result_max(
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,
@@ -340,7 +335,7 @@ pub const Parser = struct {
                 }
 
                 const state_machine_op = operation.state_machine_op();
-                if (!StateMachine.operation_is_batchable(state_machine_op)) {
+                if (!state_machine_op.is_batchable()) {
                     try parser.print_current_position();
                     try parser.terminal.print_error(
                         "{s} expects a single {s} but received multiple.\n",
@@ -885,9 +880,8 @@ test "parser.zig: Parser account filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    .get_account_transfers,
-                    StateMachine.machine_constants.message_body_size_max,
+                .limit = StateMachine.Operation.get_account_transfers.result_max(
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -963,9 +957,8 @@ test "parser.zig: Parser query filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.operation_result_max(
-                    .query_transfers,
-                    StateMachine.machine_constants.message_body_size_max,
+                .limit = StateMachine.Operation.query_transfers.result_max(
+                    constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,

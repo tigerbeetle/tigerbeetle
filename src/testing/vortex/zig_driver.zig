@@ -1,9 +1,8 @@
 const std = @import("std");
 const stdx = @import("stdx");
-const constants = @import("../../constants.zig");
-const StateMachineType = @import("../../state_machine.zig").StateMachineType;
-const TestingStorage = @import("../storage.zig").Storage;
-const StateMachine = StateMachineType(TestingStorage, constants.state_machine_config);
+const vsr = @import("../../vsr.zig");
+const constants = vsr.constants;
+const Operation = vsr.tigerbeetle.Operation;
 
 // We could have used the idiomatic Zig API exposed by `vsr.tb_client`,
 // but we want to test the actual FFI exposed by `libtb_client`.
@@ -17,8 +16,8 @@ const log = std.log.scoped(.zig_driver);
 const events_count_max = 8189;
 const events_buffer_size_max = size: {
     var event_size_max = 0;
-    for (std.enums.values(StateMachine.Operation)) |operation| {
-        event_size_max = @max(event_size_max, @sizeOf(StateMachine.EventType(operation)));
+    for (std.enums.values(Operation)) |operation| {
+        event_size_max = @max(event_size_max, operation.event_size());
     }
     break :size event_size_max * events_count_max;
 };
@@ -131,20 +130,20 @@ pub fn on_complete(
 
 fn write_results(
     writer: std.io.AnyWriter,
-    operation: StateMachine.Operation,
+    operation: Operation,
     result: []const u8,
 ) !void {
     switch (operation) {
-        inline else => |comptime_operation| {
-            const size = @sizeOf(StateMachine.ResultType(comptime_operation));
-            if (size > 0) {
-                const count = @divExact(result.len, size);
+        inline else => |operation_comptime| {
+            const result_size = operation_comptime.result_size();
+            if (result_size > 0) {
+                const count = @divExact(result.len, result_size);
                 try writer.writeInt(u32, @intCast(count), .little);
                 try writer.writeAll(result);
             } else {
                 log.err(
                     "unexpected size {d} for op: {s}",
-                    .{ size, @tagName(comptime_operation) },
+                    .{ result_size, @tagName(operation_comptime) },
                 );
                 unreachable;
             }
@@ -152,19 +151,21 @@ fn write_results(
     }
 }
 
-fn receive(reader: std.io.AnyReader, buffer: []u8) !struct { StateMachine.Operation, []const u8 } {
-    const operation = try reader.readEnum(StateMachine.Operation, .little);
+fn receive(reader: std.io.AnyReader, buffer: []u8) !struct { Operation, []const u8 } {
+    const operation = try reader.readEnum(Operation, .little);
     const count = try reader.readInt(u32, .little);
 
     return switch (operation) {
-        inline else => |comptime_operation| {
+        inline else => |operation_comptime| {
             assert(count <= events_count_max);
 
-            const events_size = @sizeOf(StateMachine.EventType(comptime_operation)) * count;
-            assert(buffer.len >= events_size);
-            assert(try reader.readAtLeast(buffer, events_size) == events_size);
+            const response_size = operation_comptime.event_size() * count;
+            assert(buffer.len >= response_size);
 
-            return .{ comptime_operation, buffer[0..events_size] };
+            const read_total_size = try reader.readAtLeast(buffer, response_size);
+            assert(read_total_size == response_size);
+
+            return .{ operation_comptime, buffer[0..response_size] };
         },
     };
 }

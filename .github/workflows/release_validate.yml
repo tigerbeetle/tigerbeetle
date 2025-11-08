@@ -22,6 +22,8 @@ jobs:
         with:
           ref: release
       # Run on the latest tag. The release branch is ahead of release tag over the weekend.
+      # NB: Temporarily overriden to cb22/release-validate-override - make sure to revert back
+      # before the next release!
       - run: |
           TAG=$(gh release list --limit 1 | cut -f1)
           git fetch origin $TAG && git switch -d FETCH_HEAD

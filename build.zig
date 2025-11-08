@@ -292,7 +292,7 @@ pub fn build(b: *std.Build) !void {
     build_rust_client(b, build_steps.clients_rust, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
-        .tb_client_header = tb_client_header,
+        .tb_client_header = tb_client_header.path,
         .mode = mode,
     });
     build_go_client(b, build_steps.clients_go, .{
@@ -929,7 +929,7 @@ fn build_test_integration(
         .stdx_module = options.stdx_module,
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
-        .config_release = "0.16.99",
+        .config_release = "65535.0.0",
         .config_release_client_min = "0.16.4",
         .config_aof_recovery = false,
     });
@@ -1227,6 +1227,16 @@ fn build_vortex_executable(
         tb_client.linkSystemLibrary("advapi32");
     }
 
+    const tigerbeetle = build_tigerbeetle_executable(b, .{
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+        .target = options.target,
+        .mode = options.mode,
+    });
+
+    const vortex_options = b.addOptions();
+    vortex_options.addOptionPath("tigerbeetle_exe", tigerbeetle.getEmittedBin());
+
     const vortex = b.addExecutable(.{
         .name = "vortex",
         .root_module = b.createModule(.{
@@ -1241,6 +1251,7 @@ fn build_vortex_executable(
     vortex.linkLibrary(tb_client);
     vortex.addIncludePath(options.tb_client_header.dirname());
     vortex.root_module.addOptions("vsr_options", options.vsr_options);
+    vortex.root_module.addOptions("vortex_options", vortex_options);
     return vortex;
 }
 
@@ -1269,11 +1280,19 @@ fn build_rust_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
-        tb_client_header: *Generated,
+        tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
-    step_clients_rust.dependOn(&options.tb_client_header.step);
+    // The Rust test suite runs tigerbeetle directly. This ensures it is available.
+    step_clients_rust.dependOn(b.getInstallStep());
+
+    // Copy the generated header file to the Rust client assets directory:
+    const tb_client_header_copy = Generated.file_copy(b, .{
+        .from = options.tb_client_header,
+        .path = "./src/clients/rust/assets/tb_client.h",
+    });
+    step_clients_rust.dependOn(&tb_client_header_copy.step);
 
     inline for (platforms) |platform| {
         const query = Query.parse(.{

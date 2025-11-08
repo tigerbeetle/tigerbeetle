@@ -507,7 +507,13 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(connection.fd == IO.INVALID_SOCKET);
 
                 const family = bus.configuration[replica].any.family;
-                connection.fd = init_tcp(bus.io, family) catch return;
+                connection.fd = init_tcp(bus.io, family) catch |err| {
+                    log.err("{}: connect_to_replcia: init_tcp error={s}", .{
+                        bus.id,
+                        @errorName(err),
+                    });
+                    return;
+                };
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;

@@ -3,11 +3,6 @@ const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const assert = std.debug.assert;
 
-const constants = vsr.constants;
-const IO = vsr.io.IO;
-
-const Storage = vsr.storage.StorageType(IO);
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const tb = vsr.tigerbeetle;
 
 /// VSR type mappings: these will always be the same regardless of state machine.
@@ -354,20 +349,20 @@ fn ctype_type_name(comptime Type: type) []const u8 {
 
 fn emit_method(
     buffer: *Buffer,
-    comptime operation: StateMachine.Operation,
+    comptime operation: tb.Operation,
     options: struct { is_async: bool },
 ) void {
-    const event_type = comptime if (StateMachine.operation_is_batchable(operation))
-        "list[" ++ zig_to_python(StateMachine.EventType(operation)) ++ "]"
+    const event_type = comptime if (operation.is_batchable())
+        "list[" ++ zig_to_python(operation.EventType()) ++ "]"
     else
-        zig_to_python(StateMachine.EventType(operation));
+        zig_to_python(operation.EventType());
 
     const result_type =
-        comptime "list[" ++ zig_to_python(StateMachine.ResultType(operation)) ++ "]";
+        comptime "list[" ++ zig_to_python(operation.ResultType()) ++ "]";
 
     // For ergonomics, the client allows calling things like .query_accounts(filter) even
     // though the _submit function requires a list for everything. Wrap them here.
-    const event_name_or_list = comptime if (!StateMachine.operation_is_batchable(operation))
+    const event_name_or_list = comptime if (!operation.is_batchable())
         "[" ++ event_name(operation) ++ "]"
     else
         event_name(operation);
@@ -393,8 +388,8 @@ fn emit_method(
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
             .operation_name = to_uppercase(@tagName(operation)),
-            .event_type_c = ctype_type_name(StateMachine.EventType(operation)),
-            .result_type_c = ctype_type_name(StateMachine.ResultType(operation)),
+            .event_type_c = ctype_type_name(operation.EventType()),
+            .result_type_c = ctype_type_name(operation.ResultType()),
         },
     );
 }
@@ -578,7 +573,7 @@ pub fn main() !void {
             \\
         , .{prefix_class});
 
-        const operations: []const StateMachine.Operation = &.{
+        const operations: []const tb.Operation = &.{
             .create_accounts,
             .create_transfers,
             .lookup_accounts,
@@ -601,7 +596,7 @@ pub fn main() !void {
 /// Used by client code generation to make clearer APIs: the name of the Event parameter,
 /// when used as a variable.
 /// Inline function so that `operation` can be known at comptime.
-fn event_name(comptime operation: StateMachine.Operation) []const u8 {
+fn event_name(comptime operation: tb.Operation) []const u8 {
     return switch (operation) {
         .create_accounts => "accounts",
         .create_transfers => "transfers",

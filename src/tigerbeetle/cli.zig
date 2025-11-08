@@ -25,6 +25,13 @@ const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
 const Ratio = stdx.PRNG.Ratio;
 const ByteSize = stdx.ByteSize;
+const Operation = tigerbeetle.Operation;
+const Duration = stdx.Duration;
+
+comptime {
+    // Make sure we are running the Accounting StateMachine.
+    assert(StateMachine.Operation == tigerbeetle.Operation);
+}
 
 const KiB = stdx.KiB;
 const GiB = stdx.GiB;
@@ -122,29 +129,27 @@ const CLIArgs = union(enum) {
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
-        account_count: usize = 10_000,
-        account_count_hot: usize = 0,
+        account_count: u32 = 10_000,
+        account_count_hot: u32 = 0,
         log_debug: bool = false,
         log_debug_replica: bool = false,
         /// The probability distribution used to select accounts when making transfers or queries.
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
-        account_batch_size: usize = StateMachine.operation_event_max(
-            .create_accounts,
+        account_batch_size: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
         ),
-        transfer_count: usize = 10_000_000,
-        transfer_hot_percent: usize = 100,
+        transfer_count: u32 = 10_000_000,
+        transfer_hot_percent: u32 = 100,
         transfer_pending: bool = false,
-        transfer_batch_size: usize = StateMachine.operation_event_max(
-            .create_transfers,
+        transfer_batch_size: u32 = Operation.create_transfers.event_max(
             constants.message_body_size_max,
         ),
-        transfer_batch_delay_us: usize = 0,
+        transfer_batch_delay: Duration = .ms(0),
         validate: bool = false,
         checksum_performance: bool = false,
-        query_count: usize = 100,
+        query_count: u32 = 100,
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
@@ -562,20 +567,20 @@ pub const Command = union(enum) {
         cache_grid: ?[]const u8,
         log_debug: bool,
         log_debug_replica: bool,
-        account_count: usize,
-        account_count_hot: usize,
+        account_count: u32,
+        account_count_hot: u32,
         account_distribution: Distribution,
         flag_history: bool,
         flag_imported: bool,
-        account_batch_size: usize,
-        transfer_count: usize,
-        transfer_hot_percent: usize,
+        account_batch_size: u32,
+        transfer_count: u32,
+        transfer_hot_percent: u32,
         transfer_pending: bool,
-        transfer_batch_size: usize,
-        transfer_batch_delay_us: usize,
+        transfer_batch_size: u32,
+        transfer_batch_delay: Duration,
         validate: bool,
         checksum_performance: bool,
-        query_count: usize,
+        query_count: u32,
         print_batch_timings: bool,
         id_order: IdOrder,
         clients: u32,
@@ -1019,7 +1024,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             "--cache-transfers",
         ),
         .cache_transfers_pending = parse_cache_size_to_count(
-            StateMachine.TransferPending,
+            vsr.state_machine.TransferPending,
             TransfersPendingValuesCache,
             start.cache_transfers_pending orelse defaults.cache_transfers_pending,
             "--cache-transfers-pending",
@@ -1135,7 +1140,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .transfer_hot_percent = benchmark.transfer_hot_percent,
         .transfer_pending = benchmark.transfer_pending,
         .transfer_batch_size = benchmark.transfer_batch_size,
-        .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
+        .transfer_batch_delay = benchmark.transfer_batch_delay,
         .validate = benchmark.validate,
         .checksum_performance = benchmark.checksum_performance,
         .query_count = benchmark.query_count,
