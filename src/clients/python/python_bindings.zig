@@ -381,7 +381,7 @@ fn emit_method(
     ,
         .{
             .prefix_fn = if (options.is_async) "async " else "",
-            .fn_name = function_name(operation),
+            .fn_name = @tagName(operation),
             .event_name = event_name(operation),
             .event_type = event_type,
             .result_type = result_type,
@@ -606,20 +606,6 @@ fn event_name(comptime operation: tb.Operation) []const u8 {
         .get_account_balances => "filter",
         .query_accounts => "query_filter",
         .query_transfers => "query_filter",
-        else => comptime unreachable,
-    };
-}
-
-fn function_name(comptime operation: StateMachine.Operation) []const u8 {
-    return switch (operation) {
-        .create_accounts => "create_accounts",
-        .create_transfers => "create_transfers",
-        .lookup_accounts => "lookup_accounts",
-        .lookup_transfers => "lookup_transfers",
-        .get_account_transfers => "get_account_transfers",
-        .get_account_balances => "get_account_balances",
-        .query_accounts => "query_accounts",
-        .query_transfers => "query_transfers",
         else => comptime unreachable,
     };
 }
