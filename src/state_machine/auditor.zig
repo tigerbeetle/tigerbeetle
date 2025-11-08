@@ -496,7 +496,7 @@ pub const AccountingAuditor = struct {
         client_index: usize,
         timestamp: u64,
         accounts: []const tb.Account,
-        results_sparse: []const tb.CreateAccountsErrorResult,
+        results_sparse: []const tb.CreateAccountErrorResult,
     ) void {
         assert(accounts.len >= results_sparse.len);
         assert(self.timestamp < timestamp or
@@ -505,7 +505,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
-        var iterator: ResultsSparseIteratorType(tb.CreateAccountsErrorResult) = .init(
+        var iterator: ResultsSparseIteratorType(tb.CreateAccountErrorResult) = .init(
             results_sparse,
         );
         defer assert(iterator.results.len == 0);
@@ -600,7 +600,7 @@ pub const AccountingAuditor = struct {
         client_index: usize,
         timestamp: u64,
         transfers: []const tb.Transfer,
-        results_sparse: []const tb.CreateTransfersErrorResult,
+        results_sparse: []const tb.CreateTransferErrorResult,
     ) void {
         assert(transfers.len >= results_sparse.len);
         assert(self.timestamp < timestamp or
@@ -609,7 +609,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
-        var iterator: ResultsSparseIteratorType(tb.CreateTransfersErrorResult) = .init(
+        var iterator: ResultsSparseIteratorType(tb.CreateTransferErrorResult) = .init(
             results_sparse,
         );
         defer assert(iterator.results.len == 0);
@@ -961,7 +961,7 @@ pub const AccountingAuditor = struct {
 };
 
 pub fn ResultsSparseIteratorType(comptime Result: type) type {
-    assert(Result == tb.CreateAccountsErrorResult or Result == tb.CreateTransfersErrorResult);
+    assert(Result == tb.CreateAccountErrorResult or Result == tb.CreateTransferErrorResult);
 
     return struct {
         const IteratorForCreate = @This();

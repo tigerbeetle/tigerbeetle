@@ -642,7 +642,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     client_index,
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Account, request_body),
-                    stdx.bytes_as_slice(.exact, tb.CreateAccountsErrorResult, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateAccountErrorResult, reply_body),
                 ),
                 .create_transfers,
                 => self.on_create_transfers(
@@ -657,7 +657,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     client_index,
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Transfer, request_body),
-                    stdx.bytes_as_slice(.exact, tb.CreateTransfersErrorResult, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateTransferErrorResult, reply_body),
                 ),
                 .lookup_accounts,
                 .deprecated_lookup_accounts_unbatched,
@@ -1415,7 +1415,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             client_index: usize,
             timestamp: u64,
             transfers: []const tb.Transfer,
-            results_sparse: []const tb.CreateTransfersErrorResult,
+            results_sparse: []const tb.CreateTransferErrorResult,
         ) void {
             self.auditor.on_create_transfers_sparse(
                 client_index,
@@ -1444,7 +1444,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
             }
 
-            var iterator: ResultsSparseIteratorType(tb.CreateTransfersErrorResult) = .init(
+            var iterator: ResultsSparseIteratorType(tb.CreateTransferErrorResult) = .init(
                 results_sparse,
             );
             for (transfers, 0..) |*transfer, i| {

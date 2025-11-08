@@ -736,7 +736,7 @@ fn check_version(
                     .deprecated_create_accounts_sparse,
                     .deprecated_create_accounts_unbatched,
                     => if (a.status != .created) {
-                        const result = tb.CreateAccountsErrorResult{
+                        const result = tb.CreateAccountErrorResult{
                             .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
                             .result = a.status,
                         };
@@ -810,7 +810,7 @@ fn check_version(
                     .deprecated_create_transfers_sparse,
                     .deprecated_create_transfers_unbatched,
                     => if (t.status != .created) {
-                        const result: tb.CreateTransfersErrorResult = .{
+                        const result: tb.CreateTransferErrorResult = .{
                             .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
                             .result = t.status,
                         };

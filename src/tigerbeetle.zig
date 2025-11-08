@@ -493,24 +493,24 @@ pub const CreateTransferResult = extern struct {
 };
 
 // Deprecated: sparse results containing only error codes.
-pub const CreateAccountsErrorResult = extern struct {
+pub const CreateAccountErrorResult = extern struct {
     index: u32,
     result: CreateAccountStatus,
 
     comptime {
-        assert(@sizeOf(CreateAccountsErrorResult) == 8);
-        assert(stdx.no_padding(CreateAccountsErrorResult));
+        assert(@sizeOf(CreateAccountErrorResult) == 8);
+        assert(stdx.no_padding(CreateAccountErrorResult));
     }
 };
 
 // Deprecated: sparse results containing only error codes.
-pub const CreateTransfersErrorResult = extern struct {
+pub const CreateTransferErrorResult = extern struct {
     index: u32,
     result: CreateTransferStatus,
 
     comptime {
-        assert(@sizeOf(CreateTransfersErrorResult) == 8);
-        assert(stdx.no_padding(CreateTransfersErrorResult));
+        assert(@sizeOf(CreateTransferErrorResult) == 8);
+        assert(stdx.no_padding(CreateTransferErrorResult));
     }
 };
 
@@ -754,11 +754,11 @@ pub const Operation = enum(u8) {
             .query_transfers => Transfer,
             .get_change_events => ChangeEvent,
 
-            .deprecated_create_accounts_sparse => CreateAccountsErrorResult,
-            .deprecated_create_transfers_sparse => CreateTransfersErrorResult,
+            .deprecated_create_accounts_sparse => CreateAccountErrorResult,
+            .deprecated_create_transfers_sparse => CreateTransferErrorResult,
 
-            .deprecated_create_accounts_unbatched => CreateAccountsErrorResult,
-            .deprecated_create_transfers_unbatched => CreateTransfersErrorResult,
+            .deprecated_create_accounts_unbatched => CreateAccountErrorResult,
+            .deprecated_create_transfers_unbatched => CreateTransferErrorResult,
             .deprecated_lookup_accounts_unbatched => Account,
             .deprecated_lookup_transfers_unbatched => Transfer,
             .deprecated_get_account_transfers_unbatched => Transfer,
