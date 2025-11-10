@@ -311,11 +311,12 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 bus.connections_used += 1;
 
                 connection.assert_recv_send_initial_state(bus);
-                assert(connection.send_queue.empty());
-
                 assert(connection.recv_buffer == null);
                 connection.recv_buffer = MessageBuffer.init(bus.pool);
                 bus.recv(connection);
+                // Don't start send loop yet --- on accept, we don't know which peer this is.
+                assert(connection.send_queue.empty());
+                assert(connection.state == .connected);
             } else |err| {
                 connection.state = .free;
                 // TODO: some errors should probably be fatal
@@ -507,9 +508,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             assert(connection.recv_buffer == null);
             connection.recv_buffer = MessageBuffer.init(bus.pool);
             bus.recv(connection);
-            // A message may have been queued for sending while we were connecting:
-            // TODO Should we relax recv() and send() to return if `state != .connected`?
-            if (connection.state == .connected) connection.send(bus);
+            bus.send(connection);
+            assert(connection.state == .connected);
         }
 
         /// The recv loop.
@@ -627,7 +627,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             if (process_type == .replica) assert(replica != bus.process.replica);
 
             if (bus.replicas[replica]) |connection| {
-                connection.send_message(bus, message);
+                bus.send_message(connection, message);
             } else {
                 log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
                     bus.id,
@@ -643,7 +643,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             comptime assert(process_type == .replica);
 
             if (bus.process.clients.get(client_id)) |connection| {
-                connection.send_message(bus, message);
+                bus.send_message(connection, message);
             } else {
                 log.debug(
                     "{}: send_message_to_client: no connection to={}",
@@ -654,7 +654,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
         /// Add a message to the connection's send queue, starting a send operation
         /// if the queue was previously empty.
-        pub fn send_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
+        fn send_message(bus: *MessageBus, connection: *Connection, message: *Message) void {
             assert(connection.peer != .unknown);
 
             switch (connection.state) {
@@ -678,23 +678,28 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 return;
             }
             // If there is no send operation currently in progress, start one.
-            if (!connection.send_submitted) connection.send(bus);
+            if (!connection.send_submitted) bus.send(connection);
         }
 
-        fn send(connection: *Connection, bus: *MessageBus) void {
+        /// Send loop.
+        ///
+        /// Kickstarted by `connect` and loops onto itself until all enqueue messages are sent.
+        /// `accept` doesn't start the send loop because it doesn't know the identity of the peer.
+        fn send(bus: *MessageBus, connection: *Connection) void {
             assert(connection.peer != .unknown);
             assert(connection.state == .connected);
             assert(connection.fd != null);
             assert(!connection.send_submitted);
 
-            connection.send_now(bus);
+            bus.send_now(connection);
 
-            const message = connection.send_queue.head() orelse return;
+            const message = connection.send_queue.head() orelse
+                return; // Nothing more to send, break out of the send loop.
             connection.send_submitted = true;
             bus.io.send(
                 *MessageBus,
                 bus,
-                on_send,
+                send_callback,
                 &connection.send_completion,
                 connection.fd.?,
                 message.buffer[connection.send_progress..message.header.size],
@@ -703,7 +708,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
         // Optimization/fast path: try to immediately copy the send queue over to the in-kernel
         // send buffer, falling back to asynchronous send if that's not possible.
-        fn send_now(connection: *Connection, bus: *MessageBus) void {
+        fn send_now(bus: *MessageBus, connection: *Connection) void {
             assert(connection.state == .connected);
             assert(connection.fd != null);
             assert(!connection.send_submitted);
@@ -728,7 +733,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             }
         }
 
-        fn on_send(
+        fn send_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
             result: IO.SendError!usize,
@@ -761,7 +766,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 const message = connection.send_queue.pop().?;
                 bus.unref(message);
             }
-            connection.send(bus);
+            bus.send(connection);
         }
 
         pub fn get_message(
