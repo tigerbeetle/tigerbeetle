@@ -268,6 +268,66 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             }
         }
 
+        fn maybe_accept(bus: *MessageBus) void {
+            comptime assert(process_type == .replica);
+
+            if (bus.process.accept_connection != null) return;
+            // All connections are currently in use, do nothing.
+            if (bus.connections_used == bus.connections.len) return;
+            assert(bus.connections_used < bus.connections.len);
+            bus.process.accept_connection = for (bus.connections) |*connection| {
+                if (connection.state == .free) {
+                    connection.state = .accepting;
+                    break connection;
+                }
+            } else unreachable;
+            bus.io.accept(
+                *MessageBus,
+                bus,
+                on_accept,
+                &bus.process.accept_completion,
+                bus.process.accept_fd,
+            );
+        }
+
+        fn on_accept(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.AcceptError!IO.socket_t,
+        ) void {
+            _ = completion;
+
+            comptime assert(process_type == .replica);
+            assert(bus.process.accept_connection != null);
+            defer bus.process.accept_connection = null;
+            const fd = result catch |err| {
+                bus.process.accept_connection.?.state = .free;
+                // TODO: some errors should probably be fatal
+                log.warn("{}: on_accept: {}", .{ bus.id, err });
+                return;
+            };
+            bus.process.accept_connection.?.on_accept(bus, fd);
+        }
+
+        /// Given a newly accepted fd, start receiving messages on it.
+        /// Callbacks will be continuously re-registered until terminate() is called.
+        pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: IO.socket_t) void {
+            assert(connection.peer == .unknown);
+            assert(connection.state == .accepting);
+            assert(connection.fd == null);
+
+            connection.state = .connected;
+            connection.fd = fd;
+            bus.connections_used += 1;
+
+            connection.assert_recv_send_initial_state(bus);
+            assert(connection.send_queue.empty());
+
+            assert(connection.recv_buffer == null);
+            connection.recv_buffer = MessageBuffer.init(bus.pool);
+            connection.recv(bus);
+        }
+
         fn connect_to_replica(bus: *MessageBus, replica: u8) void {
             assert(bus.replicas[replica] == null);
 
@@ -316,47 +376,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             // We assert that the max number of connections is greater
             // than the number of replicas in init().
             unreachable;
-        }
-
-        fn maybe_accept(bus: *MessageBus) void {
-            comptime assert(process_type == .replica);
-
-            if (bus.process.accept_connection != null) return;
-            // All connections are currently in use, do nothing.
-            if (bus.connections_used == bus.connections.len) return;
-            assert(bus.connections_used < bus.connections.len);
-            bus.process.accept_connection = for (bus.connections) |*connection| {
-                if (connection.state == .free) {
-                    connection.state = .accepting;
-                    break connection;
-                }
-            } else unreachable;
-            bus.io.accept(
-                *MessageBus,
-                bus,
-                on_accept,
-                &bus.process.accept_completion,
-                bus.process.accept_fd,
-            );
-        }
-
-        fn on_accept(
-            bus: *MessageBus,
-            completion: *IO.Completion,
-            result: IO.AcceptError!IO.socket_t,
-        ) void {
-            _ = completion;
-
-            comptime assert(process_type == .replica);
-            assert(bus.process.accept_connection != null);
-            defer bus.process.accept_connection = null;
-            const fd = result catch |err| {
-                bus.process.accept_connection.?.state = .free;
-                // TODO: some errors should probably be fatal
-                log.warn("{}: on_accept: {}", .{ bus.id, err });
-                return;
-            };
-            bus.process.accept_connection.?.on_accept(bus, fd);
         }
 
         pub fn get_message(
@@ -620,25 +639,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 // A message may have been queued for sending while we were connecting:
                 // TODO Should we relax recv() and send() to return if `state != .connected`?
                 if (connection.state == .connected) connection.send(bus);
-            }
-
-            /// Given a newly accepted fd, start receiving messages on it.
-            /// Callbacks will be continuously re-registered until terminate() is called.
-            pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: IO.socket_t) void {
-                assert(connection.peer == .unknown);
-                assert(connection.state == .accepting);
-                assert(connection.fd == null);
-
-                connection.state = .connected;
-                connection.fd = fd;
-                bus.connections_used += 1;
-
-                connection.assert_recv_send_initial_state(bus);
-                assert(connection.send_queue.empty());
-
-                assert(connection.recv_buffer == null);
-                connection.recv_buffer = MessageBuffer.init(bus.pool);
-                connection.recv(bus);
             }
 
             fn assert_recv_send_initial_state(connection: *Connection, bus: *MessageBus) void {
