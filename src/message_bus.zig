@@ -310,7 +310,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 connection.fd = fd;
                 bus.connections_used += 1;
 
-                connection.assert_recv_send_initial_state(bus);
+                bus.assert_connection_initial_state(connection);
                 assert(connection.recv_buffer == null);
                 connection.recv_buffer = MessageBuffer.init(bus.pool);
                 bus.recv(connection);
@@ -504,12 +504,26 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             log.info("{}: on_connect: connected to={}", .{ bus.id, connection.peer.replica });
             bus.replicas_connect_attempts[connection.peer.replica] = 0;
 
-            connection.assert_recv_send_initial_state(bus);
+            bus.assert_connection_initial_state(connection);
             assert(connection.recv_buffer == null);
             connection.recv_buffer = MessageBuffer.init(bus.pool);
             bus.recv(connection);
             bus.send(connection);
             assert(connection.state == .connected);
+        }
+
+        fn assert_connection_initial_state(bus: *MessageBus, connection: *Connection) void {
+            assert(bus.connections_used > 0);
+
+            assert(connection.peer == .unknown or connection.peer == .replica);
+            assert(connection.state == .connected);
+            assert(connection.fd != null);
+
+            assert(connection.recv_submitted == false);
+            assert(connection.recv_buffer == null);
+
+            assert(connection.send_submitted == false);
+            assert(connection.send_progress == 0);
         }
 
         /// The recv loop.
@@ -1027,20 +1041,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             send_queue: SendQueue,
             /// For connections_suspended.
             link: QueueType(Connection).Link = .{},
-
-            fn assert_recv_send_initial_state(connection: *Connection, bus: *MessageBus) void {
-                assert(bus.connections_used > 0);
-
-                assert(connection.peer == .unknown or connection.peer == .replica);
-                assert(connection.state == .connected);
-                assert(connection.fd != null);
-
-                assert(connection.recv_submitted == false);
-                assert(connection.recv_buffer == null);
-
-                assert(connection.send_submitted == false);
-                assert(connection.send_progress == 0);
-            }
 
             fn set_and_verify_peer(connection: *Connection, bus: *MessageBus, peer: vsr.Peer) bool {
                 comptime assert(process_type == .replica);
