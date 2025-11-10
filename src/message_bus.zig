@@ -622,6 +622,148 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             }
         }
 
+        pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
+            // Messages sent by a replica to itself should never be passed to the message bus.
+            if (process_type == .replica) assert(replica != bus.process.replica);
+
+            if (bus.replicas[replica]) |connection| {
+                connection.send_message(bus, message);
+            } else {
+                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
+                    bus.id,
+                    replica,
+                    message.header,
+                });
+            }
+        }
+
+        /// Try to send the message to the client with the given id.
+        /// If the client is not currently connected, the message is silently dropped.
+        pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
+            comptime assert(process_type == .replica);
+
+            if (bus.process.clients.get(client_id)) |connection| {
+                connection.send_message(bus, message);
+            } else {
+                log.debug(
+                    "{}: send_message_to_client: no connection to={}",
+                    .{ bus.id, client_id },
+                );
+            }
+        }
+
+        /// Add a message to the connection's send queue, starting a send operation
+        /// if the queue was previously empty.
+        pub fn send_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
+            assert(connection.peer != .unknown);
+
+            switch (connection.state) {
+                .connected, .connecting => {},
+                .terminating => return,
+                .free, .accepting => unreachable,
+            }
+            if (connection.send_queue.full()) {
+                log.info("{}: send_message: to={} queue full, dropping command={s}", .{
+                    bus.id,
+                    connection.peer,
+                    @tagName(message.header.command),
+                });
+                return;
+            }
+            connection.send_queue.push_assume_capacity(message.ref());
+            // If the connection has not yet been established we can't send yet.
+            // Instead on_connect() will call send().
+            if (connection.state == .connecting) {
+                assert(connection.peer == .replica);
+                return;
+            }
+            // If there is no send operation currently in progress, start one.
+            if (!connection.send_submitted) connection.send(bus);
+        }
+
+        fn send(connection: *Connection, bus: *MessageBus) void {
+            assert(connection.peer != .unknown);
+            assert(connection.state == .connected);
+            assert(connection.fd != null);
+            assert(!connection.send_submitted);
+
+            connection.send_now(bus);
+
+            const message = connection.send_queue.head() orelse return;
+            connection.send_submitted = true;
+            bus.io.send(
+                *MessageBus,
+                bus,
+                on_send,
+                &connection.send_completion,
+                connection.fd.?,
+                message.buffer[connection.send_progress..message.header.size],
+            );
+        }
+
+        // Optimization/fast path: try to immediately copy the send queue over to the in-kernel
+        // send buffer, falling back to asynchronous send if that's not possible.
+        fn send_now(connection: *Connection, bus: *MessageBus) void {
+            assert(connection.state == .connected);
+            assert(connection.fd != null);
+            assert(!connection.send_submitted);
+
+            for (0..connection.send_queue.count) |_| {
+                const message = connection.send_queue.head().?;
+                assert(connection.send_progress < message.header.size);
+                const write_size = bus.io.send_now(
+                    connection.fd.?,
+                    message.buffer[connection.send_progress..message.header.size],
+                ) orelse return;
+                connection.send_progress += write_size;
+                assert(connection.send_progress <= message.header.size);
+                if (connection.send_progress == message.header.size) {
+                    _ = connection.send_queue.pop();
+                    bus.unref(message);
+                    connection.send_progress = 0;
+                } else {
+                    assert(connection.send_progress < message.header.size);
+                    return;
+                }
+            }
+        }
+
+        fn on_send(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.SendError!usize,
+        ) void {
+            const connection: *Connection = @alignCast(
+                @fieldParentPtr("send_completion", completion),
+            );
+            assert(connection.send_submitted);
+            connection.send_submitted = false;
+            assert(connection.peer != .unknown);
+            if (connection.state == .terminating) {
+                connection.maybe_close(bus);
+                return;
+            }
+            assert(connection.state == .connected);
+            connection.send_progress += result catch |err| {
+                // TODO: maybe don't need to close on *every* error
+                log.warn("{}: on_send: to={} {}", .{
+                    bus.id,
+                    connection.peer,
+                    err,
+                });
+                connection.terminate(bus, .shutdown);
+                return;
+            };
+            assert(connection.send_progress <= connection.send_queue.head().?.header.size);
+            // If the message has been fully sent, move on to the next one.
+            if (connection.send_progress == connection.send_queue.head().?.header.size) {
+                connection.send_progress = 0;
+                const message = connection.send_queue.pop().?;
+                bus.unref(message);
+            }
+            connection.send(bus);
+        }
+
         pub fn get_message(
             bus: *MessageBus,
             comptime command: ?vsr.Command,
@@ -678,36 +820,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(connection.recv_buffer.?.advance_size >= @sizeOf(vsr.Header));
                 assert(connection.recv_buffer.?.has_message());
                 bus.recv_buffer_drain(connection);
-            }
-        }
-
-        pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
-            // Messages sent by a replica to itself should never be passed to the message bus.
-            if (process_type == .replica) assert(replica != bus.process.replica);
-
-            if (bus.replicas[replica]) |connection| {
-                connection.send_message(bus, message);
-            } else {
-                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
-                    bus.id,
-                    replica,
-                    message.header,
-                });
-            }
-        }
-
-        /// Try to send the message to the client with the given id.
-        /// If the client is not currently connected, the message is silently dropped.
-        pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
-            comptime assert(process_type == .replica);
-
-            if (bus.process.clients.get(client_id)) |connection| {
-                connection.send_message(bus, message);
-            } else {
-                log.debug(
-                    "{}: send_message_to_client: no connection to={}",
-                    .{ bus.id, client_id },
-                );
             }
         }
 
@@ -769,35 +881,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
                 assert(connection.send_submitted == false);
                 assert(connection.send_progress == 0);
-            }
-
-            /// Add a message to the connection's send queue, starting a send operation
-            /// if the queue was previously empty.
-            pub fn send_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
-                assert(connection.peer != .unknown);
-
-                switch (connection.state) {
-                    .connected, .connecting => {},
-                    .terminating => return,
-                    .free, .accepting => unreachable,
-                }
-                if (connection.send_queue.full()) {
-                    log.info("{}: send_message: to={} queue full, dropping command={s}", .{
-                        bus.id,
-                        connection.peer,
-                        @tagName(message.header.command),
-                    });
-                    return;
-                }
-                connection.send_queue.push_assume_capacity(message.ref());
-                // If the connection has not yet been established we can't send yet.
-                // Instead on_connect() will call send().
-                if (connection.state == .connecting) {
-                    assert(connection.peer == .replica);
-                    return;
-                }
-                // If there is no send operation currently in progress, start one.
-                if (!connection.send_submitted) connection.send(bus);
             }
 
             /// Clean up an active connection and reset it to its initial, unused, state.
@@ -968,89 +1051,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 connection.peer = peer;
 
                 return true;
-            }
-
-            fn send(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.peer != .unknown);
-                assert(connection.state == .connected);
-                assert(connection.fd != null);
-                assert(!connection.send_submitted);
-
-                connection.send_now(bus);
-
-                const message = connection.send_queue.head() orelse return;
-                connection.send_submitted = true;
-                bus.io.send(
-                    *MessageBus,
-                    bus,
-                    on_send,
-                    &connection.send_completion,
-                    connection.fd.?,
-                    message.buffer[connection.send_progress..message.header.size],
-                );
-            }
-
-            // Optimization/fast path: try to immediately copy the send queue over to the in-kernel
-            // send buffer, falling back to asynchronous send if that's not possible.
-            fn send_now(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.state == .connected);
-                assert(connection.fd != null);
-                assert(!connection.send_submitted);
-
-                for (0..connection.send_queue.count) |_| {
-                    const message = connection.send_queue.head().?;
-                    assert(connection.send_progress < message.header.size);
-                    const write_size = bus.io.send_now(
-                        connection.fd.?,
-                        message.buffer[connection.send_progress..message.header.size],
-                    ) orelse return;
-                    connection.send_progress += write_size;
-                    assert(connection.send_progress <= message.header.size);
-                    if (connection.send_progress == message.header.size) {
-                        _ = connection.send_queue.pop();
-                        bus.unref(message);
-                        connection.send_progress = 0;
-                    } else {
-                        assert(connection.send_progress < message.header.size);
-                        return;
-                    }
-                }
-            }
-
-            fn on_send(
-                bus: *MessageBus,
-                completion: *IO.Completion,
-                result: IO.SendError!usize,
-            ) void {
-                const connection: *Connection = @alignCast(
-                    @fieldParentPtr("send_completion", completion),
-                );
-                assert(connection.send_submitted);
-                connection.send_submitted = false;
-                assert(connection.peer != .unknown);
-                if (connection.state == .terminating) {
-                    connection.maybe_close(bus);
-                    return;
-                }
-                assert(connection.state == .connected);
-                connection.send_progress += result catch |err| {
-                    // TODO: maybe don't need to close on *every* error
-                    log.warn("{}: on_send: to={} {}", .{
-                        bus.id,
-                        connection.peer,
-                        err,
-                    });
-                    connection.terminate(bus, .shutdown);
-                    return;
-                };
-                assert(connection.send_progress <= connection.send_queue.head().?.header.size);
-                // If the message has been fully sent, move on to the next one.
-                if (connection.send_progress == connection.send_queue.head().?.header.size) {
-                    connection.send_progress = 0;
-                    const message = connection.send_queue.pop().?;
-                    bus.unref(message);
-                }
-                connection.send(bus);
             }
 
             fn maybe_close(connection: *Connection, bus: *MessageBus) void {
