@@ -168,7 +168,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     defer gpa.free(tigerbeetle_absolute_path);
 
     inline for (comptime std.enums.values(Language)) |language| {
-        if (language_requested == language or language_requested == null) {
+        if ((language_requested == language or language_requested == null) and
+            language != .rust) // Rust isn't published yet.
+        {
             const ci = @field(LanguageCI, @tagName(language));
             try ci.validate_release(shell, gpa, .{
                 .tigerbeetle = tigerbeetle_absolute_path,
