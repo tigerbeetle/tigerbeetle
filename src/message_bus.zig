@@ -373,6 +373,134 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             unreachable;
         }
 
+        /// Attempt to connect to a replica.
+        /// The slot in the Message.replicas slices is immediately reserved.
+        /// Failure is silent and returns the connection to an unused state.
+        pub fn connect_to_replica(connection: *Connection, bus: *MessageBus, replica: u8) void {
+            if (process_type == .replica) assert(replica != bus.process.replica);
+
+            assert(connection.state == .free);
+            assert(connection.fd == null);
+
+            const family = bus.configuration[replica].any.family;
+            connection.fd = init_tcp(bus.io, family) catch |err| {
+                log.err("{}: connect_to_replcia: init_tcp error={s}", .{
+                    bus.id,
+                    @errorName(err),
+                });
+                return;
+            };
+            connection.peer = .{ .replica = replica };
+            connection.state = .connecting;
+            bus.connections_used += 1;
+
+            assert(bus.replicas[replica] == null);
+            bus.replicas[replica] = connection;
+
+            const attempts = &bus.replicas_connect_attempts[replica];
+            const ms = vsr.exponential_backoff_with_jitter(
+                &bus.prng,
+                constants.connection_delay_min_ms,
+                constants.connection_delay_max_ms,
+                attempts.*,
+            );
+            attempts.* += 1;
+
+            log.debug("{}: connect_to_replica: connecting to={} after={}ms", .{
+                bus.id,
+                connection.peer.replica,
+                ms,
+            });
+
+            assert(!connection.recv_submitted);
+            connection.recv_submitted = true;
+
+            bus.io.timeout(
+                *MessageBus,
+                bus,
+                on_connect_with_exponential_backoff,
+                // We use `recv_completion` for the connection `timeout()` and `connect()` calls
+                &connection.recv_completion,
+                @as(u63, @intCast(ms * std.time.ns_per_ms)),
+            );
+        }
+
+        fn on_connect_with_exponential_backoff(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.TimeoutError!void,
+        ) void {
+            const connection: *Connection = @alignCast(
+                @fieldParentPtr("recv_completion", completion),
+            );
+            assert(connection.recv_submitted);
+            connection.recv_submitted = false;
+            if (connection.state == .terminating) {
+                connection.maybe_close(bus);
+                return;
+            }
+            assert(connection.state == .connecting);
+            result catch unreachable;
+
+            log.debug("{}: on_connect_with_exponential_backoff: to={}", .{
+                bus.id,
+                connection.peer.replica,
+            });
+
+            assert(!connection.recv_submitted);
+            connection.recv_submitted = true;
+
+            bus.io.connect(
+                *MessageBus,
+                bus,
+                on_connect,
+                // We use `recv_completion` for the connection `timeout()` and `connect()` calls
+                &connection.recv_completion,
+                connection.fd.?,
+                bus.configuration[connection.peer.replica],
+            );
+        }
+
+        fn on_connect(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.ConnectError!void,
+        ) void {
+            const connection: *Connection = @alignCast(
+                @fieldParentPtr("recv_completion", completion),
+            );
+            assert(connection.recv_submitted);
+            connection.recv_submitted = false;
+
+            if (connection.state == .terminating) {
+                connection.maybe_close(bus);
+                return;
+            }
+            assert(connection.state == .connecting);
+            connection.state = .connected;
+
+            result catch |err| {
+                log.warn("{}: on_connect: error to={} {}", .{
+                    bus.id,
+                    connection.peer.replica,
+                    err,
+                });
+                connection.terminate(bus, .close);
+                return;
+            };
+
+            log.info("{}: on_connect: connected to={}", .{ bus.id, connection.peer.replica });
+            bus.replicas_connect_attempts[connection.peer.replica] = 0;
+
+            connection.assert_recv_send_initial_state(bus);
+            assert(connection.recv_buffer == null);
+            connection.recv_buffer = MessageBuffer.init(bus.pool);
+            connection.recv(bus);
+            // A message may have been queued for sending while we were connecting:
+            // TODO Should we relax recv() and send() to return if `state != .connected`?
+            if (connection.state == .connected) connection.send(bus);
+        }
+
         pub fn get_message(
             bus: *MessageBus,
             comptime command: ?vsr.Command,
@@ -507,134 +635,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             send_queue: SendQueue,
             /// For connections_suspended.
             link: QueueType(Connection).Link = .{},
-
-            /// Attempt to connect to a replica.
-            /// The slot in the Message.replicas slices is immediately reserved.
-            /// Failure is silent and returns the connection to an unused state.
-            pub fn connect_to_replica(connection: *Connection, bus: *MessageBus, replica: u8) void {
-                if (process_type == .replica) assert(replica != bus.process.replica);
-
-                assert(connection.state == .free);
-                assert(connection.fd == null);
-
-                const family = bus.configuration[replica].any.family;
-                connection.fd = init_tcp(bus.io, family) catch |err| {
-                    log.err("{}: connect_to_replcia: init_tcp error={s}", .{
-                        bus.id,
-                        @errorName(err),
-                    });
-                    return;
-                };
-                connection.peer = .{ .replica = replica };
-                connection.state = .connecting;
-                bus.connections_used += 1;
-
-                assert(bus.replicas[replica] == null);
-                bus.replicas[replica] = connection;
-
-                const attempts = &bus.replicas_connect_attempts[replica];
-                const ms = vsr.exponential_backoff_with_jitter(
-                    &bus.prng,
-                    constants.connection_delay_min_ms,
-                    constants.connection_delay_max_ms,
-                    attempts.*,
-                );
-                attempts.* += 1;
-
-                log.debug("{}: connect_to_replica: connecting to={} after={}ms", .{
-                    bus.id,
-                    connection.peer.replica,
-                    ms,
-                });
-
-                assert(!connection.recv_submitted);
-                connection.recv_submitted = true;
-
-                bus.io.timeout(
-                    *MessageBus,
-                    bus,
-                    on_connect_with_exponential_backoff,
-                    // We use `recv_completion` for the connection `timeout()` and `connect()` calls
-                    &connection.recv_completion,
-                    @as(u63, @intCast(ms * std.time.ns_per_ms)),
-                );
-            }
-
-            fn on_connect_with_exponential_backoff(
-                bus: *MessageBus,
-                completion: *IO.Completion,
-                result: IO.TimeoutError!void,
-            ) void {
-                const connection: *Connection = @alignCast(
-                    @fieldParentPtr("recv_completion", completion),
-                );
-                assert(connection.recv_submitted);
-                connection.recv_submitted = false;
-                if (connection.state == .terminating) {
-                    connection.maybe_close(bus);
-                    return;
-                }
-                assert(connection.state == .connecting);
-                result catch unreachable;
-
-                log.debug("{}: on_connect_with_exponential_backoff: to={}", .{
-                    bus.id,
-                    connection.peer.replica,
-                });
-
-                assert(!connection.recv_submitted);
-                connection.recv_submitted = true;
-
-                bus.io.connect(
-                    *MessageBus,
-                    bus,
-                    on_connect,
-                    // We use `recv_completion` for the connection `timeout()` and `connect()` calls
-                    &connection.recv_completion,
-                    connection.fd.?,
-                    bus.configuration[connection.peer.replica],
-                );
-            }
-
-            fn on_connect(
-                bus: *MessageBus,
-                completion: *IO.Completion,
-                result: IO.ConnectError!void,
-            ) void {
-                const connection: *Connection = @alignCast(
-                    @fieldParentPtr("recv_completion", completion),
-                );
-                assert(connection.recv_submitted);
-                connection.recv_submitted = false;
-
-                if (connection.state == .terminating) {
-                    connection.maybe_close(bus);
-                    return;
-                }
-                assert(connection.state == .connecting);
-                connection.state = .connected;
-
-                result catch |err| {
-                    log.warn("{}: on_connect: error to={} {}", .{
-                        bus.id,
-                        connection.peer.replica,
-                        err,
-                    });
-                    connection.terminate(bus, .close);
-                    return;
-                };
-
-                log.info("{}: on_connect: connected to={}", .{ bus.id, connection.peer.replica });
-                bus.replicas_connect_attempts[connection.peer.replica] = 0;
-
-                connection.assert_recv_send_initial_state(bus);
-                assert(connection.recv_buffer == null);
-                connection.recv_buffer = MessageBuffer.init(bus.pool);
-                connection.recv(bus);
-                // A message may have been queued for sending while we were connecting:
-                // TODO Should we relax recv() and send() to return if `state != .connected`?
-                if (connection.state == .connected) connection.send(bus);
-            }
 
             fn assert_recv_send_initial_state(connection: *Connection, bus: *MessageBus) void {
                 assert(bus.connections_used > 0);
