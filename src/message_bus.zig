@@ -769,6 +769,149 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             bus.send(connection);
         }
 
+        /// Clean up an active connection and reset it to its initial, unused, state.
+        /// This reset does not happen instantly as currently in progress operations
+        /// must first be stopped. The `how` arg allows the caller to specify if a
+        /// shutdown syscall should be made or not before proceeding to wait for
+        /// currently in progress operations to complete and close the socket.
+        /// I'll be back! (when the Connection is reused after being fully closed)
+        pub fn terminate(
+            connection: *Connection,
+            bus: *MessageBus,
+            how: enum { shutdown, close },
+        ) void {
+            assert(connection.state != .free);
+            assert(connection.fd != null);
+            switch (how) {
+                .shutdown => {
+                    // The shutdown syscall will cause currently in progress send/recv
+                    // operations to be gracefully closed while keeping the fd open.
+                    //
+                    // TODO: Investigate differences between shutdown() on Linux vs Darwin.
+                    // Especially how this interacts with our assumptions around pending I/O.
+                    bus.io.shutdown(connection.fd.?, .both) catch |err| switch (err) {
+                        error.SocketNotConnected => {
+                            // This should only happen if we for some reason decide to terminate
+                            // a connection while a connect operation is in progress.
+                            // This is fine though, we simply continue with the logic below and
+                            // wait for the connect operation to finish.
+
+                            // TODO: This currently happens in other cases if the
+                            // connection was closed due to an error. We need to intelligently
+                            // decide whether to shutdown or close directly based on the error
+                            // before these assertions may be re-enabled.
+
+                            //assert(connection.state == .connecting);
+                            //assert(connection.recv_submitted);
+                            //assert(!connection.send_submitted);
+                        },
+                        // Ignore all the remaining errors for now
+                        error.ConnectionAborted,
+                        error.ConnectionResetByPeer,
+                        error.BlockingOperationInProgress,
+                        error.NetworkSubsystemFailed,
+                        error.SystemResources,
+                        error.Unexpected,
+                        => {},
+                    };
+                },
+                .close => {},
+            }
+            assert(connection.state != .terminating);
+            connection.state = .terminating;
+            connection.maybe_close(bus);
+        }
+
+        fn maybe_close(connection: *Connection, bus: *MessageBus) void {
+            assert(connection.state == .terminating);
+            // If a recv or send operation is currently submitted to the kernel,
+            // submitting a close would cause a race. Therefore we must wait for
+            // any currently submitted operation to complete.
+            if (connection.recv_submitted or connection.send_submitted) return;
+            // Even if there's no active physical IO in progress, we want to wait until all
+            // messages already received are consumed, to prevent graceful termination of
+            // connection from dropping messages.
+            if (connection.recv_buffer) |*receive_buffer| {
+                if (receive_buffer.has_message()) return;
+            }
+            connection.send_submitted = true;
+            connection.recv_submitted = true;
+            // We can free resources now that there is no longer any I/O in progress.
+            while (connection.send_queue.pop()) |message| {
+                bus.unref(message);
+            }
+            if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
+            connection.recv_buffer = null;
+            assert(connection.fd != null);
+            defer connection.fd = null;
+            // It's OK to use the send completion here as we know that no send
+            // operation is currently in progress.
+            bus.io.close(
+                *MessageBus,
+                bus,
+                on_close,
+                &connection.send_completion,
+                connection.fd.?,
+            );
+        }
+
+        fn on_close(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.CloseError!void,
+        ) void {
+            const connection: *Connection = @alignCast(
+                @fieldParentPtr("send_completion", completion),
+            );
+            assert(connection.send_submitted);
+            assert(connection.recv_submitted);
+
+            assert(connection.state == .terminating);
+
+            result catch |err| {
+                log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
+            };
+
+            // Reset the connection to its initial state.
+            assert(connection.recv_buffer == null);
+            assert(connection.send_queue.empty());
+
+            switch (connection.peer) {
+                .unknown => {},
+                .client, .client_likely => |client_id| switch (process_type) {
+                    .replica => {
+                        // A newer client connection may have replaced this one:
+                        if (bus.process.clients.get(client_id)) |existing_connection| {
+                            if (existing_connection == connection) {
+                                assert(bus.process.clients.remove(client_id));
+                            }
+                        } else {
+                            // A newer client connection may even leapfrog this connection
+                            // and then be terminated and set to null before we can get
+                            // here.
+                        }
+                    },
+                    .client => unreachable,
+                },
+                .replica => |replica| {
+                    // A newer replica connection may have replaced this one:
+                    if (bus.replicas[replica] == connection) {
+                        bus.replicas[replica] = null;
+                    } else {
+                        // A newer replica connection may even leapfrog this connection and
+                        // then be terminated and set to null before we can get here:
+                        stdx.maybe(bus.replicas[replica] == null);
+                    }
+                },
+            }
+            bus.connections_used -= 1;
+            connection.* = .{
+                .send_queue = .{
+                    .buffer = connection.send_queue.buffer,
+                },
+            };
+        }
+
         pub fn get_message(
             bus: *MessageBus,
             comptime command: ?vsr.Command,
@@ -888,59 +1031,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(connection.send_progress == 0);
             }
 
-            /// Clean up an active connection and reset it to its initial, unused, state.
-            /// This reset does not happen instantly as currently in progress operations
-            /// must first be stopped. The `how` arg allows the caller to specify if a
-            /// shutdown syscall should be made or not before proceeding to wait for
-            /// currently in progress operations to complete and close the socket.
-            /// I'll be back! (when the Connection is reused after being fully closed)
-            pub fn terminate(
-                connection: *Connection,
-                bus: *MessageBus,
-                how: enum { shutdown, close },
-            ) void {
-                assert(connection.state != .free);
-                assert(connection.fd != null);
-                switch (how) {
-                    .shutdown => {
-                        // The shutdown syscall will cause currently in progress send/recv
-                        // operations to be gracefully closed while keeping the fd open.
-                        //
-                        // TODO: Investigate differences between shutdown() on Linux vs Darwin.
-                        // Especially how this interacts with our assumptions around pending I/O.
-                        bus.io.shutdown(connection.fd.?, .both) catch |err| switch (err) {
-                            error.SocketNotConnected => {
-                                // This should only happen if we for some reason decide to terminate
-                                // a connection while a connect operation is in progress.
-                                // This is fine though, we simply continue with the logic below and
-                                // wait for the connect operation to finish.
-
-                                // TODO: This currently happens in other cases if the
-                                // connection was closed due to an error. We need to intelligently
-                                // decide whether to shutdown or close directly based on the error
-                                // before these assertions may be re-enabled.
-
-                                //assert(connection.state == .connecting);
-                                //assert(connection.recv_submitted);
-                                //assert(!connection.send_submitted);
-                            },
-                            // Ignore all the remaining errors for now
-                            error.ConnectionAborted,
-                            error.ConnectionResetByPeer,
-                            error.BlockingOperationInProgress,
-                            error.NetworkSubsystemFailed,
-                            error.SystemResources,
-                            error.Unexpected,
-                            => {},
-                        };
-                    },
-                    .close => {},
-                }
-                assert(connection.state != .terminating);
-                connection.state = .terminating;
-                connection.maybe_close(bus);
-            }
-
             fn set_and_verify_peer(connection: *Connection, bus: *MessageBus, peer: vsr.Peer) bool {
                 comptime assert(process_type == .replica);
 
@@ -1056,96 +1146,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 connection.peer = peer;
 
                 return true;
-            }
-
-            fn maybe_close(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.state == .terminating);
-                // If a recv or send operation is currently submitted to the kernel,
-                // submitting a close would cause a race. Therefore we must wait for
-                // any currently submitted operation to complete.
-                if (connection.recv_submitted or connection.send_submitted) return;
-                // Even if there's no active physical IO in progress, we want to wait until all
-                // messages already received are consumed, to prevent graceful termination of
-                // connection from dropping messages.
-                if (connection.recv_buffer) |*receive_buffer| {
-                    if (receive_buffer.has_message()) return;
-                }
-                connection.send_submitted = true;
-                connection.recv_submitted = true;
-                // We can free resources now that there is no longer any I/O in progress.
-                while (connection.send_queue.pop()) |message| {
-                    bus.unref(message);
-                }
-                if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
-                connection.recv_buffer = null;
-                assert(connection.fd != null);
-                defer connection.fd = null;
-                // It's OK to use the send completion here as we know that no send
-                // operation is currently in progress.
-                bus.io.close(
-                    *MessageBus,
-                    bus,
-                    on_close,
-                    &connection.send_completion,
-                    connection.fd.?,
-                );
-            }
-
-            fn on_close(
-                bus: *MessageBus,
-                completion: *IO.Completion,
-                result: IO.CloseError!void,
-            ) void {
-                const connection: *Connection = @alignCast(
-                    @fieldParentPtr("send_completion", completion),
-                );
-                assert(connection.send_submitted);
-                assert(connection.recv_submitted);
-
-                assert(connection.state == .terminating);
-
-                result catch |err| {
-                    log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
-                };
-
-                // Reset the connection to its initial state.
-                assert(connection.recv_buffer == null);
-                assert(connection.send_queue.empty());
-
-                switch (connection.peer) {
-                    .unknown => {},
-                    .client, .client_likely => |client_id| switch (process_type) {
-                        .replica => {
-                            // A newer client connection may have replaced this one:
-                            if (bus.process.clients.get(client_id)) |existing_connection| {
-                                if (existing_connection == connection) {
-                                    assert(bus.process.clients.remove(client_id));
-                                }
-                            } else {
-                                // A newer client connection may even leapfrog this connection
-                                // and then be terminated and set to null before we can get
-                                // here.
-                            }
-                        },
-                        .client => unreachable,
-                    },
-                    .replica => |replica| {
-                        // A newer replica connection may have replaced this one:
-                        if (bus.replicas[replica] == connection) {
-                            bus.replicas[replica] = null;
-                        } else {
-                            // A newer replica connection may even leapfrog this connection and
-                            // then be terminated and set to null before we can get here:
-                            stdx.maybe(bus.replicas[replica] == null);
-                        }
-                    },
-                }
-                bus.connections_used -= 1;
-                connection.* = .{
-                    .send_queue = .{
-                        .buffer = connection.send_queue.buffer,
-                    },
-                };
             }
         };
     };
