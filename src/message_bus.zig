@@ -251,7 +251,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     // to connect to each other at the same time.
                     const replica_next = bus.process.replica + 1;
                     for (bus.replicas[replica_next..], replica_next..) |connection, replica| {
-                        if (connection == null) bus.connect_to_replica(@intCast(replica));
+                        if (connection == null) bus.connect(@intCast(replica));
                     }
                     assert(bus.connections_used >= bus.replicas.len - replica_next);
 
@@ -261,7 +261,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 .client => {
                     // The client connects to all replicas.
                     for (bus.replicas, 0..) |connection, replica| {
-                        if (connection == null) bus.connect_to_replica(@intCast(replica));
+                        if (connection == null) bus.connect(@intCast(replica));
                     }
                     assert(bus.connections_used >= bus.replicas.len);
                 },
@@ -323,7 +323,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             }
         }
 
-        fn connect_to_replica(bus: *MessageBus, replica: u8) void {
+        fn connect(bus: *MessageBus, replica: u8) void {
             assert(bus.replicas[replica] == null);
 
             // Obtain a connection struct for our new replica connection.
@@ -333,15 +333,26 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             // be a replica. Since shutting a connection down does not happen
             // instantly, simply return after starting the shutdown and try again
             // on the next tick().
-            for (bus.connections) |*connection| {
-                if (connection.state == .free) {
-                    // This will immediately add the connection to bus.replicas,
-                    // or else will return early if a socket file descriptor cannot be obtained:
-                    // TODO See if we can clean this up to remove/expose the early return branch.
-                    connection.connect_to_replica(bus, replica);
-                    return;
-                }
+            const connection_free: *Connection = for (bus.connections) |*connection| {
+                if (connection.state == .free) break connection;
+            } else {
+                bus.connect_reclaim_connection();
+                return;
+            };
+
+            assert(connection_free.state == .free);
+            // This will immediately add the connection to bus.replicas,
+            // or else will return early if a socket file descriptor cannot be obtained:
+            bus.connect_connection(connection_free, replica);
+            switch (connection_free.state) {
+                .connecting => assert(bus.replicas[replica] != null),
+                .free => assert(bus.replicas[replica] == null),
+                else => unreachable,
             }
+        }
+
+        fn connect_reclaim_connection(bus: *MessageBus) void {
+            for (bus.connections) |*connection| assert(connection.state != .free);
 
             // If there is already a connection being shut down, no need to kill another.
             for (bus.connections) |*connection| {
@@ -376,7 +387,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         /// Attempt to connect to a replica.
         /// The slot in the Message.replicas slices is immediately reserved.
         /// Failure is silent and returns the connection to an unused state.
-        pub fn connect_to_replica(connection: *Connection, bus: *MessageBus, replica: u8) void {
+        fn connect_connection(bus: *MessageBus, connection: *Connection, replica: u8) void {
             if (process_type == .replica) assert(replica != bus.process.replica);
 
             assert(connection.state == .free);
@@ -418,14 +429,14 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             bus.io.timeout(
                 *MessageBus,
                 bus,
-                on_connect_with_exponential_backoff,
+                connect_timeout_callback,
                 // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                 &connection.recv_completion,
                 @as(u63, @intCast(ms * std.time.ns_per_ms)),
             );
         }
 
-        fn on_connect_with_exponential_backoff(
+        fn connect_timeout_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
             result: IO.TimeoutError!void,
@@ -453,7 +464,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             bus.io.connect(
                 *MessageBus,
                 bus,
-                on_connect,
+                connect_callback,
                 // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                 &connection.recv_completion,
                 connection.fd.?,
@@ -461,7 +472,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             );
         }
 
-        fn on_connect(
+        fn connect_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
             result: IO.ConnectError!void,
