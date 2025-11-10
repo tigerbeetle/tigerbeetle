@@ -497,7 +497,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     connection.peer.replica,
                     err,
                 });
-                bus.terminate(connection, .close);
+                bus.terminate(connection, .no_shutdown);
                 return;
             };
 
@@ -557,7 +557,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             // No bytes received means that the peer closed its side of the connection.
             if (bytes_received == 0) {
                 log.info("{}: on_recv: from={} orderly shutdown", .{ bus.id, connection.peer });
-                bus.terminate(connection, .close);
+                bus.terminate(connection, .no_shutdown);
                 return;
             }
             assert(bytes_received <= constants.message_size_max);
@@ -606,7 +606,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     connection.peer,
                     @tagName(reason),
                 });
-                bus.terminate(connection, .close);
+                bus.terminate(connection, .no_shutdown);
                 return;
             }
 
@@ -778,7 +778,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         fn terminate(
             bus: *MessageBus,
             connection: *Connection,
-            how: enum { shutdown, close },
+            how: enum { shutdown, no_shutdown },
         ) void {
             assert(connection.state != .free);
             assert(connection.fd != null);
@@ -815,7 +815,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                         => {},
                     };
                 },
-                .close => {},
+                .no_shutdown => {},
             }
             assert(connection.state != .terminating);
             connection.state = .terminating;
