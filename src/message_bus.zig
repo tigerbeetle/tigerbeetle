@@ -315,7 +315,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
                 assert(connection.recv_buffer == null);
                 connection.recv_buffer = MessageBuffer.init(bus.pool);
-                connection.recv(bus);
+                bus.recv(connection);
             } else |err| {
                 connection.state = .free;
                 // TODO: some errors should probably be fatal
@@ -506,13 +506,16 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             connection.assert_recv_send_initial_state(bus);
             assert(connection.recv_buffer == null);
             connection.recv_buffer = MessageBuffer.init(bus.pool);
-            connection.recv(bus);
+            bus.recv(connection);
             // A message may have been queued for sending while we were connecting:
             // TODO Should we relax recv() and send() to return if `state != .connected`?
             if (connection.state == .connected) connection.send(bus);
         }
 
-        fn recv(connection: *Connection, bus: *MessageBus) void {
+        /// The recv loop.
+        ///
+        /// Kickstarted by `accept` and `connect`, and loops onto itself via `recv_buffer_drain`.
+        fn recv(bus: *MessageBus, connection: *Connection) void {
             assert(connection.state == .connected);
             assert(connection.fd != null);
             assert(connection.recv_buffer != null);
@@ -523,14 +526,14 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             bus.io.recv(
                 *MessageBus,
                 bus,
-                on_recv,
+                recv_callback,
                 &connection.recv_completion,
                 connection.fd.?,
                 connection.recv_buffer.?.recv_slice(),
             );
         }
 
-        fn on_recv(
+        fn recv_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
             result: IO.RecvError!usize,
@@ -584,10 +587,15 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 // The client connects only to replicas and should set peer when connecting:
                 .client => assert(connection.peer == .replica),
             }
-            connection.call_on_messages(bus);
+            bus.recv_buffer_drain(connection);
         }
 
-        fn call_on_messages(connection: *Connection, bus: *MessageBus) void {
+        /// Attempt moving messages from recv buffer into replcia for processing. Called when recv
+        /// syscall completes, or when a replica signals readiness to consume previously suspended
+        /// messages.
+        fn recv_buffer_drain(bus: *MessageBus, connection: *Connection) void {
+            assert(connection.recv_buffer != null);
+
             if (connection.recv_buffer.?.has_message()) {
                 bus.on_messages_callback(bus, &connection.recv_buffer.?);
             }
@@ -609,7 +617,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 if (connection.state == .terminating) {
                     connection.maybe_close(bus);
                 } else {
-                    connection.recv(bus);
+                    bus.recv(connection);
                 }
             }
         }
@@ -669,7 +677,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(connection.recv_buffer != null);
                 assert(connection.recv_buffer.?.advance_size >= @sizeOf(vsr.Header));
                 assert(connection.recv_buffer.?.has_message());
-                connection.call_on_messages(bus);
+                bus.recv_buffer_drain(connection);
             }
         }
 
