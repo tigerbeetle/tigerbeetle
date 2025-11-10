@@ -512,6 +512,108 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             if (connection.state == .connected) connection.send(bus);
         }
 
+        fn recv(connection: *Connection, bus: *MessageBus) void {
+            assert(connection.state == .connected);
+            assert(connection.fd != null);
+            assert(connection.recv_buffer != null);
+
+            assert(!connection.recv_submitted);
+            connection.recv_submitted = true;
+
+            bus.io.recv(
+                *MessageBus,
+                bus,
+                on_recv,
+                &connection.recv_completion,
+                connection.fd.?,
+                connection.recv_buffer.?.recv_slice(),
+            );
+        }
+
+        fn on_recv(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.RecvError!usize,
+        ) void {
+            const connection: *Connection = @alignCast(
+                @fieldParentPtr("recv_completion", completion),
+            );
+            assert(connection.recv_submitted);
+            connection.recv_submitted = false;
+            if (connection.state == .terminating) {
+                connection.maybe_close(bus);
+                return;
+            }
+            assert(connection.state == .connected);
+            const bytes_received = result catch |err| {
+                // TODO: maybe don't need to close on *every* error
+                log.warn("{}: on_recv: from={} {}", .{ bus.id, connection.peer, err });
+                connection.terminate(bus, .shutdown);
+                return;
+            };
+            // No bytes received means that the peer closed its side of the connection.
+            if (bytes_received == 0) {
+                log.info("{}: on_recv: from={} orderly shutdown", .{ bus.id, connection.peer });
+                connection.terminate(bus, .close);
+                return;
+            }
+            assert(bytes_received <= constants.message_size_max);
+            assert(connection.recv_buffer != null);
+            connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
+
+            switch (process_type) {
+                // Replicas may forward messages from clients or from other replicas so we
+                // may receive messages from a peer before we know who they are:
+                // This has the same effect as an asymmetric network where, for a short time
+                // bounded by the time it takes to ping, we can hear from a peer before we
+                // can send back to them.
+                .replica => {
+                    while (connection.recv_buffer.?.next_header()) |header| {
+                        if (connection.set_and_verify_peer(bus, header.peer_type())) {
+                            connection.recv_buffer.?.suspend_message(&header);
+                        } else {
+                            log.warn("{}: on_recv: invalid peer transition {any} -> {any}", .{
+                                bus.id,
+                                connection.peer,
+                                header.peer_type(),
+                            });
+                            connection.recv_buffer.?.invalidate(.misdirected);
+                        }
+                    }
+                },
+                // The client connects only to replicas and should set peer when connecting:
+                .client => assert(connection.peer == .replica),
+            }
+            connection.call_on_messages(bus);
+        }
+
+        fn call_on_messages(connection: *Connection, bus: *MessageBus) void {
+            if (connection.recv_buffer.?.has_message()) {
+                bus.on_messages_callback(bus, &connection.recv_buffer.?);
+            }
+
+            if (connection.recv_buffer.?.invalid) |reason| {
+                log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
+                    bus.id,
+                    connection.peer,
+                    @tagName(reason),
+                });
+                connection.terminate(bus, .close);
+                return;
+            }
+
+            if (connection.recv_buffer.?.has_message()) {
+                maybe(connection.state == .terminating);
+                bus.connections_suspended.push(connection);
+            } else {
+                if (connection.state == .terminating) {
+                    connection.maybe_close(bus);
+                } else {
+                    connection.recv(bus);
+                }
+            }
+        }
+
         pub fn get_message(
             bus: *MessageBus,
             comptime command: ?vsr.Command,
@@ -858,108 +960,6 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 connection.peer = peer;
 
                 return true;
-            }
-
-            fn recv(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.state == .connected);
-                assert(connection.fd != null);
-                assert(connection.recv_buffer != null);
-
-                assert(!connection.recv_submitted);
-                connection.recv_submitted = true;
-
-                bus.io.recv(
-                    *MessageBus,
-                    bus,
-                    on_recv,
-                    &connection.recv_completion,
-                    connection.fd.?,
-                    connection.recv_buffer.?.recv_slice(),
-                );
-            }
-
-            fn on_recv(
-                bus: *MessageBus,
-                completion: *IO.Completion,
-                result: IO.RecvError!usize,
-            ) void {
-                const connection: *Connection = @alignCast(
-                    @fieldParentPtr("recv_completion", completion),
-                );
-                assert(connection.recv_submitted);
-                connection.recv_submitted = false;
-                if (connection.state == .terminating) {
-                    connection.maybe_close(bus);
-                    return;
-                }
-                assert(connection.state == .connected);
-                const bytes_received = result catch |err| {
-                    // TODO: maybe don't need to close on *every* error
-                    log.warn("{}: on_recv: from={} {}", .{ bus.id, connection.peer, err });
-                    connection.terminate(bus, .shutdown);
-                    return;
-                };
-                // No bytes received means that the peer closed its side of the connection.
-                if (bytes_received == 0) {
-                    log.info("{}: on_recv: from={} orderly shutdown", .{ bus.id, connection.peer });
-                    connection.terminate(bus, .close);
-                    return;
-                }
-                assert(bytes_received <= constants.message_size_max);
-                assert(connection.recv_buffer != null);
-                connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
-
-                switch (process_type) {
-                    // Replicas may forward messages from clients or from other replicas so we
-                    // may receive messages from a peer before we know who they are:
-                    // This has the same effect as an asymmetric network where, for a short time
-                    // bounded by the time it takes to ping, we can hear from a peer before we
-                    // can send back to them.
-                    .replica => {
-                        while (connection.recv_buffer.?.next_header()) |header| {
-                            if (connection.set_and_verify_peer(bus, header.peer_type())) {
-                                connection.recv_buffer.?.suspend_message(&header);
-                            } else {
-                                log.warn("{}: on_recv: invalid peer transition {any} -> {any}", .{
-                                    bus.id,
-                                    connection.peer,
-                                    header.peer_type(),
-                                });
-                                connection.recv_buffer.?.invalidate(.misdirected);
-                            }
-                        }
-                    },
-                    // The client connects only to replicas and should set peer when connecting:
-                    .client => assert(connection.peer == .replica),
-                }
-                connection.call_on_messages(bus);
-            }
-
-            fn call_on_messages(connection: *Connection, bus: *MessageBus) void {
-                if (connection.recv_buffer.?.has_message()) {
-                    bus.on_messages_callback(bus, &connection.recv_buffer.?);
-                }
-
-                if (connection.recv_buffer.?.invalid) |reason| {
-                    log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
-                        bus.id,
-                        connection.peer,
-                        @tagName(reason),
-                    });
-                    connection.terminate(bus, .close);
-                    return;
-                }
-
-                if (connection.recv_buffer.?.has_message()) {
-                    maybe(connection.state == .terminating);
-                    bus.connections_suspended.push(connection);
-                } else {
-                    if (connection.state == .terminating) {
-                        connection.maybe_close(bus);
-                    } else {
-                        connection.recv(bus);
-                    }
-                }
             }
 
             fn send(connection: *Connection, bus: *MessageBus) void {
