@@ -198,8 +198,13 @@ pub fn ContextType(
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
+
+        // The client and message pool are only accessed on the I/O thread.
+        // They are deinitialized after disconnecting from the server,
+        // which allows the server to release the session.
         message_pool: MessagePool,
         client: Client,
+
         batch_size_limit: ?u32,
 
         completion_callback: CompletionCallback,
@@ -373,14 +378,58 @@ pub fn ContextType(
         }
 
         fn tick(self: *Context) void {
-            if (self.eviction_reason == null) {
-                self.client.tick();
-            }
+            if (self.eviction_reason != null) return;
+            self.client.tick();
         }
 
+        const has_message_bus = @hasField(Client, "message_bus");
+
         fn io_thread(self: *Context) void {
-            while (self.signal.status() != .stopped) {
-                self.tick();
+            var disconnecting = false;
+            var client_deinited = false;
+
+            while (true) {
+                const should_stop = self.signal.status() == .stopped;
+                const should_disconnect = (self.eviction_reason != null or should_stop) and
+                    !disconnecting;
+
+                // Initiate graceful disconnection on eviction or shutdown.
+                // This terminates all message_bus connections through the
+                // connection state machine, which closes sockets (releasing
+                // server resources) while keeping Connection memory valid
+                // for pending IO completions to land on.
+                if (should_disconnect) {
+                    self.cancel_request_inflight();
+
+                    while (self.pending.pop()) |packet| {
+                        packet.assert_phase(.pending);
+                        self.packet_cancel(packet);
+                    }
+
+                    if (has_message_bus) {
+                        self.client.message_bus.terminate_all();
+                    }
+
+                    disconnecting = true;
+                }
+
+                // Once all connections have fully terminated (no pending IO
+                // on any Connection memory), it is safe to deinit the client
+                // which frees the connections array.
+                if (disconnecting and !client_deinited and self.client_io_settled()) {
+                    self.client.deinit(self.gpa.allocator());
+                    self.message_pool.deinit(self.gpa.allocator());
+                    client_deinited = true;
+                }
+
+                // Exit only after the signal has stopped (no pending signal
+                // IO) and the client has been deinitialized.
+                if (should_stop and client_deinited) break;
+
+                // Don't tick the client once we're disconnecting, to prevent
+                // reconnection attempts via message_bus.tick_client().
+                if (!disconnecting) self.tick();
+
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
                         self.client_id,
@@ -390,25 +439,31 @@ pub fn ContextType(
                 };
             }
 
-            self.cancel_request_inflight();
+            // Drain any remaining submitted packets under the lock to
+            // ensure visibility of user-thread writes.
+            while (true) {
+                const packet: *Packet = packet: {
+                    self.interface.locker.lock();
+                    defer self.interface.locker.unlock();
 
-            while (self.pending.pop()) |packet| {
-                packet.assert_phase(.pending);
-                self.packet_cancel(packet);
-            }
-
-            // The submitted queue is no longer accessible to user threads,
-            // so synchronization is not required here.
-            while (self.submitted.pop()) |packet| {
+                    break :packet self.submitted.pop() orelse break;
+                };
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
             }
 
-            self.io.cancel_all();
             self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
             self.io.deinit();
+        }
+
+        /// Returns true when all client IO operations have completed and
+        /// it is safe to free the client's resources.
+        fn client_io_settled(self: *const Context) bool {
+            if (has_message_bus) {
+                return self.client.message_bus.connections_used == 0 and
+                    !self.client.message_bus.resume_receive_submitted;
+            }
+            return true;
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
@@ -582,13 +637,14 @@ pub fn ContextType(
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
             assert(self.batch_size_limit != null);
-            assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
 
-            // On shutdown, cancel this packet as well as any others batched onto it.
-            if (self.signal.status() != .running) {
+            // On eviction or shutdown, cancel this packet and any others batched onto it.
+            if (self.eviction_reason != null or self.signal.status() != .running) {
                 return self.packet_cancel(packet_list);
             }
+
+            assert(self.client.request_inflight == null);
 
             const message = self.client.get_message().build(.request);
             defer {
@@ -693,9 +749,10 @@ pub fn ContextType(
             assert(self.signal.status() != .stopped);
 
             // Don't send any requests until registration completes.
+            // Submitted packets will be drained by client_register_callback
+            // or by the io_thread shutdown path.
             if (self.batch_size_limit == null) {
-                assert(self.client.request_inflight != null);
-                assert(self.client.request_inflight.?.message.header.operation == .register);
+                maybe(self.eviction_reason != null);
                 return;
             }
 
@@ -735,6 +792,7 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            assert(self.eviction_reason == null);
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
@@ -757,11 +815,11 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
-            // Now that the client is evicted, no more requests can be submitted to it and we can
-            // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
-            // client before it exits (see `io_thread`).
+            // Set the eviction reason. The io_thread main loop will detect
+            // this and initiate graceful disconnection: cancel all inflight
+            // and pending packets, terminate connections, and deinit the
+            // client once all connection IO has settled.
             self.eviction_reason = eviction.header.reason;
-            self.signal.stop();
         }
 
         fn client_result_callback(
@@ -774,6 +832,7 @@ pub fn ContextType(
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
+            assert(self.eviction_reason == null);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
@@ -905,16 +964,10 @@ pub fn ContextType(
                 .phase = .submitted,
             };
 
-            if (self.eviction_reason == null) {
-                // Enqueue the packet and notify the IO thread to process it asynchronously.
-                assert(self.signal.status() == .running);
-                self.submitted.push(packet);
-                self.signal.notify();
-            } else {
-                // Cancel the packet since we stop the IO thread during eviction.
-                assert(self.signal.status() != .running);
-                self.packet_cancel(packet);
-            }
+            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            assert(self.signal.status() == .running);
+            self.submitted.push(packet);
+            self.signal.notify();
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {

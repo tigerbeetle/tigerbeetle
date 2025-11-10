@@ -292,6 +292,19 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.tick_connect();
         }
 
+        /// Initiates graceful termination of all active connections.
+        ///
+        /// Each connection's state machine drives itself to .free through
+        /// IO callbacks. Callers must continue running the IO loop until
+        /// `connections_used == 0`.
+        pub fn terminate_all(bus: *MessageBus) void {
+            for (bus.connections) |*connection| {
+                if (connection.state != .free and connection.state != .terminating) {
+                    bus.terminate(connection, .shutdown);
+                }
+            }
+        }
+
         fn tick_connect(bus: *MessageBus) void {
             const replica_next = switch (bus.process) {
                 // Each replica is responsible for connecting to replicas that come
