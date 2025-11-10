@@ -299,6 +299,28 @@ pub const IO = struct {
         // TODO Cancel in-flight async IO and wait for all completions.
     }
 
+    pub const CancelError = error{
+        NotRunning,
+        NotInterruptable,
+    } || posix.UnexpectedError;
+
+    pub fn cancel(
+        _: *IO,
+        comptime Context: type,
+        _: Context,
+        comptime _: fn (
+            context: Context,
+            completion: *Completion,
+            result: CancelError!void,
+        ) void,
+        _: struct {
+            completion: *Completion,
+            target: *Completion,
+        },
+    ) void {
+        @panic("cancelation is not supported on windows");
+    }
+
     pub const AcceptError = posix.AcceptError || posix.SetSockOptError;
 
     pub fn accept(
