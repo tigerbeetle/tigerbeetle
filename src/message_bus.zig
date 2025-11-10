@@ -365,7 +365,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             });
             for (bus.connections) |*connection| {
                 if (connection.peer == .client) {
-                    connection.terminate(bus, .shutdown);
+                    bus.terminate(connection, .shutdown);
                     return;
                 }
             }
@@ -375,7 +375,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             });
             for (bus.connections) |*connection| {
                 if (connection.peer == .unknown) {
-                    connection.terminate(bus, .shutdown);
+                    bus.terminate(connection, .shutdown);
                     return;
                 }
             }
@@ -448,7 +448,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             assert(connection.recv_submitted);
             connection.recv_submitted = false;
             if (connection.state == .terminating) {
-                connection.maybe_close(bus);
+                bus.terminate_join(connection);
                 return;
             }
             assert(connection.state == .connecting);
@@ -485,7 +485,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             connection.recv_submitted = false;
 
             if (connection.state == .terminating) {
-                connection.maybe_close(bus);
+                bus.terminate_join(connection);
                 return;
             }
             assert(connection.state == .connecting);
@@ -497,7 +497,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     connection.peer.replica,
                     err,
                 });
-                connection.terminate(bus, .close);
+                bus.terminate(connection, .close);
                 return;
             };
 
@@ -544,20 +544,20 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             assert(connection.recv_submitted);
             connection.recv_submitted = false;
             if (connection.state == .terminating) {
-                connection.maybe_close(bus);
+                bus.terminate_join(connection);
                 return;
             }
             assert(connection.state == .connected);
             const bytes_received = result catch |err| {
                 // TODO: maybe don't need to close on *every* error
                 log.warn("{}: on_recv: from={} {}", .{ bus.id, connection.peer, err });
-                connection.terminate(bus, .shutdown);
+                bus.terminate(connection, .shutdown);
                 return;
             };
             // No bytes received means that the peer closed its side of the connection.
             if (bytes_received == 0) {
                 log.info("{}: on_recv: from={} orderly shutdown", .{ bus.id, connection.peer });
-                connection.terminate(bus, .close);
+                bus.terminate(connection, .close);
                 return;
             }
             assert(bytes_received <= constants.message_size_max);
@@ -606,7 +606,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     connection.peer,
                     @tagName(reason),
                 });
-                connection.terminate(bus, .close);
+                bus.terminate(connection, .close);
                 return;
             }
 
@@ -615,7 +615,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 bus.connections_suspended.push(connection);
             } else {
                 if (connection.state == .terminating) {
-                    connection.maybe_close(bus);
+                    bus.terminate_join(connection);
                 } else {
                     bus.recv(connection);
                 }
@@ -745,7 +745,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             connection.send_submitted = false;
             assert(connection.peer != .unknown);
             if (connection.state == .terminating) {
-                connection.maybe_close(bus);
+                bus.terminate_join(connection);
                 return;
             }
             assert(connection.state == .connected);
@@ -756,7 +756,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     connection.peer,
                     err,
                 });
-                connection.terminate(bus, .shutdown);
+                bus.terminate(connection, .shutdown);
                 return;
             };
             assert(connection.send_progress <= connection.send_queue.head().?.header.size);
@@ -775,9 +775,9 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         /// shutdown syscall should be made or not before proceeding to wait for
         /// currently in progress operations to complete and close the socket.
         /// I'll be back! (when the Connection is reused after being fully closed)
-        pub fn terminate(
-            connection: *Connection,
+        fn terminate(
             bus: *MessageBus,
+            connection: *Connection,
             how: enum { shutdown, close },
         ) void {
             assert(connection.state != .free);
@@ -819,10 +819,10 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             }
             assert(connection.state != .terminating);
             connection.state = .terminating;
-            connection.maybe_close(bus);
+            bus.terminate_join(connection);
         }
 
-        fn maybe_close(connection: *Connection, bus: *MessageBus) void {
+        fn terminate_join(bus: *MessageBus, connection: *Connection) void {
             assert(connection.state == .terminating);
             // If a recv or send operation is currently submitted to the kernel,
             // submitting a close would cause a race. Therefore we must wait for
@@ -834,6 +834,17 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             if (connection.recv_buffer) |*receive_buffer| {
                 if (receive_buffer.has_message()) return;
             }
+
+            bus.terminate_close(connection);
+        }
+
+        fn terminate_close(bus: *MessageBus, connection: *Connection) void {
+            assert(connection.state == .terminating);
+            assert(!connection.recv_submitted);
+            assert(!connection.send_submitted);
+            if (connection.recv_buffer) |receive_buffer| assert(!receive_buffer.has_message());
+            assert(connection.fd != null);
+
             connection.send_submitted = true;
             connection.recv_submitted = true;
             // We can free resources now that there is no longer any I/O in progress.
@@ -842,20 +853,20 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             }
             if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
             connection.recv_buffer = null;
-            assert(connection.fd != null);
-            defer connection.fd = null;
+            const fd = connection.fd.?;
+            connection.fd = null;
             // It's OK to use the send completion here as we know that no send
             // operation is currently in progress.
             bus.io.close(
                 *MessageBus,
                 bus,
-                on_close,
+                terminate_close_callback,
                 &connection.send_completion,
-                connection.fd.?,
+                fd,
             );
         }
 
-        fn on_close(
+        fn terminate_close_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
             result: IO.CloseError!void,
@@ -863,18 +874,18 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             const connection: *Connection = @alignCast(
                 @fieldParentPtr("send_completion", completion),
             );
-            assert(connection.send_submitted);
-            assert(connection.recv_submitted);
-
             assert(connection.state == .terminating);
+            assert(connection.recv_submitted);
+            assert(connection.send_submitted);
+            assert(connection.recv_buffer == null);
+            assert(connection.send_queue.empty());
+            assert(connection.fd == null);
 
             result catch |err| {
                 log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
             };
 
             // Reset the connection to its initial state.
-            assert(connection.recv_buffer == null);
-            assert(connection.send_queue.empty());
 
             switch (connection.peer) {
                 .unknown => {},
@@ -1061,7 +1072,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                             assert(old.peer == .replica);
                             assert(old.peer.replica == replica_index);
                             assert(old.state != .free);
-                            if (old.state != .terminating) old.terminate(bus, .shutdown);
+                            if (old.state != .terminating) bus.terminate(old, .shutdown);
                         }
 
                         switch (connection.peer) {
@@ -1109,7 +1120,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                             }
 
                             if (old != connection and old.state != .terminating) {
-                                old.terminate(bus, .shutdown);
+                                bus.terminate(old, .shutdown);
                             }
                         }
 
