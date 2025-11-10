@@ -53,8 +53,8 @@ const Faults = struct {
 const Pipe = struct {
     io: *IO,
     connection: *Connection,
-    input: std.posix.socket_t = IO.INVALID_SOCKET,
-    output: std.posix.socket_t = IO.INVALID_SOCKET,
+    input: ?std.posix.socket_t = null,
+    output: ?std.posix.socket_t = null,
     buffer: [constants.vsr.message_size_max]u8 = undefined,
     send_inflight: bool = false,
     recv_inflight: bool = false,
@@ -70,8 +70,6 @@ const Pipe = struct {
         output: std.posix.socket_t,
     ) void {
         assert(pipe.connection.state == .proxying);
-        assert(input != IO.INVALID_SOCKET);
-        assert(output != IO.INVALID_SOCKET);
 
         pipe.input = input;
         pipe.output = output;
@@ -100,7 +98,7 @@ const Pipe = struct {
             pipe,
             on_recv,
             &pipe.recv_completion,
-            pipe.input,
+            pipe.input.?,
             pipe.buffer[0..],
         );
     }
@@ -208,7 +206,7 @@ const Pipe = struct {
             pipe,
             on_send,
             &pipe.send_completion,
-            pipe.output,
+            pipe.output.?,
             buffer,
         );
     }
@@ -253,8 +251,8 @@ const Connection = struct {
     replica_index: usize,
     connection_index: usize,
 
-    origin_fd: std.posix.socket_t = IO.INVALID_SOCKET,
-    remote_fd: std.posix.socket_t = IO.INVALID_SOCKET,
+    origin_fd: ?std.posix.socket_t = null,
+    remote_fd: ?std.posix.socket_t = null,
 
     origin_to_remote_pipe: Pipe,
     remote_to_origin_pipe: Pipe,
@@ -273,11 +271,11 @@ const Connection = struct {
         assert(connection.state == .accepting);
         defer assert(connection.state == .connecting);
 
-        assert(connection.origin_fd == IO.INVALID_SOCKET);
-        defer assert(connection.origin_fd != IO.INVALID_SOCKET);
+        assert(connection.origin_fd == null);
+        defer assert(connection.origin_fd != null);
 
-        assert(connection.remote_fd == IO.INVALID_SOCKET);
-        defer assert(connection.remote_fd != IO.INVALID_SOCKET);
+        assert(connection.remote_fd == null);
+        defer assert(connection.remote_fd != null);
         assert(connection.remote_address != null);
 
         const fd = result catch |err| {
@@ -310,7 +308,7 @@ const Connection = struct {
             connection,
             Connection.on_connect,
             &connection.connect_completion,
-            connection.remote_fd,
+            connection.remote_fd.?,
             connection.remote_address.?,
         );
     }
@@ -321,8 +319,8 @@ const Connection = struct {
         result: IO.ConnectError!void,
     ) void {
         assert(connection.state == .connecting);
-        assert(connection.origin_fd != IO.INVALID_SOCKET);
-        assert(connection.remote_fd != IO.INVALID_SOCKET);
+        assert(connection.origin_fd != null);
+        assert(connection.remote_fd != null);
 
         result catch |err| {
             log.warn("connect failed ({d},{d}): {}", .{
@@ -333,8 +331,8 @@ const Connection = struct {
             return connection.try_close();
         };
         connection.state = .proxying;
-        connection.origin_to_remote_pipe.open(connection.origin_fd, connection.remote_fd);
-        connection.remote_to_origin_pipe.open(connection.remote_fd, connection.origin_fd);
+        connection.origin_to_remote_pipe.open(connection.origin_fd.?, connection.remote_fd.?);
+        connection.remote_to_origin_pipe.open(connection.remote_fd.?, connection.origin_fd.?);
     }
 
     fn try_close(connection: *Connection) void {
@@ -353,7 +351,7 @@ const Connection = struct {
                 connection.connection_index,
             });
             connection.state = .closing;
-            std.posix.shutdown(connection.origin_fd, .both) catch |err| {
+            std.posix.shutdown(connection.origin_fd.?, .both) catch |err| {
                 switch (err) {
                     error.SocketNotConnected => {},
                     else => log.warn("shutdown origin_fd ({d},{d}) failed: {}", .{
@@ -361,7 +359,7 @@ const Connection = struct {
                     }),
                 }
             };
-            std.posix.shutdown(connection.remote_fd, .both) catch |err| {
+            std.posix.shutdown(connection.remote_fd.?, .both) catch |err| {
                 switch (err) {
                     error.SocketNotConnected => {},
                     else => log.warn("shutdown remote_fd ({d},{d}) failed: {}", .{
@@ -379,7 +377,7 @@ const Connection = struct {
                 connection,
                 on_close_origin,
                 &connection.close_completion,
-                connection.origin_fd,
+                connection.origin_fd.?,
             );
             return;
         }
@@ -395,8 +393,8 @@ const Connection = struct {
         assert(connection.state == .closing_origin);
         defer assert(connection.state == .closing_remote);
 
-        assert(connection.origin_fd != IO.INVALID_SOCKET);
-        defer assert(connection.origin_fd == IO.INVALID_SOCKET);
+        assert(connection.origin_fd != null);
+        defer assert(connection.origin_fd == null);
 
         result catch |err| {
             log.warn("on_close_origin ({d},{d}) error: {any}", .{
@@ -407,13 +405,13 @@ const Connection = struct {
         };
 
         connection.state = .closing_remote;
-        connection.origin_fd = IO.INVALID_SOCKET;
+        connection.origin_fd = null;
         connection.io.close(
             *Connection,
             connection,
             on_close_remote,
             &connection.close_completion,
-            connection.remote_fd,
+            connection.remote_fd.?,
         );
     }
 
@@ -425,8 +423,8 @@ const Connection = struct {
         assert(connection.state == .closing_remote);
         defer assert(connection.state == .free);
 
-        assert(connection.remote_fd != IO.INVALID_SOCKET);
-        defer assert(connection.remote_fd == IO.INVALID_SOCKET);
+        assert(connection.remote_fd != null);
+        defer assert(connection.remote_fd == null);
 
         result catch |err| {
             log.warn("on_close_remote ({d},{d}) error: {any}", .{
@@ -441,7 +439,7 @@ const Connection = struct {
             connection.connection_index,
         });
         connection.state = .free;
-        connection.remote_fd = IO.INVALID_SOCKET;
+        connection.remote_fd = null;
     }
 };
 
@@ -559,8 +557,8 @@ pub const Network = struct {
 
                     connection.state = .accepting;
                     connection.remote_address = proxy.remote_address;
-                    connection.origin_fd = IO.INVALID_SOCKET;
-                    connection.remote_fd = IO.INVALID_SOCKET;
+                    connection.origin_fd = null;
+                    connection.remote_fd = null;
 
                     network.io.accept(
                         *Connection,

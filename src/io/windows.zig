@@ -202,7 +202,7 @@ pub const IO = struct {
             accept: struct {
                 overlapped: Overlapped,
                 listen_socket: socket_t,
-                client_socket: socket_t,
+                client_socket: ?socket_t,
                 addr_buffer: [(@sizeOf(std.net.Address) + 16) * 2]u8 align(4),
             },
             connect: struct {
@@ -321,7 +321,7 @@ pub const IO = struct {
             .{
                 .overlapped = undefined,
                 .listen_socket = socket,
-                .client_socket = INVALID_SOCKET,
+                .client_socket = null,
                 .addr_buffer = undefined,
             },
             struct {
@@ -332,68 +332,67 @@ pub const IO = struct {
                     var flags: os.windows.DWORD = undefined;
                     var transferred: os.windows.DWORD = undefined;
 
-                    const rc = switch (op.client_socket) {
+                    const rc = if (op.client_socket == null) blk: {
                         // When first called, the client_socket is invalid so we start the op.
-                        INVALID_SOCKET => blk: {
-                            // Create the socket that will be used for accept.
-                            op.client_socket = ctx.io.open_socket(
-                                posix.AF.INET,
-                                posix.SOCK.STREAM,
-                                posix.IPPROTO.TCP,
-                            ) catch |err| switch (err) {
-                                error.AddressFamilyNotSupported => unreachable,
-                                error.ProtocolNotSupported => unreachable,
-                                else => |e| return e,
-                            };
+                        // Create the socket that will be used for accept.
+                        op.client_socket = ctx.io.open_socket(
+                            posix.AF.INET,
+                            posix.SOCK.STREAM,
+                            posix.IPPROTO.TCP,
+                        ) catch |err| switch (err) {
+                            error.AddressFamilyNotSupported => unreachable,
+                            error.ProtocolNotSupported => unreachable,
+                            else => |e| return e,
+                        };
 
-                            var sync_bytes_read: os.windows.DWORD = undefined;
-                            op.overlapped = .{
-                                .raw = std.mem.zeroes(os.windows.OVERLAPPED),
-                                .completion = ctx.completion,
-                            };
+                        var sync_bytes_read: os.windows.DWORD = undefined;
+                        op.overlapped = .{
+                            .raw = std.mem.zeroes(os.windows.OVERLAPPED),
+                            .completion = ctx.completion,
+                        };
 
-                            // Start the asynchronous accept with the created socket.
-                            break :blk os.windows.ws2_32.AcceptEx(
-                                op.listen_socket,
-                                op.client_socket,
-                                &op.addr_buffer,
-                                0,
-                                @sizeOf(std.net.Address) + 16,
-                                @sizeOf(std.net.Address) + 16,
-                                &sync_bytes_read,
-                                &op.overlapped.raw,
-                            );
-                        },
+                        // Start the asynchronous accept with the created socket.
+                        break :blk os.windows.ws2_32.AcceptEx(
+                            op.listen_socket,
+                            op.client_socket.?,
+                            &op.addr_buffer,
+                            0,
+                            @sizeOf(std.net.Address) + 16,
+                            @sizeOf(std.net.Address) + 16,
+                            &sync_bytes_read,
+                            &op.overlapped.raw,
+                        );
+                    } else blk: {
                         // Called after accept was started, so get the result.
-                        else => os.windows.ws2_32.WSAGetOverlappedResult(
+                        break :blk os.windows.ws2_32.WSAGetOverlappedResult(
                             op.listen_socket,
                             &op.overlapped.raw,
                             &transferred,
                             os.windows.FALSE, // Don't wait.
                             &flags,
-                        ),
+                        );
                     };
 
                     // Return the socket if we succeed in accepting.
                     if (rc != os.windows.FALSE) {
                         // Enables getsockopt, setsockopt, getsockname, getpeername.
                         _ = os.windows.ws2_32.setsockopt(
-                            op.client_socket,
+                            op.client_socket.?,
                             os.windows.ws2_32.SOL.SOCKET,
                             os.windows.ws2_32.SO.UPDATE_ACCEPT_CONTEXT,
                             null,
                             0,
                         );
 
-                        return op.client_socket;
+                        return op.client_socket.?;
                     }
 
                     // Destroy the client_socket we created if we get a non WouldBlock error.
                     errdefer |err| switch (err) {
                         error.WouldBlock => {},
                         else => {
-                            ctx.io.close_socket(op.client_socket);
-                            op.client_socket = INVALID_SOCKET;
+                            ctx.io.close_socket(op.client_socket.?);
+                            op.client_socket = null;
                         },
                     };
 
@@ -1087,7 +1086,6 @@ pub const IO = struct {
     }
 
     pub const socket_t = posix.socket_t;
-    pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
     pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {

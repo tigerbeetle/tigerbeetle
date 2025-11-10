@@ -453,7 +453,6 @@ const IO = struct {
     pub const TimeoutError = RealIO.TimeoutError;
     pub const socket_t = i32;
     pub const fd_t = i32;
-    pub const INVALID_SOCKET: socket_t = -1;
     const EventQueue = std.PriorityQueue(Event, void, Event.less_than);
 
     pub const Options = struct {

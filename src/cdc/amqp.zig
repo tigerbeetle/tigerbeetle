@@ -50,7 +50,7 @@ pub const Client = struct {
     ) Decoder.Error!void;
 
     io: *IO,
-    fd: IO.socket_t = IO.INVALID_SOCKET,
+    fd: ?IO.socket_t = null,
     reply_timeout_ticks: u64,
 
     receive_buffer: ReceiveBuffer,
@@ -195,9 +195,9 @@ pub const Client = struct {
         self: *Client,
         allocator: std.mem.Allocator,
     ) void {
-        if (self.fd != IO.INVALID_SOCKET) {
-            self.io.close_socket(self.fd);
-            self.fd = IO.INVALID_SOCKET;
+        if (self.fd) |fd| {
+            self.io.close_socket(fd);
+            self.fd = null;
         }
         self.publish_confirms.deinit(allocator);
         allocator.free(self.send_buffer.buffer);
@@ -205,7 +205,7 @@ pub const Client = struct {
     }
 
     pub fn connect(self: *Client, callback: Callback, options: ConnectOptions) !void {
-        assert(self.fd == IO.INVALID_SOCKET);
+        assert(self.fd == null);
         assert(self.awaiter == .none);
         assert(self.send_buffer.state == .idle);
         assert(self.action == .none);
@@ -257,7 +257,7 @@ pub const Client = struct {
                 }
             }.continuation,
             &self.receive_completion,
-            self.fd,
+            self.fd.?,
             options.host,
         );
     }
@@ -687,7 +687,7 @@ pub const Client = struct {
                     self,
                     send_callback,
                     &self.send_completion,
-                    self.fd,
+                    self.fd.?,
                     self.send_buffer.flush(),
                 );
             },
@@ -712,7 +712,7 @@ pub const Client = struct {
                 self,
                 send_callback,
                 &self.send_completion,
-                self.fd,
+                self.fd.?,
                 remaining,
             );
         }
@@ -732,14 +732,14 @@ pub const Client = struct {
     }
 
     fn receive(self: *Client) void {
-        assert(self.fd != IO.INVALID_SOCKET);
+        assert(self.fd != null);
         assert(self.receive_buffer.state == .idle);
         self.io.recv(
             *Client,
             self,
             receive_callback,
             &self.receive_completion,
-            self.fd,
+            self.fd.?,
             self.receive_buffer.begin_receive(),
         );
     }
@@ -783,7 +783,7 @@ pub const Client = struct {
             self,
             receive_callback,
             &self.receive_completion,
-            self.fd,
+            self.fd.?,
             receive_buffer,
         );
     }
@@ -973,7 +973,7 @@ pub const Client = struct {
     }
 
     fn send_heartbeat(self: *Client) void {
-        assert(self.fd != IO.INVALID_SOCKET);
+        assert(self.fd != null);
         if (self.heartbeat == .sending) return;
 
         log.info("Heartbeat", .{});
@@ -997,7 +997,7 @@ pub const Client = struct {
             self,
             on_heartbeat_callback,
             &self.heartbeat.sending,
-            self.fd,
+            self.fd.?,
             &heartbeat_message,
         );
     }
