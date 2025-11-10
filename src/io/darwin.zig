@@ -310,7 +310,7 @@ pub const IO = struct {
             target: *Completion,
         },
     ) void {
-        // TODO Cancel in-flight async IO.
+        @panic("cancelation is not supported on darwin");
     }
 
     pub const AcceptError = posix.AcceptError || posix.SetSockOptError;

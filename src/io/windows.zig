@@ -318,7 +318,7 @@ pub const IO = struct {
             target: *Completion,
         },
     ) void {
-        // TODO Cancel in-flight async IO.
+        @panic("cancelation is not supported on windows");
     }
 
     pub const AcceptError = posix.AcceptError || posix.SetSockOptError;

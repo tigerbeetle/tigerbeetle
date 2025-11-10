@@ -47,7 +47,7 @@ pub const IO = struct {
     // This is *not* the completion that is being canceled.
     cancel_completion: Completion = undefined,
 
-    cancel_status: union(enum) {
+    cancel_all_status: union(enum) {
         // Not canceling.
         inactive,
         // Waiting to start canceling the next awaiting operation.
@@ -90,7 +90,7 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
-        assert(self.cancel_status != .done);
+        assert(self.cancel_all_status != .done);
 
         // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
         // and that `tick()` and `run_for_ns()` cannot be run concurrently.
@@ -117,7 +117,7 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        assert(self.cancel_status != .done);
+        assert(self.cancel_all_status != .done);
 
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
@@ -190,12 +190,12 @@ pub const IO = struct {
                 self.awaiting.remove(completion);
             }
 
-            switch (self.cancel_status) {
+            switch (self.cancel_all_status) {
                 .inactive => completion.complete(),
                 .next => {},
                 .queued => if (completion.operation == .cancel) completion.complete(),
                 .wait => |wait| if (wait.target == completion) {
-                    self.cancel_status = .next;
+                    self.cancel_all_status = .next;
                 },
                 .done => unreachable,
             }
@@ -265,7 +265,7 @@ pub const IO = struct {
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
-        switch (self.cancel_status) {
+        switch (self.cancel_all_status) {
             .inactive => {},
             .queued => assert(completion.operation == .cancel),
             else => unreachable,
@@ -303,44 +303,66 @@ pub const IO = struct {
     /// - Linux kernel ≥6.0 supports `io_uring_register_sync_cancel` which would remove the `queued`
     ///   cancellation stage.
     pub fn cancel_all(self: *IO) void {
-        assert(self.cancel_status == .inactive);
+        assert(self.cancel_all_status == .inactive);
 
         // Even if we return early due to an io_uring error, IO won't allow more operations.
-        defer self.cancel_status = .done;
+        defer self.cancel_all_status = .done;
 
-        self.cancel_status = .next;
+        self.cancel_all_status = .next;
 
         // Discard any operations that haven't started yet.
         while (self.unqueued.pop()) |_| {}
 
         while (self.awaiting.tail) |target| {
             assert(!self.awaiting.empty());
-            assert(self.cancel_status == .next);
+            assert(self.cancel_all_status == .next);
             assert(target.operation != .cancel);
 
-            self.cancel_status = .{ .queued = .{ .target = target } };
+            self.cancel_all_status = .{ .queued = .{ .target = target } };
 
             self.cancel(
                 *IO,
                 self,
-                cancel_callback,
+                cancel_all_callback,
                 .{
                     .completion = &self.cancel_completion,
                     .target = target,
                 },
             );
 
-            while (self.cancel_status == .queued or self.cancel_status == .wait) {
+            while (self.cancel_all_status == .queued or self.cancel_all_status == .wait) {
                 self.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     std.debug.panic("IO.cancel_all: run_for_ns error: {}", .{err});
                 };
             }
-            assert(self.cancel_status == .next);
+            assert(self.cancel_all_status == .next);
         }
         assert(self.awaiting.empty());
         assert(self.ios_queued == 0);
         assert(self.ios_in_kernel == 0);
     }
+
+    fn cancel_all_callback(self: *IO, completion: *Completion, result: CancelError!void) void {
+        assert(self.cancel_all_status == .queued);
+        assert(completion == &self.cancel_completion);
+        assert(completion.operation == .cancel);
+        assert(completion.operation.cancel.target == self.cancel_all_status.queued.target);
+
+        self.cancel_all_status = status: {
+            result catch |err| switch (err) {
+                error.NotRunning => break :status .next,
+                error.NotInterruptable => {},
+                error.Unexpected => unreachable,
+            };
+            // Wait for the target operation to complete or abort.
+            break :status .{ .wait = .{ .target = self.cancel_all_status.queued.target } };
+        };
+    }
+
+    pub const CancelError = error{
+        NotRunning,
+        NotInterruptable,
+    } || posix.UnexpectedError;
 
     pub fn cancel(
         self: *IO,
@@ -364,28 +386,6 @@ pub const IO = struct {
         };
 
         self.enqueue(options.completion);
-    }
-
-    pub const CancelError = error{
-        NotRunning,
-        NotInterruptable,
-    } || posix.UnexpectedError;
-
-    fn cancel_callback(self: *IO, completion: *Completion, result: CancelError!void) void {
-        assert(self.cancel_status == .queued);
-        assert(completion == &self.cancel_completion);
-        assert(completion.operation == .cancel);
-        assert(completion.operation.cancel.target == self.cancel_status.queued.target);
-
-        self.cancel_status = status: {
-            result catch |err| switch (err) {
-                error.NotRunning => break :status .next,
-                error.NotInterruptable => {},
-                error.Unexpected => unreachable,
-            };
-            // Wait for the target operation to complete or abort.
-            break :status .{ .wait = .{ .target = self.cancel_status.queued.target } };
-        };
     }
 
     /// This struct holds the data needed for a single io_uring operation.
