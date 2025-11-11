@@ -422,7 +422,7 @@ fn command_start(
     log.info("{}: cluster={}: listening on {}", .{
         replica.replica,
         replica.cluster,
-        replica.message_bus.process.accept_address,
+        replica.message_bus.accept_address.?,
     });
 
     if (constants.aof_recovery) {
@@ -452,7 +452,7 @@ fn command_start(
     //   can learn it.
     // - tigerbeetle process exits when its stdin gets closed.
     if (args.addresses_zero) {
-        const port_actual = replica.message_bus.process.accept_address.getPort();
+        const port_actual = replica.message_bus.accept_address.?.getPort();
         const stdout = std.io.getStdOut();
         try stdout.writer().print("{}\n", .{port_actual});
         stdout.close();
