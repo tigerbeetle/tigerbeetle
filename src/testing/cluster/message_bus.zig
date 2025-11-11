@@ -54,6 +54,8 @@ pub const MessageBus = struct {
         // so we don't assign bus.* to undefined here.
     }
 
+    pub fn listen(_: *MessageBus) !void {}
+
     pub fn tick(_: *MessageBus) void {}
 
     pub fn get_message(

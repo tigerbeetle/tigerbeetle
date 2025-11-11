@@ -17,8 +17,8 @@ const log = std.log.scoped(.message_bus_fuzz);
 const vsr = @import("vsr.zig");
 const constants = vsr.constants;
 const stdx = vsr.stdx;
-const MessageBusReplica = vsr.message_bus.MessageBusType(IO, .replica);
-const MessageBusClient = vsr.message_bus.MessageBusType(IO, .client);
+const MessageBusReplica = vsr.message_bus.MessageBusType(IO);
+const MessageBusClient = vsr.message_bus.MessageBusType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
@@ -125,6 +125,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             ),
             .id = @intCast(i),
         } };
+        try node.replica.message_bus.listen();
     }
     defer for (nodes[0..replica_count]) |*node| node.deinit(gpa);
 

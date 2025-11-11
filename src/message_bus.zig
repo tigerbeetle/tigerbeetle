@@ -168,16 +168,6 @@ pub fn MessageBusType(comptime IO: type) type {
                     try bus.clients.ensureTotalCapacity(allocator, connections_max);
                     errdefer bus.clients.deinit(allocator);
 
-                    const address = options.configuration[process_id.replica];
-                    const fd = try init_tcp(options.io, process_id, address.any.family);
-                    errdefer options.io.close_socket(fd);
-
-                    const accept_address = try options.io.listen(fd, address, .{
-                        .backlog = constants.tcp_backlog,
-                    });
-
-                    bus.accept_fd = fd;
-                    bus.accept_address = accept_address;
                     return bus;
                 },
                 .client => return bus,
@@ -185,11 +175,13 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
-            assert((bus.process == .replica) == (bus.accept_fd != null));
-            assert((bus.process == .replica) == (bus.accept_address != null));
             bus.clients.deinit(allocator);
 
-            if (bus.accept_fd) |fd| bus.io.close_socket(fd);
+            if (bus.accept_fd) |fd| {
+                assert(bus.process == .replica);
+                assert(bus.accept_address != null);
+                bus.io.close_socket(fd);
+            }
 
             const send_queue_max = switch (bus.process) {
                 .replica => constants.connection_send_queue_max_replica,
@@ -223,7 +215,7 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.* = undefined;
         }
 
-        fn init_tcp(io: *IO, process: ProcessID, family: u32) !IO.socket_t {
+        fn init_tcp(io: *IO, process: vsr.ProcessType, family: u32) !IO.socket_t {
             return try io.open_socket_tcp(family, .{
                 .rcvbuf = constants.tcp_rcvbuf,
                 .sndbuf = switch (process) {
@@ -240,7 +232,26 @@ pub fn MessageBusType(comptime IO: type) type {
             });
         }
 
+        pub fn listen(bus: *MessageBus) !void {
+            assert(bus.process == .replica);
+            assert(bus.accept_fd == null);
+            assert(bus.accept_address == null);
+
+            const address = bus.configuration[bus.process.replica];
+            const fd = try init_tcp(bus.io, .replica, address.any.family);
+            errdefer bus.io.close_socket(fd);
+
+            const accept_address = try bus.io.listen(fd, address, .{
+                .backlog = constants.tcp_backlog,
+            });
+
+            bus.accept_fd = fd;
+            bus.accept_address = accept_address;
+        }
+
         pub fn tick(bus: *MessageBus) void {
+            if (bus.process == .replica) assert(bus.accept_fd != null); // Must listen before tick.
+
             const replica_next = switch (bus.process) {
                 // Each replica is responsible for connecting to replicas that come
                 // after it in the configuration. This ensures that replicas never try

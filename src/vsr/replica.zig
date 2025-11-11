@@ -1284,6 +1284,8 @@ pub fn ReplicaType(
             );
             errdefer self.message_bus.deinit(allocator);
 
+            try self.message_bus.listen();
+
             self.* = .{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
