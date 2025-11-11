@@ -22,15 +22,15 @@ const Tracer = vsr.trace.Tracer;
 pub const Storage = vsr.storage.StorageType(IO);
 const AOF = vsr.aof.AOFType(IO);
 
-const MessageBus = vsr.message_bus.MessageBusReplica;
+const MessageBus = vsr.message_bus.MessageBusType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 pub const StateMachine = vsr.state_machine.StateMachineType(Storage);
 pub const Grid = vsr.GridType(Storage);
 
-const Client = vsr.ClientType(StateMachine.Operation, vsr.message_bus.MessageBusClient);
+const Client = vsr.ClientType(StateMachine.Operation, MessageBus);
 pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
 const ReplicaReformat =
-    vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage);
+    vsr.ReplicaReformatType(StateMachine, MessageBus, Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
 const KiB = stdx.KiB;
@@ -566,7 +566,7 @@ fn command_repl(
     time: Time,
     args: *const cli.Command.Repl,
 ) !void {
-    const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
+    const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusType(IO));
 
     var repl_instance = try Repl.init(gpa, io, time, .{
         .cluster_id = args.cluster,

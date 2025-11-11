@@ -693,7 +693,7 @@ const VSRContext = struct {
     const Message = MessagePool.Message;
     const Client = vsr.ClientType(
         tb.Operation,
-        vsr.message_bus.MessageBusClient,
+        vsr.message_bus.MessageBusType(vsr.io.IO),
     );
 
     client: Client,

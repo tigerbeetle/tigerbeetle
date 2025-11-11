@@ -15,9 +15,6 @@ const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
 
-pub const MessageBusReplica = MessageBusType(@import("io.zig").IO);
-pub const MessageBusClient = MessageBusType(@import("io.zig").IO);
-
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
     const SendQueue = RingBufferType(*Message, .slice);
