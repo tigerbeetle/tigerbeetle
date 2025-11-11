@@ -295,8 +295,7 @@ fn assert_valid_value_type(comptime T: type) void {
             return;
         }
 
-        @compileLog("unsupported type", T);
-        unreachable;
+        @compileError("flags: unsupported type: " ++ @typeName(T));
     }
 }
 
