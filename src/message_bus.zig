@@ -247,12 +247,13 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub fn tick(bus: *MessageBus) void {
+            assert(bus.process == .replica);
             bus.tick_connect();
-            bus.tick_accept();
+            bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
         }
 
-        // You can (but are not required to) call this function instead of `tick` for clients.
-        // This potentially allows the Zig compiler to dead-code eliminate then entire accept path.
+        // The same as tick, but asserts a client and avoids accept, allowing Zig's lazy semantics
+        // to not add dead accept code to client libraries.
         pub fn tick_client(bus: *MessageBus) void {
             assert(bus.process == .client);
             bus.tick_connect();
@@ -274,12 +275,9 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         fn tick_accept(bus: *MessageBus) void {
-            if (bus.process == .replica) assert(bus.accept_fd != null); // Must listen before tick.
-            if (bus.accept_fd != null) {
-                // Only replicas accept connections from other replicas and clients:
-                assert(bus.process == .replica);
-                bus.accept();
-            }
+            assert(bus.process == .replica);
+            assert(bus.accept_fd != null); // Must listen before tick.
+            bus.accept();
         }
 
         fn accept(bus: *MessageBus) void {

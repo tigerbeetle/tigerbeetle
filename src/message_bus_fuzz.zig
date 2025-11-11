@@ -251,7 +251,11 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
         for (nodes) |*node| {
             if (prng.chance(message_bus_tick_probability)) {
-                node.message_bus.tick();
+                if (node.message_bus.process == .replica) {
+                    node.message_bus.tick();
+                } else {
+                    node.message_bus.tick_client();
+                }
             }
             if (prng.chance(node.options.message_resume_probability)) {
                 node.message_bus.resume_receive();
