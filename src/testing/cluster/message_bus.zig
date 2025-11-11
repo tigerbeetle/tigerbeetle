@@ -58,6 +58,10 @@ pub const MessageBus = struct {
 
     pub fn tick(_: *MessageBus) void {}
 
+    pub fn tick_client(bus: *MessageBus) void {
+        bus.tick();
+    }
+
     pub fn get_message(
         bus: *MessageBus,
         comptime command: ?vsr.Command,

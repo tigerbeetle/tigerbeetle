@@ -247,8 +247,18 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub fn tick(bus: *MessageBus) void {
-            if (bus.process == .replica) assert(bus.accept_fd != null); // Must listen before tick.
+            bus.tick_connect();
+            bus.tick_accept();
+        }
 
+        // You can (but are not required to) call this function instead of `tick` for clients.
+        // This potentially allows the Zig compiler to dead-code eliminate then entire accept path.
+        pub fn tick_client(bus: *MessageBus) void {
+            assert(bus.process == .client);
+            bus.tick_connect();
+        }
+
+        fn tick_connect(bus: *MessageBus) void {
             const replica_next = switch (bus.process) {
                 // Each replica is responsible for connecting to replicas that come
                 // after it in the configuration. This ensures that replicas never try
@@ -261,7 +271,10 @@ pub fn MessageBusType(comptime IO: type) type {
                 if (connection.* == null) bus.connect(@intCast(replica));
             }
             assert(bus.connections_used >= bus.replicas.len - replica_next);
+        }
 
+        fn tick_accept(bus: *MessageBus) void {
+            if (bus.process == .replica) assert(bus.accept_fd != null); // Must listen before tick.
             if (bus.accept_fd != null) {
                 // Only replicas accept connections from other replicas and clients:
                 assert(bus.process == .replica);
