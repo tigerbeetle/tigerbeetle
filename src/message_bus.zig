@@ -31,8 +31,6 @@ pub fn MessageBusType(comptime IO: type) type {
         pool: *MessagePool,
         io: *IO,
 
-        configuration: []const Address,
-
         process: ProcessID,
         /// Prefix for log messages.
         id: u128,
@@ -67,6 +65,7 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
         replicas: []?*Connection,
+        replicas_addresses: []Address,
         /// The number of outgoing `connect()` attempts for a given replica:
         /// Reset to zero after a successful `on_connect()`.
         replicas_connect_attempts: []u64,
@@ -133,6 +132,10 @@ pub fn MessageBusType(comptime IO: type) type {
             errdefer allocator.free(replicas);
             @memset(replicas, null);
 
+            const replicas_addresses = try allocator.alloc(Address, options.configuration.len);
+            errdefer allocator.free(replicas_addresses);
+            stdx.copy_disjoint(.exact, Address, replicas_addresses, options.configuration);
+
             const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
             @memset(replicas_connect_attempts, 0);
@@ -145,7 +148,6 @@ pub fn MessageBusType(comptime IO: type) type {
             var bus: MessageBus = .{
                 .pool = message_pool,
                 .io = options.io,
-                .configuration = options.configuration,
                 .process = process_id,
                 .id = switch (process_id) {
                     .replica => |index| @as(u128, index),
@@ -155,6 +157,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .send_queue_buffer = send_queue_buffer,
                 .connections = connections,
                 .replicas = replicas,
+                .replicas_addresses = replicas_addresses,
                 .replicas_connect_attempts = replicas_connect_attempts,
                 .prng = stdx.PRNG.from_seed(prng_seed),
             };
@@ -207,6 +210,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
 
             allocator.free(bus.replicas_connect_attempts);
+            allocator.free(bus.replicas_addresses);
             allocator.free(bus.replicas);
             allocator.free(bus.connections);
             allocator.free(bus.send_queue_buffer);
@@ -235,7 +239,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.accept_fd == null);
             assert(bus.accept_address == null);
 
-            const address = bus.configuration[bus.process.replica];
+            const address = bus.replicas_addresses[bus.process.replica];
             const fd = try init_tcp(bus.io, .replica, address.any.family);
             errdefer bus.io.close_socket(fd);
 
@@ -409,7 +413,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .free);
             assert(connection.fd == null);
 
-            const family = bus.configuration[replica].any.family;
+            const family = bus.replicas_addresses[replica].any.family;
             connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
                 log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,
@@ -484,7 +488,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                 &connection.recv_completion,
                 connection.fd.?,
-                bus.configuration[connection.peer.replica],
+                bus.replicas_addresses[connection.peer.replica],
             );
         }
 
@@ -637,7 +641,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
             switch (peer) {
                 .replica => |replica_index| {
-                    if (replica_index >= bus.configuration.len) return false;
+                    if (replica_index >= bus.replicas_addresses.len) return false;
 
                     // Allowed transitions:
                     // * unknown        → replica
