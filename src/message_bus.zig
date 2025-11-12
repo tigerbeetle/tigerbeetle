@@ -25,9 +25,6 @@ pub fn MessageBusType(comptime IO: type) type {
     };
 
     return struct {
-        const Address = std.net.Address;
-        const MessageBus = @This();
-
         pool: *MessagePool,
         io: *IO,
 
@@ -55,7 +52,7 @@ pub fn MessageBusType(comptime IO: type) type {
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.state != .free).
-        connections_used: usize = 0,
+        connections_used: u32 = 0,
         connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
             .name = null,
         }),
@@ -80,11 +77,18 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Seeded with the process' replica index or client ID.
         prng: stdx.PRNG,
 
+        comptime {
+            // Assert it is correct to use u32 to track sizes.
+            assert(constants.message_size_max < std.math.maxInt(u32));
+        }
+
         pub const Options = struct {
             configuration: []const Address,
             io: *IO,
-            clients_limit: ?usize = null,
+            clients_limit: ?u32 = null,
         };
+        const Address = std.net.Address;
+        const MessageBus = @This();
 
         /// Initialize the MessageBus for the given configuration and replica/client process.
         pub fn init(
@@ -872,7 +876,8 @@ pub fn MessageBusType(comptime IO: type) type {
                     connection.fd.?,
                     message.buffer[connection.send_progress..message.header.size],
                 ) orelse return;
-                connection.send_progress += write_size;
+                assert(write_size <= constants.message_size_max);
+                connection.send_progress += @intCast(write_size);
                 assert(connection.send_progress <= message.header.size);
                 if (connection.send_progress == message.header.size) {
                     _ = connection.send_queue.pop();
@@ -901,7 +906,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 return;
             }
             assert(connection.state == .connected);
-            connection.send_progress += result catch |err| {
+            const write_size = result catch |err| {
                 // TODO: maybe don't need to close on *every* error
                 log.warn("{}: on_send: to={} {}", .{
                     bus.id,
@@ -911,6 +916,8 @@ pub fn MessageBusType(comptime IO: type) type {
                 bus.terminate(connection, .shutdown);
                 return;
             };
+            assert(write_size <= constants.message_size_max);
+            connection.send_progress += @intCast(write_size);
             assert(connection.send_progress <= connection.send_queue.head().?.header.size);
             // If the message has been fully sent, move on to the next one.
             if (connection.send_progress == connection.send_queue.head().?.header.size) {
@@ -1171,7 +1178,7 @@ pub fn MessageBusType(comptime IO: type) type {
             /// but the callback has not yet been run.
             send_submitted: bool = false,
             /// Number of bytes of the current message that have already been sent.
-            send_progress: usize = 0,
+            send_progress: u32 = 0,
             /// The queue of messages to send to the client or replica peer.
             send_queue: SendQueue,
             /// For connections_suspended.

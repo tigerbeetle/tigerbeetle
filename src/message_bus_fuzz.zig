@@ -324,7 +324,7 @@ const Node = struct {
     id: u8,
 
     fn send_message(node: *Node, target: u8, message: *Message) void {
-        if (target < node.message_bus.configuration.len) {
+        if (target < node.message_bus.replicas_addresses.len) {
             node.message_bus.send_message_to_replica(target, message);
         } else {
             assert(node.message_bus.process == .replica);
