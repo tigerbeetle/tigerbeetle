@@ -9,7 +9,7 @@ const tb = vsr.tigerbeetle;
 const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
-const MessageBus = vsr.message_bus.MessageBusClient;
+const MessageBus = vsr.message_bus.MessageBusType(vsr.io.IO);
 const Header = vsr.Header;
 
 const MiB = stdx.MiB;

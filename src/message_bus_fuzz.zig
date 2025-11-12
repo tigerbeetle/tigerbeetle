@@ -17,8 +17,7 @@ const log = std.log.scoped(.message_bus_fuzz);
 const vsr = @import("vsr.zig");
 const constants = vsr.constants;
 const stdx = vsr.stdx;
-const MessageBusReplica = vsr.message_bus.MessageBusType(IO, .replica);
-const MessageBusClient = vsr.message_bus.MessageBusType(IO, .client);
+const MessageBus = vsr.message_bus.MessageBusType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
@@ -26,13 +25,6 @@ const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
 
-const NodeReplica = NodeType(MessageBusReplica);
-const NodeClient = NodeType(MessageBusClient);
-
-/// TODO If we remove type-level distinction between MessageBusReplica and MessageBusClient, then we
-/// can simplify erase_types()/Context handling in the fuzzers IO implementation to avoid some
-/// `*any opaque`s. We can also remove Node's helper methods in favor of accessing the message_bus
-/// directly.
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const messages_max = args.events_max orelse 200;
     // Usually we don't need nearly this many ticks, but certain combinations of errors can make
@@ -106,46 +98,47 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var messages_pending = std.AutoArrayHashMapUnmanaged(u128, MessagePending).empty;
     defer messages_pending.deinit(gpa);
 
-    var nodes = try gpa.alloc(NodeAny, replica_count + clients_limit);
+    var nodes = try gpa.alloc(Node, replica_count + clients_limit);
     defer gpa.free(nodes);
 
     for (nodes[0..replica_count], 0..) |*node, i| {
-        errdefer for (nodes[0..i]) |*n| n.deinit(gpa);
+        errdefer for (nodes[0..i]) |*n| n.message_bus.deinit(gpa);
 
-        node.* = .{ .replica = .{
+        node.* = .{
             .prng = &prng,
             .options = .swarm(&prng),
             .messages_pending = &messages_pending,
-            .message_bus = try MessageBusReplica.init(
+            .message_bus = try MessageBus.init(
                 gpa,
                 .{ .replica = @intCast(i) },
                 &message_pool,
-                NodeReplica.on_messages_callback,
+                Node.on_messages_callback,
                 .{ .configuration = configuration, .io = &io, .clients_limit = clients_limit },
             ),
             .id = @intCast(i),
-        } };
+        };
+        try node.message_bus.listen();
     }
-    defer for (nodes[0..replica_count]) |*node| node.deinit(gpa);
+    defer for (nodes[0..replica_count]) |*node| node.message_bus.deinit(gpa);
 
     for (nodes[replica_count..], 0..) |*node, i| {
-        errdefer for (nodes[replica_count..][0..i]) |*n| n.deinit(gpa);
+        errdefer for (nodes[replica_count..][0..i]) |*n| n.message_bus.deinit(gpa);
 
-        node.* = .{ .client = .{
+        node.* = .{
             .prng = &prng,
             .options = .swarm(&prng),
             .messages_pending = &messages_pending,
-            .message_bus = try MessageBusClient.init(
+            .message_bus = try MessageBus.init(
                 gpa,
                 .{ .client = replica_count + i },
                 &message_pool,
-                NodeClient.on_messages_callback,
+                Node.on_messages_callback,
                 .{ .configuration = configuration, .io = &io, .clients_limit = null },
             ),
             .id = @intCast(replica_count + i),
-        } };
+        };
     }
-    defer for (nodes[replica_count..]) |*node| node.deinit(gpa);
+    defer for (nodes[replica_count..]) |*node| node.message_bus.deinit(gpa);
 
     // Allocate extra for the pings and ping_clients, which are not counted by messages_max since we
     // don't track their delivery. (Pings/ping_clients are used to identify (or misidentify!) the
@@ -198,7 +191,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         // invalid() is only checked by replica, not message bus, so we can mostly ignore the
         // command-specific header data. However, we need to keep it valid enough for peer_type() to
         // be useful, otherwise the "replicas" will never actually connect.
-        if (nodes[node_source] == .replica) {
+        if (nodes[node_source].message_bus.process == .replica) {
             message_header.replica = node_source;
             message_header.command = prng.enum_weighted(vsr.Command, command_weights);
             if (message_header.into(.request)) |request_header| {
@@ -212,7 +205,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         message_header.set_checksum_body(message[@sizeOf(vsr.Header)..message_header.size]);
         message_header.set_checksum();
 
-        const node_target: u8 = if (nodes[node_source] == .replica)
+        const node_target: u8 = if (nodes[node_source].message_bus.process == .replica)
             random_node(&prng, message_header.replica, node_count)
         else
             @intCast(prng.index(nodes[0..replica_count]));
@@ -258,10 +251,14 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
         for (nodes) |*node| {
             if (prng.chance(message_bus_tick_probability)) {
-                node.tick();
+                if (node.message_bus.process == .replica) {
+                    node.message_bus.tick();
+                } else {
+                    node.message_bus.tick_client();
+                }
             }
-            if (prng.chance(node.options().message_resume_probability)) {
-                node.resume_receive();
+            if (prng.chance(node.options.message_resume_probability)) {
+                node.message_bus.resume_receive();
             }
         }
         try io.run();
@@ -300,41 +297,6 @@ fn random_node(prng: *stdx.PRNG, node_exclude: u8, node_count: u8) u8 {
     return (node_exclude + prng.range_inclusive(u8, 1, node_count - 1)) % node_count;
 }
 
-const NodeAny = union(enum) {
-    replica: NodeReplica,
-    client: NodeClient,
-
-    fn deinit(node: *NodeAny, allocator: std.mem.Allocator) void {
-        switch (node.*) {
-            inline else => |*node_any| node_any.message_bus.deinit(allocator),
-        }
-    }
-
-    fn options(node: *const NodeAny) NodeOptions {
-        return switch (node.*) {
-            inline else => |*node_any| node_any.options,
-        };
-    }
-
-    fn send_message(node: *NodeAny, target: u8, message: *Message) void {
-        switch (node.*) {
-            inline else => |*node_any| node_any.send_message(target, message),
-        }
-    }
-
-    fn resume_receive(node: *NodeAny) void {
-        switch (node.*) {
-            inline else => |*node_any| node_any.message_bus.resume_receive(),
-        }
-    }
-
-    fn tick(node: *NodeAny) void {
-        switch (node.*) {
-            inline else => |*node_any| node_any.message_bus.tick(),
-        }
-    }
-};
-
 const NodeOptions = struct {
     message_suspend_probability: Ratio,
     message_resume_probability: Ratio,
@@ -354,70 +316,63 @@ const NodeOptions = struct {
     }
 };
 
-fn NodeType(comptime MessageBus: type) type {
-    return struct {
-        const Node = @This();
+const Node = struct {
+    prng: *stdx.PRNG,
+    options: NodeOptions,
+    messages_pending: *std.AutoArrayHashMapUnmanaged(u128, MessagePending),
+    message_bus: MessageBus,
+    id: u8,
 
-        prng: *stdx.PRNG,
-        options: NodeOptions,
-        messages_pending: *std.AutoArrayHashMapUnmanaged(u128, MessagePending),
-        message_bus: MessageBus,
-        id: u8,
+    fn send_message(node: *Node, target: u8, message: *Message) void {
+        if (target < node.message_bus.configuration.len) {
+            node.message_bus.send_message_to_replica(target, message);
+        } else {
+            assert(node.message_bus.process == .replica);
+            node.message_bus.send_message_to_client(target, message);
+        }
+    }
 
-        fn send_message(node: *Node, target: u8, message: *Message) void {
-            if (target < node.message_bus.configuration.len) {
-                node.message_bus.send_message_to_replica(target, message);
+    fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
+        const node: *Node = @fieldParentPtr("message_bus", message_bus);
+        while (buffer.next_header()) |header| {
+            assert(header.valid_checksum());
+
+            if (node.prng.chance(node.options.message_suspend_probability)) {
+                buffer.suspend_message(&header);
+                continue;
+            }
+
+            const message = buffer.consume_message(message_bus.pool, &header);
+            defer message_bus.unref(message);
+
+            assert(stdx.equal_bytes(vsr.Header, &header, message.header));
+            assert(message.header.valid_checksum_body(message.body_used()));
+
+            if (node.messages_pending.get(message.header.checksum)) |message_pending| {
+                const message_pending_checksum =
+                    std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(u128)]).*;
+                assert(message_pending_checksum == message.header.checksum);
+
+                if (message_pending.target == node.id) {
+                    const message_removed =
+                        node.messages_pending.swapRemove(message.header.checksum);
+                    assert(message_removed);
+                } else {
+                    // We aren't the intended recipient of this message.
+                    //
+                    // One of the following is true:
+                    // - We are a replica that was misidentified as a client, either due to:
+                    //   - accidental misidentification due to a request we sent, or
+                    //   - deliberate misidentification a ping_client we sent.
+                    // - We are a client that was misidentified as a *different* client, due to
+                    //   a "misdirected" ping_client we sent.
+                }
             } else {
-                if (MessageBus == MessageBusReplica) {
-                    node.message_bus.send_message_to_client(target, message);
-                } else {
-                    unreachable;
-                }
+                // Ignore duplicate messages.
             }
         }
-
-        fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-            const node: *Node = @fieldParentPtr("message_bus", message_bus);
-            while (buffer.next_header()) |header| {
-                assert(header.valid_checksum());
-
-                if (node.prng.chance(node.options.message_suspend_probability)) {
-                    buffer.suspend_message(&header);
-                    continue;
-                }
-
-                const message = buffer.consume_message(message_bus.pool, &header);
-                defer message_bus.unref(message);
-
-                assert(stdx.equal_bytes(vsr.Header, &header, message.header));
-                assert(message.header.valid_checksum_body(message.body_used()));
-
-                if (node.messages_pending.get(message.header.checksum)) |message_pending| {
-                    const message_pending_checksum =
-                        std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(u128)]).*;
-                    assert(message_pending_checksum == message.header.checksum);
-
-                    if (message_pending.target == node.id) {
-                        const message_removed =
-                            node.messages_pending.swapRemove(message.header.checksum);
-                        assert(message_removed);
-                    } else {
-                        // We aren't the intended recipient of this message.
-                        //
-                        // One of the following is true:
-                        // - We are a replica that was misidentified as a client, either due to:
-                        //   - accidental misidentification due to a request we sent, or
-                        //   - deliberate misidentification a ping_client we sent.
-                        // - We are a client that was misidentified as a *different* client, due to
-                        //   a "misdirected" ping_client we sent.
-                    }
-                } else {
-                    // Ignore duplicate messages.
-                }
-            }
-        }
-    };
-}
+    }
+};
 
 const MessagePending = struct {
     buffer: []const u8,
@@ -509,12 +464,15 @@ const IO = struct {
     };
 
     pub const Completion = struct {
-        context: ?*anyopaque,
-        callback: *const fn (
-            context: ?*anyopaque,
-            completion: *Completion,
-            result: *const anyopaque,
-        ) void,
+        context: *MessageBus,
+        callback: union(enum) {
+            accept: *const fn (*MessageBus, *Completion, AcceptError!socket_t) void,
+            close: *const fn (*MessageBus, *Completion, CloseError!void) void,
+            connect: *const fn (*MessageBus, *Completion, ConnectError!void) void,
+            recv: *const fn (*MessageBus, *Completion, RecvError!usize) void,
+            send: *const fn (*MessageBus, *Completion, SendError!usize) void,
+            timeout: *const fn (*MessageBus, *Completion, TimeoutError!void) void,
+        },
         operation: Operation,
     };
 
@@ -570,7 +528,7 @@ const IO = struct {
             .accept => |operation| {
                 if (io.prng.chance(io.options.accept_error_probability)) {
                     const result: AcceptError!socket_t = io.prng.error_uniform(AcceptError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.accept(completion.context, completion, result);
                     return .done;
                 }
 
@@ -591,15 +549,15 @@ const IO = struct {
                 const result_accept: AcceptError!socket_t = local_fd;
                 const result_connect: ConnectError!void = {};
 
-                completion.callback(
+                completion.callback.accept(
                     completion.context,
                     completion,
-                    &result_accept,
+                    result_accept,
                 );
-                remote_completion.callback(
+                remote_completion.callback.connect(
                     remote_completion.context,
                     remote_completion,
-                    &result_connect,
+                    result_connect,
                 );
             },
             .close => |operation| {
@@ -607,23 +565,23 @@ const IO = struct {
                     // close() was called but we didn't ever connect.
                     // (This happens when we injected an error into connect()).
                     const result: CloseError!void = {};
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.close(completion.context, completion, result);
                     return .done;
                 };
                 assert(local.closed);
 
                 if (io.prng.chance(io.options.close_error_probability)) {
                     const result: CloseError!void = io.prng.error_uniform(CloseError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.close(completion.context, completion, result);
                 } else {
                     const result: CloseError!void = {};
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.close(completion.context, completion, result);
                 }
             },
             .connect => |operation| {
                 if (io.prng.chance(io.options.connect_error_probability)) {
                     const result: ConnectError!void = io.prng.error_uniform(ConnectError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.connect(completion.context, completion, result);
                     return .done;
                 }
 
@@ -635,7 +593,7 @@ const IO = struct {
                 } else {
                     // No one listening at that address.
                     const result: ConnectError!void = error.ConnectionRefused;
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.connect(completion.context, completion, result);
                     return .done;
                 }
             },
@@ -647,7 +605,7 @@ const IO = struct {
 
                 if (io.prng.chance(io.options.send_error_probability)) {
                     const result: SendError!usize = io.prng.error_uniform(SendError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.send(completion.context, completion, result);
 
                     // If there is a pending recv(), we need to make sure that it fails (rather than
                     // potentially stalling and preventing MessageBus from calling shutdown/close).
@@ -660,7 +618,7 @@ const IO = struct {
                         // Sometimes allow the send() to complete even after shutdown().
                     } else {
                         const result: SendError!usize = error.BrokenPipe;
-                        completion.callback(completion.context, completion, &result);
+                        completion.callback.send(completion.context, completion, result);
                         return .done;
                     }
                 }
@@ -684,7 +642,7 @@ const IO = struct {
                 }
 
                 const result: SendError!usize = send_size;
-                completion.callback(completion.context, completion, &result);
+                completion.callback.send(completion.context, completion, result);
             },
             .recv => |operation| {
                 const receiver = io.connections.getPtr(operation.socket).?;
@@ -694,7 +652,7 @@ const IO = struct {
 
                 if (receiver.closed or io.prng.chance(io.options.recv_error_probability)) {
                     const result: RecvError!usize = io.prng.error_uniform(RecvError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.recv(completion.context, completion, result);
                     return .done;
                 }
 
@@ -703,7 +661,7 @@ const IO = struct {
                         // Sometimes allow the recv() to complete even after shutdown().
                     } else {
                         const result: RecvError!usize = 0;
-                        completion.callback(completion.context, completion, &result);
+                        completion.callback.recv(completion.context, completion, result);
                         return .done;
                     }
                 }
@@ -712,7 +670,7 @@ const IO = struct {
                 const sender = io.connections.getPtr(sender_fd).?;
                 if (sender.closed) {
                     const result: RecvError!usize = error.ConnectionResetByPeer;
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.recv(completion.context, completion, result);
                     return .done;
                 }
 
@@ -724,7 +682,7 @@ const IO = struct {
                         // Connection was half-closed, and we have received all the buffered data,
                         // so now it can close.
                         const result: RecvError!usize = 0;
-                        completion.callback(completion.context, completion, &result);
+                        completion.callback.recv(completion.context, completion, result);
                     } else {
                         // Sender is still open, but has nothing to deliver right now.
                         return .retry;
@@ -751,12 +709,12 @@ const IO = struct {
                     receiver.pending_recv = false;
 
                     const result: RecvError!usize = recv_size;
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.recv(completion.context, completion, result);
                 }
             },
             .timeout => {
                 const result: TimeoutError!void = {};
-                completion.callback(completion.context, completion, &result);
+                completion.callback.timeout(completion.context, completion, result);
             },
         }
         return .done;
@@ -814,7 +772,7 @@ const IO = struct {
     ) void {
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, AcceptError!socket_t, callback),
+            .callback = .{ .accept = callback },
             .operation = .{ .accept = .{ .socket = socket } },
         };
         io.enqueue(completion);
@@ -847,7 +805,7 @@ const IO = struct {
 
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, CloseError!void, callback),
+            .callback = .{ .close = callback },
             .operation = .{ .close = .{ .fd = fd } },
         };
         io.enqueue(completion);
@@ -864,7 +822,7 @@ const IO = struct {
     ) void {
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, ConnectError!void, callback),
+            .callback = .{ .connect = callback },
             .operation = .{ .connect = .{ .socket = socket, .address = address } },
         };
         io.enqueue(completion);
@@ -886,7 +844,7 @@ const IO = struct {
 
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, RecvError!usize, callback),
+            .callback = .{ .recv = callback },
             .operation = .{ .recv = .{ .socket = socket, .buffer = buffer } },
         };
         io.enqueue(completion);
@@ -908,7 +866,7 @@ const IO = struct {
 
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, SendError!usize, callback),
+            .callback = .{ .send = callback },
             .operation = .{ .send = .{ .socket = socket, .buffer = buffer } },
         };
         io.enqueue(completion);
@@ -941,7 +899,7 @@ const IO = struct {
     ) void {
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, TimeoutError!void, callback),
+            .callback = .{ .timeout = callback },
             .operation = .timeout,
         };
 
@@ -964,23 +922,5 @@ const IO = struct {
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = delay_ns }),
         }) catch @panic("OOM");
-    }
-
-    fn erase_types(
-        comptime Context: type,
-        comptime Result: type,
-        comptime callback: fn (context: Context, completion: *Completion, result: Result) void,
-    ) *const fn (?*anyopaque, *Completion, *const anyopaque) void {
-        return &struct {
-            fn erased(
-                ctx_any: ?*anyopaque,
-                completion: *Completion,
-                result_any: *const anyopaque,
-            ) void {
-                const ctx: Context = @ptrCast(@alignCast(ctx_any));
-                const result: *const Result = @ptrCast(@alignCast(result_any));
-                callback(ctx, completion, result.*);
-            }
-        }.erased;
     }
 };

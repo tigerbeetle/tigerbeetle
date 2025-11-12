@@ -15,17 +15,9 @@ const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
 
-pub const MessageBusReplica = MessageBusType(@import("io.zig").IO, .replica);
-pub const MessageBusClient = MessageBusType(@import("io.zig").IO, .client);
-
-pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType) type {
+pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
     const SendQueue = RingBufferType(*Message, .slice);
-    const send_queue_max = switch (process_type) {
-        .replica => constants.connection_send_queue_max_replica,
-        // A client has at most 1 in-flight request, plus pings.
-        .client => constants.connection_send_queue_max_client,
-    };
 
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
@@ -40,30 +32,21 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
         configuration: []const std.net.Address,
 
-        process: switch (process_type) {
-            .replica => struct {
-                replica: u8,
-                /// The file descriptor for the process on which to accept connections.
-                accept_fd: IO.socket_t,
-                /// Address the accept_fd is bound to, as reported by `getsockname`.
-                ///
-                /// This allows passing port 0 as an address for the OS to pick an open port for us
-                /// in a TOCTOU immune way and logging the resulting port number.
-                accept_address: std.net.Address,
-                accept_completion: IO.Completion = undefined,
-                /// The connection reserved for the currently in progress accept operation.
-                /// This is non-null exactly when an accept operation is submitted.
-                accept_connection: ?*Connection = null,
-                /// Map from client id to the currently active connection for that client.
-                /// This is used to make lookup of client connections when sending messages
-                /// efficient and to ensure old client connections are dropped if a new one
-                /// is established.
-                clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
-            },
-            .client => void,
-        },
+        process: ProcessID,
         /// Prefix for log messages.
         id: u128,
+
+        /// The file descriptor for the process on which to accept connections.
+        accept_fd: ?IO.socket_t = null,
+        /// Address the accept_fd is bound to, as reported by `getsockname`.
+        ///
+        /// This allows passing port 0 as an address for the OS to pick an open port for us
+        /// in a TOCTOU immune way and logging the resulting port number.
+        accept_address: ?std.net.Address = null,
+        accept_completion: IO.Completion = undefined,
+        /// The connection reserved for the currently in progress accept operation.
+        /// This is non-null exactly when an accept operation is submitted.
+        accept_connection: ?*Connection = null,
 
         /// The callback to be called when a message is received.
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
@@ -87,6 +70,12 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         /// Reset to zero after a successful `on_connect()`.
         replicas_connect_attempts: []u64,
 
+        /// Map from client id to the currently active connection for that client.
+        /// This is used to make lookup of client connections when sending messages
+        /// efficient and to ensure old client connections are dropped if a new one
+        /// is established.
+        clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
+
         /// Used to apply jitter when calculating exponential backoff:
         /// Seeded with the process' replica index or client ID.
         prng: stdx.PRNG,
@@ -105,18 +94,21 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
             options: Options,
         ) !MessageBus {
-            assert(@as(vsr.ProcessType, process_id) == process_type);
-
-            switch (process_type) {
+            switch (process_id) {
                 .replica => assert(options.clients_limit.? > 0),
                 .client => assert(options.clients_limit == null),
             }
 
-            const connections_max: u32 = switch (process_type) {
+            const connections_max: u32 = switch (process_id) {
                 // The maximum number of connections that can be held open by the server at any
                 // time. -1 since we don't need a connection to ourself.
                 .replica => @intCast(options.configuration.len - 1 + options.clients_limit.?),
                 .client => @intCast(options.configuration.len),
+            };
+
+            const send_queue_max = switch (process_id) {
+                .replica => constants.connection_send_queue_max_replica,
+                .client => constants.connection_send_queue_max_client,
             };
 
             const send_queue_buffer = try allocator.alloc(
@@ -144,35 +136,16 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             errdefer allocator.free(replicas_connect_attempts);
             @memset(replicas_connect_attempts, 0);
 
-            const prng_seed = switch (process_type) {
-                .replica => process_id.replica,
-                .client => @as(u64, @truncate(process_id.client)),
-            };
-
-            const process: @FieldType(MessageBus, "process") = switch (process_type) {
-                .replica => blk: {
-                    const address = options.configuration[process_id.replica];
-                    const fd = try init_tcp(options.io, address.any.family);
-                    errdefer options.io.close_socket(fd);
-
-                    const accept_address = try options.io.listen(fd, address, .{
-                        .backlog = constants.tcp_backlog,
-                    });
-
-                    break :blk .{
-                        .replica = process_id.replica,
-                        .accept_fd = fd,
-                        .accept_address = accept_address,
-                    };
-                },
-                .client => {},
+            const prng_seed = switch (process_id) {
+                .replica => |replica| replica,
+                .client => |client| @as(u64, @truncate(client)),
             };
 
             var bus: MessageBus = .{
                 .pool = message_pool,
                 .io = options.io,
                 .configuration = options.configuration,
-                .process = process,
+                .process = process_id,
                 .id = switch (process_id) {
                     .replica => |index| @as(u128, index),
                     .client => |id| id,
@@ -185,20 +158,32 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 .prng = stdx.PRNG.from_seed(prng_seed),
             };
 
-            // Pre-allocate enough memory to hold all possible connections in the client map.
-            if (process_type == .replica) {
-                try bus.process.clients.ensureTotalCapacity(allocator, connections_max);
-            }
+            switch (process_id) {
+                .replica => {
+                    // Pre-allocate enough memory to hold all possible connections
+                    // in the client map.
+                    try bus.clients.ensureTotalCapacity(allocator, connections_max);
+                    errdefer bus.clients.deinit(allocator);
 
-            return bus;
+                    return bus;
+                },
+                .client => return bus,
+            }
         }
 
         pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
-            if (process_type == .replica) {
-                bus.process.clients.deinit(allocator);
-                bus.io.close_socket(bus.process.accept_fd);
+            bus.clients.deinit(allocator);
+
+            if (bus.accept_fd) |fd| {
+                assert(bus.process == .replica);
+                assert(bus.accept_address != null);
+                bus.io.close_socket(fd);
             }
 
+            const send_queue_max = switch (bus.process) {
+                .replica => constants.connection_send_queue_max_replica,
+                .client => constants.connection_send_queue_max_client,
+            };
             var send_queue_buffer_previous: ?[]*Message = null;
             for (bus.connections) |*connection| {
                 if (connection.fd) |fd| {
@@ -224,12 +209,13 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             allocator.free(bus.replicas);
             allocator.free(bus.connections);
             allocator.free(bus.send_queue_buffer);
+            bus.* = undefined;
         }
 
-        fn init_tcp(io: *IO, family: u32) !IO.socket_t {
+        fn init_tcp(io: *IO, process: vsr.ProcessType, family: u32) !IO.socket_t {
             return try io.open_socket_tcp(family, .{
                 .rcvbuf = constants.tcp_rcvbuf,
-                .sndbuf = switch (process_type) {
+                .sndbuf = switch (process) {
                     .replica => constants.tcp_sndbuf_replica,
                     .client => constants.tcp_sndbuf_client,
                 },
@@ -243,39 +229,66 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             });
         }
 
-        pub fn tick(bus: *MessageBus) void {
-            switch (process_type) {
-                .replica => {
-                    // Each replica is responsible for connecting to replicas that come
-                    // after it in the configuration. This ensures that replicas never try
-                    // to connect to each other at the same time.
-                    const replica_next = bus.process.replica + 1;
-                    for (bus.replicas[replica_next..], replica_next..) |connection, replica| {
-                        if (connection == null) bus.connect(@intCast(replica));
-                    }
-                    assert(bus.connections_used >= bus.replicas.len - replica_next);
+        pub fn listen(bus: *MessageBus) !void {
+            assert(bus.process == .replica);
+            assert(bus.accept_fd == null);
+            assert(bus.accept_address == null);
 
-                    // Only replicas accept connections from other replicas and clients:
-                    bus.accept();
-                },
-                .client => {
-                    // The client connects to all replicas.
-                    for (bus.replicas, 0..) |connection, replica| {
-                        if (connection == null) bus.connect(@intCast(replica));
-                    }
-                    assert(bus.connections_used >= bus.replicas.len);
-                },
+            const address = bus.configuration[bus.process.replica];
+            const fd = try init_tcp(bus.io, .replica, address.any.family);
+            errdefer bus.io.close_socket(fd);
+
+            const accept_address = try bus.io.listen(fd, address, .{
+                .backlog = constants.tcp_backlog,
+            });
+
+            bus.accept_fd = fd;
+            bus.accept_address = accept_address;
+        }
+
+        pub fn tick(bus: *MessageBus) void {
+            assert(bus.process == .replica);
+            bus.tick_connect();
+            bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
+        }
+
+        // The same as tick, but asserts a client and avoids accept, allowing Zig's lazy semantics
+        // to not add dead accept code to client libraries.
+        pub fn tick_client(bus: *MessageBus) void {
+            assert(bus.process == .client);
+            bus.tick_connect();
+        }
+
+        fn tick_connect(bus: *MessageBus) void {
+            const replica_next = switch (bus.process) {
+                // Each replica is responsible for connecting to replicas that come
+                // after it in the configuration. This ensures that replicas never try
+                // to connect to each other at the same time.
+                .replica => |replica| replica + 1,
+                // The client connects to all replicas.
+                .client => 0,
+            };
+            for (bus.replicas[replica_next..], replica_next..) |*connection, replica| {
+                if (connection.* == null) bus.connect(@intCast(replica));
             }
+            assert(bus.connections_used >= bus.replicas.len - replica_next);
+        }
+
+        fn tick_accept(bus: *MessageBus) void {
+            assert(bus.process == .replica);
+            assert(bus.accept_fd != null); // Must listen before tick.
+            bus.accept();
         }
 
         fn accept(bus: *MessageBus) void {
-            comptime assert(process_type == .replica);
+            assert(bus.process == .replica);
+            assert(bus.accept_fd != null);
 
-            if (bus.process.accept_connection != null) return;
+            if (bus.accept_connection != null) return;
             // All connections are currently in use, do nothing.
             if (bus.connections_used == bus.connections.len) return;
             assert(bus.connections_used < bus.connections.len);
-            bus.process.accept_connection = for (bus.connections) |*connection| {
+            bus.accept_connection = for (bus.connections) |*connection| {
                 if (connection.state == .free) {
                     connection.state = .accepting;
                     break connection;
@@ -285,8 +298,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 *MessageBus,
                 bus,
                 accept_callback,
-                &bus.process.accept_completion,
-                bus.process.accept_fd,
+                &bus.accept_completion,
+                bus.accept_fd.?,
             );
         }
 
@@ -295,16 +308,17 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             _: *IO.Completion,
             result: IO.AcceptError!IO.socket_t,
         ) void {
-            comptime assert(process_type == .replica);
+            assert(bus.process == .replica);
 
-            assert(bus.process.accept_connection != null);
-            const connection = bus.process.accept_connection.?;
+            assert(bus.accept_connection != null);
+            const connection: *Connection = bus.accept_connection.?;
+            bus.accept_connection = null;
+
             assert(connection.peer == .unknown);
             assert(connection.fd == null);
             assert(connection.state == .accepting);
             defer assert(connection.state == .connected or connection.state == .free);
 
-            bus.process.accept_connection = null;
             if (result) |fd| {
                 connection.state = .connected;
                 connection.fd = fd;
@@ -389,14 +403,14 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         /// The slot in the Message.replicas slices is immediately reserved.
         /// Failure is silent and returns the connection to an unused state.
         fn connect_connection(bus: *MessageBus, connection: *Connection, replica: u8) void {
-            if (process_type == .replica) assert(replica != bus.process.replica);
+            if (bus.process == .replica) assert(replica > bus.process.replica);
 
             assert(connection.state == .free);
             assert(connection.fd == null);
 
             const family = bus.configuration[replica].any.family;
-            connection.fd = init_tcp(bus.io, family) catch |err| {
-                log.err("{}: connect_to_replcia: init_tcp error={s}", .{
+            connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
+                log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,
                     @errorName(err),
                 });
@@ -578,7 +592,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
 
-            switch (process_type) {
+            switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
                 // may receive messages from a peer before we know who they are:
                 // This has the same effect as an asymmetric network where, for a short time
@@ -605,7 +619,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         }
 
         fn recv_update_peer(bus: *MessageBus, connection: *Connection, peer: vsr.Peer) bool {
-            comptime assert(process_type == .replica);
+            assert(bus.process == .replica);
+            assert(bus.clients.capacity() > 0);
 
             assert(bus.connections_used > 0);
 
@@ -644,9 +659,9 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                         // reside in the clients map. If so, it must be popped and mapped to the
                         // correct replica.
                         .client_likely => |existing| {
-                            if (bus.process.clients.get(existing)) |existing_connection| {
+                            if (bus.clients.get(existing)) |existing_connection| {
                                 if (existing_connection == connection) {
-                                    assert(bus.process.clients.remove(existing));
+                                    assert(bus.clients.remove(existing));
                                 }
                             }
                         },
@@ -668,7 +683,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     assert(connection.peer == .unknown or connection.peer == .client_likely);
 
                     // If there is a connection to this client, terminate and replace it.
-                    const result = bus.process.clients.getOrPutAssumeCapacity(client_id);
+                    const result = bus.clients.getOrPutAssumeCapacity(client_id);
                     if (result.found_existing) {
                         const old = result.value_ptr.*;
                         assert(old.state == .connected or old.state == .terminating);
@@ -703,7 +718,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                             // exists in the client map, we wait for it to get resolved to
                             // either a replica or a client.
                             const result =
-                                bus.process.clients.getOrPutAssumeCapacity(client_id);
+                                bus.clients.getOrPutAssumeCapacity(client_id);
                             if (!result.found_existing) {
                                 result.value_ptr.* = connection;
                                 log.info("{}: set_and_verify_peer connection from " ++
@@ -755,7 +770,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
         pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
             // Messages sent by a replica to itself should never be passed to the message bus.
-            if (process_type == .replica) assert(replica != bus.process.replica);
+            if (bus.process == .replica) assert(replica != bus.process.replica);
 
             if (bus.replicas[replica]) |connection| {
                 bus.send_message(connection, message);
@@ -771,9 +786,10 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         /// Try to send the message to the client with the given id.
         /// If the client is not currently connected, the message is silently dropped.
         pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
-            comptime assert(process_type == .replica);
+            assert(bus.process == .replica);
+            assert(bus.clients.capacity() > 0);
 
-            if (bus.process.clients.get(client_id)) |connection| {
+            if (bus.clients.get(client_id)) |connection| {
                 bus.send_message(connection, message);
             } else {
                 log.debug(
@@ -1017,23 +1033,20 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             };
 
             // Reset the connection to its initial state.
-
             switch (connection.peer) {
                 .unknown => {},
-                .client, .client_likely => |client_id| switch (process_type) {
-                    .replica => {
-                        // A newer client connection may have replaced this one:
-                        if (bus.process.clients.get(client_id)) |existing_connection| {
-                            if (existing_connection == connection) {
-                                assert(bus.process.clients.remove(client_id));
-                            }
-                        } else {
-                            // A newer client connection may even leapfrog this connection
-                            // and then be terminated and set to null before we can get
-                            // here.
+                .client, .client_likely => |client_id| {
+                    assert(bus.process == .replica);
+                    // A newer client connection may have replaced this one:
+                    if (bus.clients.get(client_id)) |existing_connection| {
+                        if (existing_connection == connection) {
+                            assert(bus.clients.remove(client_id));
                         }
-                    },
-                    .client => unreachable,
+                    } else {
+                        // A newer client connection may even leapfrog this connection
+                        // and then be terminated and set to null before we can get
+                        // here.
+                    }
                 },
                 .replica => |replica| {
                     // A newer replica connection may have replaced this one:
