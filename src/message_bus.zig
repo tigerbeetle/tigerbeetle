@@ -410,7 +410,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
             const family = bus.configuration[replica].any.family;
             connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
-                log.err("{}: connect_to_replcia: init_tcp error={s}", .{
+                log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,
                     @errorName(err),
                 });
@@ -1033,13 +1033,12 @@ pub fn MessageBusType(comptime IO: type) type {
             };
 
             // Reset the connection to its initial state.
-
             switch (connection.peer) {
                 .unknown => {},
                 .client, .client_likely => |client_id| {
+                    assert(bus.process == .replica);
                     // A newer client connection may have replaced this one:
                     if (bus.clients.get(client_id)) |existing_connection| {
-                        assert(bus.process == .replica);
                         if (existing_connection == connection) {
                             assert(bus.clients.remove(client_id));
                         }
