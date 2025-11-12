@@ -25,12 +25,13 @@ pub fn MessageBusType(comptime IO: type) type {
     };
 
     return struct {
+        const Address = std.net.Address;
         const MessageBus = @This();
 
         pool: *MessagePool,
         io: *IO,
 
-        configuration: []const std.net.Address,
+        configuration: []const Address,
 
         process: ProcessID,
         /// Prefix for log messages.
@@ -42,7 +43,7 @@ pub fn MessageBusType(comptime IO: type) type {
         ///
         /// This allows passing port 0 as an address for the OS to pick an open port for us
         /// in a TOCTOU immune way and logging the resulting port number.
-        accept_address: ?std.net.Address = null,
+        accept_address: ?Address = null,
         accept_completion: IO.Completion = undefined,
         /// The connection reserved for the currently in progress accept operation.
         /// This is non-null exactly when an accept operation is submitted.
@@ -81,7 +82,7 @@ pub fn MessageBusType(comptime IO: type) type {
         prng: stdx.PRNG,
 
         pub const Options = struct {
-            configuration: []const std.net.Address,
+            configuration: []const Address,
             io: *IO,
             clients_limit: ?usize = null,
         };
