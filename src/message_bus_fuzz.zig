@@ -464,12 +464,15 @@ const IO = struct {
     };
 
     pub const Completion = struct {
-        context: ?*anyopaque,
-        callback: *const fn (
-            context: ?*anyopaque,
-            completion: *Completion,
-            result: *const anyopaque,
-        ) void,
+        context: *MessageBus,
+        callback: union(enum) {
+            accept: *const fn (*MessageBus, *Completion, AcceptError!socket_t) void,
+            close: *const fn (*MessageBus, *Completion, CloseError!void) void,
+            connect: *const fn (*MessageBus, *Completion, ConnectError!void) void,
+            recv: *const fn (*MessageBus, *Completion, RecvError!usize) void,
+            send: *const fn (*MessageBus, *Completion, SendError!usize) void,
+            timeout: *const fn (*MessageBus, *Completion, TimeoutError!void) void,
+        },
         operation: Operation,
     };
 
@@ -525,7 +528,7 @@ const IO = struct {
             .accept => |operation| {
                 if (io.prng.chance(io.options.accept_error_probability)) {
                     const result: AcceptError!socket_t = io.prng.error_uniform(AcceptError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.accept(completion.context, completion, result);
                     return .done;
                 }
 
@@ -546,15 +549,15 @@ const IO = struct {
                 const result_accept: AcceptError!socket_t = local_fd;
                 const result_connect: ConnectError!void = {};
 
-                completion.callback(
+                completion.callback.accept(
                     completion.context,
                     completion,
-                    &result_accept,
+                    result_accept,
                 );
-                remote_completion.callback(
+                remote_completion.callback.connect(
                     remote_completion.context,
                     remote_completion,
-                    &result_connect,
+                    result_connect,
                 );
             },
             .close => |operation| {
@@ -562,23 +565,23 @@ const IO = struct {
                     // close() was called but we didn't ever connect.
                     // (This happens when we injected an error into connect()).
                     const result: CloseError!void = {};
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.close(completion.context, completion, result);
                     return .done;
                 };
                 assert(local.closed);
 
                 if (io.prng.chance(io.options.close_error_probability)) {
                     const result: CloseError!void = io.prng.error_uniform(CloseError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.close(completion.context, completion, result);
                 } else {
                     const result: CloseError!void = {};
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.close(completion.context, completion, result);
                 }
             },
             .connect => |operation| {
                 if (io.prng.chance(io.options.connect_error_probability)) {
                     const result: ConnectError!void = io.prng.error_uniform(ConnectError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.connect(completion.context, completion, result);
                     return .done;
                 }
 
@@ -590,7 +593,7 @@ const IO = struct {
                 } else {
                     // No one listening at that address.
                     const result: ConnectError!void = error.ConnectionRefused;
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.connect(completion.context, completion, result);
                     return .done;
                 }
             },
@@ -602,7 +605,7 @@ const IO = struct {
 
                 if (io.prng.chance(io.options.send_error_probability)) {
                     const result: SendError!usize = io.prng.error_uniform(SendError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.send(completion.context, completion, result);
 
                     // If there is a pending recv(), we need to make sure that it fails (rather than
                     // potentially stalling and preventing MessageBus from calling shutdown/close).
@@ -615,7 +618,7 @@ const IO = struct {
                         // Sometimes allow the send() to complete even after shutdown().
                     } else {
                         const result: SendError!usize = error.BrokenPipe;
-                        completion.callback(completion.context, completion, &result);
+                        completion.callback.send(completion.context, completion, result);
                         return .done;
                     }
                 }
@@ -639,7 +642,7 @@ const IO = struct {
                 }
 
                 const result: SendError!usize = send_size;
-                completion.callback(completion.context, completion, &result);
+                completion.callback.send(completion.context, completion, result);
             },
             .recv => |operation| {
                 const receiver = io.connections.getPtr(operation.socket).?;
@@ -649,7 +652,7 @@ const IO = struct {
 
                 if (receiver.closed or io.prng.chance(io.options.recv_error_probability)) {
                     const result: RecvError!usize = io.prng.error_uniform(RecvError);
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.recv(completion.context, completion, result);
                     return .done;
                 }
 
@@ -658,7 +661,7 @@ const IO = struct {
                         // Sometimes allow the recv() to complete even after shutdown().
                     } else {
                         const result: RecvError!usize = 0;
-                        completion.callback(completion.context, completion, &result);
+                        completion.callback.recv(completion.context, completion, result);
                         return .done;
                     }
                 }
@@ -667,7 +670,7 @@ const IO = struct {
                 const sender = io.connections.getPtr(sender_fd).?;
                 if (sender.closed) {
                     const result: RecvError!usize = error.ConnectionResetByPeer;
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.recv(completion.context, completion, result);
                     return .done;
                 }
 
@@ -679,7 +682,7 @@ const IO = struct {
                         // Connection was half-closed, and we have received all the buffered data,
                         // so now it can close.
                         const result: RecvError!usize = 0;
-                        completion.callback(completion.context, completion, &result);
+                        completion.callback.recv(completion.context, completion, result);
                     } else {
                         // Sender is still open, but has nothing to deliver right now.
                         return .retry;
@@ -706,12 +709,12 @@ const IO = struct {
                     receiver.pending_recv = false;
 
                     const result: RecvError!usize = recv_size;
-                    completion.callback(completion.context, completion, &result);
+                    completion.callback.recv(completion.context, completion, result);
                 }
             },
             .timeout => {
                 const result: TimeoutError!void = {};
-                completion.callback(completion.context, completion, &result);
+                completion.callback.timeout(completion.context, completion, result);
             },
         }
         return .done;
@@ -769,7 +772,7 @@ const IO = struct {
     ) void {
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, AcceptError!socket_t, callback),
+            .callback = .{ .accept = callback },
             .operation = .{ .accept = .{ .socket = socket } },
         };
         io.enqueue(completion);
@@ -802,7 +805,7 @@ const IO = struct {
 
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, CloseError!void, callback),
+            .callback = .{ .close = callback },
             .operation = .{ .close = .{ .fd = fd } },
         };
         io.enqueue(completion);
@@ -819,7 +822,7 @@ const IO = struct {
     ) void {
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, ConnectError!void, callback),
+            .callback = .{ .connect = callback },
             .operation = .{ .connect = .{ .socket = socket, .address = address } },
         };
         io.enqueue(completion);
@@ -841,7 +844,7 @@ const IO = struct {
 
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, RecvError!usize, callback),
+            .callback = .{ .recv = callback },
             .operation = .{ .recv = .{ .socket = socket, .buffer = buffer } },
         };
         io.enqueue(completion);
@@ -863,7 +866,7 @@ const IO = struct {
 
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, SendError!usize, callback),
+            .callback = .{ .send = callback },
             .operation = .{ .send = .{ .socket = socket, .buffer = buffer } },
         };
         io.enqueue(completion);
@@ -896,7 +899,7 @@ const IO = struct {
     ) void {
         completion.* = .{
             .context = context,
-            .callback = erase_types(Context, TimeoutError!void, callback),
+            .callback = .{ .timeout = callback },
             .operation = .timeout,
         };
 
@@ -919,23 +922,5 @@ const IO = struct {
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = delay_ns }),
         }) catch @panic("OOM");
-    }
-
-    fn erase_types(
-        comptime Context: type,
-        comptime Result: type,
-        comptime callback: fn (context: Context, completion: *Completion, result: Result) void,
-    ) *const fn (?*anyopaque, *Completion, *const anyopaque) void {
-        return &struct {
-            fn erased(
-                ctx_any: ?*anyopaque,
-                completion: *Completion,
-                result_any: *const anyopaque,
-            ) void {
-                const ctx: Context = @ptrCast(@alignCast(ctx_any));
-                const result: *const Result = @ptrCast(@alignCast(result_any));
-                callback(ctx, completion, result.*);
-            }
-        }.erased;
     }
 };
