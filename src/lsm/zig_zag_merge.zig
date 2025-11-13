@@ -171,16 +171,15 @@ pub fn ZigZagMergeIteratorType(
                             error.Empty => return null,
                             error.Drained => {
                                 drained.set(stream_index);
-                                probing.unset(stream_index);
                                 continue;
                             },
                         }
                     };
 
-                    // After probed, the stream must either match the key or be ahead.
                     if (key == probe_key) {
-                        probing.unset(stream_index);
+                        // After probed, the stream must either match the key exactly ...
                     } else {
+                        // or be ahead!
                         assert(it.key_ahead(.{ .key_after = key, .key_before = probe_key }));
                     }
                 }
