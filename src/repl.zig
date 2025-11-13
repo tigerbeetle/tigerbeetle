@@ -168,18 +168,18 @@ pub fn ReplType(comptime MessageBus: type) type {
                         return &.{};
                     },
                     .newline => {
-                         repl.line_editor.move_end();
-                         try redraw_line(repl, prompt_str);
-                         try repl.terminal.print("\n", .{});
-                         return repl.line_editor.const_slice();
-                     },
-                     .printable => |character| {
-                         if (repl.line_editor.const_slice().len >= repl_history_entry_bytes_without_nul) {
-                             continue;
-                         }
-                         repl.line_editor.insert(character);
-                         try redraw_line(repl, prompt_str);
-                     },
+                        repl.line_editor.move_end();
+                        try redraw_line(repl, prompt_str);
+                        try repl.terminal.print("\n", .{});
+                        return repl.line_editor.const_slice();
+                    },
+                    .printable => |character| {
+                        if (repl.line_editor.const_slice().len >= repl_history_entry_bytes_without_nul) {
+                            continue;
+                        }
+                        repl.line_editor.insert(character);
+                        try redraw_line(repl, prompt_str);
+                    },
                     .backspace => {
                         repl.line_editor.backspace();
                         try redraw_line(repl, prompt_str);
@@ -188,8 +188,29 @@ pub fn ReplType(comptime MessageBus: type) type {
                         repl.line_editor.delete();
                         try redraw_line(repl, prompt_str);
                     },
-                    // Tab completion skipped for this implementation
-                    .tab => {},
+                    .tab => {
+                        const buf = repl.line_editor.const_slice();
+                        const cursor_offset = repl.line_editor.get_cursor_byte_offset();
+
+                        try repl.completion.split_and_complete(buf, cursor_offset);
+                        const completion = try repl.completion.get_next_completion();
+
+                        const total_len = repl.completion.prefix.count() +
+                            repl.completion.suffix.count() + completion.len;
+
+                        if (total_len >= repl_history_entry_bytes_without_nul) {
+                            continue;
+                        }
+
+                        // Reconstruct buffer with completion.
+                        var new_buffer: ReplBufferBoundedArray = .{};
+                        new_buffer.push_slice(repl.completion.prefix.const_slice());
+                        new_buffer.push_slice(completion);
+                        new_buffer.push_slice(repl.completion.suffix.const_slice());
+
+                        try repl.line_editor.set_content(new_buffer.const_slice());
+                        try redraw_line(repl, prompt_str);
+                    },
                     .left, .ctrlb => {
                         repl.line_editor.move_left();
                         try redraw_line(repl, prompt_str);
@@ -204,9 +225,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                         const buffer_next = std.mem.sliceTo(buffer_next_full, 0);
 
                         if (history_index == repl.history.count) {
-                             repl.buffer_outside_history.clear();
-                             repl.buffer_outside_history.push_slice(repl.line_editor.const_slice());
-                         }
+                            repl.buffer_outside_history.clear();
+                            repl.buffer_outside_history.push_slice(repl.line_editor.const_slice());
+                        }
                         try repl.line_editor.set_content(buffer_next);
                         history_index = history_index_next;
                         try redraw_line(repl, prompt_str);
@@ -435,8 +456,6 @@ pub fn ReplType(comptime MessageBus: type) type {
                 },
             );
             errdefer client.deinit(allocator);
-
-
 
             // Disable all dynamic allocation from this point onwards.
             static_allocator.transition_from_init_to_static();
