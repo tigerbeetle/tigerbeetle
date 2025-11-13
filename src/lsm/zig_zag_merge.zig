@@ -69,33 +69,32 @@ pub fn ZigZagMergeIteratorType(
         }
 
         pub fn pop(it: *ZigZagMergeIterator) error{Drained}!?Value {
-            while (try it.peek_key()) |key| {
-                const value = stream_pop(it.context, 0);
-                assert(key_from_value(&value) == key);
-                for (1..it.streams_count) |stream_index| {
-                    const value_other = stream_pop(it.context, @intCast(stream_index));
-                    assert(key_from_value(&value_other) == key);
+            const key = try it.peek_key() orelse
+                return null;
 
-                    // Differently from K-way merge, there's no precedence between streams
-                    // in Zig-Zag merge. It's assumed that all streams will produce the same
-                    // value during a key intersection.
-                    assert(stdx.equal_bytes(Value, &value, &value_other));
+            if (it.key_popped) |previous| {
+                switch (std.math.order(previous, key)) {
+                    .lt => assert(it.direction == .ascending),
+                    // Duplicate values are not expected.
+                    .eq => unreachable,
+                    .gt => assert(it.direction == .descending),
                 }
+            }
+            it.key_popped = key;
 
-                if (it.key_popped) |previous| {
-                    switch (std.math.order(previous, key)) {
-                        .lt => assert(it.direction == .ascending),
-                        // Duplicate values are not expected.
-                        .eq => unreachable,
-                        .gt => assert(it.direction == .descending),
-                    }
-                }
-                it.key_popped = key;
+            const value = stream_pop(it.context, 0);
+            assert(key_from_value(&value) == key);
+            for (1..it.streams_count) |stream_index| {
+                const value_other = stream_pop(it.context, @intCast(stream_index));
+                assert(key_from_value(&value_other) == key);
 
-                return value;
+                // Differently from K-way merge, there's no precedence between streams
+                // in Zig-Zag merge. It's assumed that all streams will produce the same
+                // value during a key intersection.
+                assert(stdx.equal_bytes(Value, &value, &value_other));
             }
 
-            return null;
+            return value;
         }
 
         fn peek_key(it: *ZigZagMergeIterator) error{Drained}!?Key {
