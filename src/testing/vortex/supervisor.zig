@@ -82,6 +82,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         });
     } else {
         log.warn("vortex may spawn runaway processes when run on a non-Linux OS", .{});
+        log.warn("vortex may encounter port collisions non-Linux OS", .{});
     }
 
     const shell = try Shell.create(allocator);
