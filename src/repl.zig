@@ -113,10 +113,10 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn redraw_line(repl: *const Repl, prompt_str: []const u8) !void {
-            const buf = repl.line_editor.get_buffer();
+            const buf = repl.line_editor.const_slice();
             const prompt_len = prompt_str.len;
 
-            // move to start of line (CR)
+            // Move to the start of the line (CR).
             try repl.terminal.print("\r", .{});
 
             try repl.terminal.print("{s}", .{prompt_str});
@@ -153,7 +153,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                 switch (user_input) {
                     .ctrld => {
-                        if (repl.line_editor.get_buffer().len == 0) {
+                        if (repl.line_editor.const_slice().len == 0) {
                             return null;
                         }
                         repl.line_editor.delete();
@@ -168,18 +168,18 @@ pub fn ReplType(comptime MessageBus: type) type {
                         return &.{};
                     },
                     .newline => {
-                        repl.line_editor.move_end();
-                        try redraw_line(repl, prompt_str);
-                        try repl.terminal.print("\n", .{});
-                        return repl.line_editor.get_buffer();
-                    },
-                    .printable => |character| {
-                        if (repl.line_editor.get_buffer().len >= repl_history_entry_bytes_without_nul) {
-                            continue;
-                        }
-                        repl.line_editor.insert_char(character);
-                        try redraw_line(repl, prompt_str);
-                    },
+                         repl.line_editor.move_end();
+                         try redraw_line(repl, prompt_str);
+                         try repl.terminal.print("\n", .{});
+                         return repl.line_editor.const_slice();
+                     },
+                     .printable => |character| {
+                         if (repl.line_editor.const_slice().len >= repl_history_entry_bytes_without_nul) {
+                             continue;
+                         }
+                         repl.line_editor.insert(character);
+                         try redraw_line(repl, prompt_str);
+                     },
                     .backspace => {
                         repl.line_editor.backspace();
                         try redraw_line(repl, prompt_str);
@@ -204,9 +204,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                         const buffer_next = std.mem.sliceTo(buffer_next_full, 0);
 
                         if (history_index == repl.history.count) {
-                            repl.buffer_outside_history.clear();
-                            repl.buffer_outside_history.push_slice(repl.line_editor.get_buffer());
-                        }
+                             repl.buffer_outside_history.clear();
+                             repl.buffer_outside_history.push_slice(repl.line_editor.const_slice());
+                         }
                         try repl.line_editor.set_content(buffer_next);
                         history_index = history_index_next;
                         try redraw_line(repl, prompt_str);
@@ -251,7 +251,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // Move to 0,0 and clear the screen from cursor, print the prompt, then ask
                         // the terminal for the new position.
                         try repl.terminal.print("\x1b[0;0H\x1b[J", .{});
-                        try repl.terminal.print_string(prompt_str);
+                        try repl.terminal.print("{s}", .{prompt_str});
                         terminal_screen = try repl.terminal.get_screen();
 
                         // Print whatever is in the buffer and move the cursor back to cursor.
@@ -260,7 +260,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         );
 
                         try repl.terminal.print("{s}\x1b[{};{}H", .{
-                            repl.line_editor.get_buffer(),
+                            repl.line_editor.const_slice(),
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
                         });
@@ -275,10 +275,10 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
-            const prompt_str = if (repl.statement_buffer.items.len == 0) "> " else "... ";
-            try repl.terminal.print_string(prompt_str);
+            const prompt = if (repl.statement_buffer.items.len == 0) "> " else "... ";
+            try repl.terminal.print("{s}", .{prompt});
 
-            const input = repl.read_until_newline_or_eof(prompt_str) catch |err| {
+            const input = repl.read_until_newline_or_eof(prompt) catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -288,9 +288,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             };
 
-            const allocator = repl.static_allocator.allocator();
-            try repl.statement_buffer.appendSlice(allocator, input);
-            try repl.statement_buffer.append(allocator, '\n');
+            try repl.statement_buffer.appendSlice(repl.static_allocator.allocator(), input);
+            try repl.statement_buffer.append(repl.static_allocator.allocator(), '\n');
 
             if (std.mem.indexOf(u8, repl.statement_buffer.items, ";")) |_| {
                 // Parse the accumulated statement
@@ -437,8 +436,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             );
             errdefer client.deinit(allocator);
 
-            var line_editor = LineEditor.init();
-            errdefer line_editor.deinit();
+
 
             // Disable all dynamic allocation from this point onwards.
             static_allocator.transition_from_init_to_static();
@@ -452,7 +450,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .terminal = undefined, // Init on run.
                 .completion = undefined, // Init on run.
                 .history = HistoryBuffer.init(), // No corresponding deinit.
-                .line_editor = line_editor,
+                .line_editor = .{},
                 .buffer_outside_history = .{},
                 .arguments = arguments,
                 .message_pool = message_pool,
@@ -465,7 +463,6 @@ pub fn ReplType(comptime MessageBus: type) type {
         pub fn deinit(repl: *Repl, allocator: std.mem.Allocator) void {
             repl.static_allocator.transition_from_static_to_deinit();
 
-            repl.line_editor.deinit();
             repl.client.deinit(allocator);
             repl.message_pool.deinit(allocator);
             allocator.destroy(repl.message_pool);
