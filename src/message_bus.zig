@@ -25,12 +25,8 @@ pub fn MessageBusType(comptime IO: type) type {
     };
 
     return struct {
-        const MessageBus = @This();
-
         pool: *MessagePool,
         io: *IO,
-
-        configuration: []const std.net.Address,
 
         process: ProcessID,
         /// Prefix for log messages.
@@ -42,7 +38,7 @@ pub fn MessageBusType(comptime IO: type) type {
         ///
         /// This allows passing port 0 as an address for the OS to pick an open port for us
         /// in a TOCTOU immune way and logging the resulting port number.
-        accept_address: ?std.net.Address = null,
+        accept_address: ?Address = null,
         accept_completion: IO.Completion = undefined,
         /// The connection reserved for the currently in progress accept operation.
         /// This is non-null exactly when an accept operation is submitted.
@@ -56,7 +52,7 @@ pub fn MessageBusType(comptime IO: type) type {
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.state != .free).
-        connections_used: usize = 0,
+        connections_used: u32 = 0,
         connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
             .name = null,
         }),
@@ -66,6 +62,7 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
         replicas: []?*Connection,
+        replicas_addresses: []Address,
         /// The number of outgoing `connect()` attempts for a given replica:
         /// Reset to zero after a successful `on_connect()`.
         replicas_connect_attempts: []u64,
@@ -80,11 +77,18 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Seeded with the process' replica index or client ID.
         prng: stdx.PRNG,
 
+        comptime {
+            // Assert it is correct to use u32 to track sizes.
+            assert(constants.message_size_max < std.math.maxInt(u32));
+        }
+
         pub const Options = struct {
-            configuration: []const std.net.Address,
+            configuration: []const Address,
             io: *IO,
-            clients_limit: ?usize = null,
+            clients_limit: ?u32 = null,
         };
+        const Address = std.net.Address;
+        const MessageBus = @This();
 
         /// Initialize the MessageBus for the given configuration and replica/client process.
         pub fn init(
@@ -132,6 +136,10 @@ pub fn MessageBusType(comptime IO: type) type {
             errdefer allocator.free(replicas);
             @memset(replicas, null);
 
+            const replicas_addresses = try allocator.alloc(Address, options.configuration.len);
+            errdefer allocator.free(replicas_addresses);
+            stdx.copy_disjoint(.exact, Address, replicas_addresses, options.configuration);
+
             const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
             @memset(replicas_connect_attempts, 0);
@@ -144,7 +152,6 @@ pub fn MessageBusType(comptime IO: type) type {
             var bus: MessageBus = .{
                 .pool = message_pool,
                 .io = options.io,
-                .configuration = options.configuration,
                 .process = process_id,
                 .id = switch (process_id) {
                     .replica => |index| @as(u128, index),
@@ -154,6 +161,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .send_queue_buffer = send_queue_buffer,
                 .connections = connections,
                 .replicas = replicas,
+                .replicas_addresses = replicas_addresses,
                 .replicas_connect_attempts = replicas_connect_attempts,
                 .prng = stdx.PRNG.from_seed(prng_seed),
             };
@@ -206,6 +214,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
 
             allocator.free(bus.replicas_connect_attempts);
+            allocator.free(bus.replicas_addresses);
             allocator.free(bus.replicas);
             allocator.free(bus.connections);
             allocator.free(bus.send_queue_buffer);
@@ -234,7 +243,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.accept_fd == null);
             assert(bus.accept_address == null);
 
-            const address = bus.configuration[bus.process.replica];
+            const address = bus.replicas_addresses[bus.process.replica];
             const fd = try init_tcp(bus.io, .replica, address.any.family);
             errdefer bus.io.close_socket(fd);
 
@@ -408,7 +417,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .free);
             assert(connection.fd == null);
 
-            const family = bus.configuration[replica].any.family;
+            const family = bus.replicas_addresses[replica].any.family;
             connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
                 log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,
@@ -483,7 +492,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                 &connection.recv_completion,
                 connection.fd.?,
-                bus.configuration[connection.peer.replica],
+                bus.replicas_addresses[connection.peer.replica],
             );
         }
 
@@ -636,7 +645,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
             switch (peer) {
                 .replica => |replica_index| {
-                    if (replica_index >= bus.configuration.len) return false;
+                    if (replica_index >= bus.replicas_addresses.len) return false;
 
                     // Allowed transitions:
                     // * unknown        → replica
@@ -867,7 +876,8 @@ pub fn MessageBusType(comptime IO: type) type {
                     connection.fd.?,
                     message.buffer[connection.send_progress..message.header.size],
                 ) orelse return;
-                connection.send_progress += write_size;
+                assert(write_size <= constants.message_size_max);
+                connection.send_progress += @intCast(write_size);
                 assert(connection.send_progress <= message.header.size);
                 if (connection.send_progress == message.header.size) {
                     _ = connection.send_queue.pop();
@@ -896,7 +906,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 return;
             }
             assert(connection.state == .connected);
-            connection.send_progress += result catch |err| {
+            const write_size = result catch |err| {
                 // TODO: maybe don't need to close on *every* error
                 log.warn("{}: on_send: to={} {}", .{
                     bus.id,
@@ -906,6 +916,8 @@ pub fn MessageBusType(comptime IO: type) type {
                 bus.terminate(connection, .shutdown);
                 return;
             };
+            assert(write_size <= constants.message_size_max);
+            connection.send_progress += @intCast(write_size);
             assert(connection.send_progress <= connection.send_queue.head().?.header.size);
             // If the message has been fully sent, move on to the next one.
             if (connection.send_progress == connection.send_queue.head().?.header.size) {
@@ -1166,7 +1178,7 @@ pub fn MessageBusType(comptime IO: type) type {
             /// but the callback has not yet been run.
             send_submitted: bool = false,
             /// Number of bytes of the current message that have already been sent.
-            send_progress: usize = 0,
+            send_progress: u32 = 0,
             /// The queue of messages to send to the client or replica peer.
             send_queue: SendQueue,
             /// For connections_suspended.
