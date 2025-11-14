@@ -8339,7 +8339,7 @@ pub fn ReplicaType(
 
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
                 if (self.journal.header_with_op(header.op)) |_| {
-                    assert(self.journal.has_header(header));
+                    assert(self.syncing == .updating_checkpoint or self.journal.has_header(header));
                 }
             }
 
