@@ -1402,8 +1402,10 @@ def test_ids_random():
     samples = [tb.id() for _ in range(10_000)]
     assert len(samples) == len(set(samples))
 
-def test_ids_sortable():
-    """IDs are expected to be sortable, with at least 1 millisecond between calls."""
-    id1 = tb.id()
-    time.sleep(0.001)
-    assert tb.id() > id1
+def test_ids_increasing():
+    """IDs are expected to be strictly increasing."""
+    id_previous = tb.id()
+    for i in range(10_000):
+        id = tb.id()
+        assert id_previous < id
+        id_previous = id
