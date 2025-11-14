@@ -3,6 +3,46 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.65
+
+Released: 2025-11-14
+
+### Safety And Performance
+
+- [#3377](https://github.com/tigerbeetle/tigerbeetle/pull/3377)
+
+  Fix overzealous assertion that didn't account for state sync while accepting start view headers.
+
+### Internals
+
+- [#3369](https://github.com/tigerbeetle/tigerbeetle/pull/3369),
+  [#3370](https://github.com/tigerbeetle/tigerbeetle/pull/3370),
+  [#3374](https://github.com/tigerbeetle/tigerbeetle/pull/3374)
+
+  Various MessageBus refactors to reduce code bloat.
+
+  Earlier, the connection and message passing logic was spread out across the MessageBus and
+  Connection types. Now, all that logic is contained within the MessageBus type, with Connection
+  only maintaining connection state between two peers.
+
+- [#3367](https://github.com/tigerbeetle/tigerbeetle/pull/3367)
+
+  Fix bug in cut_suffix wherein the suffix itself was being returned instead of the prefix.
+
+- [#3365](https://github.com/tigerbeetle/tigerbeetle/pull/3365)
+
+  Make IO file descriptor a Zig optional, as opposed to using INVALID_SOCKET.
+
+- [#3364](https://github.com/tigerbeetle/tigerbeetle/pull/3364)
+
+  Add support for canceling _individual_ inflight IO operations on Linux.
+
+  Earlier, Linux IO only allowed canceling _all_ asynchronous in-flight operations.
+
+### TigerTracks 🎧
+
+- [Elegia](https://open.spotify.com/track/5wZtbH2PjVZ5W1Akn5z2uA?si=6d0b2a9c09494e9b)
+
 ## TigerBeetle 0.16.64
 
 Released: 2025-11-07
