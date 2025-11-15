@@ -21,8 +21,7 @@
 //!    * the results (result count * size of result pair), where each pair holds an index and a
 //!      result enum value (see `src/tigerbeetle.zig`)
 //! 3. The workload receives the results, and expects them to be of the same operation type as
-//!    originally requested. There might be fewer results than events, because clients can omit
-//!    .ok results.
+//!    originally requested.
 //!
 //! Additionally, the workload itself sends `Progress` events on its stdout back to the supervisor.
 //! This is used for tracing and liveness checks.
@@ -117,8 +116,8 @@ const CommandBuffers = FixedSizeBuffersType(Command);
 var command_buffers: CommandBuffers = std.mem.zeroes(CommandBuffers);
 
 const Result = union(enum) {
-    create_accounts: []tb.CreateAccountsResult,
-    create_transfers: []tb.CreateTransfersResult,
+    create_accounts: []tb.CreateAccountResult,
+    create_transfers: []tb.CreateTransferResult,
     lookup_all_accounts: []tb.Account,
     lookup_latest_transfers: []tb.Transfer,
 };
@@ -156,29 +155,20 @@ fn operation_from_command(tag: std.meta.Tag(Command)) Operation {
 
 fn reconcile(result: Result, command: *const Command, model: *Model) !void {
     switch (result) {
-        .create_accounts => |entries| {
-            const accounts_new = command.create_accounts;
-
-            // Track results for all new accounts, assuming `.ok` if response from driver is
-            // omitted.
-            var accounts_results: [accounts_count_max]tb.CreateAccountResult = undefined;
-            @memset(accounts_results[0..accounts_new.len], .ok);
-
-            // Fill in non-ok results.
-            for (entries) |entry| {
-                accounts_results[entry.index] = entry.result;
-            }
+        .create_accounts => |account_results| {
+            const accounts = command.create_accounts;
+            assert(account_results.len == accounts.len);
 
             for (
-                accounts_results[0..accounts_new.len],
-                accounts_new,
+                accounts,
+                account_results,
                 0..,
-            ) |account_result, account, index| {
-                if (account_result == .ok) {
+            ) |account, account_result, index| {
+                if (account_result.status == .created) {
                     model.accounts.appendAssumeCapacity(account);
                 } else {
-                    log.err("got result {s} for event {d}: {any}", .{
-                        @tagName(account_result),
+                    log.err("got status {s} for event {d}: {any}", .{
+                        @tagName(account_result.status),
                         index,
                         account,
                     });
@@ -186,39 +176,29 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                 }
             }
         },
-        .create_transfers => |entries| {
+        .create_transfers => |transfer_results| {
             const transfers = command.create_transfers;
-
-            // Track results for all new transfers, assuming `.ok` if response from driver is
-            // omitted.
-            var transfers_results: [events_count_max]tb.CreateTransferResult = undefined;
-            @memset(transfers_results[0..transfers.len], .ok);
-
-            // Fill in non-ok results.
-            for (entries) |entry| {
-                transfers_results[entry.index] = entry.result;
-            }
+            assert(transfer_results.len == transfers.len);
 
             // Collect all successful transfer IDs.
             var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
 
             for (
                 transfers,
-                transfers_results[0..transfers.len],
+                transfer_results,
                 0..,
-            ) |transfer, transfer_result, transfer_index| {
+            ) |transfer, transfer_result, index| {
                 // Check that linked transfers fail together.
-                if (transfer_index > 0) {
-                    const preceding_transfer = transfers[transfer_index - 1];
+                if (index > 0) {
+                    const preceding_transfer = transfers[index - 1];
                     if (preceding_transfer.flags.linked) {
-                        const preceding_entry = entries[transfer_index - 1];
-                        try testing.expect(preceding_entry.index == transfer_index - 1);
-                        try testing.expect(preceding_entry.result != .ok);
+                        const preceding_entry = transfer_results[index - 1];
+                        try testing.expect(preceding_entry.status != .created);
                     }
                 }
 
                 // No further validation needed for failed transfers.
-                if (transfer_result != .ok) {
+                if (transfer_result.status != .created) {
                     continue;
                 }
 

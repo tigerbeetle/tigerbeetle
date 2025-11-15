@@ -393,17 +393,21 @@ const Benchmark = struct {
         });
     }
 
-    fn create_accounts_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+    fn create_accounts_callback(b: *Benchmark, client_index: u32, results: []const u8) void {
         assert(b.stage == .create_accounts);
 
         const create_accounts_results = stdx.bytes_as_slice(
             .exact,
-            tb.CreateAccountsResult,
-            result,
+            tb.CreateAccountResult,
+            results,
         );
-        if (create_accounts_results.len > 0) {
-            panic("CreateAccountsResults: {any}", .{create_accounts_results});
+        for (create_accounts_results) |result| {
+            assert(result.timestamp > 0);
+            if (result.status != .created) {
+                panic("CreateAccountStatus: {any}", .{result.status});
+            }
         }
+        if (create_accounts_results.len != 0) {}
         b.create_accounts(client_index);
     }
 
@@ -433,15 +437,18 @@ const Benchmark = struct {
         });
     }
 
-    fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+    fn create_transfers_callback(b: *Benchmark, client_index: u32, results: []const u8) void {
         assert(!b.clients_busy.is_set(client_index));
         const create_transfers_results = stdx.bytes_as_slice(
             .exact,
-            tb.CreateTransfersResult,
-            result,
+            tb.CreateTransferResult,
+            results,
         );
-        if (create_transfers_results.len > 0) {
-            panic("CreateTransfersResults: {any}", .{create_transfers_results});
+        for (create_transfers_results) |result| {
+            assert(result.timestamp > 0);
+            if (result.status != .created) {
+                panic("CreateTransferStatus: {any}", .{result.status});
+            }
         }
 
         const requests_complete = b.request_index - b.clients_busy.count();

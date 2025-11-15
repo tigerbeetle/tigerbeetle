@@ -1,4 +1,4 @@
-package types
+package tigerbeetle_go
 
 import (
 	"math/big"
@@ -30,7 +30,6 @@ func Test_HexStringToUint128(t *testing.T) {
 }
 
 func Test_HexStringToUint128_LittleEndian(t *testing.T) {
-
 	test := "123456"
 
 	res, err := HexStringToUint128(test)
@@ -46,7 +45,6 @@ func Test_HexStringToUint128_LittleEndian(t *testing.T) {
 }
 
 func Test_BigIntToUint128(t *testing.T) {
-
 	tests := []string{
 		"0",
 		"1",
