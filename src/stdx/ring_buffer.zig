@@ -140,6 +140,15 @@ pub fn RingBufferType(
             self.count -= 1;
         }
 
+        pub fn advance_head_many(self: *RingBuffer, discard: u64) void {
+            assert(discard <= self.count);
+            if (self.buffer.len == 0) return;
+
+            self.index += discard;
+            self.index %= self.buffer.len;
+            self.count -= discard;
+        }
+
         pub inline fn retreat_head(self: *RingBuffer) void {
             assert(self.count < self.buffer.len);
 

@@ -19,6 +19,28 @@ const linux = std.os.linux;
 const log = std.log.scoped(.unshare);
 const assert = std.debug.assert;
 
+// The external pid of the init process of the unshare pid namespace.
+// (Its pid within the namespace is always 1.)
+var child_pid: ?std.process.Child.Id = null;
+
+// On receiving SIGTERM, the parent must explicitly kill the pid namespace child process, since
+// it would otherwise keep running. Since the child is the init process, that automatically kills
+// all of its descendants too.
+const trap_action = std.posix.Sigaction{
+    .handler = .{ .handler = trap_handler },
+    .mask = std.posix.empty_sigset,
+    .flags = 0,
+};
+
+fn trap_handler(signal: i32) callconv(.c) void {
+    if (child_pid) |child| {
+        std.posix.kill(child, std.posix.SIG.KILL) catch |err| {
+            log.err("error killing sandboxed process: {}", .{err});
+        };
+    }
+    std.posix.exit(@intCast(@as(i32, 128) + signal));
+}
+
 /// Relaunch this process with new namespaces.
 ///
 /// If the current process is already running with the namespaces configured as
@@ -44,9 +66,7 @@ pub fn maybe_unshare_and_relaunch(
 ) !void {
     comptime assert(builtin.os.tag == .linux);
 
-    const should_unshare_and_fork = std.posix.getenv("TB_UNSHARED") == null;
-
-    if (should_unshare_and_fork) {
+    if (std.os.linux.getpid() != 1) {
         try linux_unshare(.{
             .pid = options.pid,
             .network = options.network,
@@ -54,7 +74,15 @@ pub fn maybe_unshare_and_relaunch(
         if (options.network) {
             try linux_ip_link_loopback();
         }
-        try fork_and_exit(gpa);
+        if (options.pid) {
+            std.posix.sigaction(std.posix.SIG.TERM, &trap_action, null);
+            try fork_and_exit(gpa);
+        }
+    } else {
+        // We are within the pid namespace.
+        assert(options.pid);
+        assert(std.os.linux.getpid() == 1);
+        assert(child_pid == null);
     }
 }
 
@@ -239,20 +267,18 @@ fn fork_and_exit(gpa: std.mem.Allocator) !void {
         args_new[arg_index] = std.mem.span(args_ours[arg_index]);
     }
 
-    var env_map = try std.process.getEnvMap(gpa);
-    defer env_map.deinit();
-
-    try env_map.put("TB_UNSHARED", "1");
-
     var child = std.process.Child.init(args_new, gpa);
-
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
-    child.env_map = &env_map;
 
-    const result = try child.spawnAndWait();
+    try child.spawn();
 
+    // Set the global pid so that we can kill it if we receive a SIGTERM.
+    assert(child_pid == null);
+    child_pid = child.id;
+
+    const result = try child.wait();
     switch (result) {
         .Exited => |code| {
             std.process.exit(code);
