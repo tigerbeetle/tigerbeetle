@@ -337,6 +337,11 @@ extern "C" {
         completion_ctx_out: *mut usize,
     ) -> TB_CLIENT_STATUS;
 
+    // Trigger an artificial client eviction for testing purposes.
+    pub fn tb_client_trigger_eviction_for_testing(
+        client: *mut tb_client_t,
+    ) -> TB_CLIENT_STATUS;
+
     // Submit a packet with its operation, data, and data_size fields set.
     // Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
     // packet on the `tb_client` thread (separate from caller's thread).
