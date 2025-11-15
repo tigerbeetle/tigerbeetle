@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from dataclasses import asdict
 
@@ -7,9 +8,14 @@ import pytest
 import tigerbeetle as tb
 tb.configure_logging(debug=True)
 
+replica_addresses = os.getenv("TB_ADDRESS")
+if not replica_addresses:
+    print('error: missing TB_ADDRESS environment variable')
+    sys.exit(1)
+
 @pytest.fixture
 def client():
-    client = tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000"))
+    client = tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses)
     yield client
     client.close()
 
@@ -1382,7 +1388,7 @@ def test_uint128(client):
             tigerbeetle,
             "repl",
             "--cluster=0",
-            "--addresses=" + os.getenv("TB_ADDRESS", "3000"),
+            "--addresses=" + replica_addresses,
             "--command=lookup_accounts id=340282366920938463463374607431768211446"
         ],
         check=True,
@@ -1396,8 +1402,10 @@ def test_ids_random():
     samples = [tb.id() for _ in range(10_000)]
     assert len(samples) == len(set(samples))
 
-def test_ids_sortable():
-    """IDs are expected to be sortable, with at least 1 millisecond between calls."""
-    id1 = tb.id()
-    time.sleep(0.001)
-    assert tb.id() > id1
+def test_ids_increasing():
+    """IDs are expected to be strictly increasing."""
+    id_previous = tb.id()
+    for i in range(10_000):
+        id = tb.id()
+        assert id_previous < id
+        id_previous = id

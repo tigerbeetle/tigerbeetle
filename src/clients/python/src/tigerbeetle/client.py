@@ -60,20 +60,24 @@ class _IDGenerator:
     Keeps a monotonically increasing millisecond timestamp between calls to `.generate()`.
     """
     def __init__(self) -> None:
-        self._time_ms_last = time.time_ns() // (1000 * 1000)
+        self._last_time_ms = time.time_ns() // (1000 * 1000)
+        self._last_random = int.from_bytes(os.urandom(10), 'little')
 
     def generate(self) -> int:
         time_ms = time.time_ns() // (1000 * 1000)
 
         # Ensure time_ms monotonically increases.
-        if time_ms <= self._time_ms_last:
-            time_ms = self._time_ms_last
+        if time_ms <= self._last_time_ms:
+            time_ms = self._last_time_ms
         else:
-            self._time_ms_last = time_ms
+            self._last_time_ms = time_ms
+            self._last_random = int.from_bytes(os.urandom(10), 'little')
 
-        randomness = os.urandom(10)
+        self._last_random += 1
+        if self._last_random == 2 ** 80:
+            raise Exception('random bits overflow on monotonic increment')
 
-        return (time_ms << 80) | int.from_bytes(randomness, "little")
+        return (time_ms << 80) | self._last_random
 
 # Module-level singleton instance.
 _id_generator = _IDGenerator()
