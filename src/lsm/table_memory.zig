@@ -251,6 +251,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         // - needs to track how much dropped
         // - needs to track how much are left. (max - consumed)
         // - damn this must be resetted per iteration for compaction.
+        // TODO: Should we make this comptime.
         pub const ImmutableTableIterator = struct {
             merge_context: MergeContext,
             k_way_iterator: KWayMergeIterator,
@@ -609,7 +610,47 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn iterator_context(table_immutable: *TableMemory) MergeContext {
             assert(table_immutable.mutability == .immutable);
+            // push down stream.
+            // reslice them they could be empty?
             return table_immutable.value_context.run_tracker.merge_context(table_immutable.values_used());
+        }
+
+        pub fn iterator_context_range(table_immutable: *TableMemory, range: struct { min: Key, max: Key }) MergeContext {
+            assert(table_immutable.mutability == .immutable);
+            // push down stream.
+            // reslice them they could be empty?
+            var context = table_immutable.value_context.run_tracker.merge_context(table_immutable.values_used());
+
+            var target_index: u32 = 0;
+            var source_index: u32 = 0;
+
+            while (source_index < context.streams_count) : (source_index += 1) {
+                const run_min = key_from_value(&context.streams[source_index][0]);
+                const run_max = key_from_value(&context.streams[source_index][context.streams[source_index].len - 1]);
+                // BUG + TODO: We need to reslice based on directio!
+                if (range.min <= run_max and range.max >= run_min) {
+                    // re-slice.
+                    context.streams[target_index] = blk: {
+                        const values = context.streams[source_index];
+                        // This returns the first index of the match.
+                        const start = binary_search.binary_search_values_upsert_index(
+                            Key,
+                            Value,
+                            key_from_value,
+                            values,
+                            range.min,
+                            .{ .mode = .lower_bound },
+                        );
+                        break :blk if (start == values.len) &.{} else values[start..];
+                    };
+                    assert(context.streams[target_index].len > 0); // otherwise we should have pruned
+                    context.stream_origins[target_index] = context.stream_origins[source_index];
+                    target_index += 1;
+                }
+            }
+            context.streams_count = target_index;
+
+            return context;
         }
 
         // Merge `table_mutable` runs into `table_immutable`.
