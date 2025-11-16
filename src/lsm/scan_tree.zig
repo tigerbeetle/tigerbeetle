@@ -10,6 +10,12 @@ const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
+const perf = @import("perf_event.zig");
+
+const Params = struct {
+    name: []const u8 = "scan",
+};
+
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -254,21 +260,25 @@ pub fn ScanTreeType(
                 break :blk values[range.start..][0..range.count];
             };
 
-            //const table_immutable_values_iterator: []const Value = blk: {
-            //if (snapshot < tree.table_immutable.mutability.immutable.snapshot_min) {
-            //TZ: it seems that we never hit this case.
-            //std.debug.print("hit this case\n", .{});
-            //break :blk &.{};
-            //} else break :blk tree.table_immutable.values_used();
-            //};
+            const context = tree.table_immutable.iterator_context_range(.{ .min = key_min, .max = key_max });
+            var count: u32 = 0;
 
+            for (0..context.streams_count) |s_i| {
+                count += @intCast(context.streams[s_i].len);
+            }
+            // BUG: we push down max key but not min key
+            //       That means we have to possible iterate through the full table.
             var table_immutable_iterator: ImmutableTableIterator = .init(
-                tree.table_immutable.iterator_context(),
+                context,
                 if (direction == .ascending) key_max else key_min,
                 direction,
-                tree.table_immutable.count(),
+                count,
             );
 
+            //var param = Params{ .name = "main prune" };
+            //var block = perf.PerfEventBlockType(Params).init(&param, true);
+
+            //var counter: u32 = 0;
             while (true) {
                 // if the slice is empty we just return here and leave it to handle in the core logic.
                 const key_peek = table_immutable_iterator.peek() catch break;
@@ -281,7 +291,10 @@ pub fn ScanTreeType(
                     },
                 }
                 _ = table_immutable_iterator.pop() catch unreachable;
+                //counter += 1;
             }
+            //block.set_scale(counter);
+            //block.deinit();
 
             return .{
                 .tree = tree,
@@ -428,6 +441,9 @@ pub fn ScanTreeType(
                 field.* = slice;
             }
             // reslice it now for our iterator too.
+            //var param = Params{ .name = "reslice" };
+            //var block = perf.PerfEventBlockType(Params).init(&param, true);
+            //var counter: u32 = 0;
 
             while (true) {
                 // if the slice is empty we just return here and leave it to handle in the core logic.
@@ -441,7 +457,10 @@ pub fn ScanTreeType(
                     },
                 }
                 _ = self.table_immutable_iterator.pop() catch unreachable;
+                //counter += 1;
             }
+            //block.set_scale(counter);
+            //block.deinit();
 
             switch (self.state) {
                 .idle => {},
