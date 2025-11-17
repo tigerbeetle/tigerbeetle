@@ -399,9 +399,17 @@ fn run_fuzzers(
                     });
 
                     const term = try if (fuzzer_done) fuzzer.child.wait() else fuzzer.child.kill();
-                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
+                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL }) or
+                        (std.meta.eql(term, .{ .Exited = @intCast(128 + std.posix.SIG.KILL) }) and
+                            fuzzer.fuzzer == .vortex))
+                    {
                         // Something killed the fuzzer. This is likely OOM, so count this seed
                         // neither as a success, nor as a failure.
+                        //
+                        // Vortex is special-cased since one of its child processes might have been
+                        // SIGKILL'd, which the supervisor bubbles up as 128+SIGKILL. (It can't just
+                        // SIGKILL itself because the supervisor is immune to internal SIGKILL as it
+                        // is the init process of a pid namespace.
                         log.info("ignored SIGKILL for '{s}'", .{fuzzer.seed.command});
                     } else if (std.meta.eql(term, .{ .Signal = std.posix.SIG.TERM }) and
                         iteration_last)
