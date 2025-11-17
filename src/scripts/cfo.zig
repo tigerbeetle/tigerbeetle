@@ -55,7 +55,7 @@ const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
 const MiB = stdx.MiB;
-const log_size_max = 64 * stdx.KiB;
+const log_size_max = 256 * stdx.KiB;
 
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
