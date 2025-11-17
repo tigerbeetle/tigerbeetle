@@ -2854,6 +2854,22 @@ pub fn ReplicaType(
                             );
                             assert(self.op == header.op);
                             assert(self.commit_max >= message.header.commit_max);
+
+                            if (self.syncing == .updating_checkpoint) {
+                                // State sync can "truncate" the first batch of committed ops!
+                                maybe(self.commit_min >
+                                    self.syncing.updating_checkpoint.header.op);
+                                assert(self.commit_min <= constants.lsm_compaction_ops +
+                                    self.syncing.updating_checkpoint.header.op);
+
+                                self.commit_min = self.syncing.updating_checkpoint.header.op;
+                                self.sync_wal_repair_progress = .{
+                                    .commit_min = self.commit_min,
+                                    .advanced = true,
+                                };
+                            }
+                            assert(self.commit_min <= self.commit_max);
+
                             break;
                         }
                     }
@@ -2868,19 +2884,6 @@ pub fn ReplicaType(
                         self.replace_header(header);
                     }
                 }
-            }
-            if (self.syncing == .updating_checkpoint) {
-                // State sync can "truncate" the first batch of committed ops!
-                maybe(self.commit_min >
-                    self.syncing.updating_checkpoint.header.op);
-                assert(self.commit_min <= constants.lsm_compaction_ops +
-                    self.syncing.updating_checkpoint.header.op);
-
-                self.commit_min = self.syncing.updating_checkpoint.header.op;
-                self.sync_wal_repair_progress = .{
-                    .commit_min = self.commit_min,
-                    .advanced = true,
-                };
             }
 
             self.view_headers.replace(.start_view, view_headers);
@@ -6918,6 +6921,14 @@ pub fn ReplicaType(
             return self.superblock.working.vsr_state.checkpoint.header.op;
         }
 
+        /// Like op_checkpoint, but takes into account the in-memory checkpoint during sync.
+        fn op_checkpoint_sync(self: *const Replica) u64 {
+            if (self.syncing != .updating_checkpoint)
+                return self.op_checkpoint()
+            else
+                return self.syncing.updating_checkpoint.header.op;
+        }
+
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
         pub fn op_checkpoint_next(self: *const Replica) u64 {
             assert(vsr.Checkpoint.valid(self.op_checkpoint()));
@@ -6947,7 +6958,7 @@ pub fn ReplicaType(
             return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
-        /// Like prepare_max, but takes into account yet the in-memory checkpoint during sync.
+        /// Like prepare_max, but takes into account the in-memory checkpoint during sync.
         fn op_prepare_max_sync(self: *const Replica) u64 {
             if (self.syncing != .updating_checkpoint) return self.op_prepare_max();
 
@@ -7002,9 +7013,14 @@ pub fn ReplicaType(
         /// Returns `null` for ops which are too far in the past/future to know their checkpoint
         /// ids.
         fn checkpoint_id_for_op(self: *const Replica, op: u64) ?u128 {
-            const checkpoint_now = self.op_checkpoint();
+            const checkpoint_now = self.op_checkpoint_sync();
             const checkpoint_next_1 = vsr.Checkpoint.checkpoint_after(checkpoint_now);
             const checkpoint_next_2 = vsr.Checkpoint.checkpoint_after(checkpoint_next_1);
+
+            const checkpoint: *const vsr.CheckpointState = if (self.syncing == .updating_checkpoint)
+                &self.syncing.updating_checkpoint
+            else
+                &self.superblock.working.vsr_state.checkpoint;
 
             if (op + constants.vsr_checkpoint_ops <= checkpoint_now) {
                 // Case 1: op is from a too distant past for us to know its checkpoint id.
@@ -7013,17 +7029,17 @@ pub fn ReplicaType(
 
             if (op <= checkpoint_now) {
                 // Case 2: op is from the previous checkpoint whose id we still remember.
-                return self.superblock.working.vsr_state.checkpoint.grandparent_checkpoint_id;
+                return checkpoint.grandparent_checkpoint_id;
             }
 
             if (op <= checkpoint_next_1) {
                 // Case 3: op is in the current checkpoint.
-                return self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
+                return checkpoint.parent_checkpoint_id;
             }
 
             if (op <= checkpoint_next_2) {
                 // Case 4: op is in the next checkpoint (which we have not checkpointed).
-                return self.superblock.working.checkpoint_id();
+                return vsr.checksum(std.mem.asBytes(checkpoint));
             }
 
             // Case 5: op is from the too far future for us to know anything!
@@ -7046,45 +7062,44 @@ pub fn ReplicaType(
         /// for ensuring that replica.op is valid.
         pub fn op_repair_min(self: *const Replica) u64 {
             if (self.status == .recovering) assert(self.solo());
-            assert(self.op >= self.op_checkpoint());
-            assert(self.syncing == .updating_checkpoint or
-                (self.op < self.op_checkpoint_next() + constants.journal_slot_count));
+            assert(self.op >= self.op_checkpoint_sync());
+            assert(self.op < (vsr.Checkpoint
+                .checkpoint_after(self.op_checkpoint_sync()) + constants.journal_slot_count));
             assert(self.op <= self.op_prepare_max_sync() or
                 vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max));
 
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             const repair_min = repair_min: {
-                if (vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max)) {
-                    if (self.op == self.op_checkpoint()) {
+                if (vsr.Checkpoint.durable(self.op_checkpoint_sync(), self.commit_max)) {
+                    if (self.op == self.op_checkpoint_sync()) {
                         // Don't allow "op_repair_min > op_head".
                         // See https://github.com/tigerbeetle/tigerbeetle/pull/1589 for why
                         // this is required.
-                        break :repair_min self.op_checkpoint();
+                        break :repair_min self.op_checkpoint_sync();
                     }
 
-                    // While writing the target checkpoint to our superblock during state sync, our
-                    // head op is from the target checkpoint. Special case updating_checkpoint to
-                    // avoid spuriously returning an op_repair_min based on that head op.
-                    if (self.syncing != .updating_checkpoint and self.op > self.op_prepare_max()) {
-                        assert(vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max));
+                    if (self.op > self.op_prepare_max_sync()) {
+                        assert(vsr.Checkpoint.durable(
+                            vsr.Checkpoint.checkpoint_after(self.op_checkpoint_sync()),
+                            self.commit_max,
+                        ));
                         break :repair_min (self.op + 1) -| constants.journal_slot_count;
                     }
 
-                    break :repair_min if (self.op_checkpoint() == 0)
+                    break :repair_min if (self.op_checkpoint_sync() == 0)
                         0
                     else
-                        self.op_checkpoint() + 1;
+                        self.op_checkpoint_sync() + 1;
                 } else {
-                    break :repair_min (self.op_checkpoint() + 1) -|
+                    break :repair_min (self.op_checkpoint_sync() + 1) -|
                         constants.vsr_checkpoint_ops;
                 }
             };
 
             assert(repair_min <= self.op);
             assert(repair_min <= self.commit_min + 1);
-            assert(self.syncing == .updating_checkpoint or
-                self.op - repair_min < constants.journal_slot_count);
+            assert(self.op - repair_min < constants.journal_slot_count);
             assert(self.checkpoint_id_for_op(repair_min) != null);
             return repair_min;
         }
@@ -7097,14 +7112,13 @@ pub fn ReplicaType(
             assert(self.op >= self.op_checkpoint());
             assert(self.op <= self.op_prepare_max_sync() or
                 vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max));
-            assert(self.syncing == .updating_checkpoint or
-                (self.op < self.op_checkpoint_next() + constants.journal_slot_count));
+            assert((self.op < vsr.Checkpoint
+                .checkpoint_after(self.op_checkpoint_sync()) + constants.journal_slot_count));
             assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
             const repair_max = @min(self.commit_max, @max(self.op_prepare_max_sync(), self.op));
 
-            assert(self.syncing == .updating_checkpoint or
-                repair_max - self.op_repair_min() <= constants.journal_slot_count);
+            assert(repair_max - self.op_repair_min() <= constants.journal_slot_count);
             return repair_max;
         }
 
@@ -8337,7 +8351,7 @@ pub fn ReplicaType(
             assert(header.op <= self.op); // Never advance the op.
             assert(header.op <= self.op_prepare_max_sync());
 
-            if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
+            if (self.op_checkpoint_sync() < header.op and header.op <= self.commit_min) {
                 if (self.journal.header_with_op(header.op)) |_| {
                     assert(self.syncing == .updating_checkpoint or self.journal.has_header(header));
                 }
@@ -9537,7 +9551,7 @@ pub fn ReplicaType(
             assert(self.commit_max >= self.commit_min);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
-            log.debug("{}: {s}: view={} op={}..{} commit={}..{}", .{
+            log.debug("{}: {s}: view={} op={}..{} commit_max={}..{}", .{
                 self.log_prefix(),
                 source.fn_name,
                 self.view,
