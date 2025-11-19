@@ -422,7 +422,14 @@ const Supervisor = struct {
                             "{}: replica terminated unexpectedly with {}",
                             .{ replica_index, term },
                         );
-                        return error.TestFailed;
+                        if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
+                            // If one of the replica dies to SIGKILL, it is likely an OOM.
+                            // Bubble that up to CFO so that this Vortex run is counted as neither a
+                            // success or failure.
+                            std.posix.exit(@intCast(128 + term.Signal));
+                        } else {
+                            return error.TestFailed;
+                        }
                     }
                 }
             }
