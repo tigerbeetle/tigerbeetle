@@ -69,7 +69,7 @@ pub const GridBlocksMissing = struct {
         /// TODO(Congestion control): This bitset is currently used only for extra validation.
         /// Eventually we should request tables using this + EWAH encoding, instead of
         /// block-by-block.
-        value_blocks_received: *std.DynamicBitSetUnmanaged,
+        value_blocks_received: std.DynamicBitSetUnmanaged,
         /// This count includes the index block.
         /// Invariants:
         /// - table_blocks_written ≤ table_blocks_total
@@ -301,15 +301,14 @@ pub const GridBlocksMissing = struct {
     pub fn sync_table(
         queue: *GridBlocksMissing,
         table: *RepairTable,
-        table_bitset: *std.DynamicBitSetUnmanaged,
         table_info: *const schema.ManifestNode.TableInfo,
     ) enum { insert, duplicate } {
         assert(queue.state == .repairing or queue.state == .checkpoint_durable);
         assert(queue.faulty_tables.count() < queue.options.tables_max);
         assert(queue.faulty_blocks.count() + queue.syncing_faulty_blocks.count() ==
             queue.enqueued_blocks_repair + queue.enqueued_blocks_sync);
-        assert(table_bitset.capacity() == constants.lsm_table_value_blocks_max);
-        assert(table_bitset.count() == 0);
+        assert(table.value_blocks_received.capacity() == constants.lsm_table_value_blocks_max);
+        assert(table.value_blocks_received.count() == 0);
 
         const address = table_info.address;
         const checksum = table_info.checksum;
@@ -317,7 +316,6 @@ pub const GridBlocksMissing = struct {
         var tables = queue.faulty_tables.iterate();
         while (tables.next()) |queue_table| {
             assert(queue_table != table);
-            assert(queue_table.value_blocks_received != table_bitset);
 
             if (queue_table.table_info.address == address) {
                 // The ForestTableIterator does not repeat tables *except* when the table was first
@@ -330,7 +328,7 @@ pub const GridBlocksMissing = struct {
 
         table.* = .{
             .table_info = table_info.*,
-            .value_blocks_received = table_bitset,
+            .value_blocks_received = table.value_blocks_received,
         };
         queue.faulty_tables.push(table);
 

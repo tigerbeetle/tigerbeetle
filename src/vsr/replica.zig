@@ -16,6 +16,7 @@ const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
 const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPSType = @import("../iops.zig").IOPSType;
+const PoolType = @import("../pool_type.zig").PoolType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
@@ -179,6 +180,7 @@ pub fn ReplicaType(
         const BlockWrite = struct {
             write: Grid.Write = undefined,
             replica: *Replica,
+            block: BlockPtr,
         };
 
         const LogPrefix = struct {
@@ -331,10 +333,8 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_reads: IOPSType(BlockRead, constants.grid_repair_reads_max) = .{},
-        grid_repair_tables: IOPSType(Grid.RepairTable, constants.grid_missing_tables_max) = .{},
-        grid_repair_table_bitsets: [constants.grid_repair_writes_max]std.DynamicBitSetUnmanaged,
-        grid_repair_writes: IOPSType(BlockWrite, constants.grid_repair_writes_max) = .{},
-        grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
+        grid_repair_tables: PoolType(Grid.RepairTable),
+        grid_repair_writes: PoolType(BlockWrite),
         grid_scrubber: GridScrubber,
 
         opened: bool,
@@ -1241,18 +1241,34 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
-            for (&self.grid_repair_table_bitsets, 0..) |*bitset, i| {
-                errdefer for (self.grid_repair_table_bitsets[0..i]) |*b| b.deinit(allocator);
-                bitset.* = try std.DynamicBitSetUnmanaged
+            self.grid_repair_tables = try PoolType(Grid.RepairTable).init(
+                allocator,
+                constants.grid_missing_tables_max,
+            );
+            errdefer self.grid_repair_tables.deinit(allocator);
+
+            for (self.grid_repair_tables.items, 0..) |*table, i| {
+                errdefer for (self.grid_repair_tables.items[0..i]) |*t| {
+                    t.value_blocks_received.deinit(allocator);
+                };
+                table.value_blocks_received = try std.DynamicBitSetUnmanaged
                     .initEmpty(allocator, constants.lsm_table_value_blocks_max);
             }
-            errdefer for (&self.grid_repair_table_bitsets) |*b| b.deinit(allocator);
+            errdefer for (self.grid_repair_tables.items) |*t| {
+                t.value_blocks_received.deinit(allocator);
+            };
 
-            for (&self.grid_repair_write_blocks, 0..) |*block, i| {
-                errdefer for (self.grid_repair_write_blocks[0..i]) |b| allocator.free(b);
-                block.* = try allocate_block(allocator);
+            self.grid_repair_writes = try PoolType(BlockWrite).init(
+                allocator,
+                constants.grid_repair_writes_max,
+            );
+            errdefer self.grid_repair_writes.deinit(allocator);
+
+            for (self.grid_repair_writes.items, 0..) |*write, i| {
+                errdefer for (self.grid_repair_writes.items[0..i]) |*w| allocator.free(w.block);
+                write.block = try allocate_block(allocator);
             }
-            errdefer for (self.grid_repair_write_blocks) |b| allocator.free(b);
+            errdefer for (self.grid_repair_writes.items) |*write| allocator.free(write.block);
 
             try self.state_machine.init(
                 allocator,
@@ -1315,8 +1331,8 @@ pub fn ReplicaType(
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
                 .grid = self.grid,
-                .grid_repair_table_bitsets = self.grid_repair_table_bitsets,
-                .grid_repair_write_blocks = self.grid_repair_write_blocks,
+                .grid_repair_tables = self.grid_repair_tables,
+                .grid_repair_writes = self.grid_repair_writes,
                 .grid_repair_message_budget = self.grid_repair_message_budget,
                 .grid_scrubber = self.grid_scrubber,
                 .opened = self.opened,
@@ -1495,8 +1511,13 @@ pub fn ReplicaType(
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
-            for (self.grid_repair_write_blocks) |block| allocator.free(block);
-            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
+            for (self.grid_repair_tables.items) |*table| {
+                table.value_blocks_received.deinit(allocator);
+            }
+            self.grid_repair_tables.deinit(allocator);
+
+            for (self.grid_repair_writes.items) |*write| allocator.free(write.block);
+            self.grid_repair_writes.deinit(allocator);
 
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
@@ -3394,8 +3415,6 @@ pub fn ReplicaType(
                 assert(!self.grid.free_set.is_free(message.header.address));
 
                 const write = self.grid_repair_writes.acquire().?;
-                const write_index = self.grid_repair_writes.index(write);
-                const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
 
                 log.debug("{}: on_block: repairing address={} checksum={} {s}", .{
                     self.log_prefix(),
@@ -3407,12 +3426,12 @@ pub fn ReplicaType(
                 stdx.copy_disjoint(
                     .inexact,
                     u8,
-                    write_block.*,
+                    write.block,
                     message.buffer[0..message.header.size],
                 );
 
-                write.* = .{ .replica = self };
-                self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
+                write.* = .{ .replica = self, .block = write.block };
+                self.grid.repair_block(grid_repair_block_callback, &write.write, &write.block);
             }
 
             if (grid_fulfill or grid_repair) {
@@ -5027,7 +5046,7 @@ pub fn ReplicaType(
 
             if (self.sync_content_done()) {
                 assert(self.sync_tables == null);
-                assert(self.grid_repair_tables.executing() == 0);
+                assert(self.grid_repair_tables.in_use() == 0);
             }
             const sync_op_min, const sync_op_max = if (self.sync_content_done())
                 .{ 0, 0 }
@@ -10357,7 +10376,7 @@ pub fn ReplicaType(
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(!self.grid.blocks_missing.repairing_blocks());
-            assert(self.grid_repair_writes.executing() == 0);
+            assert(self.grid_repair_writes.in_use() == 0);
             maybe(self.state_machine_opened);
             maybe(self.view_durable_updating());
 
@@ -10411,7 +10430,7 @@ pub fn ReplicaType(
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(!self.grid.blocks_missing.repairing_blocks());
-            assert(self.grid_repair_writes.executing() == 0);
+            assert(self.grid_repair_writes.in_use() == 0);
             assert(self.syncing == .updating_checkpoint);
             assert(!self.state_machine_opened);
             assert(self.release.value <=
@@ -10506,7 +10525,7 @@ pub fn ReplicaType(
             assert(self.sync_tables != null);
             assert(self.sync_tables_op_range != null);
             assert(!self.grid.blocks_missing.repairing_tables());
-            maybe(self.grid_repair_tables.executing() == 0);
+            maybe(self.grid_repair_tables.in_use() == 0);
 
             const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
             {
@@ -10582,7 +10601,7 @@ pub fn ReplicaType(
                 self.sync_reclaim_tables();
             } else {
                 // We are starting table-sync right out of recovery.
-                assert(self.grid_repair_tables.executing() == 0);
+                assert(self.grid_repair_tables.in_use() == 0);
                 assert(self.sync_tables_op_range.?.max ==
                     self.superblock.working.vsr_state.sync_op_max);
             }
@@ -10619,7 +10638,7 @@ pub fn ReplicaType(
             // Trailers/manifest haven't yet been synced.
             if (!self.state_machine_opened) return false;
 
-            return self.sync_tables == null and self.grid_repair_tables.executing() == 0;
+            return self.sync_tables == null and self.grid_repair_tables.in_use() == 0;
         }
 
         /// State sync finished, and we must repair all of the tables we missed.
@@ -10656,11 +10675,9 @@ pub fn ReplicaType(
                     });
 
                     const table: *Grid.RepairTable = self.grid_repair_tables.acquire().?;
-                    const table_bitset: *std.DynamicBitSetUnmanaged =
-                        &self.grid_repair_table_bitsets[self.grid_repair_tables.index(table)];
 
                     const enqueue_result =
-                        self.grid.blocks_missing.sync_table(table, table_bitset, &table_info);
+                        self.grid.blocks_missing.sync_table(table, &table_info);
 
                     switch (enqueue_result) {
                         .insert => self.trace.start(.{ .replica_sync_table = .{
@@ -10690,7 +10707,7 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.grid_repair_tables.executing() == 0) {
+            if (self.grid_repair_tables.in_use() == 0) {
                 assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
 
                 log.info("{}: sync_enqueue_tables: all tables synced (commit={}..{}/{})", .{
