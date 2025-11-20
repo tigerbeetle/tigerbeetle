@@ -110,7 +110,7 @@ const Fuzzer = enum {
         .vopr_testing_lite = 8,
         .vopr_testing = 8,
         .vopr = 8,
-        .vortex = 16,
+        .vortex = 1,
         .vsr_free_set = 1,
         .vsr_superblock_quorums = 1,
         .vsr_superblock = 1,
@@ -275,6 +275,7 @@ fn run_fuzzers(
     defer tasks.deinit();
 
     var budget_timer = try std.time.Timer.start();
+    const sleep_ns = 100 * std.time.ns_per_ms;
 
     var refresh_timer = try std.time.Timer.start();
     var refresh_first = true;
@@ -313,7 +314,7 @@ fn run_fuzzers(
                 const seed = random.int(u64);
 
                 // Ensure that multiple fuzzers spawned in the same tick are spread out over tasks.
-                task.runtime_virtual += 1;
+                task.runtime_virtual += @divFloor(sleep_ns, task.weight);
 
                 const child = try run_fuzzers_start_fuzzer(shell, .{
                     .working_directory = task.working_directory,
@@ -344,8 +345,8 @@ fn run_fuzzers(
             }
         }
 
-        // Wait 100ms before polling for completion, to avoid hogging the CPU.
-        std.time.sleep(100 * std.time.ns_per_ms);
+        // Wait before polling for completion, to avoid hogging the CPU.
+        std.time.sleep(sleep_ns);
 
         // Flush stderr/stdout into the log tail.
         for (children, children_logs) |*fuzzer_or_null, *fuzzer_log| {
@@ -376,6 +377,15 @@ fn run_fuzzers(
 
             if (fuzzer_or_null.*) |*fuzzer| {
                 running_count += 1;
+
+                // Update runtime_virtual incrementally every tick so that we have an accurate score
+                // for choosing new tasks.
+                const task = tasks.get(
+                    std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
+                    fuzzer.seed.commit_sha,
+                    fuzzer.seed.branch,
+                ).?;
+                task.runtime_virtual += @divFloor(sleep_ns, task.weight);
 
                 var fuzzer_done = false;
                 _ = fuzzer.child.stdin.?.write(&.{1}) catch |err| {
@@ -447,13 +457,7 @@ fn run_fuzzers(
                         // Sanity-check that we definitely record all assertion failures.
                         assert(!seeds.getLast().ok);
                     }
-                    const task = tasks.get(
-                        std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
-                        fuzzer.seed.commit_sha,
-                        fuzzer.seed.branch,
-                    ).?;
                     task.runtime_total_ns += seed_duration_ns;
-                    task.runtime_virtual += @divFloor(seed_duration_ns, task.weight);
 
                     fuzzer_log.clear();
                     fuzzer_or_null.* = null;
