@@ -1393,14 +1393,19 @@ fn client_eviction_crash() -> anyhow::Result<()> {
                     barrier.wait();
 
                     block_on(async {
-                        // Successful lookup.
-                        let _result = client.lookup_transfers(&[0]).await?;
+                        // First lookup of invalid ID should succeed (return empty).
+                        let result1 = client.lookup_transfers(&[0]).await?;
+                        assert_eq!(result1.len(), 0);
 
                         // Force an eviction.
                         client.trigger_eviction_for_testing()?;
 
-                        // Evicted lookup may crash in `submit` due to racing with deinit.
-                        let _result = client.lookup_transfers(&[0]).await;
+                        // Evicted lookup should fail with ClientEvicted error.
+                        let result2 = client.lookup_transfers(&[0]).await;
+                        assert_eq!(result2, Err(tb::PacketStatus::ClientEvicted));
+
+                        let result3 = client.lookup_transfers(&[0]).await;
+                        assert_eq!(result3, Err(tb::PacketStatus::ClientEvicted));
 
                         Ok(())
                     })
