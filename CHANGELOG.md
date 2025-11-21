@@ -3,6 +3,35 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.66
+
+Released: 2025-11-21
+
+### Safety And Performance
+
+- [#3379](https://github.com/tigerbeetle/tigerbeetle/pull/3379)
+
+  Fix non-monotonic ID generation in the Python client. Thank you for spotting this, @rbino!
+
+### Internals
+
+- [#3371](https://github.com/tigerbeetle/tigerbeetle/pull/3371)
+
+  Introduce `op_checkpoint_sync` to simplify assertions during state sync.
+
+- [#3353](https://github.com/tigerbeetle/tigerbeetle/pull/3353)
+
+  Run Vörtex in CFO (Continuous Fuzzing Orchestrator).
+
+- [#3380](https://github.com/tigerbeetle/tigerbeetle/pull/3380)
+- [#3384](https://github.com/tigerbeetle/tigerbeetle/pull/3384)
+
+  Various fixes for Vörtex in CFO.
+
+### TigerTracks 🎧
+
+- [The Flute Song](https://open.spotify.com/track/49fOKvQVojIKvJKQhQj2nA)
+
 ## TigerBeetle 0.16.65
 
 Released: 2025-11-14
