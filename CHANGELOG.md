@@ -9,15 +9,15 @@ Released: 2025-11-21
 
 ### Safety And Performance
 
-- [#3371](https://github.com/tigerbeetle/tigerbeetle/pull/3371)
-
-  Fix an overzealous assertion during state sync.
-
 - [#3379](https://github.com/tigerbeetle/tigerbeetle/pull/3379)
 
   Fix non-monotonic ID generation in the Python client. Thank you for spotting this, @rbino!
 
 ### Internals
+
+- [#3371](https://github.com/tigerbeetle/tigerbeetle/pull/3371)
+
+  Introduce `op_checkpoint_sync` to simplify assertions during state sync.
 
 - [#3353](https://github.com/tigerbeetle/tigerbeetle/pull/3353)
 
