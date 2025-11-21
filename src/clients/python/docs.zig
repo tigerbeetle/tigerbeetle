@@ -9,7 +9,7 @@ pub const PythonDocs = Docs{
 
     .test_source_path = "",
 
-    .name = "tigerbeetle",
+    .name = "tigerbeetle-python",
     .description =
     \\The TigerBeetle client for Python.
     ,

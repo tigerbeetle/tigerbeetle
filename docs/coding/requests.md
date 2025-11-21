@@ -62,10 +62,10 @@ In the default configuration, the maximum batch sizes for each request type are:
 | `lookup_transfers`      |                        8189 |                       8189 |
 | `create_accounts`       |                        8189 |                       8189 |
 | `create_transfers`      |                        8189 |                       8189 |
-| `get_account_transfers` |                           1 |                       8189 |
-| `get_account_balances`  |                           1 |                       8189 |
-| `query_accounts`        |                           1 |                       8189 |
-| `query_transfers`       |                           1 |                       8189 |
+| `get_account_transfers` |                          1† |                       8189 |
+| `get_account_balances`  |                          1† |                       8189 |
+| `query_accounts`        |                          1† |                       8189 |
+| `query_transfers`       |                          1† |                       8189 |
 
 - [Node.js](/src/clients/node/README.md#batching)
 - [Go](/src/clients/go/README.md#batching)
@@ -84,6 +84,9 @@ it automatically groups together batches of small sizes into one request. Since 
 can have [**at most one in-flight request**](../reference/sessions.md), the client 
 accumulates smaller batches together while waiting for a reply to the last request.
 
+†: For queries (e.g. `get_account_transfers`, etc) TigerBeetle clients use the query `limit` to
+automatically batch queries of the same type together into requests when it knows for sure that all
+of their results will fit in a single reply.
 
 ## Guarantees
 
