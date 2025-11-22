@@ -200,7 +200,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .workload = workload,
         .prng = &prng,
         .test_duration = args.test_duration,
-        .disable_faults = args.disable_faults,
+        .faulty = !args.disable_faults,
     });
     defer supervisor.destroy(allocator);
 
@@ -214,7 +214,7 @@ const Supervisor = struct {
     workload: *Workload,
     prng: *stdx.PRNG,
     test_deadline: i128,
-    disable_faults: bool,
+    faulty: bool,
 
     fn create(allocator: std.mem.Allocator, options: struct {
         io: *IO,
@@ -223,7 +223,7 @@ const Supervisor = struct {
         workload: *Workload,
         prng: *stdx.PRNG,
         test_duration: stdx.Duration,
-        disable_faults: bool,
+        faulty: bool,
     }) !*Supervisor {
         const supervisor = try allocator.create(Supervisor);
         errdefer allocator.destroy(supervisor);
@@ -235,7 +235,7 @@ const Supervisor = struct {
             .workload = options.workload,
             .prng = options.prng,
             .test_deadline = std.time.nanoTimestamp() + options.test_duration.ns,
-            .disable_faults = options.disable_faults,
+            .faulty = options.faulty,
         };
         return supervisor;
     }
@@ -315,7 +315,7 @@ const Supervisor = struct {
                 }
             }
 
-            if (sleep_deadline < now and !supervisor.disable_faults) {
+            if (sleep_deadline < now and supervisor.faulty) {
                 const Action = enum {
                     sleep,
                     replica_terminate,

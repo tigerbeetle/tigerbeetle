@@ -409,48 +409,67 @@ fn run_fuzzers(
                     });
 
                     const term = try if (fuzzer_done) fuzzer.child.wait() else fuzzer.child.kill();
-                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL }) or
-                        (std.meta.eql(term, .{ .Exited = @intCast(128 + std.posix.SIG.KILL) }) and
-                            fuzzer.fuzzer == .vortex))
-                    {
-                        // Something killed the fuzzer. This is likely OOM, so count this seed
-                        // neither as a success, nor as a failure.
-                        //
-                        // Vortex is special-cased since one of its child processes might have been
-                        // SIGKILL'd, which the supervisor bubbles up as 128+SIGKILL. (It can't just
-                        // SIGKILL itself because the supervisor is immune to internal SIGKILL as it
-                        // is the init process of a pid namespace.
-                        log.info("ignored SIGKILL for '{s}'", .{fuzzer.seed.command});
-                    } else if (std.meta.eql(term, .{ .Signal = std.posix.SIG.TERM }) and
-                        iteration_last)
-                    {
-                        // We killed the fuzzer because our budgeted time is expired, but the seed
-                        // itself is indeterminate.
-                        log.info("ignored SIGTERM for '{s}'", .{fuzzer.seed.command});
-                    } else {
-                        var seed_record = fuzzer.seed;
-                        seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
-                        // Convert seed_timestamp_start to seconds as `devhub.js` relies on it.
-                        seed_record.seed_timestamp_start = @divFloor(
-                            seed_timestamp_start_ns,
-                            std.time.ns_per_s,
-                        );
-                        seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
-                        if (!seed_record.ok) {
-                            seed_record.debug = try shell.fmt("{}", .{term});
+                    const term_adapted: enum { sigkill, sigterm, other } = term: {
+                        const code_kill = 128 + std.posix.SIG.KILL;
+                        const code_term = 128 + std.posix.SIG.TERM;
+                        const vortex = fuzzer.fuzzer == .vortex;
+
+                        if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL }) or
+                            (std.meta.eql(term, .{ .Exited = @intCast(code_kill) }) and vortex))
+                        {
+                            // Something killed the fuzzer. This is likely OOM, so count this seed
+                            // neither as a success, nor as a failure.
+                            //
+                            // Special case Vortex because one of Vortex's child processes might
+                            // have been SIGKILL'd, which the supervisor bubbles up as 128+SIGKILL.
+                            // (It can't just SIGKILL itself because the supervisor is immune to
+                            // internal SIGKILL as it is the init process of a pid namespace.)
+                            break :term .sigkill;
                         }
 
-                        if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
-                            try seed_logs.append(gpa, null);
-                        } else {
-                            const log_data = try gpa.alloc(u8, fuzzer_log.size());
-                            errdefer gpa.free(log_data);
-
-                            fuzzer_log.write_to(log_data);
-                            try seed_logs.append(gpa, log_data);
-                            seed_record.log = try create_log_path(shell.arena.allocator());
+                        if (iteration_last) {
+                            if (std.meta.eql(term, .{ .Signal = std.posix.SIG.TERM }) or
+                                (std.meta.eql(term, .{ .Exited = @intCast(code_term) }) and vortex))
+                            {
+                                // We killed the fuzzer because our budgeted time is expired, but
+                                // the seed itself is indeterminate.
+                                //
+                                // Special case Vortex because it uses a handler for SIGTERM to
+                                // ensure the supervisor's pid namespace is torn down.
+                                break :term .sigterm;
+                            }
                         }
-                        try seeds.append(gpa, seed_record);
+                        break :term .other;
+                    };
+
+                    switch (term_adapted) {
+                        .sigkill => log.info("ignored SIGKILL for '{s}'", .{fuzzer.seed.command}),
+                        .sigterm => log.info("ignored SIGTERM for '{s}'", .{fuzzer.seed.command}),
+                        .other => {
+                            var seed_record = fuzzer.seed;
+                            seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
+                            // Convert seed_timestamp_start to seconds as `devhub.js` relies on it.
+                            seed_record.seed_timestamp_start = @divFloor(
+                                seed_timestamp_start_ns,
+                                std.time.ns_per_s,
+                            );
+                            seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
+                            if (!seed_record.ok) {
+                                seed_record.debug = try shell.fmt("{}", .{term});
+                            }
+
+                            if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
+                                try seed_logs.append(gpa, null);
+                            } else {
+                                const log_data = try gpa.alloc(u8, fuzzer_log.size());
+                                errdefer gpa.free(log_data);
+
+                                fuzzer_log.write_to(log_data);
+                                try seed_logs.append(gpa, log_data);
+                                seed_record.log = try create_log_path(shell.arena.allocator());
+                            }
+                            try seeds.append(gpa, seed_record);
+                        },
                     }
 
                     if (std.meta.eql(term, .{ .Signal = std.posix.SIG.ABRT })) {
