@@ -48,19 +48,21 @@ const type_mappings = .{
         .name = "Transfer",
         .docs_link = "reference/transfer/#",
     } },
-    .{ tb.CreateAccountResult, TypeMapping{
-        .name = "CreateAccountError",
+    .{ tb.CreateAccountStatus, TypeMapping{
+        .name = "CreateAccountStatus",
         .docs_link = "reference/requests/create_accounts#",
     } },
-    .{ tb.CreateTransferResult, TypeMapping{
-        .name = "CreateTransferError",
+    .{ tb.CreateTransferStatus, TypeMapping{
+        .name = "CreateTransferStatus",
         .docs_link = "reference/requests/create_transfers#",
     } },
-    .{ tb.CreateAccountsResult, TypeMapping{
-        .name = "CreateAccountsError",
+    .{ tb.CreateAccountResult, TypeMapping{
+        .name = "CreateAccountResult",
+        .hidden_fields = &.{"reserved"},
     } },
-    .{ tb.CreateTransfersResult, TypeMapping{
-        .name = "CreateTransfersError",
+    .{ tb.CreateTransferResult, TypeMapping{
+        .name = "CreateTransferResult",
+        .hidden_fields = &.{"reserved"},
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilter",
@@ -133,9 +135,13 @@ fn emit_enum(
 
         try emit_docs(buffer, mapping, 1, field.name);
 
-        try buffer.writer().print("  {s} = {d},\n", .{
+        const int_value = @intFromEnum(@field(Type, field.name));
+        try buffer.writer().print("  {s} = {s},\n", .{
             field.name,
-            @intFromEnum(@field(Type, field.name)),
+            if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                std.fmt.comptimePrint("0x{X}", .{int_value})
+            else
+                std.fmt.comptimePrint("{}", .{int_value}),
         });
     }
 

@@ -75,13 +75,13 @@ In the default configuration, the maximum batch sizes for each request type are:
 
 ### Automatic Batching
 
-TigerBeetle clients automatically batch operations. There may be instances where your application logic 
-makes it hard to fill up the batches that you send to TigerBeetle, for example a multi-threaded web 
-server where each HTTP request is handled on a different thread. 
+TigerBeetle clients automatically batch operations. There may be instances where your application logic
+makes it hard to fill up the batches that you send to TigerBeetle, for example a multi-threaded web
+server where each HTTP request is handled on a different thread.
 
-The TigerBeetle client should be shared across threads (or tasks, depending on your paradigm), since 
-it automatically groups together batches of small sizes into one request. Since  TigerBeetle clients 
-can have [**at most one in-flight request**](../reference/sessions.md), the client 
+The TigerBeetle client should be shared across threads (or tasks, depending on your paradigm), since
+it automatically groups together batches of small sizes into one request. Since  TigerBeetle clients
+can have [**at most one in-flight request**](../reference/sessions.md), the client
 accumulates smaller batches together while waiting for a reply to the last request.
 
 †: For queries (e.g. `get_account_transfers`, etc) TigerBeetle clients use the query `limit` to

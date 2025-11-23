@@ -410,26 +410,14 @@ impl Client {
     /// that none of the submitted events were processed.
     ///
     /// The results of events are represented individually. There are two
-    /// related event result types: `CreateAccountResult` is the enum of
-    /// possible outcomes, while `CreateAccountsResult` includes the index to
-    /// map back to input events.
+    /// related event result types: `CreateAccountStatus` is the enum of
+    /// possible outcomes, and `CreateAccountResult` which includes both the
+    /// `status` enum and the `timestamp` when the event was processed.
     ///
-    /// _This function does not return a result for all input events_. Instead
-    /// it only returns results that would not be [`CreateAccountResult::Ok`].
-    /// In other words, this function does not return results for successful
-    /// events, only unsuccessful events (though note the case of
-    /// [`CreateAccountResult::Exists`], described below). This behavior
-    /// reflects optimizations in the underlying protocol. This client will
-    /// never return a `CreateAccountResult::Ok`; that variant is defined in
-    /// case it is useful for clients to materialize omitted request results. To
-    /// relate a `CreateAccountsResult` to its input event, the
-    /// [`CreateAccountsResult::index`] field is an index into the input event
-    /// slice. An example of efficiently materializing all results is included
-    /// below.
-    ///
-    /// Note that a result of `CreateAccountResult::Exists` should often be treated
-    /// the same as `CreateAccountResult::Ok`. This result can happen in cases of
-    /// application crashes or other scenarios where requests have been replayed.
+    /// Note that a status of `CreateAccountStatus::Exists` should often be treated
+    /// the same as `CreateAccountStatus::Created`, as it also returns the same `timestamp`
+    //  of the original account. This result can happen in cases of application crashes
+    /// or other scenarios where requests have been replayed.
     ///
     /// # Example
     ///
@@ -441,10 +429,15 @@ impl Client {
     ///     accounts: &[tb::Account],
     /// ) -> Result<(), Box<dyn std::error::Error>> {
     ///     let create_accounts_results = client.create_accounts(accounts).await?;
-    ///     let create_accounts_results_merged = merge_create_accounts_results(accounts, create_accounts_results);
-    ///     for (account, create_account_result) in create_accounts_results_merged {
-    ///         match create_account_result {
-    ///             tb::CreateAccountResult::Ok | tb::CreateAccountResult::Exists => {
+    ///     assert_eq!(accounts.len(), create_accounts_results.len());
+    ///     let it = accounts
+    ///         .iter()
+    ///         .enumerate()
+    ///         .map(move |(i, account)| (account, create_accounts_results[i]));
+    ///
+    ///     for (account, create_account_result) in it {
+    ///         match create_account_result.status {
+    ///             tb::CreateAccountStatus::Created | tb::CreateAccountStatus::Exists => {
     ///                 handle_create_account_success(account, create_account_result).await?;
     ///             }
     ///             _ => {
@@ -455,35 +448,19 @@ impl Client {
     ///     Ok(())
     /// }
     ///
-    /// fn merge_create_accounts_results(
-    ///     accounts: &[tb::Account],
-    ///     results: Vec<tb::CreateAccountsResult>,
-    /// ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + '_ {
-    ///     let mut results = results.into_iter().peekable();
-    ///     accounts.iter().enumerate().map(move |(i, account)| {
-    ///         match results.peek().copied() {
-    ///             Some(result) if result.index == i => {
-    ///                 let _ = results.next();
-    ///                 (account, result.result)
-    ///             }
-    ///             _ => (account, tb::CreateAccountResult::Ok),
-    ///         }
-    ///     })
+    /// async fn handle_create_account_success(
+    ///     _account: &tb::Account,
+    ///     _result: tb::CreateAccountResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
     /// }
     ///
-    /// # async fn handle_create_account_success(
-    /// #     _account: &tb::Account,
-    /// #     _result: tb::CreateAccountResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
-    /// #
-    /// # async fn handle_create_account_failure(
-    /// #     _account: &tb::Account,
-    /// #     _result: tb::CreateAccountResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
+    /// async fn handle_create_account_failure(
+    ///     _account: &tb::Account,
+    ///     _result: tb::CreateAccountResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
+    /// }
     /// ```
     ///
     /// # Maximum batch size
@@ -499,7 +476,7 @@ impl Client {
     pub fn create_accounts(
         &self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> {
+    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
@@ -511,13 +488,13 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            let responses: &[tbc::tb_create_accounts_result_t] = handle_message(&msg)?;
+            let responses: &[tbc::tb_create_account_result_t] = handle_message(&msg)?;
 
             Ok(responses
                 .iter()
-                .map(|result| CreateAccountsResult {
-                    index: usize::try_from(result.index).expect("usize"),
-                    result: CreateAccountResult::from(result.result),
+                .map(|result| CreateAccountResult {
+                    timestamp: result.timestamp,
+                    status: CreateAccountStatus::from(result.status),
                 })
                 .collect())
         }
@@ -539,29 +516,14 @@ impl Client {
     /// that none of the submitted events were processed.
     ///
     /// The results of events are represented individually. There are two
-    /// related event result types: `CreateTransferResult` is the enum of
-    /// possible outcomes, while `CreateTransfersResult` includes the index to
-    /// map back to input events.
+    /// related event result types: `CreateTransferStatus` is the enum of
+    /// possible outcomes, and `CreateTransferResult` which includes both the
+    /// `status` enum and the `timestamp` when the event was processed.
     ///
-    /// _This function does not return a result for all input events_. Instead
-    /// it only returns results that would not be [`CreateTransferResult::Ok`].
-    /// In other words, this function does not return results for successful
-    /// events, only unsuccessful events (though note the case of
-    /// [`CreateTransferResult::Exists`], described below). This behavior
-    /// reflects optimizations in the underlying protocol. This client will
-    /// never return a `CreateTransferResult::Ok`; that variant is defined in
-    /// case it is useful for clients to materialize omitted request results. To
-    /// relate a `CreateTransfersResult` to its input event, the
-    /// [`CreateTransfersResult::index`] field is an index into the input event
-    /// slice. An example of efficiently materializing all results is included
-    /// below.
-    ///
-    /// To relate a `CreateTransfersResult` to its input event, the [`CreateTransfersResult::index`] field
-    /// is an index into the input event slice.
-    ///
-    /// Note that a result of `CreateTransferResult::Exists` should often be treated
-    /// the same as `CreateTransferResult::Ok`. This result can happen in cases of
-    /// application crashes or other scenarios where requests have been replayed.
+    /// Note that a status of `CreateTransferStatus::Exists` should often be treated
+    /// the same as `CreateTransferStatus::Created`, as it also returns the same `timestamp`
+    /// of the original transfer. This result can happen in cases of application crashes
+    /// or other scenarios where requests have been replayed.
     ///
     /// # Example
     ///
@@ -572,11 +534,14 @@ impl Client {
     ///     client: &tb::Client,
     ///     transfers: &[tb::Transfer],
     /// ) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let create_transfers_results = client.create_transfers(transfers).await?;
-    ///     let create_transfers_results_merged = merge_create_transfers_results(transfers, create_transfers_results);
-    ///     for (transfer, create_transfer_result) in create_transfers_results_merged {
-    ///         match create_transfer_result {
-    ///             tb::CreateTransferResult::Ok | tb::CreateTransferResult::Exists => {
+    ///     let results = client.create_transfers(transfers).await?;
+    ///     let it = transfers
+    ///         .iter()
+    ///         .enumerate()
+    ///         .map(move |(i, transfer)| (transfer, results[i]));
+    ///     for (transfer, create_transfer_result) in it {
+    ///         match create_transfer_result.status {
+    ///             tb::CreateTransferStatus::Created | tb::CreateTransferStatus::Exists => {
     ///                 handle_create_transfer_success(transfer, create_transfer_result).await?;
     ///             }
     ///             _ => {
@@ -587,35 +552,19 @@ impl Client {
     ///     Ok(())
     /// }
     ///
-    /// fn merge_create_transfers_results(
-    ///     transfers: &[tb::Transfer],
-    ///     results: Vec<tb::CreateTransfersResult>,
-    /// ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + '_ {
-    ///     let mut results = results.into_iter().peekable();
-    ///     transfers.iter().enumerate().map(move |(i, transfer)| {
-    ///         match results.peek().copied() {
-    ///             Some(result) if result.index == i => {
-    ///                 let _ = results.next();
-    ///                 (transfer, result.result)
-    ///             }
-    ///             _ => (transfer, tb::CreateTransferResult::Ok),
-    ///         }
-    ///     })
+    /// async fn handle_create_transfer_success(
+    ///     _transfer: &tb::Transfer,
+    ///     _result: tb::CreateTransferResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
     /// }
     ///
-    /// # async fn handle_create_transfer_success(
-    /// #     _transfer: &tb::Transfer,
-    /// #     _result: tb::CreateTransferResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
-    /// #
-    /// # async fn handle_create_transfer_failure(
-    /// #     _transfer: &tb::Transfer,
-    /// #     _result: tb::CreateTransferResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
+    /// async fn handle_create_transfer_failure(
+    ///     _transfer: &tb::Transfer,
+    ///     _result: tb::CreateTransferResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
+    /// }
     /// ```
     ///
     /// # Maximum batch size
@@ -631,7 +580,7 @@ impl Client {
     pub fn create_transfers(
         &self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> {
+    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
@@ -643,13 +592,13 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            let responses: &[tbc::tb_create_transfers_result_t] = handle_message(&msg)?;
+            let responses: &[tbc::tb_create_transfer_result_t] = handle_message(&msg)?;
 
             Ok(responses
                 .iter()
-                .map(|result| CreateTransfersResult {
-                    index: usize::try_from(result.index).expect("usize"),
-                    result: CreateTransferResult::from(result.result),
+                .map(|result| CreateTransferResult {
+                    timestamp: result.timestamp,
+                    status: CreateTransferStatus::from(result.status),
                 })
                 .collect())
         }
@@ -1298,7 +1247,7 @@ bitflags! {
 ///
 /// For the meaning of individual enum variants see the linked protocol reference.
 ///
-/// See also [`CreateAccountsResult`] (note the plural), the type directly
+/// See also [`CreateAccountResult`] (note the plural), the type directly
 /// returned by `create_accunts`, and which contains an additional index for
 /// relating results with input events.
 ///
@@ -1306,11 +1255,11 @@ bitflags! {
 ///
 /// # Protocol reference
 ///
-/// [`CreateAccountResult`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
+/// [`CreateAccountStatus`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum CreateAccountResult {
-    Ok,
+pub enum CreateAccountStatus {
+    Created,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -1345,17 +1294,17 @@ pub enum CreateAccountResult {
 ///
 /// # Protocol reference
 ///
-/// [`CreateAccountResult`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
+/// [`CreateAccountStatus`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CreateAccountsResult {
-    pub index: usize,
-    pub result: CreateAccountResult,
+pub struct CreateAccountResult {
+    pub timestamp: u64,
+    pub status: CreateAccountStatus,
 }
 
-impl core::fmt::Display for CreateAccountResult {
+impl core::fmt::Display for CreateAccountStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
-            Self::Ok => f.write_str("ok"),
+            Self::Created => f.write_str("created"),
             Self::LinkedEventFailed => f.write_str("linked event failed"),
             Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
             Self::ImportedEventExpected => f.write_str("imported event expected"),
@@ -1402,7 +1351,7 @@ impl core::fmt::Display for CreateAccountResult {
 ///
 /// For the meaning of individual enum variants see the linked protocol reference.
 ///
-/// See also [`CreateTransfersResult`] (note the plural), the type directly
+/// See also [`CreateTransferResult`] (note the plural), the type directly
 /// returned by `create_accunts`, and which contains an additional index for
 /// relating results with input events.
 ///
@@ -1410,11 +1359,11 @@ impl core::fmt::Display for CreateAccountResult {
 ///
 /// # Protocol reference
 ///
-/// [`CreateTransferResult`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
+/// [`CreateTransferStatus`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum CreateTransferResult {
-    Ok,
+pub enum CreateTransferStatus {
+    Created,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -1490,17 +1439,17 @@ pub enum CreateTransferResult {
 ///
 /// # Protocol reference
 ///
-/// [`CreateTransferResult`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
+/// [`CreateTransferStatus`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CreateTransfersResult {
-    pub index: usize,
-    pub result: CreateTransferResult,
+pub struct CreateTransferResult {
+    pub timestamp: u64,
+    pub status: CreateTransferStatus,
 }
 
-impl core::fmt::Display for CreateTransferResult {
+impl core::fmt::Display for CreateTransferStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
-            Self::Ok => f.write_str("ok"),
+            Self::Created => f.write_str("created"),
             Self::LinkedEventFailed => f.write_str("linked event failed"),
             Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
             Self::ImportedEventExpected => f.write_str("imported event expected"),

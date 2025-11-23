@@ -21,7 +21,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // section:create-accounts
-        let account_errors = client
+        let account_results = client
             .create_accounts(&[tb::Account {
                 id: tb::id(),
                 ledger: 1,
@@ -29,7 +29,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 ..Default::default()
             }])
             .await?;
-        // Error handling omitted.
+        // Result handling omitted.
         // endsection:create-accounts
     }
 
@@ -50,8 +50,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let account_errors = client.create_accounts(&[account0, account1]).await?;
-        // Error handling omitted.
+        let account_results = client.create_accounts(&[account0, account1]).await?;
+        // Result handling omitted.
         // endsection:account-flags
     }
 
@@ -76,21 +76,29 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let account_errors = client
+        let account_results = client
             .create_accounts(&[account0, account1, account2])
             .await?;
 
-        assert!(account_errors.len() <= 3);
-
-        for err in account_errors {
-            match err.result {
-                tb::CreateAccountResult::Exists => {
-                    println!("Batch account at {} already exists.", err.index);
+        assert!(account_results.len() == 3);
+        for (index, result) in account_results.into_iter().enumerate() {
+            match result.status {
+                tb::CreateAccountStatus::Created => {
+                    println!(
+                        "Batch account at {} successfully created with timestamp {}",
+                        index, result.timestamp
+                    );
+                }
+                tb::CreateAccountStatus::Exists => {
+                    println!(
+                        "Batch account at {} already exists with timestamp {}.",
+                        index, result.timestamp
+                    );
                 }
                 _ => {
                     println!(
                         "Batch account at {} failed to create: {:?}",
-                        err.index, err.result
+                        index, result.status
                     );
                 }
             }
@@ -116,8 +124,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }];
 
-        let transfer_errors = client.create_transfers(&transfers).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&transfers).await?;
+        // Result handling omitted.
         // endsection:create-transfers
     }
 
@@ -153,17 +161,26 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             },
         ];
 
-        let transfer_errors = client.create_transfers(&transfers).await?;
-
-        for err in transfer_errors {
-            match err.result {
-                tb::CreateTransferResult::Exists => {
-                    println!("Batch transfer at {} already exists.", err.index);
+        let transfer_results = client.create_transfers(&transfers).await?;
+        assert!(transfer_results.len() == transfers.len());
+        for (index, result) in transfer_results.into_iter().enumerate() {
+            match result.status {
+                tb::CreateTransferStatus::Created => {
+                    println!(
+                        "Batch transfer at {} successfully created with timestamp {}",
+                        index, result.timestamp
+                    );
+                }
+                tb::CreateTransferStatus::Exists => {
+                    println!(
+                        "Batch transfer at {} already exists with timestamp {}.",
+                        index, result.timestamp
+                    );
                 }
                 _ => {
                     println!(
                         "Batch transfer at {} failed to create: {:?}",
-                        err.index, err.result
+                        index, result.status
                     );
                 }
             }
@@ -172,22 +189,12 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        // section:no-batch
-        let batch: Vec<tb::Transfer> = vec![];
-        for transfer in &batch {
-            let transfer_errors = client.create_transfers(&[*transfer]).await?;
-            // Error handling omitted.
-        }
-        // endsection:no-batch
-    }
-
-    {
         // section:batch
         let transfers: Vec<tb::Transfer> = vec![];
         const BATCH_SIZE: usize = 8189;
         for batch in transfers.chunks(BATCH_SIZE) {
-            let transfer_errors = client.create_transfers(batch).await?;
-            // Error handling omitted.
+            let transfer_results = client.create_transfers(batch).await?;
+            // Result handling omitted.
         }
         // endsection:batch
     }
@@ -214,8 +221,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_errors = client.create_transfers(&[transfer0, transfer1]).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&[transfer0, transfer1]).await?;
+        // Result handling omitted.
         // endsection:transfer-flags-link
     }
 
@@ -231,8 +238,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_errors = client.create_transfers(&[transfer0]).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&[transfer0]).await?;
+        // Result handling omitted.
 
         let transfer1 = tb::Transfer {
             id: 7,
@@ -242,8 +249,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_errors = client.create_transfers(&[transfer1]).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&[transfer1]).await?;
+        // Result handling omitted.
         // endsection:transfer-flags-post
     }
 
@@ -259,8 +266,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_errors = client.create_transfers(&[transfer0]).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&[transfer0]).await?;
+        // Result handling omitted.
 
         let transfer1 = tb::Transfer {
             id: 9,
@@ -270,8 +277,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_errors = client.create_transfers(&[transfer1]).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&[transfer1]).await?;
+        // Result handling omitted.
         // endsection:transfer-flags-void
     }
 
@@ -422,8 +429,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         });
 
-        let transfer_errors = client.create_transfers(&batch).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&batch).await?;
+        // Result handling omitted.
         // endsection:linked-events
     }
 
@@ -450,8 +457,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             accounts_batch.push(account);
         }
 
-        let account_errors = client.create_accounts(&accounts_batch).await?;
-        // Error handling omitted.
+        let account_results = client.create_accounts(&accounts_batch).await?;
+        // Result handling omitted.
 
         // Then, load and import all transfers with their timestamps from the historical source.
         let mut transfers_batch = vec![];
@@ -469,8 +476,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             transfers_batch.push(transfer);
         }
 
-        let transfer_errors = client.create_transfers(&transfers_batch).await?;
-        // Error handling omitted.
+        let transfer_results = client.create_transfers(&transfers_batch).await?;
+        // Result handling omitted.
         // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
         // with the same historical timestamps without regressing the cluster timestamp.
         // endsection:imported-events

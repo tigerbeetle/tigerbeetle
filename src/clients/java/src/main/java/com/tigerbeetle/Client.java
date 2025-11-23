@@ -69,8 +69,10 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public CreateAccountResultBatch createAccounts(final AccountBatch batch) {
+    public CreateAccountResultBatch createAccounts(final AccountBatch batch)
+            throws InterruptedException {
         final var request = BlockingRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -103,8 +105,9 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public AccountBatch lookupAccounts(final IdBatch batch) {
+    public AccountBatch lookupAccounts(final IdBatch batch) throws InterruptedException {
         final var request = BlockingRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -137,8 +140,10 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public CreateTransferResultBatch createTransfers(final TransferBatch batch) {
+    public CreateTransferResultBatch createTransfers(final TransferBatch batch)
+            throws InterruptedException {
         final var request = BlockingRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -171,8 +176,9 @@ public final class Client implements AutoCloseable {
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public TransferBatch lookupTransfers(final IdBatch batch) {
+    public TransferBatch lookupTransfers(final IdBatch batch) throws InterruptedException {
         final var request = BlockingRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -203,8 +209,10 @@ public final class Client implements AutoCloseable {
      *         match the query parameters.
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public TransferBatch getAccountTransfers(final AccountFilter filter) {
+    public TransferBatch getAccountTransfers(final AccountFilter filter)
+            throws InterruptedException {
         final var request = BlockingRequest.getAccountTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -234,8 +242,10 @@ public final class Client implements AutoCloseable {
      *         that match the query parameters.
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public AccountBalanceBatch getAccountBalances(final AccountFilter filter) {
+    public AccountBalanceBatch getAccountBalances(final AccountFilter filter)
+            throws InterruptedException {
         final var request = BlockingRequest.getAccountBalances(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -265,8 +275,9 @@ public final class Client implements AutoCloseable {
      *         match the query parameters.
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public AccountBatch queryAccounts(final QueryFilter filter) {
+    public AccountBatch queryAccounts(final QueryFilter filter) throws InterruptedException {
         final var request = BlockingRequest.queryAccounts(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
@@ -295,8 +306,9 @@ public final class Client implements AutoCloseable {
      *         match the query parameters.
      * @throws NullPointerException if {@code filter} is null.
      * @throws IllegalStateException if this client is closed.
+     * @throws InterruptedException if the current thread is interrupted.
      */
-    public TransferBatch queryTransfers(final QueryFilter filter) {
+    public TransferBatch queryTransfers(final QueryFilter filter) throws InterruptedException {
         final var request = BlockingRequest.queryTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
