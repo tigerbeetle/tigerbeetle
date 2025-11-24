@@ -197,7 +197,7 @@ for err in account_errors {
             println!("Batch account at {} already exists.", err.index);
         }
         _ => {
-            println!(
+            eprintln!(
                 "Batch account at {} failed to create: {:?}",
                 err.index, err.result
             );
@@ -301,7 +301,7 @@ for err in transfer_errors {
             println!("Batch transfer at {} already exists.", err.index);
         }
         _ => {
-            println!(
+            eprintln!(
                 "Batch transfer at {} failed to create: {:?}",
                 err.index, err.result
             );

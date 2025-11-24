@@ -88,7 +88,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Batch account at {} already exists.", err.index);
                 }
                 _ => {
-                    println!(
+                    eprintln!(
                         "Batch account at {} failed to create: {:?}",
                         err.index, err.result
                     );
@@ -161,7 +161,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Batch transfer at {} already exists.", err.index);
                 }
                 _ => {
-                    println!(
+                    eprintln!(
                         "Batch transfer at {} failed to create: {:?}",
                         err.index, err.result
                     );
