@@ -148,55 +148,24 @@ test "Instant/Duration" {
 }
 
 test "Duration.parse_flag_value" {
-    for ([_]struct { []const u8, u64 }{
-        .{ "1h", std.time.ns_per_hour },
-        .{ "1m", std.time.ns_per_min },
-        .{ "1h2m", std.time.ns_per_hour + 2 * std.time.ns_per_min },
-        .{ "1ms2us3ns", std.time.ns_per_ms + 2 * std.time.ns_per_us + 3 },
-    }) |pair| {
-        try std.testing.expectEqual(Duration.parse_flag_value(pair.@"0").ok.ns, pair.@"1");
-    }
-
-    for ([_][]const u8{
-        "",
-        "h",
-        "1",
-        "h1",
-        "1H",
-        "1h2x",
-        "1h 2m",
-        "18446744073709551616ns",
-        "1844674407370955161s",
-    }) |string| {
-        try std.testing.expect(Duration.parse_flag_value(string) == .err);
-    }
-}
-
-test "Duration.parse_flag_value fuzz" {
-    const test_count = 1024;
-    const input_size_max = 32;
-    const alphabet = " \t\n.-e[]0123456789abcdhmuns";
-
-    var prng = stdx.PRNG.from_seed_testing();
-
-    var input_buffer: [input_size_max]u8 = @splat(0);
-    for (0..test_count) |_| {
-        const input_size = prng.int_inclusive(usize, input_size_max);
-        const input = input_buffer[0..input_size];
-        for (input) |*c| {
-            c.* = alphabet[prng.index(alphabet)];
-        }
-
-        const result = Duration.parse_flag_value(input);
-        switch (result) {
-            .ok => |duration| {
-                var buffer: [64]u8 = undefined;
-                _ = std.fmt.bufPrint(&buffer, "{}", .{duration}) catch unreachable;
-                // Round-trip not guaranteed.
-            },
-            .err => {},
-        }
-    }
+    try stdx.parse_flag_value_fuzz(Duration, Duration.parse_flag_value, .{
+        .ok = &.{
+            .{ "1h", .{ .ns = std.time.ns_per_hour } },
+            .{ "1m", .{ .ns = std.time.ns_per_min } },
+            .{ "1h2m", .{ .ns = std.time.ns_per_hour + 2 * std.time.ns_per_min } },
+            .{ "1ms2us3ns", .{ .ns = std.time.ns_per_ms + 2 * std.time.ns_per_us + 3 } },
+        },
+        .err = &.{
+            .{ "h", "missing value" },
+            .{ "1", "missing unit" },
+            .{ "h1", "missing value" },
+            .{ "1H", "unknown unit; must be one of: d/h/m/s/ms/us/ns" },
+            .{ "1h2x", "unknown unit" },
+            .{ "1h 2m", "missing value" },
+            .{ "18446744073709551616ns", "integer overflow" },
+            .{ "1844674407370955161s", "duration too large" },
+        },
+    });
 }
 
 /// DateTime in UTC, intended primarily for logging.

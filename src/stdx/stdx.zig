@@ -19,6 +19,7 @@ pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 pub const aegis = @import("aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const flags = @import("flags.zig").parse;
+pub const parse_flag_value_fuzz = @import("flags.zig").parse_flag_value_fuzz;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
@@ -1069,41 +1070,31 @@ pub const ByteSize = struct {
 };
 
 test "ByteSize.parse_flag_value" {
-    const kib = 1024;
-    const mib = kib * 1024;
-    const gib = mib * 1024;
-    const tib = gib * 1024;
+    try parse_flag_value_fuzz(ByteSize, ByteSize.parse_flag_value, .{
+        .ok = &.{
+            .{ "0", .{ .value = 0, .unit = .bytes } },
+            .{ "1", .{ .value = 1, .unit = .bytes } },
 
-    const cases = .{
-        .{ 0, "0", 0, ByteSize.Unit.bytes },
-        .{ 1, "1", 1, ByteSize.Unit.bytes },
-        .{ 140737488355328, "140737488355328", 140737488355328, ByteSize.Unit.bytes },
-        .{ 140737488355328, "128TiB", 128, ByteSize.Unit.tib },
-        .{ 1 * tib, "1TiB", 1, ByteSize.Unit.tib },
-        .{ 10 * tib, "10tib", 10, ByteSize.Unit.tib },
-        .{ 1 * gib, "1GiB", 1, ByteSize.Unit.gib },
-        .{ 10 * gib, "10gib", 10, ByteSize.Unit.gib },
-        .{ 1 * mib, "1MiB", 1, ByteSize.Unit.mib },
-        .{ 10 * mib, "10mib", 10, ByteSize.Unit.mib },
-        .{ 1 * kib, "1KiB", 1, ByteSize.Unit.kib },
-        .{ 10 * kib, "10kib", 10, ByteSize.Unit.kib },
-        .{ 10 * kib, "1_0kib", 10, ByteSize.Unit.kib },
-    };
-
-    inline for (cases) |case| {
-        const bytes = case[0];
-        const input = case[1];
-        const unit_val = case[2];
-        const unit = case[3];
-        const result = ByteSize.parse_flag_value(input);
-        if (result == .err) {
-            std.debug.panic("expected ok, got: '{s}'", .{result.err});
-        }
-        const got = result.ok;
-        assert(bytes == got.bytes());
-        assert(unit_val == got.value);
-        assert(unit == got.unit);
-    }
+            .{ "140737488355328", .{ .value = 140737488355328, .unit = .bytes } },
+            .{ "128TiB", .{ .value = 128, .unit = .tib } },
+            .{ "1TiB", .{ .value = 1, .unit = .tib } },
+            .{ "10tib", .{ .value = 10, .unit = .tib } },
+            .{ "1GiB", .{ .value = 1, .unit = .gib } },
+            .{ "10gib", .{ .value = 10, .unit = .gib } },
+            .{ "1MiB", .{ .value = 1, .unit = .mib } },
+            .{ "10mib", .{ .value = 10, .unit = .mib } },
+            .{ "1KiB", .{ .value = 1, .unit = .kib } },
+            .{ "10kib", .{ .value = 10, .unit = .kib } },
+            .{ "1_0kib", .{ .value = 10, .unit = .kib } },
+        },
+        .err = &.{
+            .{ "18446744073709551616", "value exceeds 64-bit unsigned integer" },
+            .{ "MiB", "expected a size, but found" },
+            .{ "10bananas", "invalid unit in size, needed KiB, MiB, GiB or TiB" },
+            .{ "10GB", "invalid unit in size" },
+            .{ "18446744073709551GiB", "size in bytes exceeds 64-bit unsigned integer" },
+        },
+    });
 }
 
 // Fast alternative to modulo reduction (Note, it is not the same as modulo).

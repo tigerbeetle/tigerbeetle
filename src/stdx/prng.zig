@@ -53,6 +53,7 @@ pub const Ratio = struct {
         value: []const u8,
         static_diagnostic: *?[]const u8,
     ) error{InvalidFlagValue}!Ratio {
+        assert(value.len > 0);
         const numerator_string, const denominator_string = stdx.cut(value, "/") orelse {
             static_diagnostic.* = "expected 'a/b' ratio, but found:";
             return error.InvalidFlagValue;
@@ -75,34 +76,18 @@ pub const Ratio = struct {
 };
 
 test "Ratio.parse_flag_value" {
-    assert(std.meta.eql(
-        Ratio.parse_flag_value("3/4"),
-        .{ .ok = ratio(3, 4) },
-    ));
-    assert(std.meta.eql(
-        Ratio.parse_flag_value("10/100"),
-        .{ .ok = ratio(10, 100) },
-    ));
-    assert(std.meta.eql(
-        Ratio.parse_flag_value("3"),
-        .{ .err = "expected 'a/b' ratio, but found:" },
-    ));
-    assert(std.meta.eql(
-        Ratio.parse_flag_value(""),
-        .{ .err = "expected 'a/b' ratio, but found:" },
-    ));
-    assert(std.meta.eql(
-        Ratio.parse_flag_value("π/4"),
-        .{ .err = "invalid numerator:" },
-    ));
-    assert(std.meta.eql(
-        Ratio.parse_flag_value("3/i"),
-        .{ .err = "invalid denominator:" },
-    ));
-    assert(std.meta.eql(
-        Ratio.parse_flag_value("4/3"),
-        .{ .err = "ratio greater than 1:" },
-    ));
+    try stdx.parse_flag_value_fuzz(Ratio, Ratio.parse_flag_value, .{
+        .ok = &.{
+            .{ "3/4", ratio(3, 4) },
+            .{ "10/100", ratio(10, 100) },
+        },
+        .err = &.{
+            .{ "3", "expected 'a/b' ratio, but found" },
+            .{ "π/4", "invalid numerator" },
+            .{ "3/i", "invalid denominator" },
+            .{ "4/3", "ratio greater than 1" },
+        },
+    });
 }
 
 /// Canonical constructor for Ratio. Import as `const ratio = stdx.PRNG.ratio`.
