@@ -1001,7 +1001,7 @@ pub const ByteSize = struct {
 
         const split_index = for (string, 0..) |c, index| {
             if (std.ascii.isDigit(c) or c == '_') {
-                // Numeric string part continues
+                // Numeric part continues.
             } else break index;
         } else string.len;
 
