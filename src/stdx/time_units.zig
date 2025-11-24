@@ -78,56 +78,71 @@ pub const Duration = struct {
         static_diagnostic: *?[]const u8,
     ) error{InvalidFlagValue}!Duration {
         assert(string.len > 0);
-
-        var duration_ns: u64 = 0;
-
         var string_remaining = string;
+
+        var result: Duration = .{ .ns = 0 };
         while (string_remaining.len > 0) {
-            const value_size = for (string_remaining, 0..) |character, i| {
-                if (!std.ascii.isDigit(character)) break i;
-            } else {
-                static_diagnostic.* = "missing unit; must be one of: d/h/m/s/ms/us/ns:";
-                return error.InvalidFlagValue;
-            };
-            if (value_size == 0) {
-                static_diagnostic.* = "missing value:";
-                return error.InvalidFlagValue;
-            }
-
-            const value = std.fmt.parseInt(u64, string_remaining[0..value_size], 10) catch |err| {
-                switch (err) {
-                    error.Overflow => {
-                        static_diagnostic.* = "integer overflow:";
-                        return error.InvalidFlagValue;
-                    },
-                    error.InvalidCharacter => unreachable,
-                }
-            };
-
-            for ([_]struct { ns: u64, label: []const u8 }{
-                .{ .ns = 1, .label = "ns" },
-                .{ .ns = std.time.ns_per_us, .label = "us" },
-                .{ .ns = std.time.ns_per_ms, .label = "ms" },
-                .{ .ns = std.time.ns_per_s, .label = "s" },
-                .{ .ns = std.time.ns_per_min, .label = "m" },
-                .{ .ns = std.time.ns_per_hour, .label = "h" },
-                .{ .ns = std.time.ns_per_day, .label = "d" },
-            }) |unit| {
-                if (stdx.cut_prefix(string_remaining[value_size..], unit.label)) |suffix| {
-                    duration_ns +|= unit.ns *| value;
-                    string_remaining = suffix;
-                    break;
-                }
-            } else {
-                static_diagnostic.* = "unknown unit; must be one of: d/h/m/s/ms/us/ns:";
-                return error.InvalidFlagValue;
-            }
+            string_remaining, const component =
+                try parse_flag_value_component(string_remaining, static_diagnostic);
+            result.ns +|= component.ns;
         }
-        if (duration_ns >= 1_000 * std.time.ns_per_day) {
+
+        if (result.ns >= 1_000 * std.time.ns_per_day) {
             static_diagnostic.* = "duration too large:";
             return error.InvalidFlagValue;
         }
-        return .{ .ns = duration_ns };
+        return result;
+    }
+
+    fn parse_flag_value_component(
+        string: []const u8,
+        static_diagnostic: *?[]const u8,
+    ) error{InvalidFlagValue}!struct { []const u8, Duration } {
+        const split_index = for (string, 0..) |c, index| {
+            if (std.ascii.isDigit(c)) {
+                // Numeric part continues.
+            } else break index;
+        } else {
+            static_diagnostic.* = "missing unit; must be one of: d/h/m/s/ms/us/ns:";
+            return error.InvalidFlagValue;
+        };
+
+        if (split_index == 0) {
+            static_diagnostic.* = "missing value:";
+            return error.InvalidFlagValue;
+        }
+
+        const string_amount = string[0..split_index];
+        const string_remaining = string[split_index..];
+        assert(string_amount.len > 0);
+        assert(string_remaining.len > 0);
+
+        const amount = std.fmt.parseInt(u64, string_amount, 10) catch |err| switch (err) {
+            error.Overflow => {
+                static_diagnostic.* = "integer overflow:";
+                return error.InvalidFlagValue;
+            },
+            error.InvalidCharacter => unreachable,
+        };
+
+        const Unit = enum(u64) {
+            ns = 1,
+            us = std.time.ns_per_us,
+            ms = std.time.ns_per_ms,
+            s = std.time.ns_per_s,
+            m = std.time.ns_per_min,
+            h = std.time.ns_per_hour,
+            d = std.time.ns_per_day,
+        };
+
+        inline for (comptime std.enums.values(Unit)) |unit| {
+            if (stdx.cut_prefix(string_remaining, @tagName(unit))) |suffix| {
+                return .{ suffix, .{ .ns = amount *| @intFromEnum(unit) } };
+            }
+        } else {
+            static_diagnostic.* = "unknown unit; must be one of: d/h/m/s/ms/us/ns:";
+            return error.InvalidFlagValue;
+        }
     }
 };
 
@@ -161,6 +176,7 @@ test "Duration.parse_flag_value" {
             .{ "h1", "missing value" },
             .{ "1H", "unknown unit; must be one of: d/h/m/s/ms/us/ns" },
             .{ "1h2x", "unknown unit" },
+            .{ "1_0h", "unknown unit" },
             .{ "1h 2m", "missing value" },
             .{ "18446744073709551616ns", "integer overflow" },
             .{ "1844674407370955161s", "duration too large" },
