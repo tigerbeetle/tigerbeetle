@@ -259,6 +259,8 @@ pub const Command = enum(u8) {
 
     start_view = 24,
 
+    discover = 25,
+
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
     deprecated_12 = 12, // start_view without checkpoint
     deprecated_21 = 21, // request_sync_checkpoint

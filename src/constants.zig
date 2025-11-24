@@ -420,6 +420,9 @@ pub const connection_send_queue_max_client = 2;
 /// request).
 pub const client_request_queue_max = config.process.client_request_queue_max;
 
+pub const discovery_addresses_max = replicas_max + 4;
+pub const discovery_concurrency = discovery_addresses_max;
+
 /// The maximum number of connections in the kernel's complete connection queue pending an accept():
 /// If the backlog argument is greater than the value in `/proc/sys/net/core/somaxconn`, then it is
 /// silently truncated to that value. Since Linux 5.4, the default in this file is 4096.

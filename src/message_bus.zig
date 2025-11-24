@@ -14,10 +14,13 @@ const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
+const IOPSType = @import("./iops.zig").IOPSType;
+const Timeout = vsr.Timeout;
 
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
     const SendQueue = RingBufferType(*Message, .slice);
+    const Discovery = DiscoveryType(IO);
 
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
@@ -31,6 +34,8 @@ pub fn MessageBusType(comptime IO: type) type {
         process: ProcessID,
         /// Prefix for log messages.
         id: u128,
+
+        discovery: Discovery,
 
         /// The file descriptor for the process on which to accept connections.
         accept_fd: ?IO.socket_t = null,
@@ -148,8 +153,16 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replica => |replica| replica,
                 .client => |client| @as(u64, @truncate(client)),
             };
+            var prng = stdx.PRNG.from_seed(prng_seed);
+
+            var discovery = try Discovery.init(allocator, options.io, .{
+                .prng_seed = prng.int(u64),
+                .initial_addresses = options.configuration,
+            });
+            errdefer discovery.deinit(allocator);
 
             var bus: MessageBus = .{
+                .discovery = discovery,
                 .pool = message_pool,
                 .io = options.io,
                 .process = process_id,
@@ -163,7 +176,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replicas = replicas,
                 .replicas_addresses = replicas_addresses,
                 .replicas_connect_attempts = replicas_connect_attempts,
-                .prng = stdx.PRNG.from_seed(prng_seed),
+                .prng = prng,
             };
 
             switch (process_id) {
@@ -180,13 +193,14 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
-            bus.clients.deinit(allocator);
-
             if (bus.accept_fd) |fd| {
                 assert(bus.process == .replica);
                 assert(bus.accept_address != null);
                 bus.io.close_socket(fd);
             }
+
+            bus.discovery.deinit(allocator);
+            bus.clients.deinit(allocator);
 
             const send_queue_max = switch (bus.process) {
                 .replica => constants.connection_send_queue_max_replica,
@@ -257,6 +271,12 @@ pub fn MessageBusType(comptime IO: type) type {
 
         pub fn tick(bus: *MessageBus) void {
             assert(bus.process == .replica);
+            bus.discovery.tick();
+            for (bus.discovery.replicas, 0..) |address, replica_index| {
+                if (address.ttl > 0) {
+                    bus.replicas_addresses[replica_index] = address.to_std();
+                }
+            }
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
         }
@@ -1184,5 +1204,226 @@ pub fn MessageBusType(comptime IO: type) type {
             /// For connections_suspended.
             link: QueueType(Connection).Link = .{},
         };
+    };
+}
+
+fn DiscoveryType(IO: type) type {
+    return struct {
+        io: *IO,
+        prng: stdx.PRNG,
+
+        addresses: [constants.discovery_addresses_max]Address,
+        replicas: [constants.members_max]Address = @splat(.expired),
+
+        discover_self: vsr.Header.Discover,
+        send_completion: IOPSType(IO.Completion, constants.discovery_concurrency) = .{},
+        recv_completion: IO.Completion = undefined,
+        recv_buffer: *[discovery_message_size_max]u8,
+        timeout: Timeout,
+
+        const discovery_message_size_max = @sizeOf(vsr.Header) +
+            (constants.members_max * (@sizeOf([16]u8) + @sizeOf(u16)));
+
+        const ttl_forever = std.math.maxInt(u32);
+        const ttl_initial = @divFloor(5 * std.time.ms_per_min, constants.tick_ms);
+
+        const Address = struct {
+            ip: [16]u8,
+            port: u16,
+            ttl: u32,
+
+            const expired: Address = .{
+                .ip = @splat(0),
+                .port = 0,
+                .ttl = 0,
+            };
+
+            pub fn to_std(address: Address) std.net.Address {
+                return .{
+                    .in6 = .init(address.ip, address.port, 0, 0),
+                };
+            }
+        };
+
+        const Discovery = @This();
+
+        pub fn init(gpa: std.mem.Allocator, io: *IO, options: struct {
+            prng_seed: u64,
+            initial_addresses: []const std.net.Address,
+        }) !Discovery {
+            assert(options.initial_addresses.len <= constants.discovery_addresses_max);
+
+            const recv_buffer = try gpa.create([discovery_message_size_max]u8);
+            errdefer gpa.free(recv_buffer);
+
+            var addresses: [constants.discovery_addresses_max]Address = @splat(.expired);
+            for (options.initial_addresses, 0..) |address, index| {
+                addresses[index] = .{
+                    .ip = address.in6.sa.addr,
+                    .port = mem.bigToNative(u16, address.in6.sa.port),
+                    .ttl = ttl_forever,
+                };
+            }
+
+            var discover_self: vsr.Header.Discover = .{
+                .checksum = undefined,
+                .checksum_padding = 0,
+                .checksum_body = comptime vsr.checksum(&.{}),
+                .checksum_body_padding = 0,
+                .cluster = 0,
+                .size = @sizeOf(vsr.Header),
+                .epoch = 0,
+                .view = 0,
+                .release = constants.config.process.release,
+                .protocol = vsr.Version,
+                .command = .discover,
+                .replica = 0,
+            };
+            discover_self.set_checksum();
+
+            return .{
+                .io = io,
+                .prng = .from_seed(options.prng_seed),
+                .discover_self = discover_self,
+                .addresses = addresses,
+                .recv_buffer = recv_buffer,
+                .timeout = .{
+                    .name = "discovery_timeout",
+                    .id = 0,
+                    .after = 1_000 / constants.tick_ms,
+                },
+            };
+        }
+
+        pub fn deinit(discovery: *Discovery, gpa: std.mem.Allocator) void {
+            gpa.free(discovery.recv_buffer);
+            discovery.* = undefined;
+        }
+
+        pub fn tick(discovery: *Discovery) void {
+            for (&discovery.addresses) |*address| {
+                if (address.ttl == ttl_forever) continue; // Pre-configured address.
+                address.ttl -|= 1;
+            }
+            discovery.timeout.tick();
+            if (discovery.timeout.fired()) {
+                discovery.timeout.reset();
+                discovery.broadcast();
+            }
+        }
+
+        pub fn broadcast(discovery: *Discovery) void {
+            const permutation = discovery.prng.permutation(u8, constants.discovery_addresses_max);
+
+            for (permutation) |index| {
+                const address = discovery.addresses[index];
+                if (address.ttl > 0) {
+                    const completion = discovery.send_completion.acquire() orelse
+                        break;
+                    discovery.io.send_msg(
+                        *Discovery,
+                        discovery,
+                        broadcast_send_callback,
+                        completion,
+                        address.to_std(),
+                        std.mem.asBytes(&discovery.discover_self),
+                    );
+                }
+            }
+        }
+
+        fn broadcast_send_callback(
+            discovery: *Discovery,
+            completion: *IO.Completion,
+            result: IO.SendError!usize,
+        ) void {
+            discovery.send_completion.release(completion);
+            const send_size = result catch |err| {
+                log.err("send_msg: error={s}", .{@errorName(err)});
+                return;
+            };
+            if (send_size != @sizeOf(vsr.Header)) {
+                log.err("send_msg: unexpected size ({}!={})", .{ send_size, @sizeOf(vsr.Header) });
+            }
+        }
+
+        fn recv(discovery: *Discovery) void {
+            discovery.io.recv_msg(
+                *Discovery,
+                discovery,
+                recv_callback,
+                &discovery.recv_completion,
+                discovery.socket,
+                discovery.recv_buffer,
+            );
+        }
+
+        fn recv_callback(
+            discovery: *Discovery,
+            completion: *IO.Completion,
+            result_or_error: IO.RecvError!IO.RecvMsgResult,
+        ) void {
+            assert(completion == &discovery.recv_completion);
+            const result = result_or_error catch |err| {
+                log.err("recv_callback: err={s}", .{@errorName(err)});
+                return;
+            };
+            assert(result.size <= discovery_message_size_max);
+            assert(result.size >= @sizeOf(vsr.Header));
+            const header = std.mem.bytesAsValue(
+                vsr.Header,
+                discovery.recv_buffer[0..@sizeOf(vsr.Header)],
+            );
+            assert(header.valid_checksum());
+            assert(result.size == header.size);
+
+            if (header.size == @sizeOf(vsr.Header)) {
+                assert(header.replica < discovery.replica_count);
+                discovery.replica_addresses[header.replica] = result.address;
+            } else {
+                const address_count = @divExact(
+                    header.size - @sizeOf(vsr.Header),
+                    @sizeOf(u128) + @sizeOf(u16),
+                );
+                const addresses_offset = @sizeOf(vsr.Header);
+                const addresses_size = @sizeOf(u128) * address_count;
+                const ports_offset = addresses_offset + addresses_size;
+                const ports_size = @sizeOf(u16) * address_count;
+                assert(ports_offset + ports_size == header.size);
+                const addresses: []u128 = discovery.recv_buffer[addresses_offset..][0..addresses_size];
+                const ports: []u16 = discovery.recv_buffer[ports_offset..][0..ports_size];
+                for (addresses, ports) |address_new, port_new| {
+                    var ttl_min: u32 = ttl_forever;
+                    var ttl_min_index: ?usize = null;
+                    for (discovery.address, &discovery.address_ttl, 0..) |address, *ttl, index| {
+                        if (address.ip == address_new and address.port == port_new) {
+                            if (ttl.* == ttl_forever) {
+                                // Heard back from pre-configured address, no changes, remains
+                                // pre-configured (perpetual).
+                            } else {
+                                // Heard avain from a known address, reset TTL.
+                                assert(ttl.* <= ttl_initial);
+                                ttl.* = ttl_initial;
+                            }
+                            break;
+                        }
+                        if (ttl.* < ttl_min) {
+                            ttl_min = ttl.*;
+                            ttl_min_index = index;
+                        }
+                    } else {
+                        // This is a new address, bump the oldest one.
+                        assert(ttl_min_index != null);
+                        assert(ttl_min < ttl_forever);
+                        assert(discovery.address_ttl);
+                        discovery.address[ttl_min_index.?] = .{
+                            .address = address_new,
+                            .port = port_new,
+                        };
+                        discovery.address_tll[ttl_min_index.?] = ttl_initial;
+                    }
+                }
+            }
+        }
     };
 }

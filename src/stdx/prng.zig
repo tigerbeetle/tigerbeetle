@@ -662,6 +662,13 @@ test shuffle {
     ).diff_fmt("g_first_count = {} expected_value={}", .{ g_first_count, 1000 / 7 });
 }
 
+pub fn permutation(prng: *PRNG, T: type, comptime count: u8) [count]T {
+    var result: [count]T = undefined;
+    for (&result, 0..) |*slot, slot_index| slot.* = @intCast(slot_index);
+    prng.shuffle(T, &result);
+    return result;
+}
+
 test "no floating point please" {
     const path = try std.fs.path.join(std.testing.allocator, &.{
         module_path,
