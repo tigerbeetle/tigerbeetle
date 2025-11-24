@@ -73,8 +73,11 @@ pub const Duration = struct {
         try std.fmt.fmtDuration(duration.ns).format(fmt, options, writer);
     }
 
-    pub fn parse_flag_value(string: []const u8) union(enum) { ok: Duration, err: []const u8 } {
-        if (string.len == 0) return .{ .err = "expected a duration, but found nothing" };
+    pub fn parse_flag_value(
+        string: []const u8,
+        static_diagnostic: *?[]const u8,
+    ) error{InvalidFlagValue}!Duration {
+        assert(string.len > 0);
 
         var duration_ns: u64 = 0;
 
@@ -82,12 +85,21 @@ pub const Duration = struct {
         while (string_remaining.len > 0) {
             const value_size = for (string_remaining, 0..) |character, i| {
                 if (!std.ascii.isDigit(character)) break i;
-            } else return .{ .err = "missing unit; must be one of: d/h/m/s/ms/us/ns" };
-            if (value_size == 0) return .{ .err = "missing value" };
+            } else {
+                static_diagnostic.* = "missing unit; must be one of: d/h/m/s/ms/us/ns:";
+                return error.InvalidFlagValue;
+            };
+            if (value_size == 0) {
+                static_diagnostic.* = "missing value:";
+                return error.InvalidFlagValue;
+            }
 
             const value = std.fmt.parseInt(u64, string_remaining[0..value_size], 10) catch |err| {
                 switch (err) {
-                    error.Overflow => return .{ .err = "integer overflow" },
+                    error.Overflow => {
+                        static_diagnostic.* = "integer overflow:";
+                        return error.InvalidFlagValue;
+                    },
                     error.InvalidCharacter => unreachable,
                 }
             };
@@ -107,13 +119,15 @@ pub const Duration = struct {
                     break;
                 }
             } else {
-                return .{ .err = "unknown unit; must be one of: d/h/m/s/ms/us/ns" };
+                static_diagnostic.* = "unknown unit; must be one of: d/h/m/s/ms/us/ns:";
+                return error.InvalidFlagValue;
             }
         }
         if (duration_ns >= 1_000 * std.time.ns_per_day) {
-            return .{ .err = "duration too large" };
+            static_diagnostic.* = "duration too large:";
+            return error.InvalidFlagValue;
         }
-        return .{ .ok = .{ .ns = duration_ns } };
+        return .{ .ns = duration_ns };
     }
 };
 

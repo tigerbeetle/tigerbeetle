@@ -992,7 +992,10 @@ pub const ByteSize = struct {
         tib = TiB,
     };
 
-    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
+    pub fn parse_flag_value(
+        value: []const u8,
+        static_diagnostic: *?[]const u8,
+    ) error{InvalidFlagValue}!ByteSize {
         assert(value.len != 0);
 
         const split: struct {
@@ -1015,11 +1018,13 @@ pub const ByteSize = struct {
         const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
             switch (err) {
                 error.Overflow => {
-                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
+                    static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
+                    return error.InvalidFlagValue;
                 },
                 error.InvalidCharacter => {
                     // The only case this can happen is for the empty string
-                    return .{ .err = "expected a size, but found:" };
+                    static_diagnostic.* = "expected a size, but found:";
+                    return error.InvalidFlagValue;
                 },
             }
         };
@@ -1030,16 +1035,18 @@ pub const ByteSize = struct {
                     break :unit tag;
                 }
             } else {
-                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
+                static_diagnostic.* = "invalid unit in size, needed KiB, MiB, GiB or TiB:";
+                return error.InvalidFlagValue;
             }
         else
             Unit.bytes;
 
         _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
-            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
+            static_diagnostic.* = "size in bytes exceeds 64-bit unsigned integer:";
+            return error.InvalidFlagValue;
         };
 
-        return .{ .ok = .{ .value = amount, .unit = unit } };
+        return .{ .value = amount, .unit = unit };
     }
 
     pub fn bytes(size: *const ByteSize) u64 {

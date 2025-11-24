@@ -49,18 +49,28 @@ pub const Ratio = struct {
         return writer.print("{d}/{d}", .{ r.numerator, r.denominator });
     }
 
-    pub fn parse_flag_value(value: []const u8) union(enum) { ok: Ratio, err: []const u8 } {
-        const numerator_string, const denominator_string = stdx.cut(value, "/") orelse
-            return .{ .err = "expected 'a/b' ratio, but found:" };
+    pub fn parse_flag_value(
+        value: []const u8,
+        static_diagnostic: *?[]const u8,
+    ) error{InvalidFlagValue}!Ratio {
+        const numerator_string, const denominator_string = stdx.cut(value, "/") orelse {
+            static_diagnostic.* = "expected 'a/b' ratio, but found:";
+            return error.InvalidFlagValue;
+        };
 
-        const numerator = std.fmt.parseInt(u64, numerator_string, 10) catch
-            return .{ .err = "invalid numerator:" };
-        const denominator = std.fmt.parseInt(u64, denominator_string, 10) catch
-            return .{ .err = "invalid denominator:" };
+        const numerator = std.fmt.parseInt(u64, numerator_string, 10) catch {
+            static_diagnostic.* = "invalid numerator:";
+            return error.InvalidFlagValue;
+        };
+        const denominator = std.fmt.parseInt(u64, denominator_string, 10) catch {
+            static_diagnostic.* = "invalid denominator:";
+            return error.InvalidFlagValue;
+        };
         if (numerator > denominator) {
-            return .{ .err = "ratio greater than 1:" };
+            static_diagnostic.* = "ratio greater than 1:";
+            return error.InvalidFlagValue;
         }
-        return .{ .ok = ratio(numerator, denominator) };
+        return ratio(numerator, denominator);
     }
 };
 

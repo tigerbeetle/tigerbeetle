@@ -76,6 +76,8 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 /// `positional` field is treated specially, it designates positional arguments.
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
+///
+/// Value parsing can be customized on per-type basis via `parse_flag_value` customization point.
 pub fn parse(args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
     comptime assert(CLIArgs != void);
     assert(args.skip()); // Discard executable name.
@@ -348,9 +350,25 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     if (@typeInfo(V) == .int) return parse_value_int(V, flag, value);
     if (@typeInfo(V) == .@"enum") return parse_value_enum(V, flag, value);
     if (@hasDecl(V, "parse_flag_value")) {
-        switch (V.parse_flag_value(value)) {
-            .ok => |v| return v,
-            .err => |message| {
+
+        // Contracts:
+        // - Input string is guaranteed to be not empty.
+        // - Output diagnostic must point to statically-allocated data.
+        // - Diagnostic must start with a lower case letter.
+        // - Diagnostic must end with a ':' (it will be concatenated with original input).
+        // - (static_diagnostic != null) iff error.InvalidFlagValue is returned.
+        const parse_flag_value: fn (
+            string: []const u8,
+            static_diagnostic: *?[]const u8,
+        ) error{InvalidFlagValue}!V = V.parse_flag_value;
+
+        var diagnostic: ?[]const u8 = null;
+        if (parse_flag_value(value, &diagnostic)) |result| {
+            assert(diagnostic == null);
+            return result;
+        } else |err| switch (err) {
+            error.InvalidFlagValue => {
+                const message = diagnostic.?;
                 assert(message[message.len - 1] == ':');
                 fatal("{s}: {s} '{s}'", .{ flag, message, value });
             },
