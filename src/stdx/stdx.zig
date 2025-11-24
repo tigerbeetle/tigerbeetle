@@ -999,48 +999,36 @@ pub const ByteSize = struct {
     ) error{InvalidFlagValue}!ByteSize {
         assert(value.len != 0);
 
-        const split: struct {
-            value_input: []const u8,
-            unit_input: []const u8,
-        } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
-                break :split .{
-                    .value_input = value[0..i],
-                    .unit_input = value[i..],
-                };
-            }
-        } else {
-            break :split .{
-                .value_input = value,
-                .unit_input = "",
-            };
-        };
+        const split_index = for (value, 0..) |c, index| {
+            if (std.ascii.isDigit(c) or c == '_') {
+                // Numeric value part continues
+            } else break index;
+        } else value.len;
 
-        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
-            switch (err) {
-                error.Overflow => {
-                    static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
-                    return error.InvalidFlagValue;
-                },
-                error.InvalidCharacter => {
-                    // The only case this can happen is for the empty string
-                    static_diagnostic.* = "expected a size, but found:";
-                    return error.InvalidFlagValue;
-                },
-            }
-        };
+        const value_input = value[0..split_index];
+        const unit_input = value[split_index..];
+        maybe(value_input.len == 0);
+        maybe(unit_input.len == 0);
 
-        const unit = if (split.unit_input.len > 0)
-            unit: inline for (comptime std.enums.values(Unit)) |tag| {
-                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
-                    break :unit tag;
-                }
-            } else {
-                static_diagnostic.* = "invalid unit in size, needed KiB, MiB, GiB or TiB:";
+        const amount = std.fmt.parseUnsigned(u64, value_input, 10) catch |err| switch (err) {
+            error.Overflow => {
+                static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
                 return error.InvalidFlagValue;
-            }
-        else
-            Unit.bytes;
+            },
+            error.InvalidCharacter => {
+                static_diagnostic.* = "expected a size, but found:";
+                return error.InvalidFlagValue;
+            },
+        };
+
+        const unit = if (unit_input.len == 0)
+            .bytes
+        else inline for (comptime std.enums.values(Unit)) |tag| {
+            if (std.ascii.eqlIgnoreCase(unit_input, @tagName(tag))) break tag;
+        } else {
+            static_diagnostic.* = "invalid unit in size, needed KiB, MiB, GiB or TiB:";
+            return error.InvalidFlagValue;
+        };
 
         _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
             static_diagnostic.* = "size in bytes exceeds 64-bit unsigned integer:";
@@ -1090,6 +1078,7 @@ test "ByteSize.parse_flag_value" {
         .err = &.{
             .{ "18446744073709551616", "value exceeds 64-bit unsigned integer" },
             .{ "MiB", "expected a size, but found" },
+            .{ "_MiB", "expected a size" },
             .{ "10bananas", "invalid unit in size, needed KiB, MiB, GiB or TiB" },
             .{ "10GB", "invalid unit in size" },
             .{ "18446744073709551GiB", "size in bytes exceeds 64-bit unsigned integer" },
