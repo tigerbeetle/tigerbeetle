@@ -167,19 +167,19 @@ reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```rust
 let account0 = tb::Account {
-    id: (102),
+    id: 102,
     ledger: 1,
     code: 718,
     ..Default::default()
 };
 let account1 = tb::Account {
-    id: (103),
+    id: 103,
     ledger: 1,
     code: 718,
     ..Default::default()
 };
 let account2 = tb::Account {
-    id: (104),
+    id: 104,
     ledger: 1,
     code: 718,
     ..Default::default()
@@ -266,27 +266,27 @@ reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 let transfers = vec![
     tb::Transfer {
         id: 1,
-        debit_account_id: (101),
-        credit_account_id: (102),
-        amount: (10),
+        debit_account_id: 101,
+        credit_account_id: 102,
+        amount: 10,
         ledger: 1,
         code: 1,
         ..Default::default()
     },
     tb::Transfer {
         id: 2,
-        debit_account_id: (101),
-        credit_account_id: (102),
-        amount: (10),
+        debit_account_id: 101,
+        credit_account_id: 102,
+        amount: 10,
         ledger: 1,
         code: 1,
         ..Default::default()
     },
     tb::Transfer {
         id: 3,
-        debit_account_id: (101),
-        credit_account_id: (102),
-        amount: (10),
+        debit_account_id: 101,
+        credit_account_id: 102,
+        amount: 10,
         ledger: 1,
         code: 1,
         ..Default::default()
