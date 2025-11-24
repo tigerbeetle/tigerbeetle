@@ -64,8 +64,8 @@ Now, start a replica:
 ./tigerbeetle start --addresses=3000 --development ./0_0.tigerbeetle
 ```
 
-It will listen on port 3000 for connections from clients. There's intensionally no way to gracefully
-shut down a replica, you can `^C` it freely, and the data will be safe as long as the underlying
+It will listen on port 3000 for connections from clients. There's intentionally no way to gracefully
+shut down a replica. You can `^C` it freely, and the data will be safe as long as the underlying
 storage functions correctly. Note that with a real cluster of 6 replicas, the data is safe even if
 the storage misbehaves.
 
