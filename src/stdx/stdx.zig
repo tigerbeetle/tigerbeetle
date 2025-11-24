@@ -19,6 +19,7 @@ pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 pub const aegis = @import("aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const flags = @import("flags.zig").parse;
+pub const parse_flag_value_fuzz = @import("flags.zig").parse_flag_value_fuzz;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
@@ -992,54 +993,49 @@ pub const ByteSize = struct {
         tib = TiB,
     };
 
-    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
-        assert(value.len != 0);
+    pub fn parse_flag_value(
+        string: []const u8,
+        static_diagnostic: *?[]const u8,
+    ) error{InvalidFlagValue}!ByteSize {
+        assert(string.len != 0);
 
-        const split: struct {
-            value_input: []const u8,
-            unit_input: []const u8,
-        } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
-                break :split .{
-                    .value_input = value[0..i],
-                    .unit_input = value[i..],
-                };
-            }
+        const split_index = for (string, 0..) |c, index| {
+            if (std.ascii.isDigit(c) or c == '_') {
+                // Numeric part continues.
+            } else break index;
+        } else string.len;
+
+        const string_amount = string[0..split_index];
+        const string_unit = string[split_index..];
+        maybe(string_amount.len == 0);
+        maybe(string_unit.len == 0);
+
+        const amount = std.fmt.parseUnsigned(u64, string_amount, 10) catch |err| switch (err) {
+            error.Overflow => {
+                static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
+                return error.InvalidFlagValue;
+            },
+            error.InvalidCharacter => {
+                static_diagnostic.* = "expected a size, but found:";
+                return error.InvalidFlagValue;
+            },
+        };
+
+        const unit = if (string_unit.len == 0)
+            .bytes
+        else inline for (comptime std.enums.values(Unit)) |tag| {
+            if (std.ascii.eqlIgnoreCase(string_unit, @tagName(tag))) break tag;
         } else {
-            break :split .{
-                .value_input = value,
-                .unit_input = "",
-            };
+            static_diagnostic.* = "invalid unit in size, needed KiB, MiB, GiB or TiB:";
+            return error.InvalidFlagValue;
         };
-
-        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
-            switch (err) {
-                error.Overflow => {
-                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
-                },
-                error.InvalidCharacter => {
-                    // The only case this can happen is for the empty string
-                    return .{ .err = "expected a size, but found:" };
-                },
-            }
-        };
-
-        const unit = if (split.unit_input.len > 0)
-            unit: inline for (comptime std.enums.values(Unit)) |tag| {
-                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
-                    break :unit tag;
-                }
-            } else {
-                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
-            }
-        else
-            Unit.bytes;
 
         _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
-            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
+            static_diagnostic.* = "size in bytes exceeds 64-bit unsigned integer:";
+            return error.InvalidFlagValue;
         };
 
-        return .{ .ok = .{ .value = amount, .unit = unit } };
+        return .{ .value = amount, .unit = unit };
     }
 
     pub fn bytes(size: *const ByteSize) u64 {
@@ -1062,41 +1058,32 @@ pub const ByteSize = struct {
 };
 
 test "ByteSize.parse_flag_value" {
-    const kib = 1024;
-    const mib = kib * 1024;
-    const gib = mib * 1024;
-    const tib = gib * 1024;
+    try parse_flag_value_fuzz(ByteSize, ByteSize.parse_flag_value, .{
+        .ok = &.{
+            .{ "0", .{ .value = 0, .unit = .bytes } },
+            .{ "1", .{ .value = 1, .unit = .bytes } },
 
-    const cases = .{
-        .{ 0, "0", 0, ByteSize.Unit.bytes },
-        .{ 1, "1", 1, ByteSize.Unit.bytes },
-        .{ 140737488355328, "140737488355328", 140737488355328, ByteSize.Unit.bytes },
-        .{ 140737488355328, "128TiB", 128, ByteSize.Unit.tib },
-        .{ 1 * tib, "1TiB", 1, ByteSize.Unit.tib },
-        .{ 10 * tib, "10tib", 10, ByteSize.Unit.tib },
-        .{ 1 * gib, "1GiB", 1, ByteSize.Unit.gib },
-        .{ 10 * gib, "10gib", 10, ByteSize.Unit.gib },
-        .{ 1 * mib, "1MiB", 1, ByteSize.Unit.mib },
-        .{ 10 * mib, "10mib", 10, ByteSize.Unit.mib },
-        .{ 1 * kib, "1KiB", 1, ByteSize.Unit.kib },
-        .{ 10 * kib, "10kib", 10, ByteSize.Unit.kib },
-        .{ 10 * kib, "1_0kib", 10, ByteSize.Unit.kib },
-    };
-
-    inline for (cases) |case| {
-        const bytes = case[0];
-        const input = case[1];
-        const unit_val = case[2];
-        const unit = case[3];
-        const result = ByteSize.parse_flag_value(input);
-        if (result == .err) {
-            std.debug.panic("expected ok, got: '{s}'", .{result.err});
-        }
-        const got = result.ok;
-        assert(bytes == got.bytes());
-        assert(unit_val == got.value);
-        assert(unit == got.unit);
-    }
+            .{ "140737488355328", .{ .value = 140737488355328, .unit = .bytes } },
+            .{ "128TiB", .{ .value = 128, .unit = .tib } },
+            .{ "1TiB", .{ .value = 1, .unit = .tib } },
+            .{ "10tib", .{ .value = 10, .unit = .tib } },
+            .{ "1GiB", .{ .value = 1, .unit = .gib } },
+            .{ "10gib", .{ .value = 10, .unit = .gib } },
+            .{ "1MiB", .{ .value = 1, .unit = .mib } },
+            .{ "10mib", .{ .value = 10, .unit = .mib } },
+            .{ "1KiB", .{ .value = 1, .unit = .kib } },
+            .{ "10kib", .{ .value = 10, .unit = .kib } },
+            .{ "1_0kib", .{ .value = 10, .unit = .kib } },
+        },
+        .err = &.{
+            .{ "18446744073709551616", "value exceeds 64-bit unsigned integer" },
+            .{ "MiB", "expected a size, but found" },
+            .{ "_MiB", "expected a size" },
+            .{ "10bananas", "invalid unit in size, needed KiB, MiB, GiB or TiB" },
+            .{ "10GB", "invalid unit in size" },
+            .{ "18446744073709551GiB", "size in bytes exceeds 64-bit unsigned integer" },
+        },
+    });
 }
 
 // Fast alternative to modulo reduction (Note, it is not the same as modulo).
