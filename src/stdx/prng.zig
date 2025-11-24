@@ -50,20 +50,20 @@ pub const Ratio = struct {
     }
 
     pub fn parse_flag_value(
-        value: []const u8,
+        string: []const u8,
         static_diagnostic: *?[]const u8,
     ) error{InvalidFlagValue}!Ratio {
-        assert(value.len > 0);
-        const numerator_string, const denominator_string = stdx.cut(value, "/") orelse {
+        assert(string.len > 0);
+        const string_numerator, const string_denominator = stdx.cut(string, "/") orelse {
             static_diagnostic.* = "expected 'a/b' ratio, but found:";
             return error.InvalidFlagValue;
         };
 
-        const numerator = std.fmt.parseInt(u64, numerator_string, 10) catch {
+        const numerator = std.fmt.parseInt(u64, string_numerator, 10) catch {
             static_diagnostic.* = "invalid numerator:";
             return error.InvalidFlagValue;
         };
-        const denominator = std.fmt.parseInt(u64, denominator_string, 10) catch {
+        const denominator = std.fmt.parseInt(u64, string_denominator, 10) catch {
             static_diagnostic.* = "invalid denominator:";
             return error.InvalidFlagValue;
         };

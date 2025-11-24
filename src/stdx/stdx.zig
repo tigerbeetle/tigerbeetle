@@ -994,23 +994,23 @@ pub const ByteSize = struct {
     };
 
     pub fn parse_flag_value(
-        value: []const u8,
+        string: []const u8,
         static_diagnostic: *?[]const u8,
     ) error{InvalidFlagValue}!ByteSize {
-        assert(value.len != 0);
+        assert(string.len != 0);
 
-        const split_index = for (value, 0..) |c, index| {
+        const split_index = for (string, 0..) |c, index| {
             if (std.ascii.isDigit(c) or c == '_') {
-                // Numeric value part continues
+                // Numeric string part continues
             } else break index;
-        } else value.len;
+        } else string.len;
 
-        const value_input = value[0..split_index];
-        const unit_input = value[split_index..];
-        maybe(value_input.len == 0);
-        maybe(unit_input.len == 0);
+        const string_amount = string[0..split_index];
+        const string_unit = string[split_index..];
+        maybe(string_amount.len == 0);
+        maybe(string_unit.len == 0);
 
-        const amount = std.fmt.parseUnsigned(u64, value_input, 10) catch |err| switch (err) {
+        const amount = std.fmt.parseUnsigned(u64, string_amount, 10) catch |err| switch (err) {
             error.Overflow => {
                 static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
                 return error.InvalidFlagValue;
@@ -1021,10 +1021,10 @@ pub const ByteSize = struct {
             },
         };
 
-        const unit = if (unit_input.len == 0)
+        const unit = if (string_unit.len == 0)
             .bytes
         else inline for (comptime std.enums.values(Unit)) |tag| {
-            if (std.ascii.eqlIgnoreCase(unit_input, @tagName(tag))) break tag;
+            if (std.ascii.eqlIgnoreCase(string_unit, @tagName(tag))) break tag;
         } else {
             static_diagnostic.* = "invalid unit in size, needed KiB, MiB, GiB or TiB:";
             return error.InvalidFlagValue;
