@@ -480,6 +480,9 @@ test route_decode {
                 if (prng.chance(ratio(1, 20))) {
                     code ^= prng.bit(u64);
                 }
+                if (prng.chance(ratio(1, 20))) {
+                    code = prng.int(u64);
+                }
 
                 var routing = Routing.init(.{
                     .replica = prng.int_inclusive(u8, replica_count - 1),
