@@ -1,6 +1,6 @@
 [package]
 name = "tigerbeetle"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2021"
 description = "TigerBeetle client for Rust"
 license = "Apache-2.0"
