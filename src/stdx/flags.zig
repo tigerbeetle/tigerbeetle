@@ -480,7 +480,7 @@ pub fn parse_flag_value_fuzz(
 ) !void {
     comptime assert(T.parse_flag_value == parse_flag_value);
 
-    const test_count = 1024;
+    const test_count = 50_000;
     const string_size_max = 32;
 
     const gpa = std.testing.allocator;
