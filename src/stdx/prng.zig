@@ -46,6 +46,7 @@ pub const Ratio = struct {
     ) !void {
         _ = fmt;
         _ = options;
+        if (r.numerator == 0) return writer.print("0", .{});
         return writer.print("{d}/{d}", .{ r.numerator, r.denominator });
     }
 
@@ -54,6 +55,8 @@ pub const Ratio = struct {
         static_diagnostic: *?[]const u8,
     ) error{InvalidFlagValue}!Ratio {
         assert(string.len > 0);
+        if (string.len == 1 and string[0] == '0') return .zero();
+
         const string_numerator, const string_denominator = stdx.cut(string, "/") orelse {
             static_diagnostic.* = "expected 'a/b' ratio, but found:";
             return error.InvalidFlagValue;
@@ -67,6 +70,10 @@ pub const Ratio = struct {
             static_diagnostic.* = "invalid denominator:";
             return error.InvalidFlagValue;
         };
+        if (denominator == 0) {
+            static_diagnostic.* = "denominator is zero:";
+            return error.InvalidFlagValue;
+        }
         if (numerator > denominator) {
             static_diagnostic.* = "ratio greater than 1:";
             return error.InvalidFlagValue;
@@ -78,10 +85,13 @@ pub const Ratio = struct {
 test "Ratio.parse_flag_value" {
     try stdx.parse_flag_value_fuzz(Ratio, Ratio.parse_flag_value, .{
         .ok = &.{
+            .{ "0", .zero() },
             .{ "3/4", ratio(3, 4) },
             .{ "10/100", ratio(10, 100) },
         },
         .err = &.{
+            .{ "1/0", "denominator is zero" },
+            .{ "0/0", "denominator is zero" },
             .{ "3", "expected 'a/b' ratio, but found" },
             .{ "π/4", "invalid numerator" },
             .{ "3/i", "invalid denominator" },
