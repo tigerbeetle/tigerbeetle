@@ -333,17 +333,23 @@ pub fn ScanTreeType(
                     self.state == .needs_data);
                 return;
             }
+            self.probe_advance(probe_key);
+        }
+
+        fn probe_advance(self: *ScanTree, probe_key: Key) void {
+            assert(self.state != .aborted);
+            assert(self.state != .buffering);
+            assert(self.key_min <= probe_key);
+            assert(probe_key <= self.key_max);
 
             // Updates the scan range depending on the direction.
             switch (self.direction) {
                 .ascending => {
                     assert(self.key_min < probe_key);
-                    assert(probe_key <= self.key_max);
                     self.key_min = probe_key;
                 },
                 .descending => {
                     assert(probe_key < self.key_max);
-                    assert(self.key_min <= probe_key);
                     self.key_max = probe_key;
                 },
             }
