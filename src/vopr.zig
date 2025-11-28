@@ -88,9 +88,8 @@ const CLIArgs = struct {
     replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
 
-    positional: struct {
-        seed: ?[]const u8 = null,
-    },
+    @"--": void,
+    seed: ?[]const u8 = null,
 };
 
 pub fn main() !void {
@@ -128,7 +127,7 @@ pub fn main() !void {
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
-        const seed_argument = cli_args.positional.seed orelse break :seed_from_arg seed_random;
+        const seed_argument = cli_args.seed orelse break :seed_from_arg seed_random;
         break :seed_from_arg vsr.testing.parse_seed(seed_argument);
     };
 
