@@ -158,11 +158,10 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
 - Declare variables at the **smallest possible scope**, and **minimize the number of variables in
   scope**, to reduce the probability that variables are misused.
 
-- Restrict the length of function bodies to reduce the probability of poorly structured code. We
-  enforce a **hard limit of 70 lines per function**.
-
-  Splitting code into functions requires taste. There are many ways to cut a wall of code into
-  chunks of 70 lines, but only a few splits will feel right. Some rules of thumb:
+- There's a sharp discontinuity between a function fitting on a screen, and having to scroll to even
+  see how long it is. For this physical reason we enforce a **hard limit of 70 lines per function**.
+  Art is born out of constraints. There are many ways to cut a wall of code into chunks of 70 lines,
+  but only a few splits will feel just right. Some rules of thumb:
 
   * Good function shape is often the inverse of an hourglass: a few parameters, a simple return
     type, and a lot of meaty logic between the braces.
@@ -464,6 +463,9 @@ Beyond these rules:
   "measure". Use it up. Never go beyond. Nothing should be hidden by a horizontal scrollbar. Let
   your editor help you by setting a column ruler. To wrap a function signature, call or data
   structure, add a trailing comma, close your eyes and let `zig fmt` do the rest.
+
+  Similar to function length, the motivation behind the number 100 is physical: this is just enough
+  to fit two copies of the code side-by-side on a screen.
 
 - Add braces to the `if` statement unless it fits on a single line for consistency and defense in
   depth against "goto fail;" bugs.
