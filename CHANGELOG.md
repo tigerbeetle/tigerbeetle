@@ -3,6 +3,39 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.67
+
+Released: 2025-11-28
+
+### Features
+
+- [#3386](https://github.com/tigerbeetle/tigerbeetle/pull/3386)
+
+  Add more documentation details around query multibatching.
+
+### Internals
+
+- [#3389](https://github.com/tigerbeetle/tigerbeetle/pull/3389)
+
+  Improve how Vörtex handles SIGTERM.
+
+- [#3391](https://github.com/tigerbeetle/tigerbeetle/pull/3391)
+  [#3394](https://github.com/tigerbeetle/tigerbeetle/pull/3394)
+
+  Improve the way we handle ratios in stdx, and refactor `parse_flag_value`.
+
+- [#3395](https://github.com/tigerbeetle/tigerbeetle/pull/3395)
+
+  Update TigerStyle with more context for the line and function length limits.
+
+- [#3390](https://github.com/tigerbeetle/tigerbeetle/pull/3390)
+
+  Improve some spelling and grammar in `start.md`. Thanks @elness!
+
+### TigerTracks 🎧
+
+- [The Ominous Blue](https://open.spotify.com/track/32ivi8KXX5qNqntYKfLMQT?si=b9295603d04741e7)
+
 ## TigerBeetle 0.16.66
 
 Released: 2025-11-21
