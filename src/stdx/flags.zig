@@ -181,7 +181,12 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
 
         var optional_tail: bool = false;
-        for (fields_positional) |field| {
+        for (fields_positional, 0..) |field, index| {
+            if (field.type == *std.process.ArgIterator) {
+                // The "rest" argument must the the last.
+                assert(index == fields_positional.len - 1);
+                break;
+            }
             if (field.defaultValue() == null) {
                 if (optional_tail) @panic("optional positional arguments must be trailing");
             } else {

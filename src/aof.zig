@@ -834,45 +834,62 @@ test "aof write / read" {
 
 test "aof merge" {}
 
-const usage =
-    \\Usage:
-    \\
-    \\  aof [-h | --help]
-    \\
-    \\  aof recover <addresses> <path>
-    \\
-    \\  aof debug <path>
-    \\
-    \\  aof merge path.aof ... <path.aof n>
-    \\
-    \\
-    \\Commands:
-    \\
-    \\  recover  Recover a recorded AOF file at <path> to a TigerBeetle cluster running
-    \\           at <addresses>. Said cluster must be running with aof_recovery = true
-    \\           and have the same cluster ID as the source. The AOF must have a consistent
-    \\           hash chain, which can be ensured using the `merge` subcommand.
-    \\
-    \\  debug    Print all entries that have been recorded in the AOF file at <path>
-    \\           to stdout. Checksums are verified, and aof will panic if an invalid
-    \\           checksum is encountered, so this can be used to check the validity
-    \\           of an AOF file. Prints a final hash of all data entries in the AOF.
-    \\
-    \\  merge    Walk through multiple AOF files, extracting entries from each one
-    \\           that pass validation, and build a single valid AOF. The first entry
-    \\           of the first specified AOF file will be considered the root hash.
-    \\           Can also be used to merge multiple incomplete AOF files into one,
-    \\           or re-order a single AOF file. Will output to `merged.aof`.
-    \\
-    \\           NB: Make sure to run merge with at least half of the replicas' AOFs,
-    \\           otherwise entries might be lost.
-    \\
-    \\Options:
-    \\
-    \\  -h, --help
-    \\        Print this help message and exit.
-    \\
-;
+const CLIArgs = union(enum) {
+    recover: struct {
+        @"--": void,
+        addresses: []const u8,
+        path: []const u8,
+    },
+    debug: struct {
+        @"--": void,
+        path: []const u8,
+    },
+    merge: struct {
+        @"--": void,
+        path0: []const u8,
+        path1: []const u8,
+    },
+
+    pub const usage =
+        \\Usage:
+        \\
+        \\  aof [-h | --help]
+        \\
+        \\  aof recover <addresses> <path>
+        \\
+        \\  aof debug <path>
+        \\
+        \\  aof merge path.aof ... <path.aof n>
+        \\
+        \\
+        \\Commands:
+        \\
+        \\  recover  Recover a recorded AOF file at <path> to a TigerBeetle cluster running
+        \\           at <addresses>. Said cluster must be running with aof_recovery = true
+        \\           and have the same cluster ID as the source. The AOF must have a consistent
+        \\           hash chain, which can be ensured using the `merge` subcommand.
+        \\
+        \\  debug    Print all entries that have been recorded in the AOF file at <path>
+        \\           to stdout. Checksums are verified, and aof will panic if an invalid
+        \\           checksum is encountered, so this can be used to check the validity
+        \\           of an AOF file. Prints a final hash of all data entries in the AOF.
+        \\
+        \\  merge    Walk through multiple AOF files, extracting entries from each one
+        \\           that pass validation, and build a single valid AOF. The first entry
+        \\           of the first specified AOF file will be considered the root hash.
+        \\           Can also be used to merge multiple incomplete AOF files into one,
+        \\           or re-order a single AOF file. Will output to `merged.aof`.
+        \\
+        \\           NB: Make sure to run merge with at least half of the replicas' AOFs,
+        \\           otherwise entries might be lost.
+        \\
+        \\Options:
+        \\
+        \\  -h, --help
+        \\        Print this help message and exit.
+        \\
+    ;
+};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -884,31 +901,10 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    var action: ?[:0]const u8 = null;
-    var addresses: ?[:0]const u8 = null;
-    var paths: [constants.members_max][:0]const u8 = undefined;
-    var count: usize = 0;
+    var flags: stdx.Flags = .init(allocator);
+    defer flags.deinit();
 
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
-            std.posix.exit(0);
-        }
-
-        if (count == 1) {
-            action = arg;
-        } else if (count == 2 and std.mem.eql(u8, action.?, "recover")) {
-            addresses = arg;
-        } else if (count == 2 and std.mem.eql(u8, action.?, "debug")) {
-            paths[0] = arg;
-        } else if (count == 3 and std.mem.eql(u8, action.?, "recover")) {
-            paths[0] = arg;
-        } else if (count >= 2 and std.mem.eql(u8, action.?, "merge")) {
-            paths[count - 2] = arg;
-        }
-
-        count += 1;
-    }
+    const cli_args = flags.parse(CLIArgs);
 
     const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
@@ -921,47 +917,54 @@ pub fn main() !void {
     const AOFReplayClient = AOF.ReplayClient;
     const AOFIterator = AOF.Iterator;
 
-    if (action != null and std.mem.eql(u8, action.?, "recover") and count == 4) {
-        var it = try AOFIterator.init(&io, paths[0]);
-        defer it.close();
+    switch (cli_args) {
+        .recover => |recover| {
+            var it = try AOFIterator.init(&io, recover.path);
+            defer it.close();
 
-        var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
-        const addresses_parsed = try vsr.parse_addresses(addresses.?, &addresses_buffer);
-        var replay = try AOFReplayClient.init(&io, allocator, time, addresses_parsed);
-        defer replay.deinit(allocator);
+            var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
+            const addresses_parsed = try vsr.parse_addresses(recover.addresses, &addresses_buffer);
+            var replay = try AOFReplayClient.init(&io, allocator, time, addresses_parsed);
+            defer replay.deinit(allocator);
 
-        try replay.replay(&it);
-    } else if (action != null and std.mem.eql(u8, action.?, "debug") and count == 3) {
-        var it = try AOFIterator.init(&io, paths[0]);
-        defer it.close();
+            try replay.replay(&it);
+        },
+        .debug => |debug| {
+            var it = try AOFIterator.init(&io, debug.path);
+            defer it.close();
 
-        var data_checksum: [32]u8 = undefined;
-        var blake3 = std.crypto.hash.Blake3.init(.{});
+            var data_checksum: [32]u8 = undefined;
+            var blake3 = std.crypto.hash.Blake3.init(.{});
 
-        const stdout = std.io.getStdOut().writer();
-        while (try it.next(target)) |entry| {
-            const header = entry.header();
-            if (!AOFReplayClient.replay_message(header)) continue;
+            const stdout = std.io.getStdOut().writer();
+            while (try it.next(target)) |entry| {
+                const header = entry.header();
+                if (!AOFReplayClient.replay_message(header)) continue;
 
-            try stdout.print("{}\n", .{
-                header,
-            });
+                try stdout.print("{}\n", .{
+                    header,
+                });
 
-            // The body isn't the only important information, there's also the operation
-            // and the timestamp which are in the header. Include those in our hash too.
-            blake3.update(std.mem.asBytes(&header.checksum_body));
-            blake3.update(std.mem.asBytes(&header.timestamp));
-            blake3.update(std.mem.asBytes(&header.operation));
-        }
-        blake3.final(data_checksum[0..]);
-        try stdout.print(
-            "\nData checksum chain: {}\n",
-            .{@as(u128, @bitCast(data_checksum[0..@sizeOf(u128)].*))},
-        );
-    } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
-        try AOF.merge(&io, allocator, paths[0 .. count - 2], "prepared.aof");
-    } else {
-        std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
-        std.posix.exit(1);
+                // The body isn't the only important information, there's also the operation
+                // and the timestamp which are in the header. Include those in our hash too.
+                blake3.update(std.mem.asBytes(&header.checksum_body));
+                blake3.update(std.mem.asBytes(&header.timestamp));
+                blake3.update(std.mem.asBytes(&header.operation));
+            }
+            blake3.final(data_checksum[0..]);
+            try stdout.print(
+                "\nData checksum chain: {}\n",
+                .{@as(u128, @bitCast(data_checksum[0..@sizeOf(u128)].*))},
+            );
+        },
+        .merge => |merge| {
+            var paths: [constants.members_max][:0]const u8 = undefined;
+            var count: usize = 0;
+            while (merge.paths.next()) |path| {
+                paths[count] = path;
+                count += 1;
+            }
+            try AOF.merge(&io, allocator, paths[0..count], "prepared.aof");
+        },
     }
 }
