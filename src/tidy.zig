@@ -442,6 +442,7 @@ fn tidy_ast(
                     f.line_opening + 1,
                     function_length,
                 });
+                return error.LongFunction;
             }
         }
     }

@@ -450,12 +450,7 @@ pub const MultiBatchEncoder = struct {
         assert(source.len == target.len);
         assert(@intFromPtr(source.ptr) >= @intFromPtr(target.ptr));
         if (source.ptr != target.ptr) {
-            stdx.copy_left(
-                .exact,
-                u8,
-                target,
-                source,
-            );
+            stdx.copy_left(.exact, u8, target, source);
         }
 
         const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
