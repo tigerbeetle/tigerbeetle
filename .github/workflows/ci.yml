@@ -125,7 +125,7 @@ jobs:
         uses: actions/setup-python@v4
         with: { python-version: "${{ matrix.language_version }}" }
       - if: matrix.language == 'python'
-        run: pip install build hatch pytest mypy
+        run: pip install build hatch pytest mypy<=1.18.2
 
       - run: ./zig/download.ps1 && ./zig/zig build ci -- ${{ matrix.language }}
 
