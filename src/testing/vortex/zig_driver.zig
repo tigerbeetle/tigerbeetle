@@ -23,23 +23,22 @@ const events_buffer_size_max = size: {
 };
 
 pub const CLIArgs = struct {
-    positional: struct {
-        @"cluster-id": u128,
-        addresses: []const u8,
-    },
+    @"--": void,
+    @"cluster-id": u128,
+    addresses: []const u8,
 };
 
 pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
-    log.info("addresses: {s}", .{args.positional.addresses});
+    log.info("addresses: {s}", .{args.addresses});
 
-    const cluster_id = args.positional.@"cluster-id";
+    const cluster_id = args.@"cluster-id";
 
     var tb_client: c.tb_client_t = undefined;
     const init_status = c.tb_client_init(
         &tb_client,
         std.mem.asBytes(&cluster_id),
-        args.positional.addresses.ptr,
-        @intCast(args.positional.addresses.len),
+        args.addresses.ptr,
+        @intCast(args.addresses.len),
         0,
         on_complete,
     );

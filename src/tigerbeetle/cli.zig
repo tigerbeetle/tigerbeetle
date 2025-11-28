@@ -46,9 +46,8 @@ const CLIArgs = union(enum) {
         development: bool = false,
         log_debug: bool = false,
 
-        positional: struct {
-            path: []const u8,
-        },
+        @"--": void,
+        path: []const u8,
     };
 
     const Recover = struct {
@@ -59,9 +58,8 @@ const CLIArgs = union(enum) {
         development: bool = false,
         log_debug: bool = false,
 
-        positional: struct {
-            path: []const u8,
-        },
+        @"--": void,
+        path: []const u8,
     };
 
     const Start = struct {
@@ -69,14 +67,11 @@ const CLIArgs = union(enum) {
         addresses: []const u8,
         cache_grid: ?ByteSize = null,
         development: bool = false,
-        positional: struct {
-            path: []const u8,
-        },
 
-        // Everything below here is considered experimental, and requires `--experimental` to be
-        // set. Experimental flags disable automatic upgrades with multiversion binaries; each
-        // replica has to be manually restarted.
-        // Experimental flags must default to null, except for bools which must be false.
+        // Everything from here until positional arguments is considered experimental, and requires
+        // `--experimental` to be set. Experimental flags disable automatic upgrades with
+        // multiversion binaries; each replica has to be manually restarted. Experimental flags must
+        // default to null, except for bools which must be false.
         experimental: bool = false,
 
         limit_storage: ?ByteSize = null,
@@ -109,6 +104,9 @@ const CLIArgs = union(enum) {
         /// Legacy AOF option. Mututally exclusive with aof_file, and will have the same effect as
         /// setting aof_file to '<data file path>.aof'.
         aof: bool = false,
+
+        @"--": void,
+        path: []const u8,
     };
 
     const Version = struct {
@@ -166,34 +164,46 @@ const CLIArgs = union(enum) {
         constants,
         metrics,
         op: struct {
-            positional: struct { op: u64 },
+            @"--": void,
+            op: u64,
         },
         superblock: struct {
-            positional: struct { path: []const u8 },
+            @"--": void,
+            path: []const u8,
         },
         wal: struct {
             slot: ?usize = null,
-            positional: struct { path: []const u8 },
+
+            @"--": void,
+            path: []const u8,
         },
         replies: struct {
             slot: ?usize = null,
             superblock_copy: ?u8 = null,
-            positional: struct { path: []const u8 },
+
+            @"--": void,
+            path: []const u8,
         },
         grid: struct {
             block: ?u64 = null,
             superblock_copy: ?u8 = null,
-            positional: struct { path: []const u8 },
+
+            @"--": void,
+            path: []const u8,
         },
         manifest: struct {
             superblock_copy: ?u8 = null,
-            positional: struct { path: []const u8 },
+
+            @"--": void,
+            path: []const u8,
         },
         tables: struct {
             superblock_copy: ?u8 = null,
             tree: []const u8,
             level: ?u6 = null,
-            positional: struct { path: []const u8 },
+
+            @"--": void,
+            path: []const u8,
         },
         integrity: struct {
             log_debug: bool = false,
@@ -203,9 +213,8 @@ const CLIArgs = union(enum) {
             skip_client_replies: bool = false,
             skip_grid: bool = false,
 
-            positional: struct {
-                path: [:0]const u8,
-            },
+            @"--": void,
+            path: [:0]const u8,
         },
 
         pub const help =
@@ -291,9 +300,9 @@ const CLIArgs = union(enum) {
     // Internal: used to validate multiversion binaries.
     const Multiversion = struct {
         log_debug: bool = false,
-        positional: struct {
-            path: []const u8,
-        },
+
+        @"--": void,
+        path: []const u8,
     };
 
     // CDC connector for AMQP targets.
@@ -748,7 +757,7 @@ fn parse_args_format(format: CLIArgs.Format) Command.Format {
         .replica = replica,
         .replica_count = format.replica_count,
         .development = format.development,
-        .path = format.positional.path,
+        .path = format.path,
         .log_debug = format.log_debug,
     };
 }
@@ -784,7 +793,7 @@ fn parse_args_recover(recover: CLIArgs.Recover) Command.Recover {
         .replica = replica,
         .replica_count = recover.replica_count,
         .development = recover.development,
-        .path = recover.positional.path,
+        .path = recover.path,
         .log_debug = recover.log_debug,
     };
 }
@@ -793,11 +802,14 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
     const stable_args = .{
-        "addresses",   "cache_grid",   "positional",
+        "addresses",   "cache_grid",
         "development", "experimental",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
         @setEvalBranchQuota(4_000);
+        // Positional arguments can't be experimental.
+        comptime if (std.mem.eql(u8, field.name, "--")) break;
+
         const stable_field = comptime for (stable_args) |stable_arg| {
             assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
             if (std.mem.eql(u8, field.name, stable_arg)) {
@@ -975,10 +987,10 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         }
 
         var aof_file: Command.Path = .{};
-        if (aof_file.capacity() < start.positional.path.len + 4) {
+        if (aof_file.capacity() < start.path.len + 4) {
             vsr.fatal(.cli, "data file path is too long for --aof. use --aof-file", .{});
         }
-        aof_file.push_slice(start.positional.path);
+        aof_file.push_slice(start.path);
         aof_file.push_slice(".aof");
 
         std.log.warn(
@@ -993,7 +1005,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         }
 
         var aof_file: Command.Path = .{};
-        if (aof_file.capacity() < start.positional.path.len) {
+        if (aof_file.capacity() < start.path.len) {
             vsr.fatal(.cli, "--aof-file path is too long", .{});
         }
         aof_file.push_slice(start_aof_file);
@@ -1051,7 +1063,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .trace = start.trace,
         .replicate_star = start.replicate_star,
         .aof_file = aof_file,
-        .path = start.positional.path,
+        .path = start.path,
         .log_debug = start.log_debug,
         .log_trace = start.log_trace,
         .statsd = if (start.statsd) |statsd_address|
@@ -1195,7 +1207,7 @@ fn parse_args_inspect_integrity(args: CLIArgs.Inspect) Command.Inspect.Integrity
         @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
     return .{
-        .path = integrity.positional.path,
+        .path = integrity.path,
         .log_debug = integrity.log_debug,
         .seed = integrity.seed,
         .skip_wal = integrity.skip_wal,
@@ -1209,9 +1221,9 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         .constants => return .constants,
         .metrics => return .metrics,
-        .op => |args| return .{ .op = args.positional.op },
+        .op => |args| return .{ .op = args.op },
         .integrity => return .{ .integrity = parse_args_inspect_integrity(inspect) },
-        inline else => |args| args.positional.path,
+        inline else => |args| args.path,
     };
 
     return .{ .data_file = .{
@@ -1246,7 +1258,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
 
 fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multiversion {
     return .{
-        .path = multiversion.positional.path,
+        .path = multiversion.path,
         .log_debug = multiversion.log_debug,
     };
 }
