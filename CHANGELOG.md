@@ -7,15 +7,7 @@ to receive notifications about breaking changes!
 
 Released: 2025-11-28
 
-### Safety And Performance
-
-- [#3395](https://github.com/tigerbeetle/tigerbeetle/pull/3395)
-
-  Update TigerStyle with more context for the line and function length limits.
-
-- [#3390](https://github.com/tigerbeetle/tigerbeetle/pull/3390)
-
-  Improve some spelling and grammar in `start.md`. Thanks @elness!
+### Features
 
 - [#3386](https://github.com/tigerbeetle/tigerbeetle/pull/3386)
 
@@ -31,6 +23,14 @@ Released: 2025-11-28
   [#3394](https://github.com/tigerbeetle/tigerbeetle/pull/3394)
 
   Improve the way we handle ratios in stdx, and refactor `parse_flag_value`.
+
+- [#3395](https://github.com/tigerbeetle/tigerbeetle/pull/3395)
+
+  Update TigerStyle with more context for the line and function length limits.
+
+- [#3390](https://github.com/tigerbeetle/tigerbeetle/pull/3390)
+
+  Improve some spelling and grammar in `start.md`. Thanks @elness!
 
 ### TigerTracks 🎧
 
