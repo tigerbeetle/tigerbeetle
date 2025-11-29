@@ -17,6 +17,8 @@ pub const Layout = struct {
     tag_bits: u64 = 8,
     clock_bits: u64 = 2,
     cache_line_size: u64 = 64,
+    /// If false, do not increment counts on cache hits (cheaper, weaker recency).
+    count_on_hit: bool = true,
     /// Set this to a non-null value to override the alignment of the stored values.
     value_alignment: ?u29 = null,
 };
@@ -229,8 +231,10 @@ pub fn SetAssociativeCacheType(
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
                 self.metrics.hits += 1;
-                const count = self.counts.get(set.offset + way);
-                self.counts.set(set.offset + way, count +| 1);
+                if (layout.count_on_hit) {
+                    const count = self.counts.get(set.offset + way);
+                    self.counts.set(set.offset + way, count +| 1);
+                }
                 return set.offset + way;
             } else {
                 self.metrics.misses += 1;

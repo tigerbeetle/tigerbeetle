@@ -32,7 +32,7 @@ pub fn BatchCacheType(
             Value,
             key_from_value,
             hash_from_key,
-            .{},
+            .{ .count_on_hit = false },
         );
         pub const Cache = EvictionCache;
 
