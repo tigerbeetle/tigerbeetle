@@ -59,10 +59,10 @@ const FuzzersEnum = std.meta.FieldEnum(@TypeOf(Fuzzers));
 
 const CLIArgs = struct {
     events_max: ?usize = null,
-    positional: struct {
-        fuzzer: FuzzersEnum,
-        seed: ?u64 = null,
-    },
+
+    @"--": void,
+    fuzzer: FuzzersEnum,
+    seed: ?u64 = null,
 };
 
 pub fn main() !void {
@@ -104,9 +104,9 @@ pub fn main() !void {
 
     const cli_args = stdx.flags(&args, CLIArgs);
 
-    switch (cli_args.positional.fuzzer) {
+    switch (cli_args.fuzzer) {
         .smoke => {
-            assert(cli_args.positional.seed == null);
+            assert(cli_args.seed == null);
             assert(cli_args.events_max == null);
             try main_smoke(gpa);
         },
@@ -158,13 +158,13 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
 }
 
 fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
-    assert(cli_args.positional.fuzzer != .smoke);
+    assert(cli_args.fuzzer != .smoke);
 
-    const seed = cli_args.positional.seed orelse std.crypto.random.int(u64);
+    const seed = cli_args.seed orelse std.crypto.random.int(u64);
     log.info("Fuzz seed = {}", .{seed});
 
     var timer = try std.time.Timer.start();
-    switch (cli_args.positional.fuzzer) {
+    switch (cli_args.fuzzer) {
         .smoke => unreachable,
         .canary => {
             if (seed % 100 == 0) {
