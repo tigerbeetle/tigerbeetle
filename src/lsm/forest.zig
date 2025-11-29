@@ -393,28 +393,101 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             manifest_log: *ManifestLog,
             table: *const schema.ManifestNode.TableInfo,
         ) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
-            assert(forest.progress.? == .open);
-            assert(forest.compaction_progress == null);
-            assert(table.label.level < constants.lsm_levels);
-            assert(table.label.event != .remove);
-
-            if (table.tree_id < tree_id_range.min or table.tree_id > tree_id_range.max) {
-                log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
-                @panic("Forest.manifest_log_open_event: unknown table in manifest");
-            }
-            switch (tree_id_cast(table.tree_id)) {
-                inline else => |tree_id| {
-                    var tree: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
-                    tree.open_table(table);
-                },
-            }
+            _ = manifest_log;
+            _ = table;
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(forest.compaction_progress == null);
+
+            const tables = manifest_log.open_tables_slice();
+
+            // First bucket the tables per tree/level so we can sort and build each level once.
+            var counts: [tree_infos.len][constants.lsm_levels]usize = undefined;
+            for (&counts) |*per_tree| @memset(per_tree, 0);
+
+            for (tables) |table| {
+                assert(table.label.level < constants.lsm_levels);
+                const tree_index: usize =
+                    @intCast(table.tree_id - tree_id_range.min);
+                const level: usize = table.label.level;
+                assert(tree_index < tree_infos.len);
+                counts[tree_index][level] += 1;
+            }
+
+            const TableBucket = struct {
+                tables: [constants.lsm_levels]std.ArrayListUnmanaged(schema.ManifestNode.TableInfo),
+            };
+
+            var buckets: [tree_infos.len]TableBucket = undefined;
+            for (&buckets) |*bucket| {
+                for (&bucket.tables) |*list| list.* = .{};
+            }
+
+            for (&buckets, 0..) |*bucket, tree_index| {
+                for (&bucket.tables, 0..) |*list, level| {
+                    if (counts[tree_index][level] == 0) continue;
+                    list.ensureTotalCapacity(
+                        manifest_log.allocator,
+                        counts[tree_index][level],
+                    ) catch unreachable;
+                }
+            }
+
+            for (tables) |table| {
+                const tree_index: usize =
+                    @intCast(table.tree_id - tree_id_range.min);
+                const level: usize = table.label.level;
+                buckets[tree_index].tables[level].appendAssumeCapacity(table);
+            }
+
+            inline for (tree_infos, 0..) |tree_info, tree_index| {
+                const Tree = tree_info.Tree;
+                const TreeTableInfo = Tree.Manifest.TreeTableInfo;
+                const tree_id_enum: TreeID = @enumFromInt(tree_info.tree_id);
+                var tree: *TreeForIdType(tree_id_enum) = forest.tree_for_id(tree_id_enum);
+
+                for (&buckets[tree_index].tables, 0..) |list, level| {
+                    if (list.items.len > 1) {
+                        std.sort.block(
+                            schema.ManifestNode.TableInfo,
+                            list.items,
+                            {},
+                            struct {
+                                fn less(
+                                    _: void,
+                                    a: schema.ManifestNode.TableInfo,
+                                    b: schema.ManifestNode.TableInfo,
+                                ) bool {
+                                    const a_decoded = TreeTableInfo.decode(&a);
+                                    const b_decoded = TreeTableInfo.decode(&b);
+                                    if (a_decoded.key_max != b_decoded.key_max) {
+                                        return a_decoded.key_max < b_decoded.key_max;
+                                    }
+                                    return a_decoded.snapshot_min < b_decoded.snapshot_min;
+                                }
+                            }.less,
+                        );
+                    }
+
+                    for (list.items) |table_raw| {
+                        const table_decoded = Tree.Manifest.TreeTableInfo.decode(&table_raw);
+                        tree.manifest.levels[level].insert_table(
+                            tree.manifest.node_pool,
+                            &table_decoded,
+                        );
+                    }
+                }
+            }
+
+            for (&buckets) |*bucket| {
+                for (&bucket.tables) |*list| list.deinit(manifest_log.allocator);
+            }
+
+            manifest_log.open_tables.clearRetainingCapacity();
+
             forest.verify_tables_recovered();
 
             inline for (std.meta.fields(Grooves)) |field| {

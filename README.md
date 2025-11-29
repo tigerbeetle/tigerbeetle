@@ -12,6 +12,22 @@
 * [TIGER_STYLE.md](./docs/TIGER_STYLE.md), the engineering methodology behind TigerBeetle.
 * [Slack](https://slack.tigerbeetle.com/join), say hello!
 
+## Manifest Open Benchmark
+
+When a node restarts or rejoins, it replays the manifest log to rebuild the in-memory manifest. The log is small on disk (bounded by ~1.5k blocks), but can hold ~1.5M table metadata entries. The new path buffers the latest entries, sorts once per tree/level, and bulk-builds the manifest (O(n log n)) instead of inserting each entry one-by-one (O(n²)).
+
+Motivation: for large manifests (many tables across levels) the old O(n²) rebuild could dominate startup/rejoin time even though the log IO was tiny. The new bulk path keeps replay time proportional to n log n and avoids cache churn.
+
+Conceptual change: during manifest replay we now (1) collect only the latest extent per table, (2) bucket per tree/level, (3) sort each bucket by (key_max, snapshot_min), and (4) build the segmented arrays in one sequential pass. Steady-state append/update/remove logic is unchanged.
+
+Run a synthetic benchmark comparing the old incremental insert path vs the new batch sort/build path:
+
+```console
+$ ./zig/zig build bench:manifest-log -- --tables 100000 --trees 4 --levels 6 --seed 0xdeadbeef
+```
+
+It reports total time, ns/table, and speedup. Use larger `--tables` to see the gap; small inputs behave similarly.
+
 ## Start
 
 Run a single-replica cluster on Linux (or [other platforms](https://docs.tigerbeetle.com/start/)):

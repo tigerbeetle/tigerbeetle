@@ -94,6 +94,14 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
+        .bench_manifest_log = b.step(
+            "bench:manifest-log",
+            "Run manifest log open reconstruction benchmark",
+        ),
+        .bench_manifest_log_build = b.step(
+            "bench:manifest-log:build",
+            "Build manifest log open reconstruction benchmark",
+        ),
     };
 
     const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
@@ -262,6 +270,15 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .mode = mode,
         .print_exe = build_options.print_exe,
+    });
+
+    build_manifest_log_bench(b, .{
+        .bench_run = build_steps.bench_manifest_log,
+        .bench_build = build_steps.bench_manifest_log_build,
+    }, .{
+        .stdx_module = stdx_module,
+        .vsr_options = vsr_options,
+        .target = target,
     });
 
     // zig build scripts -- ci --language=java
@@ -1128,6 +1145,37 @@ fn build_fuzz(
     const fuzz_run = b.addRunArtifact(fuzz_exe);
     if (b.args) |args| fuzz_run.addArgs(args);
     steps.fuzz.dependOn(&fuzz_run.step);
+}
+
+fn build_manifest_log_bench(
+    b: *std.Build,
+    steps: struct {
+        bench_run: *std.Build.Step,
+        bench_build: *std.Build.Step,
+    },
+    options: struct {
+        stdx_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+    },
+) void {
+    const bench = b.addExecutable(.{
+        .name = "manifest_log_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lsm/manifest_log_bench.zig"),
+            .target = options.target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    bench.root_module.addImport("stdx", options.stdx_module);
+    bench.root_module.addOptions("vsr_options", options.vsr_options);
+    bench.root_module.addIncludePath(b.path("src"));
+
+    steps.bench_build.dependOn(&b.addInstallArtifact(bench, .{}).step);
+
+    const bench_run = b.addRunArtifact(bench);
+    if (b.args) |args| bench_run.addArgs(args);
+    steps.bench_run.dependOn(&bench_run.step);
 }
 
 fn build_scripts(

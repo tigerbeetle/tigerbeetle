@@ -68,6 +68,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             entry: u32, // Index within the manifest block Label/TableInfo arrays.
         };
 
+        allocator: mem.Allocator,
         superblock: *SuperBlock,
         grid: *Grid,
         pace: *const Pace,
@@ -138,6 +139,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
         // from the grid cache or node pool instead so that we don't pay for it during normal
         // operation.
         tables_removed: TablesRemoved,
+        /// Collected tables during open(); emitted in bulk after replay completes.
+        open_tables: std.ArrayListUnmanaged(TableInfo),
 
         pub fn init(
             manifest_log: *ManifestLog,
@@ -146,6 +149,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             compaction_pace: *const Pace,
         ) !void {
             manifest_log.* = .{
+                .allocator = allocator,
                 .superblock = grid.superblock,
                 .grid = grid,
                 .forest_table_count_max = compaction_pace.tables_max,
@@ -156,6 +160,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .writes = undefined,
                 .table_extents = undefined,
                 .tables_removed = undefined,
+                .open_tables = .{},
             };
 
             inline for (std.meta.fields(Pace)) |pace_field| {
@@ -215,11 +220,17 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.forest_table_count_max,
             );
             errdefer manifest_log.tables_removed.deinit(allocator);
+
+            try manifest_log.open_tables.ensureTotalCapacity(
+                allocator,
+                manifest_log.forest_table_count_max,
+            );
         }
 
         pub fn deinit(manifest_log: *ManifestLog, allocator: mem.Allocator) void {
             manifest_log.tables_removed.deinit(allocator);
             manifest_log.table_extents.deinit(allocator);
+            manifest_log.open_tables.deinit(allocator);
             allocator.free(manifest_log.writes);
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
             manifest_log.blocks.deinit(allocator);
@@ -238,8 +249,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
             for (manifest_log.blocks.buffer) |block| @memset(block, 0);
             manifest_log.table_extents.clearRetainingCapacity();
             manifest_log.tables_removed.clearRetainingCapacity();
+            manifest_log.open_tables.clearRetainingCapacity();
 
             manifest_log.* = .{
+                .allocator = manifest_log.allocator,
                 .superblock = manifest_log.superblock,
                 .grid = manifest_log.grid,
                 .forest_table_count_max = manifest_log.pace.tables_max,
@@ -250,18 +263,16 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .writes = manifest_log.writes,
                 .table_extents = manifest_log.table_extents,
                 .tables_removed = manifest_log.tables_removed,
+                .open_tables = manifest_log.open_tables,
             };
         }
 
         /// Opens the manifest log.
-        /// Reads the manifest blocks in reverse order and passes extent table inserts to event().
-        /// Therefore, only the latest version of a table will be emitted by event() for insertion
-        /// into the in-memory manifest. Older versions of a table in older manifest blocks will not
-        /// be emitted, as an optimization to not replay all table mutations.
-        /// `ManifestLog.table_extents` is used to track the latest version of a table.
-        // TODO(Optimization): Accumulate tables unordered, then sort all at once to splice into the
-        // ManifestLevels' SegmentedArrays. (Constructing SegmentedArrays by repeated inserts is
-        // expensive.)
+        /// Reads the manifest blocks in reverse order and collects the latest version of every
+        /// table. The tables are exposed via `open_tables_slice()` during the callback.
+        /// Older versions of a table in older manifest blocks will not be emitted, as an
+        /// optimization to not replay all table mutations. `ManifestLog.table_extents` is used to
+        /// track the latest version of a table.
         pub fn open(manifest_log: *ManifestLog, event: OpenEvent, callback: Callback) void {
             assert(!manifest_log.opened);
             assert(!manifest_log.reading);
@@ -275,7 +286,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.entry_count == 0);
             assert(manifest_log.table_extents.count() == 0);
             assert(manifest_log.tables_removed.count() == 0);
+            assert(manifest_log.open_tables.items.len == 0);
 
+            // The legacy per-table event is retained for API compatibility but is not invoked by
+            // the current open implementation. Callers should use `open_tables_slice()` in the
+            // callback instead.
             manifest_log.open_event = event;
             manifest_log.reading = true;
             manifest_log.read_callback = callback;
@@ -388,7 +403,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                         if (!extent.found_existing) {
                             manifest_log.check_tables_count();
                             extent.value_ptr.* = .{ .block = block_address, .entry = entry };
-                            manifest_log.open_event(manifest_log, table);
+                            manifest_log.open_tables.appendAssumeCapacity(table.*);
                         }
                     }
                 }
@@ -433,6 +448,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.entry_count == 0);
+            assert(manifest_log.open_tables.items.len == manifest_log.table_extents.count());
 
             log.debug("{}: open_done: opened block_count={} table_count={}", .{
                 manifest_log.superblock.replica_index.?,
@@ -447,6 +463,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.read_callback = null;
 
             callback(manifest_log);
+        }
+
+        /// The tables collected during open(), in unspecified order.
+        pub fn open_tables_slice(manifest_log: *const ManifestLog) []const TableInfo {
+            return manifest_log.open_tables.items;
         }
 
         /// Appends an insert/update/remove of a table to a level.
