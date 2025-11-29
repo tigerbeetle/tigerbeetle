@@ -74,12 +74,8 @@ pub fn ZigZagMergeIteratorType(
                 return null;
 
             if (it.key_popped) |previous| {
-                switch (std.math.order(previous, key)) {
-                    .lt => assert(it.direction == .ascending),
-                    // Duplicate values are not expected.
-                    .eq => unreachable,
-                    .gt => assert(it.direction == .descending),
-                }
+                // Duplicate values are not expected.
+                assert(it.direction.cmp(previous, .@"<", key));
             }
             it.key_popped = key;
 
@@ -134,19 +130,13 @@ pub fn ZigZagMergeIteratorType(
                         return null;
 
                     // The stream cannot regress.
-                    assert(
-                        it.probe_key_previous == null or
-                            key == it.probe_key_previous.? or
-                            it.key_ahead(.{
-                                .key_after = key,
-                                .key_before = it.probe_key_previous.?,
-                            }),
-                    );
+                    assert(it.probe_key_previous == null or
+                        it.direction.cmp(it.probe_key_previous.?, .@"<=", key));
 
                     // The keys match, continuing to the next stream.
-                    if (key == probe_key) continue;
+                    if (probe_key == key) continue;
 
-                    if (it.key_ahead(.{ .key_after = key, .key_before = probe_key })) {
+                    if (it.direction.cmp(probe_key, .@"<", key)) {
                         // The stream is ahead, it will be the probe key,
                         // meaning all streams before must be probed.
                         probe_key = key;
@@ -180,7 +170,7 @@ pub fn ZigZagMergeIteratorType(
                     if (key == probe_key) {
                         probing.unset(stream_index);
                     } else {
-                        assert(it.key_ahead(.{ .key_after = key, .key_before = probe_key }));
+                        assert(it.direction.cmp(probe_key, .@"<", key));
                     }
                 }
             }
@@ -207,23 +197,10 @@ pub fn ZigZagMergeIteratorType(
 
             // The iterator cannot regress.
             assert(it.probe_key_previous == null or
-                probe_key == it.probe_key_previous.? or
-                it.key_ahead(.{ .key_after = probe_key, .key_before = it.probe_key_previous.? }));
+                it.direction.cmp(it.probe_key_previous.?, .@"<=", probe_key));
 
             it.probe_key_previous = probe_key;
             return if (pending.count() == 0) probe_key else error.Pending;
-        }
-
-        /// Returns true if `key_after` is ahead of `key_before` depending on the direction,
-        /// that is `key_after > key_before` (ascending) or `key_after < key_before` (descending).
-        inline fn key_ahead(
-            it: *const ZigZagMergeIterator,
-            keys: struct { key_after: Key, key_before: Key },
-        ) bool {
-            return switch (it.direction) {
-                .ascending => keys.key_after > keys.key_before,
-                .descending => keys.key_after < keys.key_before,
-            };
         }
     };
 }
