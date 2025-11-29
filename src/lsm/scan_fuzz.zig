@@ -577,6 +577,8 @@ const Environment = struct {
         for (0..commits_max) |_| {
             assert(env.state == .fuzzing);
 
+            env.forest.grooves.things.objects_cache.begin_batch();
+
             // Often insert full batches, to fill the database.
             const batch_objects = if (prng.boolean())
                 batch_objects_max

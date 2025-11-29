@@ -14,7 +14,7 @@ const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
-const CacheMapType = @import("cache_map.zig").CacheMapType;
+const BatchCacheType = @import("batch_cache.zig").BatchCacheType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
@@ -454,7 +454,7 @@ pub fn GrooveType(
         }
     };
 
-    const _ObjectsCache = if (groove_options.objects_cache) CacheMapType(
+    const _ObjectsCache = if (groove_options.objects_cache) BatchCacheType(
         PrimaryKey,
         Object,
         ObjectsCacheHelpers.key_from_value,
@@ -630,15 +630,10 @@ pub fn GrooveType(
             };
 
             groove.objects_cache = if (ObjectsCache != void) try ObjectsCache.init(allocator, .{
-                .cache_value_count_max = options.cache_entries_max,
-                // In the worst case, each stash must be able to store
-                // batch_value_count_limit per beat (to contain either TableMutable or
-                // TableImmutable) as well as the maximum number of prefetches a bar may
-                // perform, excluding prefetches already accounted
-                // for by batch_value_count_limit.
-                .stash_value_count_max = constants.lsm_compaction_ops *
-                    (options.tree_options_object.batch_value_count_limit +
-                        options.prefetch_entries_for_read_max),
+                .eviction_value_count_max = options.cache_entries_max,
+                // Per-beat capacity: mutable table + prefetched entries for the beat.
+                .batch_value_count_max = options.tree_options_object.batch_value_count_limit +
+                    options.prefetch_entries_for_read_max,
 
                 // Scopes are limited to a single beat, so the maximum number of entries in
                 // a single scope is batch_value_count_limit (total – not per beat).
@@ -818,6 +813,7 @@ pub fn GrooveType(
             // here as a warning that they're not fully tested yet.
             assert(snapshot == null);
 
+            if (ObjectsCache != void) groove.objects_cache.begin_batch();
             const snapshot_target = snapshot orelse snapshot_latest;
             assert(snapshot_target <= snapshot_latest);
 
@@ -1454,6 +1450,8 @@ pub fn GrooveType(
         }
 
         pub fn compact(groove: *Groove, op: u64) void {
+            if (ObjectsCache != void) groove.objects_cache.begin_batch();
+
             if (has_id) groove.ids.compact();
             groove.objects.compact();
 
