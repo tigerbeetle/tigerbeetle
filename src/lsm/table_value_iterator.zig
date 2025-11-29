@@ -53,19 +53,16 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
             assert(it.callback == null);
             assert(!it.empty());
 
-            const index: usize = switch (it.context.direction) {
-                .ascending => 0,
-                .descending => it.context.addresses.len - 1,
-            };
-
-            assert(it.context.checksums[index].padding == 0);
+            const address = it.context.direction.slice_peek(it.context.addresses).*;
+            const checksum = it.context.direction.slice_peek(it.context.checksums).*;
+            assert(checksum.padding == 0);
 
             it.callback = callback;
             it.context.grid.read_block(
                 .{ .from_local_or_global_storage = read_block_callback },
                 &it.read,
-                it.context.addresses[index],
-                it.context.checksums[index].value,
+                address,
+                checksum.value,
                 .{ .cache_read = true, .cache_write = true },
             );
         }
@@ -78,26 +75,14 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
             const callback = it.callback.?;
             it.callback = null;
 
-            switch (it.context.direction) {
-                .ascending => {
-                    const header = schema.header_from_block(block);
-                    assert(header.address == it.context.addresses[0]);
-                    assert(header.checksum == it.context.checksums[0].value);
+            const address, it.context.addresses =
+                it.context.direction.slice_pop(it.context.addresses);
+            const checksum, it.context.checksums =
+                it.context.direction.slice_pop(it.context.checksums);
 
-                    it.context.addresses = it.context.addresses[1..];
-                    it.context.checksums = it.context.checksums[1..];
-                },
-                .descending => {
-                    const index_last = it.context.checksums.len - 1;
-                    const header = schema.header_from_block(block);
-                    assert(header.address == it.context.addresses[index_last]);
-                    assert(header.checksum == it.context.checksums[index_last].value);
-
-                    it.context.addresses = it.context.addresses[0..index_last];
-                    it.context.checksums = it.context.checksums[0..index_last];
-                },
-            }
-
+            const header = schema.header_from_block(block);
+            assert(header.address == address);
+            assert(header.checksum == checksum.value);
             assert(it.context.addresses.len == it.context.checksums.len);
             callback(it, block);
         }
