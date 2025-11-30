@@ -48,6 +48,10 @@ struct TestDb {
 
 impl TestDb {
     fn new() -> anyhow::Result<TestDb> {
+        Self::new_with_name("0_0.testdb.tigerbeetle")
+    }
+
+    fn new_with_name(database_name: &str) -> anyhow::Result<TestDb> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
         // NB: There is one test database shared between all tests, and reused
@@ -56,7 +60,6 @@ impl TestDb {
         // forever, just taking up a lot of space.
         let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
         let work_dir = env!("CARGO_TARGET_TMPDIR");
-        let database_name = "0_0.testdb.tigerbeetle";
 
         if !Path::new(&format!("{work_dir}/{database_name}")).try_exists()? {
             let mut cmd = Command::new(&tigerbeetle_bin);
@@ -1358,4 +1361,62 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
 
         Ok(())
     })
+}
+
+// Test for client eviction shutdown data race crash.
+// This reproduces much easier if tb_client is compiled for release,
+// which should be how CI is configured.
+#[test]
+fn client_eviction_crash() -> anyhow::Result<()> {
+    // Create a separate test database to avoid evicting the shared client.
+    let test_db = TestDb::new_with_name("eviction_test.tigerbeetle")?;
+    let address = format!("127.0.0.1:{}", test_db.port);
+
+    // The crash is easier to reproduce if you increase this number,
+    // but test much slower because client registration is slow.
+    let tries = 1;
+
+    for i in 0..tries {
+        eprintln!("client eviction crash try {i}");
+        let client = tb::Client::new(0, &address)?;
+        let client = Arc::new(client);
+
+        // Higher numbers here make the crash reproduce faster.
+        let num_threads = 8;
+        let barrier = Arc::new(Barrier::new(num_threads));
+
+        let join_handles: Vec<_> = (0..num_threads)
+            .map(|_thread_id| {
+                let client = client.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || -> anyhow::Result<()> {
+                    barrier.wait();
+
+                    block_on(async {
+                        // First lookup of invalid ID should succeed (return empty).
+                        let result1 = client.lookup_transfers(&[0]).await?;
+                        assert_eq!(result1.len(), 0);
+
+                        // Force an eviction.
+                        client.trigger_eviction_for_testing()?;
+
+                        // Evicted lookup should fail with ClientEvicted error.
+                        let result2 = client.lookup_transfers(&[0]).await;
+                        assert_eq!(result2, Err(tb::PacketStatus::ClientEvicted));
+
+                        let result3 = client.lookup_transfers(&[0]).await;
+                        assert_eq!(result3, Err(tb::PacketStatus::ClientEvicted));
+
+                        Ok(())
+                    })
+                })
+            })
+            .collect();
+
+        for join_handle in join_handles {
+            let _res = join_handle.join().unwrap();
+        }
+    }
+
+    Ok(())
 }

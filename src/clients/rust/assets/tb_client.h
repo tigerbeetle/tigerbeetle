@@ -343,6 +343,15 @@ TB_CLIENT_STATUS tb_client_completion_context(
     uintptr_t* completion_ctx_out
 );
 
+// Trigger an artificial client eviction for testing purposes.
+// This will cause the next request to be sent with a lower session number,
+// which will trigger a session_too_low eviction from the server.
+// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+// not initialized or has already been closed.
+TB_CLIENT_STATUS tb_client_trigger_eviction_for_testing(
+    tb_client_t* client
+);
+
 // Submit a packet with its `operation`, `data`, and `data_size` fields set.
 // Once completed, `completion_callback` will be invoked with `completion_ctx`
 // and the given packet on the `tb_client` thread (separate from the caller's thread).

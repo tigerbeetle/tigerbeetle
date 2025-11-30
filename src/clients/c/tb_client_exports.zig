@@ -186,6 +186,16 @@ pub fn completion_context(
     return .ok;
 }
 
+pub fn trigger_eviction_for_testing(
+    tb_client: ?*tb_client_t,
+) callconv(.c) tb_client_status {
+    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
+    client.trigger_eviction_for_testing() catch |err| switch (err) {
+        error.ClientInvalid => return .invalid,
+    };
+    return .ok;
+}
+
 pub fn register_log_callback(
     callback_maybe: ?Logging.Callback,
     debug: bool,

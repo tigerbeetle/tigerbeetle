@@ -33,4 +33,8 @@ comptime {
         &exports.init_parameters,
         .{ .name = "tb_client_init_parameters", .linkage = .strong },
     );
+    @export(
+        &exports.trigger_eviction_for_testing,
+        .{ .name = "tb_client_trigger_eviction_for_testing", .linkage = .strong },
+    );
 }

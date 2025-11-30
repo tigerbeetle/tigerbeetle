@@ -976,6 +976,24 @@ impl Client {
         }
     }
 
+    /// Trigger an artificial client eviction for testing purposes.
+    ///
+    /// This will cause the next request to be sent with a lower session number,
+    /// which will trigger a session_too_low eviction from the server.
+    ///
+    /// This function is considered internal and not API-stable.
+    #[doc(hidden)]
+    pub fn trigger_eviction_for_testing(&self) -> Result<(), InitStatus> {
+        unsafe {
+            let status = tbc::tb_client_trigger_eviction_for_testing(self.client);
+            if status == tbc::TB_CLIENT_STATUS_TB_CLIENT_OK {
+                Ok(())
+            } else {
+                Err(InitStatus::Unexpected)
+            }
+        }
+    }
+
     /// Close the client and asynchronously wait for completion.
     ///
     /// Note that it is not required for correctness to call this method &mdash;

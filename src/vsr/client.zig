@@ -400,6 +400,12 @@ pub fn ClientType(
             self.message_bus.unref(message);
         }
 
+        /// Sets the session number artificially for testing purposes.
+        pub fn set_session_for_testing(self: *Client, session: u64) void {
+            assert(session > 0); // Session 0 is reserved for unregistered state.
+            self.session = session;
+        }
+
         fn on_eviction(self: *Client, eviction: *const Message.Eviction) void {
             assert(!self.evicted);
             assert(eviction.header.command == .eviction);

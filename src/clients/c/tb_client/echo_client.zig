@@ -189,6 +189,11 @@ pub fn EchoClientType(comptime MessageBus: type) type {
         pub fn release_message(self: *EchoClient, message: *Message) void {
             self.message_pool.unref(message);
         }
+
+        pub fn set_session_for_testing(self: *EchoClient, session: u64) void {
+            _ = self;
+            _ = session;
+        }
     };
 }
 
