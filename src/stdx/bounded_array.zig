@@ -139,7 +139,8 @@ test BoundedArrayType {
     const capacity = 8;
     const Array = BoundedArrayType(u8, capacity);
     const Model = std.ArrayListUnmanaged(u8);
-    const N = 1_000;
+    const swarm_count = 10;
+    const action_count = 1_000;
 
     const gpa = std.testing.allocator;
 
@@ -148,110 +149,111 @@ test BoundedArrayType {
     defer model.deinit(gpa);
 
     var prng = stdx.PRNG.from_seed_testing();
-    for (0..N) |_| {
-        const swarm_distribution = prng.enum_weighted(
-            std.meta.DeclEnum(Array),
-            prng.enum_weights(std.meta.DeclEnum(Array)),
-        );
-        switch (swarm_distribution) {
-            .count => assert(array.count() == model.items.len),
-            .count_as => assert(array.count_as(u8) == model.items.len),
-            .full => assert(array.full() == (model.unusedCapacitySlice().len == 0)),
-            .empty => assert(array.empty() == (model.items.len == 0)),
-            .get => {
-                if (model.items.len > 0) {
-                    const index = prng.index(model.items);
-                    assert(array.get(index) == model.items[index]);
-                }
-            },
-            .slice => assert(std.mem.eql(u8, array.slice(), model.items)),
-            .const_slice => assert(std.mem.eql(u8, array.const_slice(), model.items)),
-            .unused_capacity_slice => {
-                assert(array.unused_capacity_slice().len == model.unusedCapacitySlice().len);
-            },
-            .insert_at => {
-                if (model.items.len < model.capacity) {
-                    const index = prng.int_inclusive(usize, model.items.len);
-                    const value = prng.int(u8);
 
-                    array.insert_at(index, value);
-                    model.insertAssumeCapacity(index, value);
-                }
-            },
-            .push => {
-                if (model.items.len < model.capacity) {
-                    const value = prng.int(u8);
-
-                    array.push(value);
-                    model.appendAssumeCapacity(value);
-                }
-            },
-            .push_slice => {
-                var buffer: [capacity]u8 = undefined;
-                const count = prng.int_inclusive(usize, model.capacity - model.items.len);
-                for (0..count) |index| buffer[index] = prng.int(u8);
-                const slice = buffer[0..count];
-
-                array.push_slice(slice);
-                model.appendSliceAssumeCapacity(slice);
-            },
-            .swap_remove => {
-                if (model.items.len > 0) {
-                    const index = prng.index(model.items);
-
-                    const a = array.swap_remove(index);
-                    const b = model.swapRemove(index);
-                    assert(a == b);
-                }
-            },
-            .ordered_remove => {
-                if (model.items.len > 0) {
-                    const index = prng.index(model.items);
-
-                    const a = array.ordered_remove(index);
-                    const b = model.orderedRemove(index);
-                    assert(a == b);
-                }
-            },
-            .resize => {
-                const count_old = model.items.len;
-                const count_new = prng.int_inclusive(usize, capacity);
-
-                model.resize(gpa, count_new) catch unreachable;
-                array.resize(count_new) catch unreachable;
-                if (count_old <= count_new) {
-                    for (count_old..count_new) |index| {
-                        const value = prng.int(u8);
-                        model.items[index] = value;
-                        array.buffer[index] = value;
+    for (0..swarm_count) |_| {
+        const swarm_weights = prng.enum_weights(std.meta.DeclEnum(Array));
+        for (0..action_count) |_| {
+            const action = prng.enum_weighted(std.meta.DeclEnum(Array), swarm_weights);
+            switch (action) {
+                .count => assert(array.count() == model.items.len),
+                .count_as => assert(array.count_as(u8) == model.items.len),
+                .full => assert(array.full() == (model.unusedCapacitySlice().len == 0)),
+                .empty => assert(array.empty() == (model.items.len == 0)),
+                .get => {
+                    if (model.items.len > 0) {
+                        const index = prng.index(model.items);
+                        assert(array.get(index) == model.items[index]);
                     }
-                }
-            },
-            .truncate => {
-                const count_new = prng.int_inclusive(usize, model.items.len);
-                array.truncate(count_new);
-                model.resize(gpa, count_new) catch unreachable;
-            },
-            .clear => {
-                array.clear();
-                model.clearRetainingCapacity();
-            },
-            .pop => {
-                const b = model.pop();
-                const a = array.pop();
-                assert((a == null and b == null) or (a.? == b.?));
-            },
-            .capacity => assert(array.capacity() == model.capacity),
-            .from_slice => {
-                var buffer: [capacity]u8 = undefined;
-                const count = prng.int_inclusive(usize, model.capacity - model.items.len);
-                for (0..count) |index| buffer[index] = prng.int(u8);
-                const slice = buffer[0..count];
+                },
+                .slice => assert(std.mem.eql(u8, array.slice(), model.items)),
+                .const_slice => assert(std.mem.eql(u8, array.const_slice(), model.items)),
+                .unused_capacity_slice => {
+                    assert(array.unused_capacity_slice().len == model.unusedCapacitySlice().len);
+                },
+                .insert_at => {
+                    if (model.items.len < model.capacity) {
+                        const index = prng.int_inclusive(usize, model.items.len);
+                        const value = prng.int(u8);
 
-                array = Array.from_slice(slice) catch unreachable;
-                model.clearRetainingCapacity();
-                model.appendSliceAssumeCapacity(slice);
-            },
+                        array.insert_at(index, value);
+                        model.insertAssumeCapacity(index, value);
+                    }
+                },
+                .push => {
+                    if (model.items.len < model.capacity) {
+                        const value = prng.int(u8);
+
+                        array.push(value);
+                        model.appendAssumeCapacity(value);
+                    }
+                },
+                .push_slice => {
+                    var buffer: [capacity]u8 = undefined;
+                    const count = prng.int_inclusive(usize, model.capacity - model.items.len);
+                    for (0..count) |index| buffer[index] = prng.int(u8);
+                    const slice = buffer[0..count];
+
+                    array.push_slice(slice);
+                    model.appendSliceAssumeCapacity(slice);
+                },
+                .swap_remove => {
+                    if (model.items.len > 0) {
+                        const index = prng.index(model.items);
+
+                        const a = array.swap_remove(index);
+                        const b = model.swapRemove(index);
+                        assert(a == b);
+                    }
+                },
+                .ordered_remove => {
+                    if (model.items.len > 0) {
+                        const index = prng.index(model.items);
+
+                        const a = array.ordered_remove(index);
+                        const b = model.orderedRemove(index);
+                        assert(a == b);
+                    }
+                },
+                .resize => {
+                    const count_old = model.items.len;
+                    const count_new = prng.int_inclusive(usize, capacity);
+
+                    model.resize(gpa, count_new) catch unreachable;
+                    array.resize(count_new) catch unreachable;
+                    if (count_old <= count_new) {
+                        for (count_old..count_new) |index| {
+                            const value = prng.int(u8);
+                            model.items[index] = value;
+                            array.buffer[index] = value;
+                        }
+                    }
+                },
+                .truncate => {
+                    const count_new = prng.int_inclusive(usize, model.items.len);
+                    array.truncate(count_new);
+                    model.resize(gpa, count_new) catch unreachable;
+                },
+                .clear => {
+                    array.clear();
+                    model.clearRetainingCapacity();
+                },
+                .pop => {
+                    const b = model.pop();
+                    const a = array.pop();
+                    assert((a == null and b == null) or (a.? == b.?));
+                },
+                .capacity => assert(array.capacity() == model.capacity),
+                .from_slice => {
+                    var buffer: [capacity]u8 = undefined;
+                    const count = prng.int_inclusive(usize, model.capacity - model.items.len);
+                    for (0..count) |index| buffer[index] = prng.int(u8);
+                    const slice = buffer[0..count];
+
+                    array = Array.from_slice(slice) catch unreachable;
+                    model.clearRetainingCapacity();
+                    model.appendSliceAssumeCapacity(slice);
+                },
+            }
         }
     }
 }
