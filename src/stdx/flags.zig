@@ -998,6 +998,13 @@ test "flags" {
         \\
     ));
 
+    try t.check(&.{ "pos", "--", "x", "y" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: '--'
+        \\
+    ));
+
     try t.check(&.{ "pos", "--flak", "x", "y" }, snap(@src(),
         \\status: 1
         \\stderr:
