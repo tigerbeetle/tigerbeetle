@@ -836,7 +836,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
                 .{flag_name},
             );
         }
-    }
+    } else unreachable;
 
     const groove_config = StateMachine.Forest.groove_config;
     const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
