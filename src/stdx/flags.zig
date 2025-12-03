@@ -201,24 +201,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
     }
 
-    // Would use std.enums.EnumFieldStruct(Flags, u32, 0) here but Flags is a Struct not an Enum.
-    var counts: Counts: {
-        var count_fields = std.meta.fields(Flags)[0..std.meta.fields(Flags).len].*;
-        for (&count_fields) |*field| {
-            field.type = u32;
-            field.alignment = @alignOf(u32);
-            field.default_value_ptr = @ptrCast(&@as(u32, 0));
-        }
-        break :Counts @Type(.{
-            .@"struct" = .{
-                .layout = .auto,
-                .fields = &count_fields,
-                .decls = &.{},
-                .is_tuple = false,
-            },
-        });
-    } = .{};
-
+    var counts: std.enums.EnumFieldStruct(std.meta.FieldEnum(Flags), u32, 0) = .{};
     var result: Flags = undefined;
     var parsed_positional = false;
     next_arg: while (args.next()) |arg| {
