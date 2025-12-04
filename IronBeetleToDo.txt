@@ -1,0 +1,21 @@
++ client sessions
++ GridBlocksMissing
+- WAL&recovering head&disentangling torn writes from corruption
+- queries (including VOPR)
++ VOPR
++ CFO
++ UPGRADES!!!!!!!!! (+ VOPR)
+- TBID & bloom filters
+- flags.zig
+- snaptest.zig
+- copyhound.zig
++ PERFORMANCE MODE (!)
+- FaultAtlas?
+- Misdirected IO in VOPR
+- auto-batching
+- pulses, pending, posted
+- minor fuzzers
++ Adaptive Routing
++ Exhaustigen
+- Refactor op_finalize to zero the op?
++ Is this TODO? // Future-compatibility with adaptive routing.
