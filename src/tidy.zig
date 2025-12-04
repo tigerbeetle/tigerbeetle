@@ -240,9 +240,8 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 if (string_value_length <= 100) continue;
 
                 if (std.mem.endsWith(u8, file.path, "state_machine_tests.zig") and
-                    (std.mem.startsWith(u8, string_value, " account A") or
-                        std.mem.startsWith(u8, string_value, " transfer T") or
-                        std.mem.startsWith(u8, string_value, " transfer   ")))
+                    (std.mem.startsWith(u8, string_value, " account ") or
+                        std.mem.startsWith(u8, string_value, " transfer ")))
                 {
                     // Table tests from state_machine.zig. They are intentionally wide.
                     continue;
@@ -395,7 +394,7 @@ fn tidy_dead_declarations(
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 411; // fn check in state_machine.zig
+const function_line_count_max = 460; // fn check_version in state_machine_tests.zig
 
 fn tidy_long_functions(
     file: SourceFile,

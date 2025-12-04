@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = tb::Client::new(0, &port)?;
 
     // Create two accounts
-    let account_errors = client
+    let account_results = client
         .create_accounts(&[
             tb::Account {
                 id: 1,
@@ -68,10 +68,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .await?;
 
-    for error in &account_errors {
-        eprintln!("Error creating account {}: {:?}", error.index, error.result);
-    }
-    assert!(account_errors.is_empty());
+    assert!(account_results.len() == 2);
+    assert!(account_results[0].status == tb::CreateAccountStatus::Created);
+    assert!(account_results[1].status == tb::CreateAccountStatus::Created);
 
     // Start five pending transfers
     let transfers = vec![
@@ -127,11 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    let transfer_errors = client.create_transfers(&transfers).await?;
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
+    let transfer_results = client.create_transfers(&transfers).await?;
+    assert!(transfer_results.len() == transfers.len());
+    for result in &transfer_results {
+        assert!(result.status == tb::CreateTransferStatus::Created);
     }
-    assert!(transfer_errors.is_empty());
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
     assert_account_balances(
@@ -159,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Create a 6th transfer posting the 1st transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 6,
             debit_account_id: 1,
@@ -173,10 +172,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate account balances after posting 1st pending transfer
     assert_account_balances(
@@ -204,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Create a 7th transfer voiding the 2nd transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 7,
             debit_account_id: 1,
@@ -218,10 +215,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate account balances after voiding 2nd pending transfer
     assert_account_balances(
@@ -249,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Create a 8th transfer posting the 3rd transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 8,
             debit_account_id: 1,
@@ -263,10 +258,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate account balances after posting 3rd pending transfer
     assert_account_balances(
@@ -294,7 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Create a 9th transfer voiding the 4th transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 9,
             debit_account_id: 1,
@@ -308,10 +301,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate account balances after voiding 4th pending transfer
     assert_account_balances(
@@ -339,7 +330,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     // Create a 10th transfer posting the 5th transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 10,
             debit_account_id: 1,
@@ -353,10 +344,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate account balances after posting 5th pending transfer
     assert_account_balances(
@@ -383,6 +372,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    println!("ok");
     Ok(())
 }

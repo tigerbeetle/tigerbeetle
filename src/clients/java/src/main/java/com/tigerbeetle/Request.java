@@ -29,8 +29,8 @@ abstract class Request<TResponse extends Batch> {
     enum Operations {
         // TODO Auto-generate these.
         PULSE(128),
-        CREATE_ACCOUNTS(138),
-        CREATE_TRANSFERS(139),
+        CREATE_ACCOUNTS(146),
+        CREATE_TRANSFERS(147),
         LOOKUP_ACCOUNTS(140),
         LOOKUP_TRANSFERS(141),
         GET_ACCOUNT_TRANSFERS(142),
@@ -38,8 +38,8 @@ abstract class Request<TResponse extends Batch> {
         QUERY_ACCOUNTS(144),
         QUERY_TRANSFERS(145),
 
-        ECHO_ACCOUNTS(138),
-        ECHO_TRANSFERS(139);
+        ECHO_ACCOUNTS(146),
+        ECHO_TRANSFERS(147);
 
         byte value;
 
