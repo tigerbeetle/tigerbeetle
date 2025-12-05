@@ -176,11 +176,11 @@ pub fn main() !void {
         \\          request_probability={}
         \\          idle_on_probability={}
         \\          idle_off_probability={}
-        \\          one_way_delay_mean={} ticks
-        \\          one_way_delay_min={} ticks
+        \\          one_way_delay_mean={}
+        \\          one_way_delay_min={}
         \\          packet_loss_probability={}
         \\          path_maximum_capacity={} messages
-        \\          path_clog_duration_mean={} ticks
+        \\          path_clog_duration_mean={}
         \\          path_clog_probability={}
         \\          packet_replay_probability={}
         \\          partition_mode={s}
