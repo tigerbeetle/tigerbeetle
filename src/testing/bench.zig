@@ -7,7 +7,7 @@
 //!
 //! Non-goals:
 //! - absolute benchmarking,
-//! - continious benchmarking,
+//! - continuous benchmarking,
 //! - automatic regression detection.
 //!
 //! If you run
@@ -48,7 +48,7 @@ test "benchmark: API tutorial" { // `benchmark:` in the name is important!
 
     // You can compile individual benchmark  via
     //   ./zig/zig build test:unit:build -- "benchmark: binary search"
-    // and use the resulting biniary with perf/hyperfine/poop.
+    // and use the resulting binary with perf/hyperfine/poop.
 }
 
 const std = @import("std");
@@ -59,7 +59,7 @@ const Instant = stdx.Instant;
 const TimeOS = @import("../time.zig").TimeOS;
 
 const mode: enum { smoke, benchmark } =
-    // See build.zig for how this is ultimateely determined.
+    // See build.zig for how this is ultimately determined.
     if (@import("test_options").benchmark) .benchmark else .smoke;
 
 time: TimeOS = .{},
