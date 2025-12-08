@@ -1073,34 +1073,34 @@ const Environment = struct {
     }
 
     fn forest_open_callback(forest: *Forest) void {
-        const env: *Environment = @fieldParentPtr("forest", forest);
+        const env: *Environment = @alignCast(@fieldParentPtr("forest", forest));
         env.change_state(.forest_open, .fuzzing);
     }
 
     fn grid_checkpoint_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
+        const env: *Environment = @alignCast(@fieldParentPtr("grid", grid));
         assert(env.checkpoint_op != null);
         env.change_state(.grid_checkpoint, .superblock_checkpoint);
     }
 
     fn forest_checkpoint_callback(forest: *Forest) void {
-        const env: *Environment = @fieldParentPtr("forest", forest);
+        const env: *Environment = @alignCast(@fieldParentPtr("forest", forest));
         assert(env.checkpoint_op != null);
         env.change_state(.forest_checkpoint, .grid_checkpoint);
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
+        const env: *Environment = @alignCast(@fieldParentPtr("superblock_context", superblock_context));
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
     fn forest_compact_callback(forest: *Forest) void {
-        const env: *Environment = @fieldParentPtr("forest", forest);
+        const env: *Environment = @alignCast(@fieldParentPtr("forest", forest));
         env.change_state(.forest_compact, .fuzzing);
     }
 
     fn scan_lookup_callback(scan_lookup: *ScanLookup, result: []const Thing) void {
-        const env: *Environment = @fieldParentPtr("scan_lookup", scan_lookup);
+        const env: *Environment = @alignCast(@fieldParentPtr("scan_lookup", scan_lookup));
         assert(env.scan_lookup_result == null);
         env.scan_lookup_result = result;
         env.change_state(.scanning, .fuzzing);

@@ -42,6 +42,7 @@ pub fn ScanRangeType(
         scan_tree: ScanTree,
 
         pub fn init(
+            self: *ScanRange,
             evaluator_context: EvaluatorContext,
             tree: *Tree,
             buffer: *const ScanBuffer,
@@ -49,18 +50,16 @@ pub fn ScanRangeType(
             key_min: Tree.Table.Key,
             key_max: Tree.Table.Key,
             direction: Direction,
-        ) ScanRange {
-            return .{
-                .evaluator_context = evaluator_context,
-                .scan_tree = ScanTree.init(
-                    tree,
-                    buffer,
-                    snapshot_,
-                    key_min,
-                    key_max,
-                    direction,
-                ),
-            };
+        ) void {
+            self.evaluator_context = evaluator_context;
+            self.scan_tree.init(
+                tree,
+                buffer,
+                snapshot_,
+                key_min,
+                key_max,
+                direction,
+            );
         }
 
         pub fn read(scan: *ScanRange, context: *Context) void {
