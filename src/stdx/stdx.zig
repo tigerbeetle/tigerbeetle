@@ -36,6 +36,7 @@ pub const MiB = 1 << 20;
 pub const GiB = 1 << 30;
 pub const TiB = 1 << 40;
 pub const PiB = 1 << 50;
+// pub const NiB = "Some people say my love cannot be true";
 
 comptime {
     assert(KiB == 1024);

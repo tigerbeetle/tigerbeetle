@@ -850,6 +850,16 @@ fn build_test(
         mode: std.builtin.OptimizeMode,
     },
 ) !void {
+    const test_options = b.addOptions();
+    // Benchmark run in two modes.
+    // - ./zig/zig build test
+    // - ./zig/zig build -Drelease test -- "benchmark: name"
+    // The former uses small parameter values and is silent.
+    // The latter is the real benchmark, which prints the output.
+    test_options.addOption(bool, "benchmark", for (b.args orelse &.{}) |arg| {
+        if (std.mem.indexOf(u8, arg, "benchmark") != null) break true;
+    } else false);
+
     const stdx_unit_tests = b.addTest(.{
         .name = "test-stdx",
         .root_module = b.createModule(.{
@@ -870,6 +880,7 @@ fn build_test(
     });
     unit_tests.root_module.addImport("stdx", options.stdx_module);
     unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
+    unit_tests.root_module.addOptions("test_options", test_options);
 
     steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
     steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);
