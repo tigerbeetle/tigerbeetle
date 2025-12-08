@@ -382,7 +382,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             manifest_log: *ManifestLog,
             table: *const schema.ManifestNode.TableInfo,
         ) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
+            const forest: *Forest = @alignCast(@fieldParentPtr("manifest_log", manifest_log));
             assert(forest.progress.? == .open);
             assert(table.label.level < constants.lsm_levels);
             assert(table.label.event != .remove);
@@ -400,7 +400,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
+            const forest: *Forest = @alignCast(@fieldParentPtr("manifest_log", manifest_log));
             assert(forest.progress.? == .open);
             forest.verify_tables_recovered();
 
@@ -639,7 +639,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             tree_id: u16,
             values_consumed: u64,
         ) void {
-            const forest: *Forest = @fieldParentPtr("resource_pool", pool);
+            const forest: *Forest = @alignCast(@fieldParentPtr("resource_pool", pool));
 
             switch (Forest.tree_id_cast(tree_id)) {
                 inline else => |id| {
@@ -668,7 +668,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
+            const forest: *Forest = @alignCast(@fieldParentPtr("manifest_log", manifest_log));
 
             assert(forest.progress.? == .compact);
             assert(!forest.progress.?.compact.manifest_log_done);
@@ -831,7 +831,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
+            const forest: *Forest = @alignCast(@fieldParentPtr("manifest_log", manifest_log));
             assert(forest.progress.? == .checkpoint);
             forest.verify_table_extents();
             forest.verify_tables_recovered();
