@@ -45,11 +45,6 @@ const ChangeEventsFilter = tb.ChangeEventsFilter;
 const ChangeEvent = tb.ChangeEvent;
 const ChangeEventType = tb.ChangeEventType;
 
-const Params = struct {
-    name: []const u8 = "scan",
-};
-const PerfEventBlock = @import("lsm/perf_event.zig").PerfEventBlockType(Params);
-
 pub const tree_ids = struct {
     pub const Account = .{
         .id = 1,

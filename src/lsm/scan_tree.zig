@@ -10,12 +10,6 @@ const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
-const perf = @import("perf_event.zig");
-
-const Params = struct {
-    name: []const u8 = "scan",
-};
-
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -134,64 +128,6 @@ pub fn ScanTreeType(
             );
         };
 
-        const DummyIterator = struct {
-            // We can simply reslice as in the old one.
-            // So we need the immutable values as values.
-            values: []const Value,
-            direction: Direction,
-            key_end: Key,
-            pub fn init(table_immutable_values: []const Value, key_end: Key, direction: Direction) DummyIterator {
-                return .{
-                    .values = table_immutable_values,
-                    .direction = direction,
-                    .key_end = key_end,
-                };
-            }
-
-            pub fn peek(iterator: *const DummyIterator) error{ Drained, Empty }!Key {
-                if (iterator.values.len == 0) return error.Empty;
-
-                const value: *const Value = switch (iterator.direction) {
-                    .ascending => &iterator.values[0],
-                    .descending => &iterator.values[iterator.values.len - 1],
-                };
-
-                const key = key_from_value(value);
-
-                switch (iterator.direction) {
-                    .ascending => if (key > iterator.key_end) return error.Empty else return key,
-                    .descending => if (key < iterator.key_end) return error.Empty else return key,
-                }
-            }
-            pub fn pop(iterator: *DummyIterator) Value {
-                assert(iterator.values.len > 0);
-
-                // TableMemory already deduplicates.
-                switch (iterator.direction) {
-                    .ascending => {
-                        assert(iterator.values.len <= 1 or
-                            key_from_value(&iterator.values[0]) !=
-                                key_from_value(&iterator.values[1]));
-
-                        const value_first = iterator.values[0];
-                        iterator.values = iterator.values[1..];
-                        assert(key_from_value(&value_first) <= iterator.key_end);
-                        return value_first;
-                    },
-                    .descending => {
-                        assert(iterator.values.len <= 1 or
-                            key_from_value(&iterator.values[iterator.values.len - 1]) !=
-                                key_from_value(&iterator.values[iterator.values.len - 2]));
-
-                        const value_last = iterator.values[iterator.values.len - 1];
-                        iterator.values = iterator.values[0 .. iterator.values.len - 1];
-                        assert(key_from_value(&value_last) >= iterator.key_end);
-                        return value_last;
-                    },
-                }
-            }
-        };
-
         tree: *Tree,
         buffer: *const ScanBuffer,
 
@@ -260,27 +196,23 @@ pub fn ScanTreeType(
                 break :blk values[range.start..][0..range.count];
             };
 
-            const context = tree.table_immutable.iterator_context_range(.{ .min = key_min, .max = key_max });
+            const context = tree.table_immutable.iterator_context_range(
+                .{ .min = key_min, .max = key_max },
+                direction,
+            );
             var count: u32 = 0;
 
             for (0..context.streams_count) |s_i| {
                 count += @intCast(context.streams[s_i].len);
             }
-            // BUG: we push down max key but not min key
-            //       That means we have to possible iterate through the full table.
             var table_immutable_iterator: ImmutableTableIterator = .init(
                 context,
                 if (direction == .ascending) key_max else key_min,
                 direction,
-                count,
             );
 
-            //var param = Params{ .name = "main prune" };
-            //var block = perf.PerfEventBlockType(Params).init(&param, true);
-
-            //var counter: u32 = 0;
             while (true) {
-                // if the slice is empty we just return here and leave it to handle in the core logic.
+                // if the slice is empty we just return here and leave it to handle in the core.
                 const key_peek = table_immutable_iterator.peek() catch break;
                 switch (direction) {
                     .ascending => {
@@ -291,10 +223,7 @@ pub fn ScanTreeType(
                     },
                 }
                 _ = table_immutable_iterator.pop() catch unreachable;
-                //counter += 1;
             }
-            //block.set_scale(counter);
-            //block.deinit();
 
             return .{
                 .tree = tree,
@@ -441,12 +370,9 @@ pub fn ScanTreeType(
                 field.* = slice;
             }
             // reslice it now for our iterator too.
-            //var param = Params{ .name = "reslice" };
-            //var block = perf.PerfEventBlockType(Params).init(&param, true);
-            //var counter: u32 = 0;
 
             while (true) {
-                // if the slice is empty we just return here and leave it to handle in the core logic.
+                // if the slice is empty we just return here and leave it to handle in the core.
                 const key_peek = self.table_immutable_iterator.peek() catch break;
                 switch (self.direction) {
                     .ascending => {
@@ -608,7 +534,6 @@ pub fn ScanTreeType(
             // Abstract direction away and peek + pop until we find the `key`
             switch (direction) {
                 .ascending => {
-                    // This returns the first index of the match.
                     const start = binary_search.binary_search_values_upsert_index(
                         Key,
                         Value,
@@ -622,8 +547,6 @@ pub fn ScanTreeType(
                 },
                 .descending => {
                     const end = end: {
-                        // This returns the last index of the match.
-                        // e.g. makes sense since it is reversed.
                         const index = binary_search.binary_search_values_upsert_index(
                             Key,
                             Value,
@@ -632,10 +555,6 @@ pub fn ScanTreeType(
                             key,
                             .{ .mode = .upper_bound },
                         );
-                        // What does this do?
-                        // adjust to be exactly one before our search key.
-                        // Ah since slicing is not inclusive!
-                        // that means in the new impl. we can exactly end at where key would be.
                         break :end index + @intFromBool(
                             index < values.len and key_from_value(&values[index]) <= key,
                         );

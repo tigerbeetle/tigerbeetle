@@ -85,6 +85,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         // At most: LSM compactions + one sort() call + one immutable run for `absorb`.
         const sorted_runs_max = constants.lsm_compaction_ops + 2;
 
+        const KeyRange = struct {
+            min: Key,
+            max: Key,
+        };
+
         // Merge context for the k-way iterator across all runs in the tracker.
         pub const MergeContext = struct {
             streams: [sorted_runs_max][]const Value,
@@ -246,12 +251,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
         };
 
-        // TODO:
-        // - needs to track how much consumed
-        // - needs to track how much dropped
-        // - needs to track how much are left. (max - consumed)
-        // - damn this must be resetted per iteration for compaction.
-        // TODO: Should we make this comptime.
         pub const ImmutableTableIterator = struct {
             merge_context: MergeContext,
             k_way_iterator: KWayMergeIterator,
@@ -265,17 +264,20 @@ pub fn TableMemoryType(comptime Table: type) type {
             counters: struct {
                 input: u32 = 0, // This is the input count of the immutabl table.
                 dropped: u32 = 0, // Tombstones.
-                out: u32 = 0, // How many we handed out. input - (dropped + out ) is how much is still remaning.
+                out: u32 = 0, // How many we handed out. input - (dropped + out ) how much remaning.
             } = .{},
 
             pub fn init(
                 merge_context: MergeContext,
                 maybe_key_end: ?Key,
                 direction: Direction,
-                count_input: u32,
             ) ImmutableTableIterator {
                 var context = merge_context;
                 context.direction = direction;
+                var count_input: usize = 0;
+                for (context.streams[0..context.streams_count]) |stream| {
+                    count_input += stream.len;
+                }
                 return .{
                     .merge_context = context,
                     .k_way_iterator = undefined,
@@ -286,7 +288,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .end_reached = false,
                     .initialized = false,
                     .counters = .{
-                        .input = count_input,
+                        .input = @intCast(count_input),
                     },
                 };
             }
@@ -300,12 +302,13 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             pub fn count_remaining(iterator: *const ImmutableTableIterator) u32 {
-                return iterator.counters.input - (iterator.counters.out + iterator.counters.dropped);
+                return iterator.counters.input - (iterator.counters.out +
+                    iterator.counters.dropped);
             }
 
             fn ensure_initialized(iterator: *ImmutableTableIterator) void {
                 if (iterator.initialized) {
-                    // Iterator structs are frequently copied; rebind the context pointer after moves.
+                    // Iterator structs are frequently copied; rebind the context pointer after.
                     iterator.k_way_iterator.context = &iterator.merge_context;
                     return;
                 }
@@ -350,9 +353,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                             return;
                         }
                         // Here we really reached the end and not the end of the range.
-                        assert(
-                            iterator.counters.input == (iterator.counters.out + iterator.counters.dropped),
-                        );
+                        const consumed = iterator.counters.out + iterator.counters.dropped;
+                        assert(iterator.counters.input == consumed);
 
                         iterator.end_reached = true;
                         return error.Empty;
@@ -365,14 +367,9 @@ pub fn TableMemoryType(comptime Table: type) type {
                         const pending_key = key_from_value(&pending_value);
 
                         if (key == pending_key) {
-                            iterator.pending = dedup: {
-                                if (Table.usage == .secondary_index) {
-                                    assert(Table.tombstone(&pending_value) !=
-                                        Table.tombstone(&value));
-                                    break :dedup null;
-                                } else break :dedup value;
-                            };
-                            iterator.counters.dropped += 1;
+                            const dedup_result = dedup_pending(pending_value, value);
+                            iterator.pending = dedup_result.next_pending;
+                            iterator.counters.dropped += dedup_result.dropped_count;
                             continue;
                         }
 
@@ -397,12 +394,15 @@ pub fn TableMemoryType(comptime Table: type) type {
                 }
             }
 
-            inline fn dedup_same_key(pending: Value, value: Value) ?Value {
+            inline fn dedup_pending(pending: Value, value: Value) struct {
+                next_pending: ?Value,
+                dropped_count: u32,
+            } {
                 if (Table.usage == .secondary_index) {
                     assert(Table.tombstone(&pending) != Table.tombstone(&value));
-                    return null;
+                    return .{ .next_pending = null, .dropped_count = 2 };
                 }
-                return value;
+                return .{ .next_pending = value, .dropped_count = 1 };
             }
 
             inline fn within_range(iterator: *ImmutableTableIterator, key: Key) bool {
@@ -449,8 +449,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                         // Effect: consume both and produce nothing for this key.
                         self.pending = null; // drop both
                     } else {
-                        // The last value in a run of duplicates needs to be the one that ends up in
-                        // target.
+                        // The last value in a run of duplicates needs to be the one that ends up
+                        // in  target.
                         // Effect: keep the slot, overwrite winner with the newer value.
                         self.pending = value; // last wins
                     }
@@ -514,7 +514,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             };
 
             // TODO This would ideally be value_count_limit, but needs to be value_count_max to
-            // ensure that memory table coalescing is deterministic even if the batch limit changes.
+            // ensure that memory table coalescing is deterministic even if the batch limit
+            // changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
         }
@@ -612,40 +613,51 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table_immutable.mutability == .immutable);
             // push down stream.
             // reslice them they could be empty?
-            return table_immutable.value_context.run_tracker.merge_context(table_immutable.values_used());
+            return table_immutable.value_context.run_tracker.merge_context(
+                table_immutable.values_used(),
+            );
         }
 
-        pub fn iterator_context_range(table_immutable: *TableMemory, range: struct { min: Key, max: Key }) MergeContext {
+        inline fn slice_run_for_range(values: []const Value, range_in: KeyRange) ?[]const Value {
+            const range_slice = binary_search.binary_search_values_range(
+                Key,
+                Value,
+                key_from_value,
+                values,
+                range_in.min,
+                range_in.max,
+            );
+            if (range_slice.count == 0) return null;
+            return values[range_slice.start..][0..range_slice.count];
+        }
+
+        pub fn iterator_context_range(
+            table_immutable: *TableMemory,
+            range: KeyRange,
+            direction: Direction,
+        ) MergeContext {
             assert(table_immutable.mutability == .immutable);
             // push down stream.
             // reslice them they could be empty?
-            var context = table_immutable.value_context.run_tracker.merge_context(table_immutable.values_used());
+            var context = table_immutable.value_context.run_tracker.merge_context(
+                table_immutable.values_used(),
+            );
+            context.direction = direction;
 
             var target_index: u32 = 0;
             var source_index: u32 = 0;
 
             while (source_index < context.streams_count) : (source_index += 1) {
                 const run_min = key_from_value(&context.streams[source_index][0]);
-                const run_max = key_from_value(&context.streams[source_index][context.streams[source_index].len - 1]);
-                // BUG + TODO: We need to reslice based on directio!
+                const run_max = key_from_value(
+                    &context.streams[source_index][context.streams[source_index].len - 1],
+                );
                 if (range.min <= run_max and range.max >= run_min) {
-                    // re-slice.
-                    context.streams[target_index] = blk: {
-                        const values = context.streams[source_index];
-                        // This returns the first index of the match.
-                        const start = binary_search.binary_search_values_upsert_index(
-                            Key,
-                            Value,
-                            key_from_value,
-                            values,
-                            range.min,
-                            .{ .mode = .lower_bound },
-                        );
-                        break :blk if (start == values.len) &.{} else values[start..];
-                    };
-                    assert(context.streams[target_index].len > 0); // otherwise we should have pruned
-                    context.stream_origins[target_index] = context.stream_origins[source_index];
-                    target_index += 1;
+                    if (slice_run_for_range(context.streams[source_index], range)) |run_slice| {
+                        context.streams[target_index] = run_slice;
+                        context.stream_origins[target_index] = context.stream_origins[source_index];
+                        target_index += 1;
+                    }
                 }
             }
             context.streams_count = target_index;
@@ -669,7 +681,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_mutable.value_context.run_tracker.assert_invariants(table_mutable.count());
 
             std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
-            std.mem.swap(ValueContext, &table_mutable.value_context, &table_immutable.value_context);
+            std.mem.swap(
+                ValueContext,
+                &table_mutable.value_context,
+                &table_immutable.value_context,
+            );
 
             table_mutable.reset();
             table_immutable.finalize(snapshot_min);
@@ -694,9 +710,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             if (table_mutable.count() == 0) return;
 
-            // TODO: we make the immutable table sorted sorted
             // BUG: probably a performance bug.
-
             const radix_buffer_values = table_mutable.mutability.mutable.radix_buffer.acquire(
                 Value,
                 table_immutable.count(),
@@ -980,7 +994,6 @@ test "table_memory: merge and absorb (last wins across streams)" {
     table_mutable.sort();
 
     table_immutable.compact(&table_mutable, 0);
-    assert(table_immutable.sorted());
     assert(table_mutable.count() == 0);
 
     table_mutable.put(&Value{ .key = 2, .version = 1, .tombstone = false });
@@ -989,13 +1002,37 @@ test "table_memory: merge and absorb (last wins across streams)" {
 
     table_immutable.absorb(&table_mutable, 0);
 
-    assert(table_immutable.sorted());
     assert(table_mutable.count() == 0);
-    assert(table_immutable.count() == 3);
+    try testing.expectEqual(@as(u32, 4), table_immutable.count());
+    try testing.expectEqual(@as(u32, 2), table_immutable.value_context.run_tracker.count());
+
+    // Even though both runs are retained, reading should prefer the newest version.
+    const latest = table_immutable.get(2).?;
+    try testing.expectEqual(@as(u32, 1), latest.version);
+    try testing.expectEqual(false, latest.tombstone);
+
+    const run_1_context = table_immutable.iterator_context();
+    var iterator = TableMemory.ImmutableTableIterator.init(
+        run_1_context,
+        null,
+        .ascending,
+    );
+
+    var merged: [Table.value_count_max]Value = undefined;
+    var merged_len: usize = 0;
+    while (true) {
+        const value = iterator.pop() catch |err| switch (err) {
+            error.Empty => break,
+            error.Drained => unreachable,
+        };
+        merged[merged_len] = value;
+        merged_len += 1;
+    }
+
+    try testing.expectEqual(@as(usize, 3), merged_len);
 
     var keys: [3]struct { Table.Key, u32 } = undefined;
-
-    for (table_immutable.values_used(), 0..) |value, i| {
+    for (merged[0..3], 0..) |value, i| {
         keys[i] = .{ value.key, value.version };
     }
 
@@ -1043,13 +1080,36 @@ test "table_memory: compact and deduplicate across runs" {
     table_mutable.sort_suffix();
 
     table_immutable.compact(&table_mutable, 0);
-    assert(table_immutable.sorted());
     assert(table_mutable.count() == 0);
-    assert(table_immutable.count() == 1);
+    try testing.expectEqual(@as(u32, 2), table_immutable.count());
+    try testing.expectEqual(@as(u32, 2), table_immutable.value_context.run_tracker.count());
+
+    const latest = table_immutable.get(2).?;
+    try testing.expectEqual(@as(u32, 3), latest.version);
+
+    const merge_context = table_immutable.iterator_context();
+    var iterator = TableMemory.ImmutableTableIterator.init(
+        merge_context,
+        null,
+        .ascending,
+    );
+
+    var merged: [Table.value_count_max]Value = undefined;
+    var merged_len: usize = 0;
+    while (true) {
+        const value = iterator.pop() catch |err| switch (err) {
+            error.Empty => break,
+            error.Drained => unreachable,
+        };
+        merged[merged_len] = value;
+        merged_len += 1;
+    }
+
+    try testing.expectEqual(@as(usize, 1), merged_len);
 
     var keys: [1]struct { Table.Key, u32 } = undefined;
 
-    for (table_immutable.values_used(), 0..) |value, i| {
+    for (merged[0..1], 0..) |value, i| {
         keys[i] = .{ value.key, value.version };
     }
 
@@ -1091,7 +1151,6 @@ test "table_memory (secondary): annhiliation yields zero after deduplicate" {
     table_mutable.sort_suffix();
 
     table_immutable.compact(&table_mutable, 0);
-    assert(table_immutable.sorted());
     assert(table_mutable.count() == 0);
     assert(table_immutable.count() == 0);
 }

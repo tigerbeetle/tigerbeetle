@@ -627,7 +627,6 @@ pub fn CompactionType(
                         compaction.tree.table_immutable.iterator_context(),
                         null,
                         .ascending,
-                        compaction.tree.table_immutable.count(),
                     ),
                 };
 
@@ -1560,7 +1559,6 @@ pub fn CompactionType(
                 .value_block_values()[compaction.table_builder.value_count..];
 
             // TODO: reenable this check again.
-            // This check is fine we could reanble it.
             //inline for ([_]?[]const Value{
             //values_source_a,
             //values_source_b,
@@ -1597,7 +1595,6 @@ pub fn CompactionType(
                         .produced = copy_result.produced,
                     };
                 } else {
-                    // I think we need this in addition for our same.
                     // TODO we whould probably return copy result here too!
                     const dropped_before = values_source_a.?.count_dropped();
                     const remaining_before = values_source_a.?.count_remaining();
@@ -1608,7 +1605,10 @@ pub fn CompactionType(
                     );
                     const dropped_after = values_source_a.?.count_dropped();
                     const remaining_after = values_source_a.?.count_remaining();
-                    assert(consumed + (dropped_after - dropped_before) == (remaining_before - remaining_after));
+                    assert(
+                        consumed + (dropped_after - dropped_before) ==
+                            (remaining_before - remaining_after),
+                    );
                     break :blk .{
                         .consumed_a = remaining_before - remaining_after,
                         .consumed_b = 0,
@@ -1629,9 +1629,7 @@ pub fn CompactionType(
             return merge_result;
         }
 
-        // TODO specialize for immutable and disk
         fn merge_disk(compaction: *Compaction) MergeResult {
-            // this must be specialized
             const values_source_a, const values_source_b = compaction.merge_inputs_disk();
             assert(values_source_a != null or values_source_b != null);
 
@@ -1662,7 +1660,6 @@ pub fn CompactionType(
                 };
             } else if (values_source_b == null) blk: {
                 if (compaction.drop_tombstones) {
-                    // I think we need this in addition for our primary tables.
                     const copy_result = values_copy_drop_tombstones(
                         values_target,
                         values_source_a.?,
@@ -1674,7 +1671,6 @@ pub fn CompactionType(
                         .produced = copy_result.produced,
                     };
                 } else {
-                    // I think we need this in addition for our same.
                     const consumed = values_copy(values_target, values_source_a.?);
                     break :blk .{
                         .consumed_a = consumed,
@@ -1683,8 +1679,6 @@ pub fn CompactionType(
                         .produced = consumed,
                     };
                 }
-
-                // we need to specialize this too.
             } else values_merge(
                 values_target,
                 values_source_a.?,
@@ -1694,7 +1688,6 @@ pub fn CompactionType(
             return merge_result;
         }
 
-        // TODO: I think this is the main function I need to touch for now.
         fn merge_callback(next_tick: *Grid.NextTick) void {
             const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
             const compaction: *Compaction = cpu.parent(Compaction);
@@ -1743,14 +1736,10 @@ pub fn CompactionType(
             compaction.compaction_dispatch();
         }
 
-        fn merge_inputs_immutable(compaction: *Compaction) struct { ?*ImmutableTableIterator, ?[]const Value } {
-            // - the immutable table iterator must track that actually.
-            // - we then just pass it in the fuctions and return it here as well.
-            // - we can just move it out of this function too.
-            // - tracks count_max and tracks how much are still remaining
-            // - must be initialized with the budget.
-            // Curerntly this function simply returns the iterator if there is one
-            // and in future must also return the budget.
+        fn merge_inputs_immutable(compaction: *Compaction) struct {
+            ?*ImmutableTableIterator,
+            ?[]const Value,
+        } {
             const level_a_values_used: ?*ImmutableTableIterator = values: {
                 switch (compaction.table_info_a.?) {
                     .immutable => {
@@ -1785,7 +1774,10 @@ pub fn CompactionType(
             return .{ level_a_values_used, level_b_values };
         }
 
-        fn merge_inputs_disk(compaction: *const Compaction) struct { ?[]const Value, ?[]const Value } {
+        fn merge_inputs_disk(compaction: *const Compaction) struct {
+            ?[]const Value,
+            ?[]const Value,
+        } {
             const level_a_values_used: ?[]const Value = values: {
                 switch (compaction.table_info_a.?) {
                     .immutable => {
@@ -2034,7 +2026,9 @@ pub fn CompactionType(
             assert(values_target.len <= Table.data.value_count_max);
 
             var index_target: u32 = 0;
-            while (index_target < budget_iterator and index_target < values_target.len) : (index_target += 1) {
+            while (index_target < budget_iterator and
+                index_target < values_target.len) : (index_target += 1)
+            {
                 const value_in = values_iterator.pop() catch break;
                 values_target[index_target] = value_in;
             }
@@ -2180,8 +2174,6 @@ pub fn CompactionType(
             while (index_source_a < budget_iterator and index_source_b < values_source_b.len and
                 index_target < values_target.len)
             {
-                // BUG: This must be peek! We pop later only when the element is the one we choose
-                //const value_a = iterator_source_a.pop() catch break;
                 const key_a = iterator_source_a.peek() catch break;
                 const value_b = &values_source_b[index_source_b];
                 switch (std.math.order(key_a, key_from_value(value_b))) {
@@ -2217,15 +2209,12 @@ pub fn CompactionType(
             }
             const remaining_after_iterator = iterator_source_a.count_remaining();
             const dropped_after_iterator = iterator_source_a.count_dropped();
-            // BUG Check dropped etc.
-            // TODO: fiz those counters there!
-            // Think about dropped here for a second.
-            // Should this include the iterator state!
             const merge_result: MergeResult = .{
-                // remaining_before - remaining_after
                 .consumed_a = remaining_before_iterator - remaining_after_iterator,
                 .consumed_b = @intCast(index_source_b),
-                .dropped = (dropped_after_iterator - dropped_before_iterator) + @as(u32, @intCast(index_source_a + index_source_b - index_target)),
+                .dropped = (dropped_after_iterator - dropped_before_iterator) + @as(u32, @intCast(
+                    index_source_a + index_source_b - index_target,
+                )),
                 .produced = @intCast(index_target),
             };
             assert(merge_result.consumed_a > 0 or merge_result.consumed_b > 0);
