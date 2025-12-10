@@ -44,6 +44,7 @@ Remove-Item "$ZIG_ARCHIVE"
 
 # Replace these existing directories and files so that we can install or upgrade:
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue zig/doc, zig/lib
+New-Item -Path "zig" -ItemType Directory
 Move-Item "$ZIG_DIRECTORY/LICENSE" zig/
 Move-Item "$ZIG_DIRECTORY/README.md" zig/
 Move-Item "$ZIG_DIRECTORY/doc" zig/

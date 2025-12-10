@@ -103,6 +103,7 @@ rm "$ZIG_ARCHIVE"
 # Replace these existing directories and files so that we can install or upgrade:
 rm -rf zig/doc
 rm -rf zig/lib
+mkdir zig/
 mv "$ZIG_DIRECTORY/LICENSE" zig/
 mv "$ZIG_DIRECTORY/README.md" zig/
 mv "$ZIG_DIRECTORY/doc" zig/
