@@ -49,13 +49,9 @@ fn ScanMergeType(
             scan: *Scan,
             current: ?u64 = null,
 
-            fn peek(
-                self: *MergeScanStream,
-            ) Pending!?u64 { // FIXME:
+            fn peek(self: *MergeScanStream) Pending!?u64 {
                 if (self.current == null) {
-                    self.current = self.scan.next() catch |err| switch (err) {
-                        error.Pending => return error.Pending,
-                    };
+                    self.current = try self.scan.next();
                 }
                 maybe(self.current == null);
                 return self.current;

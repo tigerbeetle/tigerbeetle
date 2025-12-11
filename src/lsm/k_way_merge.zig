@@ -155,9 +155,7 @@ pub fn KWayMergeIteratorType(
             var contestants: [node_max]Node = @splat(sentinel);
             var contestants_count: u16 = 0;
             for (0..self.streams_count) |id| {
-                const key = stream_peek(self.context, @intCast(id)) catch |err| switch (err) {
-                    error.Pending => return error.Pending,
-                } orelse continue;
+                const key = try stream_peek(self.context, @intCast(id)) orelse continue;
                 contestants[id] = .{ .key = key, .stream_id = @intCast(id), .sentinel = false };
                 contestants_count += 1;
             }
@@ -244,9 +242,7 @@ pub fn KWayMergeIteratorType(
 
         fn next_contender(self: *KWayMergeIterator, stream_id: u32) Pending!Node {
             assert(stream_id < self.streams_count);
-            const next_key = stream_peek(self.context, stream_id) catch |err| switch (err) {
-                error.Pending => return error.Pending,
-            } orelse { // FIXME: simplify these.
+            const next_key = try stream_peek(self.context, stream_id) orelse {
                 self.streams_active -= 1;
                 return sentinel;
             };
