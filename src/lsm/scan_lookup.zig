@@ -164,7 +164,7 @@ pub fn ScanLookupType(
                 }
 
                 const timestamp = self.scan.next() catch |err| switch (err) {
-                    error.ReadAgain => {
+                    error.Pending => {
                         // The scan needs to be buffered again.
                         self.state = .scan;
                         break;

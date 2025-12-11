@@ -32,6 +32,7 @@ const maybe = stdx.maybe;
 
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
+const Pending = error{Pending};
 
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
@@ -93,11 +94,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             fn stream_peek(
                 context: *const MergeContext,
                 stream_index: u32,
-            ) error{ Empty, Drained }!Key {
+            ) Pending!?Key {
                 // TODO: Enable the asserts once `constants.verify` is disabled on release.
                 //assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
-                if (stream.len == 0) return error.Empty;
+                if (stream.len == 0) return null;
                 return key_from_value(&stream[0]);
             }
 
