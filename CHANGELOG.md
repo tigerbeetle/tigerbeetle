@@ -5,7 +5,26 @@ to receive notifications about breaking changes!
 
 ## TigerBeetle 0.16.67
 
-Released: 2025-11-28
+Released: 2025-12-12
+
+### Safety And Performance
+
+- [#3415](https://github.com/tigerbeetle/tigerbeetle/pull/3415)
+
+  Speed up VOPR storage and network during liveness mode for fast convergence, to avoid false
+  positives.
+
+- [#3402](https://github.com/tigerbeetle/tigerbeetle/pull/3402)
+
+  Don't discard high 16 bits of timestamp when generating ID's with the Node.js client.
+
+- [#3411](https://github.com/tigerbeetle/tigerbeetle/pull/3411)
+
+  Relax VOPR condition for truncating acked ops to prevent false positives.
+
+- [#3405](https://github.com/tigerbeetle/tigerbeetle/pull/3405)
+
+  Implement a micro-benchmarking harness, to protect the benchmarks from bitrot.
 
 ### Features
 
@@ -14,6 +33,23 @@ Released: 2025-11-28
   Add more documentation details around query multibatching.
 
 ### Internals
+
+- [#3414](https://github.com/tigerbeetle/tigerbeetle/pull/3414)
+
+  Make `Pending!?Value` the canonical stream signature. This type is chosen because it is the
+  orthogonal composition of iteration and asynchrony.
+
+- [#3417](https://github.com/tigerbeetle/tigerbeetle/pull/3417)
+
+  Prevent "out (disk) of space" failures during CI.
+
+- [#3396](https://github.com/tigerbeetle/tigerbeetle/pull/3396)
+
+  Make DSL for parsing positional CLI flags more natural.
+
+- [#3375](https://github.com/tigerbeetle/tigerbeetle/pull/3375)
+
+  Remove dead code from zig-zag merge join.
 
 - [#3389](https://github.com/tigerbeetle/tigerbeetle/pull/3389)
 
