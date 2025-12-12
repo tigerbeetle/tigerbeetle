@@ -921,6 +921,10 @@ pub const Storage = struct {
     }
 
     pub fn transition_to_liveness_mode(storage: *Storage) void {
+        storage.options.write_latency_mean = .ms(1);
+        storage.options.write_latency_min = .ms(1);
+        storage.options.read_latency_mean = .ms(1);
+        storage.options.read_latency_min = .ms(1);
         storage.options.read_fault_probability = Ratio.zero();
         storage.options.write_fault_probability = Ratio.zero();
         storage.options.write_misdirect_probability = Ratio.zero();
