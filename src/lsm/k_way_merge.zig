@@ -29,6 +29,7 @@ const math = std.math;
 const mem = std.mem;
 
 const Direction = @import("../direction.zig").Direction;
+const Pending = error{Pending};
 
 const Options = struct {
     streams_max: u32,
@@ -43,13 +44,13 @@ pub fn KWayMergeIteratorType(
     comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
-    /// Returns Drained if the stream was consumed and
+    /// Returns Pending if the stream was consumed and
     /// must be refilled before calling peek() again.
-    /// Returns Empty if the stream was fully consumed and reached the end.
+    /// Returns null if the stream was fully consumed and reached the end.
     comptime stream_peek: fn (
         context: *Context,
         stream_index: u32,
-    ) error{ Empty, Drained }!Key,
+    ) Pending!?Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
     /// Returns true if stream A has higher precedence than stream B.
     /// This is used to break ties across streams.
@@ -102,7 +103,7 @@ pub fn KWayMergeIteratorType(
                 const ordered = if (direction == .ascending) a.key < b.key else a.key > b.key;
                 const stabler = (a.key == b.key) and
                     stream_precedence(ctx, a.stream_id, b.stream_id);
-                return ordered or stabler; // “true”  means  a  loses
+                return ordered or stabler; // “true”  means  a wins.
             }
         };
 
@@ -144,7 +145,7 @@ pub fn KWayMergeIteratorType(
             };
         }
 
-        fn load(self: *KWayMergeIterator) error{Drained}!void {
+        fn load(self: *KWayMergeIterator) Pending!void {
             assert(self.state == .loading);
             assert(self.nodes_count == 0);
             assert(self.tree_height == 0);
@@ -154,10 +155,7 @@ pub fn KWayMergeIteratorType(
             var contestants: [node_max]Node = @splat(sentinel);
             var contestants_count: u16 = 0;
             for (0..self.streams_count) |id| {
-                const key = stream_peek(self.context, @intCast(id)) catch |err| switch (err) {
-                    error.Empty => continue,
-                    error.Drained => return error.Drained,
-                };
+                const key = try stream_peek(self.context, @intCast(id)) orelse continue;
                 contestants[id] = .{ .key = key, .stream_id = @intCast(id), .sentinel = false };
                 contestants_count += 1;
             }
@@ -202,7 +200,7 @@ pub fn KWayMergeIteratorType(
             self.state = .iterating;
         }
 
-        pub fn pop(self: *KWayMergeIterator) error{Drained}!?Value {
+        pub fn pop(self: *KWayMergeIterator) Pending!?Value {
             if (self.state == .loading) try self.load();
             assert(self.state == .iterating);
 
@@ -218,7 +216,7 @@ pub fn KWayMergeIteratorType(
             return null;
         }
 
-        fn next(self: *KWayMergeIterator) error{Drained}!?Value {
+        fn next(self: *KWayMergeIterator) Pending!?Value {
             const direction = self.direction;
             const stream_id = self.contender.stream_id;
             assert(!self.contender.sentinel);
@@ -242,14 +240,11 @@ pub fn KWayMergeIteratorType(
             return stream_pop(self.context, self.contender.stream_id);
         }
 
-        fn next_contender(self: *KWayMergeIterator, stream_id: u32) error{Drained}!Node {
+        fn next_contender(self: *KWayMergeIterator, stream_id: u32) Pending!Node {
             assert(stream_id < self.streams_count);
-            const next_key = stream_peek(self.context, stream_id) catch |err| switch (err) {
-                error.Drained => return error.Drained,
-                error.Empty => {
-                    self.streams_active -= 1;
-                    return sentinel;
-                },
+            const next_key = try stream_peek(self.context, stream_id) orelse {
+                self.streams_active -= 1;
+                return sentinel;
             };
             return .{ .key = next_key, .stream_id = stream_id, .sentinel = false };
         }
@@ -309,9 +304,9 @@ fn TestContextType(comptime streams_max: u32) type {
         fn stream_peek(
             context: *const TestContext,
             stream_index: u32,
-        ) error{ Empty, Drained }!u32 {
+        ) Pending!?u32 {
             const stream = context.streams[stream_index];
-            if (stream.len == 0) return error.Empty;
+            if (stream.len == 0) return null;
             return stream[0].key;
         }
 
@@ -485,6 +480,7 @@ test "k_way_merge: unit" {
 
 fn FuzzTestContextType(comptime streams_max: u32) type {
     const testing = std.testing;
+    const ratio = stdx.PRNG.ratio;
 
     return struct {
         const FuzzTestContext = @This();
@@ -500,14 +496,11 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
         fn fuzz_stream_peek(
             context: *const FuzzTestContext,
             stream_index: u32,
-        ) error{ Empty, Drained }!u32 {
-            switch (context.prng.enum_weighted(
-                enum { normal, drained },
-                .{ .normal = 95, .drained = 5 },
-            )) {
-                .normal => return context.inner.stream_peek(stream_index),
-                .drained => return error.Drained,
+        ) Pending!?u32 {
+            if (context.prng.chance(ratio(5, 100))) {
+                return error.Pending;
             }
+            return context.inner.stream_peek(stream_index);
         }
 
         fn stream_pop(context: *FuzzTestContext, stream_index: u32) Value {

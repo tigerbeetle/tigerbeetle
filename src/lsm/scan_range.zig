@@ -2,6 +2,7 @@ const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 
 const Direction = @import("../direction.zig").Direction;
+const Pending = error{Pending};
 
 /// Apply a custom filter and/or stop-condition when scanning a range of values.
 pub const EvaluateNext = enum {
@@ -71,7 +72,7 @@ pub fn ScanRangeType(
             context.callback(context, parent);
         }
 
-        pub fn next(scan: *ScanRange) error{ReadAgain}!?u64 {
+        pub fn next(scan: *ScanRange) Pending!?u64 {
             while (try scan.scan_tree.next()) |value| {
                 if (Tree.Table.tombstone(&value)) continue;
 

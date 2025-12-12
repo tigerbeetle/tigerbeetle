@@ -164,7 +164,7 @@ pub fn ScanLookupType(
                 }
 
                 const timestamp = self.scan.next() catch |err| switch (err) {
-                    error.ReadAgain => {
+                    error.Pending => {
                         // The scan needs to be buffered again.
                         self.state = .scan;
                         break;
@@ -196,7 +196,7 @@ pub fn ScanLookupType(
                     timestamp,
                 )) {
                     // Since the scan already found the key,
-                    // we don't expected `negative` here.
+                    // we don't expect `negative` here.
                     .negative => unreachable,
 
                     // Object is cached in memory,

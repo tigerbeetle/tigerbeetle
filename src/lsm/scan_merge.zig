@@ -10,6 +10,7 @@ const Direction = @import("../direction.zig").Direction;
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 const ZigZagMergeIteratorType = @import("zig_zag_merge.zig").ZigZagMergeIteratorType;
 const ScanType = @import("scan_builder.zig").ScanType;
+const Pending = error{Pending};
 
 /// Union ∪ operation over an array of non-specialized `Scan` instances.
 /// At a high level, this is an ordered iterator over the set-union of the timestamps of
@@ -48,15 +49,12 @@ fn ScanMergeType(
             scan: *Scan,
             current: ?u64 = null,
 
-            fn peek(
-                self: *MergeScanStream,
-            ) error{ Empty, Drained }!u64 {
+            fn peek(self: *MergeScanStream) Pending!?u64 {
                 if (self.current == null) {
-                    self.current = self.scan.next() catch |err| switch (err) {
-                        error.ReadAgain => return error.Drained,
-                    };
+                    self.current = try self.scan.next();
                 }
-                return self.current orelse error.Empty;
+                maybe(self.current == null);
+                return self.current;
             }
 
             fn pop(self: *MergeScanStream) u64 {
@@ -218,21 +216,21 @@ fn ScanMergeType(
 
         /// Moves the iterator to the next position and returns its `Value` or `null` if the
         /// iterator has no more values to iterate.
-        /// May return `error.ReadAgain` if the scan needs to be loaded, in this case
+        /// May return `error.Pending` if the scan needs to be loaded, in this case
         /// call `read()` and resume the iteration after the read callback.
-        pub fn next(self: *ScanMerge) error{ReadAgain}!?u64 {
+        pub fn next(self: *ScanMerge) Pending!?u64 {
             switch (self.state) {
                 .idle => {
                     assert(self.merge_iterator == null);
-                    return error.ReadAgain;
+                    return error.Pending;
                 },
                 .seeking => return self.merge_iterator.?.pop() catch |err| switch (err) {
-                    error.Drained => {
+                    error.Pending => {
                         self.state = .needs_data;
-                        return error.ReadAgain;
+                        return error.Pending;
                     },
                 },
-                .needs_data => return error.ReadAgain,
+                .needs_data => return error.Pending,
                 .buffering, .aborted => unreachable,
             }
         }
@@ -334,7 +332,7 @@ fn ScanMergeType(
         fn merge_stream_peek(
             self: *ScanMerge,
             stream_index: u32,
-        ) error{ Empty, Drained }!u64 {
+        ) Pending!?u64 {
             assert(stream_index < self.streams.count());
 
             var stream = &self.streams.slice()[stream_index];

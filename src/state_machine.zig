@@ -4793,7 +4793,7 @@ fn ChangeEventsScanLookupType(
             assert(self.state == .scan);
 
             while (scan_tree.next() catch |err| switch (err) {
-                error.ReadAgain => {
+                error.Pending => {
                     self.scan_tree.read({}, &scan_read_callback);
                     return;
                 },
