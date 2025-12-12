@@ -103,7 +103,7 @@ pub fn KWayMergeIteratorType(
                 const ordered = if (direction == .ascending) a.key < b.key else a.key > b.key;
                 const stabler = (a.key == b.key) and
                     stream_precedence(ctx, a.stream_id, b.stream_id);
-                return ordered or stabler; // “true”  means  a  loses
+                return ordered or stabler; // “true”  means  a wins.
             }
         };
 

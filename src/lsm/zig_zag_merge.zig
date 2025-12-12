@@ -143,7 +143,7 @@ pub fn ZigZagMergeIteratorType(
                             }),
                     );
 
-                    // The keys matches, continuing to the next stream.
+                    // The keys match, continuing to the next stream.
                     if (key == probe_key) continue;
 
                     if (it.key_ahead(.{ .key_after = key, .key_before = probe_key })) {
@@ -196,7 +196,7 @@ pub fn ZigZagMergeIteratorType(
                 if (pending.isSet(stream_index)) {
                     // Probing the pending stream will update the key range for the next read.
                     stream_probe(it.context, @intCast(stream_index), probe_key);
-                    // The stream must remain pending after probed.
+                    // The stream must remain pending after being probed.
                     assert(stream_peek(it.context, @intCast(stream_index)) == Pending.Pending);
                 } else {
                     // At this point, all the buffered streams must have produced a matching key.
