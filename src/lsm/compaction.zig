@@ -270,12 +270,14 @@ pub fn CompactionType(
         const TableInfoReference = Manifest.TableInfoReference;
         const CompactionRange = Manifest.CompactionRange;
 
+        const ImmutableTableIterator = Tree.TableMemory.ImmutableTableIterator;
+
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
         const TableInfoA = union(enum) {
-            immutable: []Value,
+            immutable: ImmutableTableIterator,
             disk: TableInfoReference,
         };
 
@@ -499,7 +501,7 @@ pub fn CompactionType(
             if (compaction.table_info_a.? == .immutable) {
                 assert(compaction.level_a_value_block.empty());
                 if (compaction.level_a_immutable_stage != .exhausted) {
-                    values_in_flight += compaction.table_info_a.?.immutable.len;
+                    values_in_flight += compaction.table_info_a.?.immutable.count_max();
                 }
             }
 
@@ -620,7 +622,12 @@ pub fn CompactionType(
                 }
 
                 compaction.table_info_a = .{
-                    .immutable = compaction.tree.table_immutable.values_used(),
+                    //.immutable = compaction.tree.table_immutable.values_used(),
+                    .immutable = .init(
+                        compaction.tree.table_immutable.iterator_context(),
+                        null,
+                        .ascending,
+                    ),
                 };
 
                 compaction.range_b = compaction.tree.manifest.immutable_table_compaction_range(
@@ -727,7 +734,7 @@ pub fn CompactionType(
                 return 0;
             } else {
                 if (compaction.table_info_a.? == .immutable) {
-                    compaction.counters.in += compaction.table_info_a.?.immutable.len;
+                    compaction.counters.in += compaction.table_info_a.?.immutable.count_max();
                 }
                 return compaction.quotas.bar;
             }
@@ -1534,23 +1541,102 @@ pub fn CompactionType(
             compaction.grid.on_next_tick(merge_callback, &cpu.next_tick);
         }
 
-        fn merge_callback(next_tick: *Grid.NextTick) void {
-            const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
-            const compaction: *Compaction = cpu.parent(Compaction);
-            compaction.pool.?.cpus.release(cpu);
-            assert(compaction.table_builder.state == .index_and_value_block);
+        fn merge_immutable(compaction: *Compaction) MergeResult {
+            const values_source_a, const values_source_b = compaction.merge_inputs_immutable();
+            assert(values_source_a != null or values_source_b != null);
 
-            compaction.grid.trace.start(.{ .compact_beat_merge = .{
-                .tree = @enumFromInt(compaction.tree.config.id),
-                .level_b = compaction.level_b,
-            } });
+            // determine budget for values_source_a e.g. immutable.
+            const budget_immutable: u32 = budget: {
+                if (values_source_a) |iterator| {
+                    break :budget @min(
+                        Table.data.value_count_max,
+                        iterator.count_remaining(),
+                    );
+                } else break :budget 0;
+            };
 
-            const values_source_a, const values_source_b = compaction.merge_inputs();
+            const values_target = compaction.table_builder
+                .value_block_values()[compaction.table_builder.value_count..];
+
+            // TODO: reenable this check again.
+            //inline for ([_]?[]const Value{
+            //values_source_a,
+            //values_source_b,
+            //values_target,
+            //}) |values_maybe| {
+            //if (values_maybe) |values| {
+            //assert(values.len > 0);
+            //assert(values.len <= Table.data.value_count_max);
+            //}
+            //}
+
+            // Do the actual merge from inputs to the output (table builder).
+            // This we can leave as we simply do not have a values_source_b result.
+            const merge_result: MergeResult = if (values_source_a == null) blk: {
+                // Unmodified function
+                const consumed = values_copy(values_target, values_source_b.?);
+                break :blk .{
+                    .consumed_a = 0,
+                    .consumed_b = consumed,
+                    .dropped = 0,
+                    .produced = consumed,
+                };
+            } else if (values_source_b == null) blk: {
+                if (compaction.drop_tombstones) {
+                    const copy_result = values_copy_drop_tombstones_immutable(
+                        values_target,
+                        values_source_a.?,
+                        budget_immutable,
+                    );
+                    break :blk .{
+                        .consumed_a = copy_result.consumed,
+                        .consumed_b = 0,
+                        .dropped = copy_result.dropped,
+                        .produced = copy_result.produced,
+                    };
+                } else {
+                    // TODO we whould probably return copy result here too!
+                    const dropped_before = values_source_a.?.count_dropped();
+                    const remaining_before = values_source_a.?.count_remaining();
+                    const consumed = values_copy_immutable(
+                        values_target,
+                        values_source_a.?,
+                        budget_immutable,
+                    );
+                    const dropped_after = values_source_a.?.count_dropped();
+                    const remaining_after = values_source_a.?.count_remaining();
+                    assert(
+                        consumed + (dropped_after - dropped_before) ==
+                            (remaining_before - remaining_after),
+                    );
+                    break :blk .{
+                        .consumed_a = remaining_before - remaining_after,
+                        .consumed_b = 0,
+                        .dropped = dropped_after - dropped_before,
+                        .produced = consumed,
+                    };
+                }
+
+                // we need to specialize this too.
+                // TODO: change this.
+            } else values_merge_immutable(
+                values_target,
+                values_source_a.?,
+                values_source_b.?,
+                compaction.drop_tombstones,
+                budget_immutable,
+            );
+            return merge_result;
+        }
+
+        fn merge_disk(compaction: *Compaction) MergeResult {
+            const values_source_a, const values_source_b = compaction.merge_inputs_disk();
             assert(values_source_a != null or values_source_b != null);
 
             const values_target = compaction.table_builder
                 .value_block_values()[compaction.table_builder.value_count..];
 
+            // This check is fine.
             inline for ([_]?[]const Value{
                 values_source_a,
                 values_source_b,
@@ -1564,6 +1650,7 @@ pub fn CompactionType(
 
             // Do the actual merge from inputs to the output (table builder).
             const merge_result: MergeResult = if (values_source_a == null) blk: {
+                // This is a simple copy of the other table.
                 const consumed = values_copy(values_target, values_source_b.?);
                 break :blk .{
                     .consumed_a = 0,
@@ -1598,6 +1685,24 @@ pub fn CompactionType(
                 values_source_b.?,
                 compaction.drop_tombstones,
             );
+            return merge_result;
+        }
+
+        fn merge_callback(next_tick: *Grid.NextTick) void {
+            const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
+            const compaction: *Compaction = cpu.parent(Compaction);
+            compaction.pool.?.cpus.release(cpu);
+            assert(compaction.table_builder.state == .index_and_value_block);
+
+            compaction.grid.trace.start(.{ .compact_beat_merge = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
+                .level_b = compaction.level_b,
+            } });
+
+            const merge_result: MergeResult = if (compaction.table_info_a.? == .immutable)
+                compaction.merge_immutable()
+            else
+                compaction.merge_disk();
 
             compaction.level_a_position.value += merge_result.consumed_a;
             compaction.level_b_position.value += merge_result.consumed_b;
@@ -1631,16 +1736,58 @@ pub fn CompactionType(
             compaction.compaction_dispatch();
         }
 
-        fn merge_inputs(compaction: *const Compaction) struct { ?[]const Value, ?[]const Value } {
-            const level_a_values_used: ?[]const Value = values: {
+        fn merge_inputs_immutable(compaction: *Compaction) struct {
+            ?*ImmutableTableIterator,
+            ?[]const Value,
+        } {
+            const level_a_values_used: ?*ImmutableTableIterator = values: {
                 switch (compaction.table_info_a.?) {
                     .immutable => {
                         if (compaction.level_a_immutable_stage == .merge) {
-                            break :values compaction.table_info_a.?.immutable;
+                            break :values &compaction.table_info_a.?.immutable;
                         } else {
                             assert(compaction.level_a_immutable_stage == .exhausted);
                             break :values null;
                         }
+                    },
+                    .disk => {
+                        unreachable;
+                    },
+                }
+            };
+
+            const level_b_values_used: ?[]const Value = values: {
+                if (compaction.level_b_value_block.head()) |block| {
+                    assert(block.stage == .merge);
+                    break :values Table.value_block_values_used(block.ptr);
+                } else {
+                    break :values null;
+                }
+            };
+            assert(!(level_a_values_used == null and level_b_values_used == null));
+
+            const level_b_values = if (level_b_values_used) |values_used|
+                values_used[compaction.level_b_position.value..]
+            else
+                null;
+
+            return .{ level_a_values_used, level_b_values };
+        }
+
+        fn merge_inputs_disk(compaction: *const Compaction) struct {
+            ?[]const Value,
+            ?[]const Value,
+        } {
+            const level_a_values_used: ?[]const Value = values: {
+                switch (compaction.table_info_a.?) {
+                    .immutable => {
+                        unreachable;
+                        //if (compaction.level_a_immutable_stage == .merge) {
+                        //break :values compaction.table_info_a.?.immutable;
+                        //} else {
+                        //assert(compaction.level_a_immutable_stage == .exhausted);
+                        //break :values null;
+                        //}
                     },
                     .disk => {
                         if (compaction.level_a_value_block.head()) |block| {
@@ -1689,7 +1836,7 @@ pub fn CompactionType(
             if (compaction.table_info_a.? == .immutable) {
                 if (compaction.level_a_immutable_stage == .merge) {
                     if (compaction.level_a_position.value ==
-                        compaction.table_info_a.?.immutable.len)
+                        compaction.table_info_a.?.immutable.count_max())
                     {
                         compaction.level_a_position.value_block += 1;
                         assert(compaction.level_a_position.value_block == 1);
@@ -1870,6 +2017,24 @@ pub fn CompactionType(
             compaction.compaction_dispatch();
         }
 
+        fn values_copy_immutable(
+            values_target: []Value,
+            values_iterator: *ImmutableTableIterator,
+            budget_iterator: u32,
+        ) u32 {
+            assert(values_target.len > 0);
+            assert(values_target.len <= Table.data.value_count_max);
+
+            var index_target: u32 = 0;
+            while (index_target < budget_iterator and
+                index_target < values_target.len) : (index_target += 1)
+            {
+                const value_in = values_iterator.pop() catch break;
+                values_target[index_target] = value_in;
+            }
+
+            return index_target;
+        }
         // The three functions below are hot CPU loops doing the actual merging, TigerBeetle's data
         // plane. To reduce the probability of the optimizer getting confused over pointers, don't
         // use 'self' and instead specify all inputs and outputs explicitly. Its the caller's job to
@@ -1899,6 +2064,50 @@ pub fn CompactionType(
             dropped: u32,
             produced: u32,
         };
+
+        fn values_copy_drop_tombstones_immutable(
+            values_target: []Value,
+            values_iterator: *ImmutableTableIterator,
+            budget_iterator: u32,
+        ) CopyDropTombstonesResult {
+            assert(values_target.len > 0);
+            assert(values_target.len <= Table.data.value_count_max);
+
+            const remaining_before_iterator = values_iterator.count_remaining();
+            const dropped_before_iterator = values_iterator.count_dropped();
+
+            var index_source: usize = 0;
+            var index_target: usize = 0;
+            while (index_source < budget_iterator and index_target < values_target.len) {
+                const value_in = values_iterator.pop() catch {
+                    break;
+                };
+                //const value_in = &values_source[index_source];
+                index_source += 1;
+                if (tombstone(&value_in)) {
+                    assert(Table.usage != .secondary_index);
+                    continue;
+                }
+                values_target[index_target] = value_in;
+                index_target += 1;
+            }
+
+            const consumed_iterator = remaining_before_iterator - values_iterator.count_remaining();
+            const dropped_iterator = values_iterator.count_dropped() - dropped_before_iterator;
+
+            const copy_result: CopyDropTombstonesResult = .{
+                .consumed = consumed_iterator,
+                .dropped = @as(u32, @intCast(index_source - index_target)) + dropped_iterator,
+                .produced = @intCast(index_target),
+            };
+            // TODO: we might not need to consume values here because of internal deduplication.
+            //assert(copy_result.consumed > 0);
+            assert(copy_result.dropped <= copy_result.consumed);
+            assert(copy_result.produced <= values_target.len);
+            assert(copy_result.produced == copy_result.consumed - copy_result.dropped);
+            return copy_result;
+        }
+
         /// Copy values from values_source to values_target, dropping tombstones as we go.
         fn values_copy_drop_tombstones(
             values_target: []Value,
@@ -1943,6 +2152,81 @@ pub fn CompactionType(
             dropped: u32,
             produced: u32,
         };
+
+        fn values_merge_immutable(
+            values_target: []Value,
+            iterator_source_a: *ImmutableTableIterator,
+            values_source_b: []const Value,
+            drop_tombstones: bool,
+            budget_iterator: u32,
+        ) MergeResult {
+            assert(values_source_b.len > 0);
+            assert(values_source_b.len <= Table.data.value_count_max);
+            assert(values_target.len > 0);
+            assert(values_target.len <= Table.data.value_count_max);
+
+            const remaining_before_iterator = iterator_source_a.count_remaining();
+            const dropped_before_iterator = iterator_source_a.count_dropped();
+            var index_source_a: usize = 0;
+            var index_source_b: usize = 0;
+            var index_target: usize = 0;
+
+            while (index_source_a < budget_iterator and index_source_b < values_source_b.len and
+                index_target < values_target.len)
+            {
+                const key_a = iterator_source_a.peek() catch break;
+                const value_b = &values_source_b[index_source_b];
+                switch (std.math.order(key_a, key_from_value(value_b))) {
+                    .lt => { // Pick value from level a.
+                        index_source_a += 1;
+                        const value_a = iterator_source_a.pop() catch break;
+                        if (drop_tombstones and tombstone(&value_a)) {
+                            assert(Table.usage != .secondary_index);
+                            continue;
+                        }
+                        values_target[index_target] = value_a;
+                        index_target += 1;
+                    },
+                    .gt => { // Pick value from level b.
+                        index_source_b += 1;
+                        values_target[index_target] = value_b.*;
+                        index_target += 1;
+                    },
+                    .eq => { // Values have equal keys -- collapse them!
+                        index_source_a += 1;
+                        index_source_b += 1;
+                        const value_a = iterator_source_a.pop() catch break;
+                        if (comptime Table.usage == .secondary_index) {
+                            // Secondary index optimization --- cancel out put and remove.
+                            assert(tombstone(&value_a) != tombstone(value_b));
+                        } else {
+                            if (drop_tombstones and tombstone(&value_a)) continue;
+                            values_target[index_target] = value_a;
+                            index_target += 1;
+                        }
+                    },
+                }
+            }
+            const remaining_after_iterator = iterator_source_a.count_remaining();
+            const dropped_after_iterator = iterator_source_a.count_dropped();
+            const merge_result: MergeResult = .{
+                .consumed_a = remaining_before_iterator - remaining_after_iterator,
+                .consumed_b = @intCast(index_source_b),
+                .dropped = (dropped_after_iterator - dropped_before_iterator) + @as(u32, @intCast(
+                    index_source_a + index_source_b - index_target,
+                )),
+                .produced = @intCast(index_target),
+            };
+            assert(merge_result.consumed_a > 0 or merge_result.consumed_b > 0);
+            //assert(merge_result.consumed_a <= values_source_a.len);
+            //assert(merge_result.consumed_b <= values_source_b.len);
+            assert(merge_result.dropped <= merge_result.consumed_a + merge_result.consumed_b);
+            assert(merge_result.produced <= values_target.len);
+
+            assert(merge_result.produced ==
+                merge_result.consumed_a + merge_result.consumed_b - merge_result.dropped);
+            return merge_result;
+        }
 
         /// Merge values from table_a and table_b, with table_a taking precedence. Tombstones may
         /// or may not be dropped depending on bar.drop_tombstones.
