@@ -538,9 +538,6 @@ fn build_ci_script(
 // Hide step's stderr unless it fails, to prevent zig build ci output being dominated by VOPR logs.
 // Sadly, this requires "overriding" Build.Step.Run make function.
 fn hide_stderr(run: *std.Build.Step.Run) void {
-    // Debugging https://github.com/tigerbeetle/tigerbeetle/actions/runs/20034473571/job/57452104427
-    if (true) return;
-
     const b = run.step.owner;
 
     run.addCheck(.{ .expect_term = .{ .Exited = 0 } });
