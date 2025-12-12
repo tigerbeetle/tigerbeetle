@@ -127,7 +127,7 @@ const Layout = struct {
 
 fn ValueType(comptime layout: Layout) type {
     return struct {
-        pub const max_key = 1 << (8 * layout.key_size) - 1;
+        pub const max_key = (1 << (8 * layout.key_size)) - 1;
         pub const Key = math.IntFittingRange(0, max_key);
         const Value = @This();
         key: Key,
