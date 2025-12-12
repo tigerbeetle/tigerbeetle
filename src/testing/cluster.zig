@@ -457,7 +457,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
-                const nonce = 1 + @as(u128, replica_index) << 64;
+                const nonce = (@as(u128, replica_index) << 64) + 1;
                 try cluster.replica_open(@intCast(replica_index), .{
                     .nonce = nonce,
                     .release = options.cluster.releases[0].release,

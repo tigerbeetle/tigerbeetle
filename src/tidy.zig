@@ -4,6 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
+const Ast = std.zig.Ast;
 
 const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
@@ -77,7 +78,7 @@ test "tidy" {
                 return error.DeadDeclaration;
             }
 
-            tidy_ast(source_file, &tree);
+            try tidy_ast(source_file, &tree);
 
             if (tidy_generic_functions(source_file)) |function| {
                 std.debug.print(
@@ -384,8 +385,8 @@ fn tidy_dead_declarations(
 
 fn tidy_ast(
     file: SourceFile,
-    tree: *const std.zig.Ast,
-) void {
+    tree: *const Ast,
+) !void {
     if (std.mem.eql(u8, file.path, "build.zig")) return;
     if (std.mem.endsWith(u8, file.path, "build_multiversion.zig")) return;
     if (std.mem.endsWith(u8, file.path, "bindings.zig")) return;
@@ -401,21 +402,37 @@ fn tidy_ast(
     var functions_count: u32 = 0;
 
     for (tags, datas, 0..) |tag, data, node| {
-        if (tag != .fn_decl) continue;
+        if (tag == .fn_decl) { // Check function length.
+            const node_body = data.rhs;
 
-        const node_body = data.rhs;
+            const token_opening = tree.firstToken(@intCast(node));
+            const token_closing = tree.lastToken(@intCast(node_body));
 
-        const token_opening = tree.firstToken(@intCast(node));
-        const token_closing = tree.lastToken(@intCast(node_body));
+            const line_opening = tree.tokenLocation(0, token_opening).line;
+            const line_closing = tree.tokenLocation(0, token_closing).line;
 
-        const line_opening = tree.tokenLocation(0, token_opening).line;
-        const line_closing = tree.tokenLocation(0, token_closing).line;
-
-        functions[functions_count] = .{
-            .line_opening = line_opening,
-            .line_closing = line_closing,
-        };
-        functions_count += 1;
+            functions[functions_count] = .{
+                .line_opening = line_opening,
+                .line_closing = line_closing,
+            };
+            functions_count += 1;
+        }
+        if (is_bin_op(tag)) { // Forbid mixing bitops and arithmetics without paraenthesis.
+            inline for (.{ data.lhs, data.rhs }) |child| {
+                const tag_child = tags[child];
+                if ((is_bin_op_bitwise(tag) and is_bin_op_arithmetic(tag_child)) or
+                    (is_bin_op_arithmetic(tag) and is_bin_op_bitwise(tag_child)))
+                {
+                    const token_opening = tree.firstToken(@intCast(node));
+                    const line_opening = tree.tokenLocation(0, token_opening).line;
+                    std.debug.print("{s}:{}: error: ambiguous precedence, add '()'\n", .{
+                        file.path,
+                        line_opening + 1,
+                    });
+                    return error.AmbiguousPrecedence;
+                }
+            }
+        }
     }
 
     // We ratchet 70-lines-per-function TigerStyle rule from the bottom up. Some functions want
@@ -446,6 +463,29 @@ fn tidy_ast(
             }
         }
     }
+}
+
+fn is_bin_op(tag: Ast.Node.Tag) bool {
+    return is_bin_op_bitwise(tag) or is_bin_op_arithmetic(tag);
+}
+
+fn is_bin_op_bitwise(tag: Ast.Node.Tag) bool {
+    return switch (tag) {
+        .shl, .shl_sat => true,
+        .shr => true,
+        .bit_xor, .bit_or, .bit_and => true,
+        else => false,
+    };
+}
+
+fn is_bin_op_arithmetic(tag: Ast.Node.Tag) bool {
+    return switch (tag) {
+        .add, .add_sat, .add_wrap => true,
+        .sub, .sub_sat, .sub_wrap => true,
+        .mul, .mul_sat, .mul_wrap => true,
+        .div, .mod => true,
+        else => false,
+    };
 }
 
 /// All functions using the `CamelCase` naming convention return a type,
