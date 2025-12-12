@@ -381,23 +381,41 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     comptime assert(!has_pointers(T));
     comptime assert(@sizeOf(T) * 8 == @bitSizeOf(T));
 
-    // Pick the biggest "word" for word-wise comparison, and don't try to early-return on the first
-    // mismatch, so that a compiler can vectorize the loop.
+    // Auto-vectorization with AVX-512 on some CPUs was causing a general protection fault in
+    // ReleaseSafe builds. To keep the non-early-return semantics without inviting 512-bit codegen,
+    // use an explicit 128-bit vector path when the type layout allows it, otherwise fall back to
+    // the scalar word loop.
+    const bytes_a = std.mem.asBytes(a);
+    const bytes_b = std.mem.asBytes(b);
+    comptime assert(bytes_a.len == bytes_b.len);
 
-    const Word = comptime for (.{ u64, u32, u16, u8 }) |Word| {
-        if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
-    } else unreachable;
+    if (@alignOf(T) >= 16 and bytes_a.len % 16 == 0) {
+        const Chunk = @Vector(16, u8);
+        var total: Chunk = @splat(0);
+        const a_chunks = std.mem.bytesAsSlice(Chunk, bytes_a);
+        const b_chunks = std.mem.bytesAsSlice(Chunk, bytes_b);
+        for (a_chunks, b_chunks) |a_chunk, b_chunk| {
+            total |= a_chunk ^ b_chunk;
+        }
+        return @reduce(.Or, total) == 0;
+    } else {
+        // Pick the biggest "word" for word-wise comparison, and don't try to early-return on the
+        // first mismatch, so that a compiler can still vectorize the loop (with narrower vectors).
+        const Word = comptime for (.{ u64, u32, u16, u8 }) |Word| {
+            if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
+        } else unreachable;
 
-    const a_words = std.mem.bytesAsSlice(Word, std.mem.asBytes(a));
-    const b_words = std.mem.bytesAsSlice(Word, std.mem.asBytes(b));
-    assert(a_words.len == b_words.len);
+        const a_words = std.mem.bytesAsSlice(Word, bytes_a);
+        const b_words = std.mem.bytesAsSlice(Word, bytes_b);
+        assert(a_words.len == b_words.len);
 
-    var total: Word = 0;
-    for (a_words, b_words) |a_word, b_word| {
-        total |= a_word ^ b_word;
+        var total: Word = 0;
+        for (a_words, b_words) |a_word, b_word| {
+            total |= a_word ^ b_word;
+        }
+
+        return total == 0;
     }
-
-    return total == 0;
 }
 
 fn has_pointers(comptime T: type) bool {

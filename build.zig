@@ -23,9 +23,9 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
     const cpus = .{
         "baseline+aes+neon",
         "baseline+aes+neon",
-        "x86_64_v3+aes",
-        "x86_64_v3+aes",
-        "x86_64_v3+aes",
+        "native",
+        "native",
+        "native",
     };
 
     const arch_os, const cpu = inline for (triples, cpus) |triple, cpu| {
