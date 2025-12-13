@@ -16,7 +16,7 @@ pub const Snap = @import("testing/snaptest.zig").Snap;
 pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 
-pub const aegis = @import("aegis.zig");
+pub const aegis = @import("vendored/aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const flags = @import("flags.zig").parse;
 pub const parse_flag_value_fuzz = @import("flags.zig").parse_flag_value_fuzz;
@@ -163,7 +163,8 @@ pub inline fn copy_disjoint(
     assert(!@inComptime());
     assert(disjoint_slices(T, T, target, source));
 
-    @memcpy(target[0..source.len], source); // Bypass tidy's ban, for stdx.
+    @memcpy // Bypass tidy ban.
+    (target[0..source.len], source);
 }
 
 pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
@@ -955,7 +956,7 @@ pub fn array_print(
     };
 }
 
-/// Like std.posix's `unexpectedErrno()` but log unconditionally, not just when mode=Debug.
+/// Like std.posix version, but log unconditionally, not just when mode=Debug.
 /// The added `label` argument works around the absence of stack traces in ReleaseSafe builds.
 pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.UnexpectedError {
     log.scoped(.stdx).err("unexpected errno: {s}: code={d} name={?s}", .{
@@ -1137,7 +1138,7 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
 }
 
 comptime {
-    _ = @import("aegis.zig");
+    _ = @import("vendored/aegis.zig");
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
     _ = @import("flags.zig");
