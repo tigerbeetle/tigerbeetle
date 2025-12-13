@@ -109,7 +109,8 @@ pub fn AOFType(comptime IO: type) type {
         const AOF = @This();
 
         io: *IO,
-        file_descriptor: IO.fd_t,
+        path: []const u8,
+        fd: ?IO.fd_t = null,
         last_checksum: ?u128 = null,
 
         state: union(enum) {
@@ -133,21 +134,41 @@ pub fn AOFType(comptime IO: type) type {
         /// immediately after .init() finishes.
         pub fn init(
             io: *IO,
-            options: struct {
-                dir_fd: IO.fd_t,
-                relative_path: []const u8,
-            },
+            path: []const u8,
         ) !AOF {
-            assert(!std.fs.path.isAbsolute(options.relative_path));
-            assert(std.mem.endsWith(u8, options.relative_path, ".aof"));
+            stdx.maybe(std.fs.path.isAbsolute(path));
+            assert(std.mem.endsWith(u8, path, ".aof"));
             assert(IO == @import("io.zig").IO);
 
-            const dir = std.fs.Dir{
-                .fd = options.dir_fd,
+            var aof = AOF{
+                .io = io,
+                .path = path,
             };
-            // Closing dir_fd is up to the caller.
 
-            const file = try dir.createFile(options.relative_path, .{
+            try aof.open();
+
+            return aof;
+        }
+
+        pub fn close(self: *AOF) void {
+            assert(self.fd != null);
+
+            self.io.aof_blocking_close(self.fd.?);
+            self.fd = null;
+        }
+
+        fn open(self: *AOF) !void {
+            assert(IO == @import("io.zig").IO);
+            assert(self.fd == null);
+
+            const dir_path = std.fs.path.dirname(self.path) orelse ".";
+
+            const dir_fd = try IO.open_dir(dir_path);
+            defer self.io.aof_blocking_close(dir_fd);
+
+            const dir = std.fs.Dir{ .fd = dir_fd };
+
+            const file = try dir.createFile(self.path, .{
                 .read = true,
                 .truncate = false,
                 .exclusive = false,
@@ -159,18 +180,12 @@ pub fn AOFType(comptime IO: type) type {
             // We cannot fsync the directory handle on Windows.
             // We have no way to open a directory with write access.
             if (builtin.os.tag != .windows) {
-                try std.posix.fsync(dir.fd);
+                try std.posix.fsync(dir_fd);
             }
 
             try file.seekFromEnd(0);
-            return AOF{
-                .io = io,
-                .file_descriptor = file.handle,
-            };
-        }
 
-        pub fn close(self: *AOF) void {
-            self.io.aof_blocking_close(self.file_descriptor);
+            self.fd = file.handle;
         }
 
         /// Write a message to disk, with standard blocking IO but using the OS's page cache. The
@@ -189,7 +204,7 @@ pub fn AOFType(comptime IO: type) type {
             const size_disk = entry.size_disk();
             const bytes = std.mem.asBytes(&entry);
 
-            try self.io.aof_blocking_write_all(self.file_descriptor, bytes[0..size_disk]);
+            try self.io.aof_blocking_write_all(self.fd.?, bytes[0..size_disk]);
 
             self.size += size_disk;
             self.state.writing.unflushed += 1;
@@ -222,7 +237,7 @@ pub fn AOFType(comptime IO: type) type {
                 self,
                 on_fsync,
                 &self.state.checkpoint.fsync_completion,
-                self.file_descriptor,
+                self.fd.?,
             );
         }
 
@@ -234,6 +249,19 @@ pub fn AOFType(comptime IO: type) type {
             const replica = self.state.checkpoint.replica;
             const replica_callback = self.state.checkpoint.replica_callback;
             self.state = .{ .writing = .{ .unflushed = 0 } };
+
+            _ = std.fs.cwd().statFile(self.path) catch |err| switch (err) {
+                error.FileNotFound => {
+                    log.info("{s} removed - reopening", .{self.path});
+                    self.close();
+                    self.open() catch |e| {
+                        std.debug.panic("failed to reopen {s} after rotate: {}", .{ self.path, e });
+                    };
+                },
+                else => {
+                    log.warn("failed to stat aof ({s}): {}", .{ self.path, err });
+                },
+            };
 
             replica_callback(replica);
         }
@@ -589,10 +617,7 @@ pub fn AOFType(comptime IO: type) type {
                 aof_count += 1;
             }
 
-            var output_aof = try AOF.init(io, .{
-                .dir_fd = dir_fd,
-                .relative_path = std.fs.path.basename(output_path),
-            });
+            var output_aof = try AOF.init(io, output_path);
 
             // First, iterate all AOFs and build a mapping between parent checksums and where the
             // entry is located.
@@ -765,10 +790,7 @@ test "aof write / read" {
     const dir_fd = try IO.open_dir(".");
     defer std.posix.close(dir_fd);
 
-    var aof = try AOF.init(&io, .{
-        .dir_fd = dir_fd,
-        .relative_path = std.fs.path.basename(aof_file),
-    });
+    var aof = try AOF.init(&io, aof_file);
 
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
