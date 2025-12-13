@@ -576,22 +576,20 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
 
         fn fuzz(prng: *stdx.PRNG, stream_key_count_max: u32) !void {
             if (log) std.debug.print("\n", .{});
-            const allocator = testing.allocator;
+            const gpa = testing.allocator;
 
             var streams: [streams_max][]u32 = undefined;
 
-            const streams_buffer = try allocator.alloc(u32, streams_max * stream_key_count_max);
-            defer allocator.free(streams_buffer);
+            const streams_buffer = try gpa.alloc(u32, streams_max * stream_key_count_max);
+            defer gpa.free(streams_buffer);
 
-            const expect_buffer = try allocator.alloc(Value, streams_max * stream_key_count_max);
-            defer allocator.free(expect_buffer);
+            const expect_buffer = try gpa.alloc(Value, streams_max * stream_key_count_max);
+            defer gpa.free(expect_buffer);
 
-            var k: u32 = 0;
-            while (k < streams_max) : (k += 1) {
+            for (0..streams_max) |k| {
                 if (log) std.debug.print("k = {}\n", .{k});
                 {
-                    var i: u32 = 0;
-                    while (i < k) : (i += 1) {
+                    for (0..k) |i| {
                         const len = fuzz_stream_len(prng, stream_key_count_max);
                         streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
                         fuzz_stream_keys(prng, streams[i]);

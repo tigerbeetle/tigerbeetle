@@ -4,6 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
+const Ast = std.zig.Ast;
 
 const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
@@ -34,8 +35,6 @@ test "tidy" {
     defer dead_declarations.deinit(allocator);
 
     try dead_declarations.ensureTotalCapacity(allocator, identifiers_per_file_max);
-
-    var function_line_count_longest: usize = 0;
 
     // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
     // to read the files once.
@@ -79,10 +78,7 @@ test "tidy" {
                 return error.DeadDeclaration;
             }
 
-            function_line_count_longest = @max(
-                function_line_count_longest,
-                (try tidy_long_functions(source_file, &tree)).function_line_count_longest,
-            );
+            try tidy_ast(source_file, &tree);
 
             if (tidy_generic_functions(source_file)) |function| {
                 std.debug.print(
@@ -111,13 +107,6 @@ test "tidy" {
     }
 
     try dead_files_detector.finish();
-
-    if (function_line_count_longest < function_line_count_max) {
-        std.debug.print("error: `function_line_count_max` must be updated to {d}\n", .{
-            function_line_count_longest,
-        });
-        return error.LineCountOutdated;
-    }
 }
 
 const SourceFile = struct { path: []const u8, text: [:0]const u8 };
@@ -394,116 +383,108 @@ fn tidy_dead_declarations(
     return null;
 }
 
-/// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 411; // fn check in state_machine.zig
-
-fn tidy_long_functions(
+fn tidy_ast(
     file: SourceFile,
-    tree: *const std.zig.Ast,
-) !struct {
-    function_line_count_longest: usize,
-} {
-    if (std.mem.endsWith(u8, file.path, "client_readmes.zig")) {
-        // This file is essentially a template to generate a markdown file, so it
-        // intentionally has giant functions.
-        return .{ .function_line_count_longest = 0 };
-    }
-
-    const Function = struct {
-        fn_decl_line: usize,
-        first_token_location: std.zig.Ast.Location,
-        last_token_location: std.zig.Ast.Location,
-        /// Functions that are not "innermost," meaning that they have other functions
-        /// inside of them (such as functions that return `type`s) are not checked as
-        /// it is normal for them to be very lengthy.
-        is_innermost: bool,
-
-        fn is_parent_of(a: @This(), b: @This()) bool {
-            return a.first_token_location.line_start < b.first_token_location.line_start and
-                a.last_token_location.line_end > b.last_token_location.line_end;
-        }
-
-        fn get_and_check_line_count(
-            function: @This(),
-            file_of_function: SourceFile,
-        ) usize {
-            const function_line_count =
-                function.last_token_location.line -
-                function.first_token_location.line;
-
-            if (function_line_count > function_line_count_max) {
-                std.debug.print(
-                    "{s}:{d} error: above function line count max with {d} lines\n",
-                    .{
-                        file_of_function.path,
-                        function.fn_decl_line + 1,
-                        function_line_count,
-                    },
-                );
-            }
-
-            return function_line_count;
-        }
-    };
-
-    var function_stack = stdx.BoundedArrayType(Function, 32).from_slice(&.{}) catch unreachable;
+    tree: *const Ast,
+) !void {
+    if (std.mem.eql(u8, file.path, "build.zig")) return;
+    if (std.mem.endsWith(u8, file.path, "build_multiversion.zig")) return;
+    if (std.mem.endsWith(u8, file.path, "bindings.zig")) return;
 
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
+    // We can implement this in a streaming fashion, but its more convenient to materialize all
+    // functions. 1k functions per file should be enough even for TigerBeetle!
+    var functions: [1024]struct {
+        line_opening: usize,
+        line_closing: usize,
+    } = undefined;
+    var functions_count: u32 = 0;
 
-    var function_line_count_longest: usize = 0;
+    for (tags, datas, 0..) |tag, data, node| {
+        if (tag == .fn_decl) { // Check function length.
+            const node_body = data.rhs;
 
-    for (tags, datas, 0..) |tag, data, function_decl_node| {
-        if (tag != .fn_decl) continue;
+            const token_opening = tree.firstToken(@intCast(node));
+            const token_closing = tree.lastToken(@intCast(node_body));
 
-        const function_body_node = data.rhs;
+            const line_opening = tree.tokenLocation(0, token_opening).line;
+            const line_closing = tree.tokenLocation(0, token_closing).line;
 
-        const function_decl_first_token = tree.firstToken(@intCast(function_decl_node));
-        const function_body_first_token = tree.firstToken(@intCast(function_body_node));
-        const function_body_last_token = tree.lastToken(@intCast(function_body_node));
-
-        const innermost_function: Function = .{
-            .fn_decl_line = tree.tokenLocation(0, function_decl_first_token).line,
-            .first_token_location = tree.tokenLocation(0, function_body_first_token),
-            .last_token_location = tree.tokenLocation(0, function_body_last_token),
-            .is_innermost = true,
-        };
-
-        while (function_stack.count() > 0) {
-            const last_function = function_stack.get(function_stack.count() - 1);
-
-            if (!last_function.is_parent_of(innermost_function)) {
-                if (last_function.is_innermost) {
-                    const line_count = last_function.get_and_check_line_count(file);
-                    function_line_count_longest = @max(function_line_count_longest, line_count);
+            functions[functions_count] = .{
+                .line_opening = line_opening,
+                .line_closing = line_closing,
+            };
+            functions_count += 1;
+        }
+        if (is_bin_op(tag)) { // Forbid mixing bitops and arithmetics without paraenthesis.
+            inline for (.{ data.lhs, data.rhs }) |child| {
+                const tag_child = tags[child];
+                if ((is_bin_op_bitwise(tag) and is_bin_op_arithmetic(tag_child)) or
+                    (is_bin_op_arithmetic(tag) and is_bin_op_bitwise(tag_child)))
+                {
+                    const token_opening = tree.firstToken(@intCast(node));
+                    const line_opening = tree.tokenLocation(0, token_opening).line;
+                    std.debug.print("{s}:{}: error: ambiguous precedence, add '()'\n", .{
+                        file.path,
+                        line_opening + 1,
+                    });
+                    return error.AmbiguousPrecedence;
                 }
-                _ = function_stack.pop();
-            } else {
-                break;
             }
         }
-
-        if (function_stack.count() > 0) {
-            const last_function = &function_stack.slice()[function_stack.count() - 1];
-
-            assert(last_function.is_parent_of(innermost_function));
-            last_function.is_innermost = false;
-        }
-
-        function_stack.push(innermost_function);
     }
 
-    if (function_stack.count() > 0) {
-        const last_function = function_stack.get(function_stack.count() - 1);
+    // We ratchet 70-lines-per-function TigerStyle rule from the bottom up. Some functions want
+    // to be really long, and that is big. The most values is in preventing originally small
+    // functions to grow over time.
+    const function_length_red_zone = .{
+        .min = 70, // NB: both are exclusive, so red zone is intentionally empty to start!
+        .max = 70,
+    };
 
-        if (last_function.is_innermost) {
-            const line_count = last_function.get_and_check_line_count(file);
-            function_line_count_longest = @max(function_line_count_longest, line_count);
+    for (functions[0..functions_count], 0..) |f, index| {
+        // Functions are sorted by the start line.
+        if (index > 0) assert(functions[index - 1].line_opening < f.line_opening);
+
+        if (index == functions_count - 1 or
+            functions[index + 1].line_opening > f.line_closing)
+        {
+            const function_length = f.line_closing - f.line_opening + 1;
+            if (function_length_red_zone.min < function_length and
+                function_length < function_length_red_zone.max)
+            {
+                std.debug.print("{s}:{}: error: long function ({} > 70)\n", .{
+                    file.path,
+                    f.line_opening + 1,
+                    function_length,
+                });
+                return error.LongFunction;
+            }
         }
     }
+}
 
-    return .{
-        .function_line_count_longest = function_line_count_longest,
+fn is_bin_op(tag: Ast.Node.Tag) bool {
+    return is_bin_op_bitwise(tag) or is_bin_op_arithmetic(tag);
+}
+
+fn is_bin_op_bitwise(tag: Ast.Node.Tag) bool {
+    return switch (tag) {
+        .shl, .shl_sat => true,
+        .shr => true,
+        .bit_xor, .bit_or, .bit_and => true,
+        else => false,
+    };
+}
+
+fn is_bin_op_arithmetic(tag: Ast.Node.Tag) bool {
+    return switch (tag) {
+        .add, .add_sat, .add_wrap => true,
+        .sub, .sub_sat, .sub_wrap => true,
+        .mul, .mul_sat, .mul_wrap => true,
+        .div, .mod => true,
+        else => false,
     };
 }
 
