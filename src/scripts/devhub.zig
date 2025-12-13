@@ -56,6 +56,9 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 }
 
 fn devhub_coverage(shell: *Shell) !void {
+    var section = try shell.open_section("coverage");
+    defer section.close();
+
     const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
         return error.NoKcov;
     };
@@ -92,6 +95,9 @@ fn devhub_coverage(shell: *Shell) !void {
 }
 
 fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
+    var section = try shell.open_section("metrics");
+    defer section.close();
+
     const commit_timestamp_str =
         try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = cli_args.sha });
     const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
