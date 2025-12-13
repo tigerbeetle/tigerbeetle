@@ -169,7 +169,6 @@ fn Aegis128LGenericType(comptime tag_bits: u9) type {
             }
             if (ad.len % 32 != 0) {
                 @memset(src[0..], 0);
-                // Bypass tidy's ban, for stdx.
                 @memcpy(src[0 .. ad.len % 32], ad[i..][0 .. ad.len % 32]);
                 state.absorb(&src);
             }
