@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const stdx = @import("stdx.zig");
 
-/// A moment in time not anchored to any particular epoch.
+/// A moment in monotonic time not anchored to any particular epoch.
 ///
 /// The absolute value of `ns` is meaningless, but it is possible to compute `Duration` between
 /// two `Instant`s sourced from the same clock.
