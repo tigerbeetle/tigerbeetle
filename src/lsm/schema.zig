@@ -271,19 +271,47 @@ pub const TableIndex = struct {
 };
 
 pub const TableValue = struct {
+    pub const hints_size: usize = 64;
+
     /// Stored in every value block's header's `metadata_bytes` field.
     pub const Metadata = extern struct {
         value_count_max: u32,
         value_count: u32,
         value_size: u32,
         tree_id: u16,
-        reserved: [82]u8 = @splat(0),
+        hints_padding: [2]u8 = @splat(0),
+        hints: [hints_size]u8 = @splat(0),
+        hints_version: u8 = 0,
+        reserved: [15]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
             assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
         }
     };
+
+    pub fn hints_count_max(comptime Key: type) comptime_int {
+        comptime {
+            assert(@sizeOf(Key) > 0);
+            assert(@sizeOf(Key) <= hints_size);
+        }
+        return hints_size / @sizeOf(Key);
+    }
+
+    pub inline fn hints_count(
+        comptime Key: type,
+        value_metadata: *const Metadata,
+    ) usize {
+        if (value_metadata.hints_version == 0) return 0;
+        return @min(@as(usize, value_metadata.value_count), hints_count_max(Key));
+    }
+
+    pub inline fn hints_bytes_used(
+        comptime Key: type,
+        value_metadata: *const Metadata,
+    ) []const u8 {
+        return value_metadata.hints[0 .. hints_count(Key, value_metadata) * @sizeOf(Key)];
+    }
 
     // @sizeOf(Table.Value)
     value_size: u32,
@@ -349,6 +377,8 @@ pub const TableValue = struct {
         assert(header_metadata.value_count > 0);
         assert(header_metadata.value_count <= header_metadata.value_count_max);
         assert(header_metadata.tree_id > 0);
+        assert(header_metadata.hints_version == 0 or header_metadata.hints_version == 1);
+        assert(stdx.zeroed(&header_metadata.hints_padding));
         assert(stdx.zeroed(&header_metadata.reserved));
         assert(@sizeOf(vsr.Header) + header_metadata.value_size * header_metadata.value_count ==
             header.size);

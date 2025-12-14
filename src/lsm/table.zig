@@ -308,15 +308,34 @@ pub fn TableType(
                 assert(builder.value_count > 0);
 
                 const block = builder.value_block;
+                const values = Table.value_block_values(block)[0..builder.value_count];
+
+                var metadata = schema.TableValue.Metadata{
+                    .value_count_max = data.value_count_max,
+                    .value_count = builder.value_count,
+                    .value_size = value_size,
+                    .tree_id = options.tree_id,
+                    .hints_version = 1,
+                };
+                const hint_count = schema.TableValue.hints_count(Key, &metadata);
+                var hint_bytes_offset: usize = 0;
+                var hint_index: usize = 0;
+                while (hint_index < hint_count) : (hint_index += 1) {
+                    const value_index = hint_position(values.len, hint_count, hint_index);
+                    const key_bytes = std.mem.asBytes(&key_from_value(&values[value_index]));
+                    std.mem.copyForwards(
+                        u8,
+                        metadata.hints[hint_bytes_offset..][0..key_bytes.len],
+                        key_bytes,
+                    );
+                    hint_bytes_offset += key_bytes.len;
+                }
+                assert(hint_bytes_offset <= metadata.hints.len);
+
                 const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .metadata_bytes = @bitCast(schema.TableValue.Metadata{
-                        .value_count_max = data.value_count_max,
-                        .value_count = builder.value_count,
-                        .value_size = value_size,
-                        .tree_id = options.tree_id,
-                    }),
+                    .metadata_bytes = @bitCast(metadata),
                     .address = options.address,
                     .snapshot = options.snapshot_min,
                     .size = @sizeOf(vsr.Header) + builder.value_count * @sizeOf(Value),
@@ -328,7 +347,6 @@ pub fn TableType(
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
-                const values = Table.value_block_values_used(block);
                 { // Now that we have checksummed the block, sanity-check the result:
 
                     if (constants.verify) {
@@ -468,6 +486,14 @@ pub fn TableType(
             return mem.bytesAsSlice(Key, index_block[offset..][0..index.keys_size]);
         }
 
+        inline fn hint_position(value_count: usize, hint_count: usize, hint_index: usize) usize {
+            assert(value_count > 0);
+            assert(hint_count > 0);
+            assert(hint_index < hint_count);
+            if (hint_count == 1) return 0;
+            return @divFloor(hint_index * (value_count - 1), hint_count - 1);
+        }
+
         pub inline fn index_value_keys_used(
             index_block: BlockPtrConst,
             comptime key: enum { key_min, key_max },
@@ -531,7 +557,42 @@ pub fn TableType(
         }
 
         pub fn value_block_search(value_block: BlockPtrConst, key: Key) ?*const Value {
+            const metadata = data.block_metadata(value_block);
             const values = value_block_values_used(value_block);
+
+            const hint_count = schema.TableValue.hints_count(Key, metadata);
+            if (hint_count > 0) {
+                var hint_keys: [schema.TableValue.hints_count_max(Key)]Key = undefined;
+                const hints_bytes = schema.TableValue.hints_bytes_used(Key, metadata);
+                const hints = hint_keys[0..hint_count];
+                const hints_as_bytes = mem.sliceAsBytes(hints);
+                assert(hints_bytes.len == hints_as_bytes.len);
+                @memcpy(hints_as_bytes, hints_bytes);
+                const hint_index = binary_search.binary_search_keys_upsert_index(
+                    Key,
+                    hints,
+                    key,
+                    .{ .mode = .upper_bound, .prefetch = false },
+                );
+                const chunk_index = if (hint_index == 0) 0 else hint_index - 1;
+                const start = hint_position(values.len, hint_count, chunk_index);
+                const end = if (hint_index == hint_count)
+                    values.len
+                else
+                    hint_position(values.len, hint_count, hint_index) + 1;
+                if (binary_search.binary_search_values(
+                    Key,
+                    Value,
+                    key_from_value,
+                    values[start..end],
+                    key,
+                    .{},
+                )) |value| {
+                    return value;
+                }
+                return null;
+            }
+            assert(false);
 
             return binary_search.binary_search_values(
                 Key,
