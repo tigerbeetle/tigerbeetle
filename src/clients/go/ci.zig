@@ -39,14 +39,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 
     try shell.exec("go test", .{});
-    {
-        log.info("testing `types` package helpers", .{});
-
-        try shell.pushd("./pkg/types");
-        defer shell.popd();
-
-        try shell.exec("go test", .{});
-    }
 
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
         log.info("testing sample '{s}'", .{sample});

@@ -12,10 +12,10 @@ const type_mappings = .{
     .{ tb.QueryFilterFlags, "QueryFilterFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
-    .{ tb.CreateAccountResult, "CreateAccountResult", "Account" },
-    .{ tb.CreateTransferResult, "CreateTransferResult", "Transfer" },
-    .{ tb.CreateAccountsResult, "AccountEventResult" },
-    .{ tb.CreateTransfersResult, "TransferEventResult" },
+    .{ tb.CreateAccountStatus, "CreateAccountStatus", "Account" },
+    .{ tb.CreateTransferStatus, "CreateTransferStatus", "Transfer" },
+    .{ tb.CreateAccountResult, "CreateAccountResult" },
+    .{ tb.CreateTransferResult, "CreateTransferResult" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
     .{ tb.QueryFilter, "QueryFilter" },
@@ -125,10 +125,14 @@ fn emit_enum(
                 if (@intFromEnum(@field(Type, field.name)) == 1) "true" else "false",
             });
         } else {
-            try buffer.writer().print("\t{s} {s} = {d}\n", .{
+            const int_value = @intFromEnum(@field(Type, field.name));
+            try buffer.writer().print("\t{s} {s} = {s}\n", .{
                 enum_name,
                 name,
-                @intFromEnum(@field(Type, field.name)),
+                if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                    std.fmt.comptimePrint("0x{X}", .{int_value})
+                else
+                    std.fmt.comptimePrint("{}", .{int_value}),
             });
         }
     }
@@ -314,10 +318,10 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\//              Do not manually modify.              //
         \\///////////////////////////////////////////////////////
         \\
-        \\package types
+        \\package tigerbeetle_go
         \\
         \\/*
-        \\#include "../native/tb_client.h"
+        \\#include "./native/tb_client.h"
         \\*/
         \\import "C"
         \\import "strconv"
