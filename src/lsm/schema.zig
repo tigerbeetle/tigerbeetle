@@ -38,6 +38,56 @@ const block_body_size = block_size - @sizeOf(vsr.Header);
 const BlockPtr = *align(constants.sector_size) [block_size]u8;
 const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 
+pub const CompressionMethod = enum(u8) {
+    none = 0,
+    lz4 = 1,
+};
+
+pub const Compression = struct {
+    method: CompressionMethod = .none,
+    compressed_body_size: u32 = 0,
+};
+
+/// Interpret the compression metadata stored in Header.Block.reserved_block.
+/// For legacy blocks, this defaults to `.none`.
+pub fn compression(header: *const vsr.Header.Block) Compression {
+    const method = std.meta.intToEnum(CompressionMethod, header.reserved_block[0]) catch
+        CompressionMethod.none;
+
+    if (method == .none) return .{};
+
+    const compressed_body_size =
+        std.mem.readInt(u32, header.reserved_block[1..][0..@sizeOf(u32)], .little);
+
+    return .{
+        .method = method,
+        .compressed_body_size = compressed_body_size,
+    };
+}
+
+pub fn set_compression(header: *vsr.Header.Block, info: Compression) void {
+    @memset(&header.reserved_block, 0);
+
+    switch (info.method) {
+        .none => return,
+        .lz4 => {
+            header.reserved_block[0] = @intFromEnum(info.method);
+            std.mem.writeInt(
+                u32,
+                header.reserved_block[1..][0..@sizeOf(u32)],
+                info.compressed_body_size,
+                .little,
+            );
+        },
+    }
+}
+
+pub fn valid_checksum(header: *const vsr.Header.Block) bool {
+    var tmp = header.*;
+    @memset(&tmp.reserved_block, 0);
+    return tmp.checksum == tmp.calculate_checksum();
+}
+
 pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header.Block {
     const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);

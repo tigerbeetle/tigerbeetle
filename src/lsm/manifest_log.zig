@@ -989,13 +989,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
-            {
-                const frame = std.mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                assert(frame.valid_checksum());
-                assert(frame.valid_checksum_body(block[@sizeOf(vsr.Header)..frame.size]));
-            }
-
             const header = schema.header_from_block(block);
+            assert(schema.valid_checksum(header));
+            assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
             assert(header.block_type == .manifest);
 
             assert(address == null or header.address == address.?);

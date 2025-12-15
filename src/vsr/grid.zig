@@ -7,6 +7,7 @@ const mem = std.mem;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("../lsm/schema.zig");
+const lz4 = @import("../compress/lz4.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const QueueType = @import("../queue.zig").QueueType;
@@ -193,6 +194,8 @@ pub fn GridType(comptime Storage: type) type {
         read_pending_queue: QueueType(ReadPending) = QueueType(ReadPending).init(.{
             .name = "grid_read_pending",
         }),
+        read_iop_blocks_compressed: [read_iops_max]BlockPtr,
+        write_iop_blocks_compressed: [write_iops_max]BlockPtr,
         /// List of `Read`s which are waiting for a block repair from another replica.
         /// (Reads in this queue have already failed locally).
         ///
@@ -256,12 +259,26 @@ pub fn GridType(comptime Storage: type) type {
             errdefer cache.deinit(allocator);
 
             var read_iop_blocks: [read_iops_max]BlockPtr = undefined;
+            var read_iop_blocks_compressed: [read_iops_max]BlockPtr = undefined;
+            var write_iop_blocks_compressed: [write_iops_max]BlockPtr = undefined;
 
             for (&read_iop_blocks, 0..) |*read_iop_block, i| {
                 errdefer for (read_iop_blocks[0..i]) |block| allocator.free(block);
                 read_iop_block.* = try allocate_block(allocator);
             }
             errdefer for (&read_iop_blocks) |block| allocator.free(block);
+
+            for (&read_iop_blocks_compressed, 0..) |*read_iop_block, i| {
+                errdefer for (read_iop_blocks_compressed[0..i]) |block| allocator.free(block);
+                read_iop_block.* = try allocate_block(allocator);
+            }
+            errdefer for (&read_iop_blocks_compressed) |block| allocator.free(block);
+
+            for (&write_iop_blocks_compressed, 0..) |*write_iop_block, i| {
+                errdefer for (write_iop_blocks_compressed[0..i]) |block| allocator.free(block);
+                write_iop_block.* = try allocate_block(allocator);
+            }
+            errdefer for (&write_iop_blocks_compressed) |block| allocator.free(block);
 
             return Grid{
                 .superblock = options.superblock,
@@ -273,10 +290,14 @@ pub fn GridType(comptime Storage: type) type {
                 .cache = cache,
                 .cache_blocks = cache_blocks,
                 .read_iop_blocks = read_iop_blocks,
+                .read_iop_blocks_compressed = read_iop_blocks_compressed,
+                .write_iop_blocks_compressed = write_iop_blocks_compressed,
             };
         }
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
+            for (&grid.write_iop_blocks_compressed) |block| allocator.free(block);
+            for (&grid.read_iop_blocks_compressed) |block| allocator.free(block);
             for (&grid.read_iop_blocks) |block| allocator.free(block);
 
             for (grid.cache_blocks) |block| allocator.free(block);
@@ -860,10 +881,15 @@ pub fn GridType(comptime Storage: type) type {
                 write.block.*[write_header.size..vsr.sector_ceil(write_header.size)],
             ));
 
+            const iop_index = grid.write_iops.index(iop);
+            const compressed_block = grid.write_iop_blocks_compressed[iop_index];
+
+            const stored_size = compress_block(write.block.*, compressed_block);
+
             grid.superblock.storage.write_sectors(
                 write_block_callback,
                 &iop.completion,
-                write.block.*[0..vsr.sector_ceil(write_header.size)],
+                compressed_block[0..vsr.sector_ceil(stored_size)],
                 .grid,
                 block_offset(write.address),
             );
@@ -969,10 +995,7 @@ pub fn GridType(comptime Storage: type) type {
 
                 return cache_block;
             } else {
-                if (options.coherent) {
-                    assert(grid.superblock.working.vsr_state.sync_op_max > 0);
-                }
-
+                maybe(options.coherent and grid.superblock.working.vsr_state.sync_op_max == 0);
                 return null;
             }
         }
@@ -1104,7 +1127,7 @@ pub fn GridType(comptime Storage: type) type {
                 .completion = undefined,
                 .read = read,
             };
-            const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
+            const iop_block = grid.read_iop_blocks_compressed[grid.read_iops.index(iop)];
 
             grid.superblock.storage.read_sectors(
                 read_block_callback,
@@ -1119,7 +1142,9 @@ pub fn GridType(comptime Storage: type) type {
             const iop: *ReadIOP = @fieldParentPtr("completion", completion);
             const read = iop.read;
             const grid = read.grid;
-            const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
+            const iop_index = grid.read_iops.index(iop);
+            const compressed_block = &grid.read_iop_blocks_compressed[iop_index];
+            const output_block = &grid.read_iop_blocks[iop_index];
 
             grid.trace.stop(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
@@ -1129,19 +1154,26 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             }
 
+            var decompress_ok = true;
+            decompress_block(compressed_block.*, output_block.*) catch {
+                decompress_ok = false;
+            };
+
             // Insert the block into the cache, and give the evicted block to `iop`.
-            const cache_index =
-                if (read.cache_write) grid.cache.upsert(&read.address).index else null;
+            const cache_index = if (read.cache_write and decompress_ok)
+                grid.cache.upsert(&read.address).index
+            else
+                null;
             const block = block: {
                 if (read.cache_write) {
                     const cache_block = &grid.cache_blocks[cache_index.?];
-                    std.mem.swap(BlockPtr, iop_block, cache_block);
+                    std.mem.swap(BlockPtr, output_block, cache_block);
                     // This block content won't be used again. We could overwrite the entire thing,
                     // but that would be more expensive.
-                    @memset(iop_block.*[0..@sizeOf(vsr.Header)], 0);
+                    @memset(output_block.*[0..@sizeOf(vsr.Header)], 0);
                     break :block cache_block;
                 } else {
-                    break :block iop_block;
+                    break :block output_block;
                 }
             };
 
@@ -1156,10 +1188,15 @@ pub fn GridType(comptime Storage: type) type {
             // Remove the "root" read so that the address is no longer actively reading / locked.
             grid.read_queue.remove(read);
 
-            const result = read_block_validate(block.*, .{
-                .address = read.address,
-                .checksum = read.checksum,
-            });
+            const result = result: {
+                if (!decompress_ok) {
+                    break :result .invalid_checksum_body;
+                }
+                break :result read_block_validate(block.*, .{
+                    .address = read.address,
+                    .checksum = read.checksum,
+                });
+            };
 
             if (result != .valid) {
                 const header =
@@ -1176,7 +1213,7 @@ pub fn GridType(comptime Storage: type) type {
                     },
                 );
 
-                if (read.cache_write) {
+                if (read.cache_write and cache_index != null) {
                     // Don't cache a corrupt or incorrect block.
                     const removed = grid.cache.remove(read.address);
                     assert(removed != null);
@@ -1194,7 +1231,7 @@ pub fn GridType(comptime Storage: type) type {
         }) ReadBlockResult {
             const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
 
-            if (!header.valid_checksum()) return .invalid_checksum;
+            if (!schema.valid_checksum(header)) return .invalid_checksum;
             if (header.command != .block) return .unexpected_command;
 
             assert(header.size >= @sizeOf(vsr.Header));
@@ -1213,6 +1250,101 @@ pub fn GridType(comptime Storage: type) type {
 
             assert(header.address == expect.address);
             return .{ .valid = block };
+        }
+
+        fn compress_block(src: BlockPtr, dest: BlockPtr) usize {
+            const header_src = schema.header_from_block(src);
+            if (header_src.block_type != .value) {
+                const stored_size = header_src.size;
+                @memcpy(dest[0..stored_size], src[0..stored_size]);
+                @memset(dest[stored_size..vsr.sector_ceil(stored_size)], 0);
+                return stored_size;
+            }
+
+            const header_size = @sizeOf(vsr.Header);
+            const uncompressed_body_size = header_src.size - header_size;
+
+            var method = schema.CompressionMethod.none;
+            var compressed_size: usize = uncompressed_body_size;
+
+            if (uncompressed_body_size > 0) {
+                const dest_body = dest[header_size..];
+                const src_body = src[header_size..][0..uncompressed_body_size];
+
+                const compressed_attempt = lz4.compress(src_body, dest_body) catch |err| switch (err) {
+                    error.OutputTooSmall => null,
+                    error.CorruptInput => null,
+                };
+
+                if (compressed_attempt) |compressed_len| {
+                    if (compressed_len > 0 and compressed_len < uncompressed_body_size) {
+                        method = .lz4;
+                        compressed_size = compressed_len;
+                    } else {
+                        @memcpy(dest_body[0..uncompressed_body_size], src_body);
+                    }
+                } else {
+                    @memcpy(dest_body[0..uncompressed_body_size], src_body);
+                }
+            }
+
+            const compression_info = schema.Compression{
+                .method = method,
+                .compressed_body_size = @intCast(if (method == .lz4) compressed_size else 0),
+            };
+
+            const header_mut = mem.bytesAsValue(vsr.Header.Block, src[0..header_size]);
+            schema.set_compression(header_mut, compression_info);
+
+            const header_dest = mem.bytesAsValue(vsr.Header.Block, dest[0..header_size]);
+            header_dest.* = header_mut.*;
+
+            const stored_size = header_size + compressed_size;
+            @memset(dest[stored_size..vsr.sector_ceil(stored_size)], 0);
+
+            return stored_size;
+        }
+
+        fn decompress_block(compressed_block: BlockPtrConst, output_block: BlockPtr) !void {
+            const header_compressed = mem.bytesAsValue(
+                vsr.Header.Block,
+                compressed_block[0..@sizeOf(vsr.Header)],
+            );
+            if (header_compressed.size <= @sizeOf(vsr.Header)) return error.CompressionInvalid;
+            if (header_compressed.size > constants.block_size) return error.CompressionInvalid;
+            const header_size = @sizeOf(vsr.Header);
+            const uncompressed_body_size = header_compressed.size - header_size;
+            const info = schema.compression(header_compressed);
+
+            const compressed_body_size = switch (info.method) {
+                .none => uncompressed_body_size,
+                .lz4 => info.compressed_body_size,
+            };
+
+            if (compressed_body_size == 0 or
+                compressed_body_size > constants.block_size - header_size)
+            {
+                return error.CompressionInvalid;
+            }
+
+            const compressed_body =
+                compressed_block[header_size..][0..compressed_body_size];
+            const output_body =
+                output_block[header_size..][0..uncompressed_body_size];
+
+            @memcpy(output_block[0..header_size], compressed_block[0..header_size]);
+
+            switch (info.method) {
+                .none => {
+                    @memcpy(output_body, compressed_body);
+                },
+                .lz4 => {
+                    const decoded = try lz4.decompress(compressed_body, output_body);
+                    if (decoded != uncompressed_body_size) return error.CompressionInvalid;
+                },
+            }
+
+            @memset(output_block[header_compressed.size..vsr.sector_ceil(header_compressed.size)], 0);
         }
 
         fn read_block_resolve(grid: *Grid, read: *Grid.Read, result: ReadBlockResult) void {
@@ -1360,10 +1492,19 @@ pub fn GridType(comptime Storage: type) type {
             const TestStorage = @import("../testing/storage.zig").Storage;
             if (Storage != TestStorage) return;
 
-            const actual_block = grid.superblock.storage.grid_block(address).?;
-            const actual_header = schema.header_from_block(actual_block);
+            const actual_block_compressed = grid.superblock.storage.grid_block(address).?;
+            const actual_header = schema.header_from_block(actual_block_compressed);
             const cached_header = schema.header_from_block(cached_block);
             assert(cached_header.checksum == actual_header.checksum);
+
+            var decompressed: [constants.block_size]u8 align(constants.sector_size) = undefined;
+            const actual_block: BlockPtrConst = blk: {
+                const info = schema.compression(actual_header);
+                if (info.method == .none) break :blk actual_block_compressed;
+
+                decompress_block(actual_block_compressed, &decompressed) catch unreachable;
+                break :blk &decompressed;
+            };
 
             assert(std.mem.eql(
                 u8,
