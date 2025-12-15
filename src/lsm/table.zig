@@ -133,9 +133,15 @@ pub fn TableType(
         pub const value_block_count_max = layout.value_block_count_max;
         pub const block_count_max = index_block_count + value_block_count_max;
 
+        const value_block_hints_per_value_block = schema.TableIndex.hints_per_value_block(.{
+            .key_size = key_size,
+            .value_block_count_max = value_block_count_max,
+            .value_block_hints_per_value_block = 0,
+        });
         pub const index = schema.TableIndex.init(.{
             .key_size = key_size,
             .value_block_count_max = value_block_count_max,
+            .value_block_hints_per_value_block = value_block_hints_per_value_block,
         });
 
         pub const data = schema.TableValue.init(.{
@@ -208,14 +214,32 @@ pub fn TableType(
             assert(index_block_count > 0);
             assert(value_block_count_max > 0);
 
-            assert(index.size == @sizeOf(vsr.Header) +
-                value_block_count_max * ((key_size * 2) + address_size + checksum_size));
+            const value_block_count_max_usize: usize = value_block_count_max;
+            const key_size_usize: usize = key_size;
+            const value_block_hints_per_value_block_usize: usize =
+                index.value_block_hints_per_value_block;
+
+            const index_entry_size: usize = key_size_usize *
+                (2 + value_block_hints_per_value_block_usize) + address_size + checksum_size;
+            assert(index.size ==
+                @sizeOf(vsr.Header) + value_block_count_max_usize * index_entry_size);
+            if (index.value_block_hints_per_value_block == 0) {
+                assert(index.value_hints_size == 0);
+            } else {
+                assert(@as(usize, index.value_hints_size) ==
+                    value_block_count_max_usize * value_block_hints_per_value_block_usize *
+                        key_size_usize);
+            }
             assert(index.size == index.value_addresses_offset + index.value_addresses_size);
             assert(index.size <= block_size);
             assert(index.keys_size > 0);
             assert(index.keys_size % key_size == 0);
             assert(@divExact(index.value_addresses_size, @sizeOf(u64)) == value_block_count_max);
             assert(@divExact(index.value_checksums_size, @sizeOf(u256)) == value_block_count_max);
+            if (index.value_block_hints_per_value_block > 0) {
+                assert(@divExact(@as(usize, index.value_hints_size), key_size_usize) ==
+                    value_block_count_max_usize * value_block_hints_per_value_block_usize);
+            }
             assert(block_size == index.padding_offset + index.padding_size);
             assert(block_size == index.size + index.padding_size);
 
@@ -308,6 +332,7 @@ pub fn TableType(
                 assert(builder.value_count > 0);
 
                 const block = builder.value_block;
+                const values_written = Table.value_block_values(block)[0..builder.value_count];
                 const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
@@ -328,7 +353,29 @@ pub fn TableType(
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
+                if (index.value_block_hints_per_value_block > 0) {
+                    const hint_count = @min(
+                        values_written.len,
+                        @as(usize, index.value_block_hints_per_value_block),
+                    );
+                    const hints = index_value_block_hints_mut(
+                        builder.index_block,
+                        builder.value_block_count,
+                    );
+                    @memset(mem.sliceAsBytes(hints), 0);
+
+                    var hint_index: usize = 0;
+                    while (hint_index < hint_count) : (hint_index += 1) {
+                        const value_index =
+                            hint_position(values_written.len, hint_count, hint_index);
+                        hints[hint_index] = key_from_value(&values_written[value_index]);
+                    }
+                }
+
                 const values = Table.value_block_values_used(block);
+                assert(values.len == values_written.len);
+                assert(values.ptr == values_written.ptr);
+
                 { // Now that we have checksummed the block, sanity-check the result:
 
                     if (constants.verify) {
@@ -423,6 +470,8 @@ pub fn TableType(
                         .value_block_count_max = index.value_block_count_max,
                         .tree_id = options.tree_id,
                         .key_size = index.key_size,
+                        .value_block_hints_per_value_block = index.value_block_hints_per_value_block,
+                        .value_block_hints_version = index.value_block_hints_version,
                     }),
                     .address = options.address,
                     .snapshot = options.snapshot_min,
@@ -468,6 +517,22 @@ pub fn TableType(
             return mem.bytesAsSlice(Key, index_block[offset..][0..index.keys_size]);
         }
 
+        inline fn hint_position(value_count: usize, hint_count: usize, hint_index: usize) usize {
+            assert(value_count > 0);
+            assert(hint_count > 0);
+            assert(hint_index < hint_count);
+            if (hint_count == 1) return 0;
+            return @divFloor(hint_index * (value_count - 1), hint_count - 1);
+        }
+
+        pub inline fn index_value_hints(index_block: BlockPtr) []Key {
+            if (index.value_hints_size == 0) return &[_]Key{};
+            return mem.bytesAsSlice(
+                Key,
+                index_block[index.value_hints_offset..][0..index.value_hints_size],
+            );
+        }
+
         pub inline fn index_value_keys_used(
             index_block: BlockPtrConst,
             comptime key: enum { key_min, key_max },
@@ -480,10 +545,45 @@ pub fn TableType(
             return slice[0..index.value_blocks_used(index_block)];
         }
 
+        pub inline fn index_value_hints_used(index_block: BlockPtrConst) []const Key {
+            if (index.value_block_hints_per_value_block == 0) return &[_]Key{};
+            const slice = mem.bytesAsSlice(
+                Key,
+                index_block[index.value_hints_offset..][0..index.value_hints_size],
+            );
+            const used = @as(usize, index.value_blocks_used(index_block)) *
+                @as(usize, index.value_block_hints_per_value_block);
+            return slice[0..used];
+        }
+
+        pub inline fn index_value_block_hints(
+            index_block: BlockPtrConst,
+            value_block_index: usize,
+        ) []const Key {
+            assert(value_block_index < @as(usize, index.value_blocks_used(index_block)));
+            const hints_per_block = index.value_block_hints_per_value_block;
+            const slice = index_value_hints_used(index_block);
+            const start = value_block_index * @as(usize, hints_per_block);
+            const end = start + @as(usize, hints_per_block);
+            return slice[start..end];
+        }
+
+        pub inline fn index_value_block_hints_mut(
+            index_block: BlockPtr,
+            value_block_index: usize,
+        ) []Key {
+            if (index.value_block_hints_per_value_block == 0) return &[_]Key{};
+            assert(value_block_index < @as(usize, value_block_count_max));
+            const slice = index_value_hints(index_block);
+            const start = value_block_index * @as(usize, index.value_block_hints_per_value_block);
+            const end = start + @as(usize, index.value_block_hints_per_value_block);
+            return slice[start..end];
+        }
+
         /// Returns the zero-based index of the value block that may contain the key
         /// or null if the key is not contained in the index block's key range.
         /// May be called on an index block only when the key is in range of the table.
-        inline fn index_value_block_for_key(index_block: BlockPtrConst, key: Key) ?u32 {
+        inline fn index_value_block_for_key(index_block: BlockPtrConst, key: Key) ?usize {
             // Because we search key_max in the index block we can use the `upsert_index`
             // binary search here and avoid the extra comparison.
             // If the search finds an exact match, we want to return that value block.
@@ -495,7 +595,7 @@ pub fn TableType(
                 key,
                 .{},
             );
-            assert(value_block_index < index.value_blocks_used(index_block));
+            assert(value_block_index < @as(usize, index.value_blocks_used(index_block)));
 
             const key_min = Table.index_value_keys_used(index_block, .key_min)[value_block_index];
             return if (key < key_min) null else value_block_index;
@@ -504,6 +604,7 @@ pub fn TableType(
         pub const IndexBlocks = struct {
             value_block_address: u64,
             value_block_checksum: u128,
+            value_block_index: usize,
         };
 
         /// Returns all data stored in the index block relating to a given key
@@ -513,6 +614,7 @@ pub fn TableType(
             return if (Table.index_value_block_for_key(index_block, key)) |i| .{
                 .value_block_address = index.value_addresses_used(index_block)[i],
                 .value_block_checksum = index.value_checksums_used(index_block)[i].value,
+                .value_block_index = i,
             } else null;
         }
 
@@ -530,8 +632,43 @@ pub fn TableType(
             return header.address;
         }
 
-        pub fn value_block_search(value_block: BlockPtrConst, key: Key) ?*const Value {
+        pub fn value_block_search(
+            value_block: BlockPtrConst,
+            key: Key,
+            hints: []const Key,
+        ) ?*const Value {
+            const log_hint_ranges = false;
             const values = value_block_values_used(value_block);
+            const hint_count = @min(hints.len, values.len);
+
+            if (hint_count > 0) {
+                const hint_index = binary_search.binary_search_keys_upsert_index(
+                    Key,
+                    hints[0..hint_count],
+                    key,
+                    .{ .mode = .upper_bound, .prefetch = false },
+                );
+                const chunk_index = if (hint_index == 0) 0 else hint_index - 1;
+                const start = hint_position(values.len, hint_count, chunk_index);
+                const end = if (hint_index == hint_count)
+                    values.len
+                else
+                    hint_position(values.len, hint_count, hint_index) + 1;
+                if (log_hint_ranges) {
+                    std.log.info(
+                        "value_block_search narrowed: range={} total={}",
+                        .{ end - start, values.len },
+                    );
+                }
+                return binary_search.binary_search_values(
+                    Key,
+                    Value,
+                    key_from_value,
+                    values[start..end],
+                    key,
+                    .{},
+                );
+            }
 
             return binary_search.binary_search_values(
                 Key,
@@ -577,6 +714,18 @@ pub fn TableType(
                     if (value_block_index == value_block_addresses.len - 1) {
                         assert(key_max == null or
                             key_from_value(&values[values.len - 1]) == key_max.?);
+                    }
+                    if (index.value_block_hints_per_value_block > 0) {
+                        const hints = Table.index_value_block_hints(index_block, value_block_index);
+                        const hint_count = @min(
+                            values.len,
+                            @as(usize, index.value_block_hints_per_value_block),
+                        );
+                        var hint_index: usize = 0;
+                        while (hint_index < hint_count) : (hint_index += 1) {
+                            const value_index = hint_position(values.len, hint_count, hint_index);
+                            assert(hints[hint_index] == key_from_value(&values[value_index]));
+                        }
                     }
                     var a = &values[0];
                     for (values[1..]) |*b| {

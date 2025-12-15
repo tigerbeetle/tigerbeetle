@@ -8,6 +8,9 @@
 //! │ [value_block_count_max]u256   │ checksums of value blocks
 //! │ [value_block_count_max]Key    │ the minimum/first key in the respective value block
 //! │ [value_block_count_max]Key    │ the maximum/last key in the respective value block
+//! │ [value_block_count_max *
+//! │  value_block_hints_per_value_block]Key
+//! │                              │ sampled hints per value block
 //! │ [value_block_count_max]u64    │ addresses of value blocks
 //! │ […]u8{0}                     │ padding (to end of block)
 //!
@@ -90,13 +93,17 @@ pub const TableIndex = struct {
         value_block_count_max: u32,
         key_size: u32,
         tree_id: u16,
-        reserved: [82]u8 = @splat(0),
+        value_block_hints_per_value_block: u8 = 0,
+        value_block_hints_version: u8 = 0,
+        reserved: [80]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
             assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
         }
     };
+
+    pub const hints_bytes_per_value_block_max: usize = 2048;
 
     key_size: u32,
     value_block_count_max: u32,
@@ -107,6 +114,10 @@ pub const TableIndex = struct {
     keys_min_offset: u32,
     keys_max_offset: u32,
     keys_size: u32,
+    value_hints_offset: u32,
+    value_hints_size: u32,
+    value_block_hints_per_value_block: u8,
+    value_block_hints_version: u8,
     value_addresses_offset: u32,
     value_addresses_size: u32,
     padding_offset: u32,
@@ -115,12 +126,46 @@ pub const TableIndex = struct {
     const Parameters = struct {
         key_size: u32,
         value_block_count_max: u32,
+        value_block_hints_per_value_block: u8,
     };
+
+    pub fn hints_per_value_block(parameters: Parameters) u8 {
+        const key_size_usize: usize = parameters.key_size;
+        const value_block_count_max_usize: usize = parameters.value_block_count_max;
+        const hints_bytes_available = hints_bytes_per_value_block_max / key_size_usize;
+
+        const hints_per_value_block_cap = hints_per_value_block_cap: {
+            if (parameters.key_size == 0) break :hints_per_value_block_cap 0;
+            break :hints_per_value_block_cap @as(
+                u8,
+                @min(hints_bytes_available, @as(usize, std.math.maxInt(u8))),
+            );
+        };
+
+        const size_without_hints = @sizeOf(vsr.Header) + value_block_count_max_usize *
+            (checksum_size + (key_size_usize * 2) + address_size);
+        if (size_without_hints >= constants.block_size) return 0;
+        const available_bytes: usize = constants.block_size - size_without_hints;
+        const hints_per_value_block_space = @min(
+            available_bytes / (value_block_count_max_usize * key_size_usize),
+            @as(usize, std.math.maxInt(u8)),
+        );
+
+        return @as(
+            u8,
+            @min(
+                @as(usize, hints_per_value_block_cap),
+                hints_per_value_block_space,
+            ),
+        );
+    }
 
     pub fn init(parameters: Parameters) TableIndex {
         assert(parameters.key_size > 0);
         assert(parameters.value_block_count_max > 0);
         assert(parameters.value_block_count_max <= constants.lsm_table_value_blocks_max);
+        assert(parameters.value_block_hints_per_value_block <=
+            hints_per_value_block(parameters));
 
         const value_checksums_offset = @sizeOf(vsr.Header);
         const value_checksums_size = parameters.value_block_count_max * checksum_size;
@@ -129,7 +174,11 @@ pub const TableIndex = struct {
         const keys_min_offset = value_checksums_offset + value_checksums_size;
         const keys_max_offset = keys_min_offset + keys_size;
 
-        const value_addresses_offset = keys_max_offset + keys_size;
+        const value_hints_offset = keys_max_offset + keys_size;
+        const value_hints_size = parameters.value_block_count_max *
+            @as(u32, parameters.value_block_hints_per_value_block) * parameters.key_size;
+
+        const value_addresses_offset = value_hints_offset + value_hints_size;
         const value_addresses_size = parameters.value_block_count_max * address_size;
 
         const padding_offset = value_addresses_offset + value_addresses_size;
@@ -138,7 +187,7 @@ pub const TableIndex = struct {
 
         // `keys_size * 2` for counting both key_min and key_max:
         const size = @sizeOf(vsr.Header) + value_checksums_size +
-            (keys_size * 2) + value_addresses_size;
+            (keys_size * 2) + value_hints_size + value_addresses_size;
         assert(size <= constants.block_size);
 
         return .{
@@ -150,6 +199,13 @@ pub const TableIndex = struct {
             .keys_min_offset = keys_min_offset,
             .keys_max_offset = keys_max_offset,
             .keys_size = keys_size,
+            .value_hints_offset = value_hints_offset,
+            .value_hints_size = value_hints_size,
+            .value_block_hints_per_value_block = parameters.value_block_hints_per_value_block,
+            .value_block_hints_version = if (parameters.value_block_hints_per_value_block == 0)
+                0
+            else
+                1,
             .value_addresses_offset = value_addresses_offset,
             .value_addresses_size = value_addresses_size,
             .padding_offset = padding_offset,
@@ -168,6 +224,7 @@ pub const TableIndex = struct {
         const index = TableIndex.init(.{
             .key_size = header_metadata.key_size,
             .value_block_count_max = header_metadata.value_block_count_max,
+            .value_block_hints_per_value_block = header_metadata.value_block_hints_per_value_block,
         });
 
         for (index.padding(index_block)) |padding_area| {
@@ -184,6 +241,17 @@ pub const TableIndex = struct {
 
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
         assert(header_metadata.value_block_count <= header_metadata.value_block_count_max);
+        assert(header_metadata.value_block_hints_version == 0 or
+            header_metadata.value_block_hints_version == 1);
+        assert((header_metadata.value_block_hints_per_value_block == 0 and
+            header_metadata.value_block_hints_version == 0) or
+            (header_metadata.value_block_hints_per_value_block > 0 and
+                header_metadata.value_block_hints_version == 1));
+        assert(header_metadata.value_block_hints_per_value_block <= hints_per_value_block(.{
+            .key_size = header_metadata.key_size,
+            .value_block_count_max = header_metadata.value_block_count_max,
+            .value_block_hints_per_value_block = header_metadata.value_block_hints_per_value_block,
+        }));
         assert(stdx.zeroed(&header_metadata.reserved));
         return header_metadata;
     }
@@ -195,6 +263,8 @@ pub const TableIndex = struct {
         const result = metadata(index_block);
         assert(result.key_size == schema.key_size);
         assert(result.value_block_count_max == schema.value_block_count_max);
+        assert(result.value_block_hints_per_value_block == schema.value_block_hints_per_value_block);
+        assert(result.value_block_hints_version == schema.value_block_hints_version);
         return result;
     }
 
@@ -244,10 +314,12 @@ pub const TableIndex = struct {
     pub fn padding(
         index: *const TableIndex,
         index_block: BlockPtrConst,
-    ) [4]struct { start: usize, end: usize } {
+    ) [5]struct { start: usize, end: usize } {
         const value_checksums_skip = index.value_blocks_used(index_block) * checksum_size;
         const keys_min_skip = index.value_blocks_used(index_block) * index.key_size;
         const keys_max_skip = index.value_blocks_used(index_block) * index.key_size;
+        const value_hints_skip = index.value_blocks_used(index_block) *
+            @as(u32, index.value_block_hints_per_value_block) * index.key_size;
         const value_addresses_skip = index.value_blocks_used(index_block) * address_size;
         return .{
             .{
@@ -261,6 +333,10 @@ pub const TableIndex = struct {
             .{
                 .start = index.keys_max_offset + keys_max_skip,
                 .end = index.keys_max_offset + index.keys_size,
+            },
+            .{
+                .start = index.value_hints_offset + value_hints_skip,
+                .end = index.value_hints_offset + index.value_hints_size,
             },
             .{
                 .start = index.value_addresses_offset + value_addresses_skip,
@@ -615,3 +691,15 @@ pub const ManifestNode = struct {
         );
     }
 };
+
+test "TableIndex hints_per_value_block capped by budget" {
+    const hints = TableIndex.hints_per_value_block(.{
+        .key_size = 8,
+        .value_block_count_max = 1,
+        .value_block_hints_per_value_block = 0,
+    });
+    try std.testing.expectEqual(
+        @as(u8, TableIndex.hints_bytes_per_value_block_max / 8),
+        hints,
+    );
+}

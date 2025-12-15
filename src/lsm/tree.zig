@@ -270,6 +270,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 switch (tree.cached_value_block_search(
                     key_blocks.value_block_address,
                     key_blocks.value_block_checksum,
+                    Table.index_value_block_hints(index_block, key_blocks.value_block_index),
                     key,
                 )) {
                     .negative => {},
@@ -292,6 +293,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree: *Tree,
             address: u64,
             checksum: u128,
+            value_block_hints: []const Key,
             key: Key,
         ) union(enum) {
             positive: *const Value,
@@ -303,7 +305,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 checksum,
                 .{ .coherent = true },
             )) |value_block| {
-                if (Table.value_block_search(value_block, key)) |value| {
+                if (Table.value_block_search(value_block, key, value_block_hints)) |value| {
                     return .{ .positive = value };
                 } else {
                     return .negative;
@@ -378,6 +380,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 checksum: u128,
             } = null,
 
+            value_block_hints_count: u8 = 0,
+            value_block_hints: [Table.index.value_block_hints_per_value_block]Key = undefined,
+
             callback: *const fn (*Tree.LookupContext, ?*const Value) void,
 
             fn read_index_block(context: *LookupContext) void {
@@ -385,6 +390,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
+                context.value_block_hints_count = 0;
 
                 context.tree.grid.read_block(
                     .{ .from_local_or_global_storage = read_index_block_callback },
@@ -413,6 +419,16 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .address = blocks.value_block_address,
                     .checksum = blocks.value_block_checksum,
                 };
+                if (Table.index.value_block_hints_per_value_block > 0) {
+                    const hints = Table.index_value_block_hints(index_block, blocks.value_block_index);
+                    context.value_block_hints_count = Table.index.value_block_hints_per_value_block;
+                    @memcpy(
+                        mem.sliceAsBytes(
+                            context.value_block_hints[0..@as(usize, context.value_block_hints_count)],
+                        ),
+                        mem.sliceAsBytes(hints),
+                    );
+                }
 
                 context.tree.grid.read_block(
                     .{ .from_local_or_global_storage = read_value_block_callback },
@@ -431,7 +447,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count <= constants.lsm_levels);
                 assert(Table.data.block_metadata(value_block).tree_id == context.tree.config.id);
 
-                if (Table.value_block_search(value_block, context.key)) |value| {
+                if (Table.value_block_search(
+                    value_block,
+                    context.key,
+                    context.value_block_hints[0..@as(usize, context.value_block_hints_count)],
+                )) |value| {
                     context.callback(context, unwrap_tombstone(value));
                 } else {
                     // The key is not present in this table, check the next level.
