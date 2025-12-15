@@ -423,18 +423,17 @@ function plot_series(series_list, root_node, batch_count) {
       },
     };
 
-    if (series.unit === "bytes") {
-      options.yaxis = {
-        labels: {
-          formatter: format_bytes,
-        },
-      };
-    }
+    const formatters = {
+      bytes: format_bytes,
+      ms: format_duration,
+      s: (s) => format_duration(s * 1000),
+      count: format_count,
+    };
 
-    if (series.unit === "ms") {
+    if (formatters[series.unit]) {
       options.yaxis = {
         labels: {
-          formatter: format_duration,
+          formatter: formatters[series.unit],
         },
       };
     }
@@ -487,10 +486,7 @@ function mean(values) {
 }
 
 function format_bytes(bytes) {
-  if (bytes === 0) return "0 Bytes";
-
-  const k = 1024;
-  const sizes = [
+  return format_suffix(bytes, 1024, [
     "Bytes",
     "KiB",
     "MiB",
@@ -500,14 +496,22 @@ function format_bytes(bytes) {
     "EiB",
     "ZiB",
     "YiB",
-  ];
+  ]);
+}
 
+function format_count(count) {
+  return format_suffix(count, 1000, ["", "K", "M", "G"]);
+}
+
+function format_suffix(amount, base, progression) {
+  if (amount == 0) return `0 ${progression[0]}`;
   let i = 0;
-  while (i != sizes.length - 1 && Math.pow(k, i + 1) < bytes) {
+  while (i != progression.length - 1 && Math.pow(base, i + 1) < amount) {
     i += 1;
   }
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  return `${parseFloat((amount / Math.pow(base, i)).toFixed(2))} ${
+    progression[i]
+  }`;
 }
 
 function format_date_day(date) {

@@ -347,7 +347,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
             .{ .name = "datafile", .value = datafile_bytes, .unit = "bytes" },
             .{ .name = "datafile empty", .value = datafile_empty_bytes, .unit = "bytes" },
-            .{ .name = "replica log lines", .value = replica_log_lines, .unit = "lines" },
+            .{ .name = "replica log lines", .value = replica_log_lines, .unit = "count" },
             .{
                 .name = "checksum(message_size_max)",
                 .value = checksum_message_size_max_us,
