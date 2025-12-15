@@ -908,6 +908,9 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             .{
                 .stdin_slice =
                 \\FROM alpine:latest
+                // TODO Remove this workaround once the Alpine 3.23.1 is published.
+                // (See https://hub.docker.com/_/alpine).
+                \\RUN apk upgrade --scripts=no apk-tools
                 \\RUN apk add --no-cache tini
                 \\ARG TARGETARCH
                 \\COPY tigerbeetle-${TARGETARCH} /tigerbeetle
