@@ -165,7 +165,7 @@ async function main_seeds() {
     } else if (is_release(record)) {
       commit_extra = "(release)";
     }
-    const log_link = record.log ? ` <a href="${logs_base + record.log}">(log)</a>` : '';
+    const log_link = record.log ? ` <a href="${logs_base + record.log}">(log)</a>` : "";
     row_dom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${
@@ -336,13 +336,31 @@ function batches_to_series(batches) {
     }
   }
 
-  return results;
+  return Array.from(results.values());
 }
 
-// Plot time series using <https://apexcharts.com>.
 function plot_series(series_list, root_node, batch_count) {
-  for (const series of series_list.values()) {
-    let options = {
+  const now_seconds = Date.now() / 1000;
+  const outlier_count = 3;
+
+  const outile_indices = series_list.map(
+    (series, index) => ({
+      series,
+      index,
+      score: outlier_score(series, now_seconds),
+    }),
+  )
+    .sort((a, b) => b.score - a.score)
+    .slice(0, outlier_count)
+    .map((it) => it.index);
+
+  const series_list_ordered = [
+    ...outile_indices.map((index) => series_list[index]),
+    ...series_list.filter((_, index) => !outile_indices.includes(index)),
+  ];
+
+  for (const [series_index, series] of series_list_ordered.entries()) {
+    const options = {
       title: {
         text: series.name,
       },
@@ -366,6 +384,7 @@ function plot_series(series_list, root_node, batch_count) {
       markers: {
         size: 4,
       },
+      colors: series_index < outlier_count ? ["var(--red-10)"] : undefined,
       series: [{
         name: series.name,
         data: series.value,
@@ -425,6 +444,46 @@ function plot_series(series_list, root_node, batch_count) {
     const chart = new ApexCharts(div, options);
     chart.render();
   }
+}
+
+// Heuristic function that takes a time series and returns a number
+// proportional to week-on-week change.
+function outlier_score(series, now_seconds) {
+  const WEEK = 7 * 24 * 60 * 60;
+
+  const recent = [];
+  const baseline = [];
+
+  for (let i = 0; i < series.value.length; i++) {
+    const value = series.value[i][1];
+    const age = now_seconds - series.timestamp[i];
+
+    if (age <= WEEK) {
+      recent.push(value);
+    } else if (age <= 2 * WEEK) {
+      baseline.push(value);
+    } else {
+      // Older than 2 weeks: discarded.
+    }
+  }
+
+  if (recent.length === 0 || baseline.length === 0) {
+    return 0;
+  }
+
+  const recent_mean = mean(recent);
+  const baseline_mean = mean(baseline);
+
+  if (baseline_mean === 0) return 0;
+
+  return Math.abs(recent_mean - baseline_mean) / baseline_mean;
+}
+
+function mean(values) {
+  assert(values.length > 0);
+  let sum = 0;
+  for (const v of values) sum += v;
+  return sum / values.length;
 }
 
 function format_bytes(bytes) {
