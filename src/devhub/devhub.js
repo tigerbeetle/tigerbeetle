@@ -7,6 +7,81 @@
 // - `deno fmt` for style
 // - no TypeScript, no build step
 
+// Global declarations
+/** @type {any} */
+let ApexCharts;
+
+/**
+ * @typedef {Object} FuzzRecord
+ * @property {string} fuzzer
+ * @property {string} branch
+ * @property {string} commit_sha
+ * @property {boolean} ok
+ * @property {number} count
+ * @property {string} command
+ * @property {number} seed_timestamp_start
+ * @property {number} seed_timestamp_end
+ * @property {string} [log]
+ */
+
+/**
+ * @typedef {Object} PullRequest
+ * @property {string} html_url
+ */
+
+/**
+ * @typedef {Object} Label
+ * @property {string} name
+ */
+
+/**
+ * @typedef {Object} User
+ * @property {string} login
+ */
+
+/**
+ * @typedef {Object} Issue
+ * @property {number} number
+ * @property {PullRequest} [pull_request]
+ * @property {Label[]} labels
+ * @property {User} user
+ */
+
+/**
+ * @typedef {Object} Metric
+ * @property {string} name
+ * @property {string} unit
+ * @property {number} value
+ */
+
+/**
+ * @typedef {Object} BatchAttributes
+ * @property {string} git_commit
+ */
+
+/**
+ * @typedef {Object} Batch
+ * @property {Metric[]} metrics
+ * @property {BatchAttributes} attributes
+ * @property {number} timestamp
+ */
+
+/**
+ * @typedef {Object} Series
+ * @property {string} name
+ * @property {string} [unit]
+ * @property {[number, number][]} value
+ * @property {string[]} git_commit
+ * @property {number[]} timestamp
+ */
+
+/**
+ * @typedef {Object} ReleaseManager
+ * @property {string} previous
+ * @property {string} current
+ * @property {string} next
+ */
+
 window.onload = () =>
   Promise.all([
     main_release_rotation(),
@@ -14,6 +89,10 @@ window.onload = () =>
     main_metrics(),
   ]);
 
+/**
+ * @param {*} condition
+ * @returns {asserts condition}
+ */
 function assert(condition) {
   if (!condition) {
     alert("Assertion failed");
@@ -21,6 +100,9 @@ function assert(condition) {
   }
 }
 
+/**
+ * @returns {void}
+ */
 function main_release_rotation() {
   const release_manager = get_release_manager();
   for (const week of ["previous", "current", "next"]) {
@@ -28,6 +110,9 @@ function main_release_rotation() {
       release_manager[week];
   }
 
+  /**
+   * @returns {ReleaseManager}
+   */
   function get_release_manager() {
     const shift = 1; // Adjust when changing the set of candidates to avoid shifts.
     const week = get_week(new Date()) + shift;
@@ -52,6 +137,9 @@ function main_release_rotation() {
   }
 }
 
+/**
+ * @returns {Promise<void>}
+ */
 async function main_seeds() {
   const data_url =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
@@ -74,7 +162,7 @@ async function main_seeds() {
     !issue.pull_request &&
     !issue.labels.map((label) => label.name).includes("triaged")
   );
-  document.querySelector("#untriaged-issues-count").innerText =
+  /** @type {HTMLElement | null} */ (document.querySelector("#untriaged-issues-count")).innerText =
     untriaged_issues.length;
   if (untriaged_issues.length) {
     document.querySelector("#untriaged-issues-count").classList.add(
@@ -213,6 +301,9 @@ async function main_seeds() {
   }
 }
 
+/**
+ * @returns {Promise<void>}
+ */
 async function main_metrics() {
   const data_url =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
@@ -228,15 +319,27 @@ async function main_metrics() {
   plot_series(series, document.querySelector("#charts"), batches.length);
 }
 
+/**
+ * @param {FuzzRecord} record
+ * @returns {boolean}
+ */
 function is_main(record) {
   return record.branch === "https://github.com/tigerbeetle/tigerbeetle";
 }
 
+/**
+ * @param {FuzzRecord} record
+ * @returns {boolean}
+ */
 function is_release(record) {
   return record.branch ===
     "https://github.com/tigerbeetle/tigerbeetle/tree/release";
 }
 
+/**
+ * @param {FuzzRecord} record
+ * @returns {number | undefined}
+ */
 function pull_request_number(record) {
   const pr_prefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
   if (record.branch.startsWith(pr_prefix)) {
@@ -249,6 +352,10 @@ function pull_request_number(record) {
   return undefined;
 }
 
+/**
+ * @param {number} duration_ms
+ * @returns {string}
+ */
 function format_duration(duration_ms) {
   const milliseconds = duration_ms % 1000;
   const seconds = Math.floor((duration_ms / 1000) % 60);
@@ -280,9 +387,13 @@ function format_duration(duration_ms) {
   return parts.join(" ");
 }
 
-// Returns the ISO week of the date.
-//
-// Source: https://weeknumber.com/how-to/javascript
+/**
+ * Returns the ISO week of the date.
+ *
+ * Source: https://weeknumber.com/how-to/javascript
+ * @param {Date} date
+ * @returns {number}
+ */
 function get_week(date) {
   date = new Date(date.getTime());
   date.setHours(0, 0, 0, 0);
@@ -297,13 +408,17 @@ function get_week(date) {
   );
 }
 
-// The input data is array of runs, where a single run contains many measurements (eg, file size,
-// build time).
-//
-// This function "transposes" the data, such that measurements with identical labels are merged to
-// form a single array which is what we want to plot.
-//
-// This doesn't depend on particular plotting library though.
+/**
+ * The input data is array of runs, where a single run contains many measurements (eg, file size,
+ * build time).
+ *
+ * This function "transposes" the data, such that measurements with identical labels are merged to
+ * form a single array which is what we want to plot.
+ *
+ * This doesn't depend on particular plotting library though.
+ * @param {Batch[]} batches
+ * @returns {Series[]}
+ */
 function batches_to_series(batches) {
   const results = new Map();
   for (const [index, batch] of batches.entries()) {
@@ -339,6 +454,12 @@ function batches_to_series(batches) {
   return Array.from(results.values());
 }
 
+/**
+ * @param {Series[]} series_list
+ * @param {HTMLElement | null} root_node
+ * @param {number} batch_count
+ * @returns {void}
+ */
 function plot_series(series_list, root_node, batch_count) {
   const now_seconds = Date.now() / 1000;
   const outlier_count = 3;
@@ -446,8 +567,13 @@ function plot_series(series_list, root_node, batch_count) {
   }
 }
 
-// Heuristic function that takes a time series and returns a number
-// proportional to week-on-week change.
+/**
+ * Heuristic function that takes a time series and returns a number
+ * proportional to week-on-week change.
+ * @param {Series} series
+ * @param {number} now_seconds
+ * @returns {number}
+ */
 function outlier_score(series, now_seconds) {
   const WEEK = 7 * 24 * 60 * 60;
 
@@ -479,6 +605,10 @@ function outlier_score(series, now_seconds) {
   return Math.abs(recent_mean - baseline_mean) / baseline_mean;
 }
 
+/**
+ * @param {number[]} values
+ * @returns {number}
+ */
 function mean(values) {
   assert(values.length > 0);
   let sum = 0;
@@ -486,6 +616,10 @@ function mean(values) {
   return sum / values.length;
 }
 
+/**
+ * @param {number} bytes
+ * @returns {string}
+ */
 function format_bytes(bytes) {
   if (bytes === 0) return "0 Bytes";
 
@@ -510,14 +644,27 @@ function format_bytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
+/**
+ * @param {Date} date
+ * @returns {string}
+ */
 function format_date_day(date) {
   return format_date(date, false);
 }
 
+/**
+ * @param {Date} date
+ * @returns {string}
+ */
 function format_date_day_time(date) {
   return format_date(date, true);
 }
 
+/**
+ * @param {Date} date
+ * @param {boolean} include_time
+ * @returns {string}
+ */
 function format_date(date, include_time) {
   assert(date instanceof Date);
 
@@ -534,11 +681,19 @@ function format_date(date, include_time) {
     : `${year}-${month}-${day}`;
 }
 
+/**
+ * @param {string} url
+ * @returns {Promise<any>}
+ */
 async function fetch_json(url) {
   const response = await fetch(url, { cache: "no-cache" });
   return await response.json();
 }
 
+/**
+ * @param {HTMLElement} element
+ * @returns {void}
+ */
 function copy_to_clipboard(element) {
   navigator.clipboard.writeText(element.innerText).then(() => {
     const before = element.innerHTML;
