@@ -411,7 +411,13 @@ pub fn AOFType(comptime IO: type) type {
                 if (header.operation.vsr_reserved()) return false;
                 const state_machine_operation = header.operation.cast(tb.Operation);
                 switch (state_machine_operation) {
-                    .create_accounts, .create_transfers => return true,
+                    .create_accounts,
+                    .create_transfers,
+                    .deprecated_create_accounts_sparse,
+                    .deprecated_create_transfers_sparse,
+                    .deprecated_create_accounts_unbatched,
+                    .deprecated_create_transfers_unbatched,
+                    => return true,
 
                     // Pulses are replayed to handle pending transfer expiry.
                     .pulse => return true,

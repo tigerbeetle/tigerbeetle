@@ -57,12 +57,7 @@ pub const RustDocs = Docs{
     \\* `AccountFlags::Linked | AccountFlags::History`
     ,
 
-    .create_accounts_errors_documentation =
-    \\To handle errors, iterate over the `Vec<CreateAccountsResult>` returned
-    \\from `client.create_accounts()`. Each result contains an `index` field
-    \\to map back to the input account and a `result` field with the
-    \\`CreateAccountResult` enum.
-    ,
+    .create_accounts_errors_documentation = "",
 
     .create_transfers_documentation =
     \\Transfers support various types including regular, pending, linked,
@@ -85,12 +80,7 @@ pub const RustDocs = Docs{
     \\chain except the last one. If any transfer in a linked chain fails,
     \\the entire chain is rolled back.
     ,
-    .create_transfers_errors_documentation =
-    \\To handle transfer errors, iterate over the `Vec<CreateTransfersResult>`
-    \\returned from `client.create_transfers()`. Each result contains an
-    \\`index` field to map back to the input transfer and a `result` field
-    \\with the `CreateTransferResult` enum.
-    ,
+    .create_transfers_errors_documentation = "",
 
     .transfer_flags_documentation =
     \\To toggle behavior for a transfer, use the `TransferFlags` bitflags.

@@ -1,13 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"reflect"
 
 	. "github.com/tigerbeetle/tigerbeetle-go"
-	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 // Since we only require Go 1.17 we can't do this as a generic function
@@ -31,7 +29,7 @@ func main() {
 	defer client.Close()
 
 	// Create two accounts
-	res, err := client.CreateAccounts([]Account{
+	accountsRes, err := client.CreateAccounts([]Account{
 		{
 			ID:     ToUint128(1),
 			Ledger: 1,
@@ -47,11 +45,16 @@ func main() {
 		log.Fatalf("Error creating accounts: %s", err)
 	}
 
-	for _, err := range res {
-		log.Fatalf("Error creating account %d: %s", err.Index, err.Result)
+	assert(len(accountsRes), 2, "accountsRes")
+	for i, result := range accountsRes {
+		switch result.Status {
+		case AccountCreated:
+		default:
+			log.Fatalf("Error creating account %d: %s", i, result.Status)
+		}
 	}
 
-	transferRes, err := client.CreateTransfers([]Transfer{
+	transfersRes, err := client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(1),
 			DebitAccountID:  ToUint128(1),
@@ -65,8 +68,13 @@ func main() {
 		log.Fatalf("Error creating transfer: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, result := range transfersRes {
+		switch result.Status {
+		case TransferCreated:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, result.Status)
+		}
 	}
 
 	// Check the sums for both accounts
@@ -87,6 +95,4 @@ func main() {
 			log.Fatalf("Unexpected account")
 		}
 	}
-
-	fmt.Println("ok")
 }

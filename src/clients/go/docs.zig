@@ -63,12 +63,7 @@ pub const GoDocs = Docs{
     \\* `AccountFlags{History: true}.ToUint16()`
     ,
 
-    .create_accounts_errors_documentation =
-    \\To handle errors you can either 1) exactly match error codes returned
-    \\from `client.createAccounts` with enum values in the
-    \\`CreateAccountError` object, or you can 2) look up the error code in
-    \\the `CreateAccountError` object for a human-readable string.
-    ,
+    .create_accounts_errors_documentation = "",
 
     .create_transfers_documentation = "",
     .create_transfers_errors_documentation = "",

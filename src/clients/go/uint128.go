@@ -1,7 +1,7 @@
-package types
+package tigerbeetle_go
 
 /*
-#include "../native/tb_client.h"
+#include "./native/tb_client.h"
 */
 import "C"
 import (

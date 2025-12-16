@@ -27,9 +27,20 @@ Connect to the cluster and make a transfer:
 
 ```console
 $ ./tigerbeetle repl --cluster=0 --addresses=3000
-> create_accounts id=1 code=10 ledger=700,
-                  id=2 code=10 ledger=700;
+> create_accounts id=1 code=10 ledger=700, id=2 code=10 ledger=700;
+{
+  "timestamp": "1761605367595515148",
+  "status": "tigerbeetle.CreateAccountStatus.created"
+}
+{
+  "timestamp": "1761605367595515149",
+  "status": "tigerbeetle.CreateAccountStatus.created"
+}
 > create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
+{
+  "timestamp": "1761605382476666870",
+  "status": "tigerbeetle.CreateTransferStatus.created"
+}
 > lookup_accounts id=1, id=2;
 {
   "id": "1",

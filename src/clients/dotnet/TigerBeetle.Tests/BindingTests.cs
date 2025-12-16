@@ -121,15 +121,37 @@ public class BindingTests
     }
 
     [TestMethod]
-    public void CreateAccountsResults()
+    public void CreateAccountResults()
     {
-        var result = new CreateAccountsResult();
+        var result = new CreateAccountResult();
 
-        result.Index = 1;
-        Assert.AreEqual(result.Index, (uint)1);
+        result.Timestamp = 1;
+        Assert.AreEqual(result.Timestamp, (uint)1);
 
-        result.Result = CreateAccountResult.Exists;
-        Assert.AreEqual(result.Result, CreateAccountResult.Exists);
+        result.Status = CreateAccountStatus.Exists;
+        Assert.AreEqual(result.Status, CreateAccountStatus.Exists);
+    }
+
+    [TestMethod]
+    public void CreateAccountResultsSerialize()
+    {
+        var expected = new byte[CreateAccountResult.SIZE];
+        using (var writer = new BinaryWriter(new MemoryStream(expected)))
+        {
+            writer.Write(99_999L); // Timestamp
+            writer.Write((uint)CreateAccountStatus.IdMustNotBeIntMax); // Result
+            writer.Write((uint)1); // Reserved
+        }
+
+        var result = new CreateAccountResult
+        {
+            Timestamp = 99_999,
+            Status = CreateAccountStatus.IdMustNotBeIntMax,
+            Reserved = 1,
+        };
+
+        var serialized = MemoryMarshal.AsBytes<CreateAccountResult>(new CreateAccountResult[] { result }).ToArray();
+        Assert.IsTrue(expected.SequenceEqual(serialized));
     }
 
     [TestMethod]
@@ -246,14 +268,36 @@ public class BindingTests
     }
 
     [TestMethod]
-    public void CreateTransfersResults()
+    public void CreateTransferResults()
     {
-        var result = new CreateTransfersResult();
+        var result = new CreateTransferResult();
 
-        result.Index = 1;
-        Assert.AreEqual(result.Index, (uint)1);
+        result.Timestamp = 1;
+        Assert.AreEqual(result.Timestamp, (uint)1);
 
-        result.Result = CreateTransferResult.Exists;
-        Assert.AreEqual(result.Result, CreateTransferResult.Exists);
+        result.Status = CreateTransferStatus.Exists;
+        Assert.AreEqual(result.Status, CreateTransferStatus.Exists);
+    }
+
+    [TestMethod]
+    public void CreateTransferResultsSerialize()
+    {
+        var expected = new byte[CreateTransferResult.SIZE];
+        using (var writer = new BinaryWriter(new MemoryStream(expected)))
+        {
+            writer.Write(99_999L); // Timestamp
+            writer.Write((uint)CreateTransferStatus.IdMustNotBeIntMax); // Result
+            writer.Write((uint)1); // Reserved
+        }
+
+        var result = new CreateTransferResult
+        {
+            Timestamp = 99_999,
+            Status = CreateTransferStatus.IdMustNotBeIntMax,
+            Reserved = 1,
+        };
+
+        var serialized = MemoryMarshal.AsBytes<CreateTransferResult>(new CreateTransferResult[] { result }).ToArray();
+        Assert.IsTrue(expected.SequenceEqual(serialized));
     }
 }

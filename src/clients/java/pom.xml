@@ -181,9 +181,9 @@
             <excludes>
               <exclude>com/tigerbeetle/AccountBatch.java</exclude>
               <exclude>com/tigerbeetle/AccountFlags.java</exclude>
-              <exclude>com/tigerbeetle/CreateAccountResult.java</exclude>
+              <exclude>com/tigerbeetle/CreateAccountStatus.java</exclude>
               <exclude>com/tigerbeetle/CreateAccountResultBatch.java</exclude>
-              <exclude>com/tigerbeetle/CreateTransferResult.java</exclude>
+              <exclude>com/tigerbeetle/CreateTransferStatus.java</exclude>
               <exclude>com/tigerbeetle/CreateTransferResultBatch.java</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.java</exclude>
               <exclude>com/tigerbeetle/ClientStatus.java</exclude>

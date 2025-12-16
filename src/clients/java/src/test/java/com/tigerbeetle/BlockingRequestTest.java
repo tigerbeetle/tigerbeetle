@@ -2,7 +2,6 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -84,7 +83,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidOperation() {
+    public void testEndRequestWithInvalidOperation() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -104,7 +103,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithUnknownOperation() {
+    public void testEndRequestWithUnknownOperation() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -125,7 +124,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testEndRequestWithNullBuffer() {
+    public void testEndRequestWithNullBuffer() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -141,12 +140,10 @@ public class BlockingRequestTest {
 
         var result = request.waitForResult();
         assertEquals(0, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidBufferSize() {
+    public void testEndRequestWithInvalidBufferSize() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -181,7 +178,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testEndRequestWithRequestException() {
+    public void testEndRequestWithRequestException() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -206,7 +203,8 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests() {
+    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests()
+            throws InterruptedException {
         var client = getDummyClient();
 
         // A batch with only 1 item
@@ -227,7 +225,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testEndRequestTwice() {
+    public void testEndRequestTwice() throws InterruptedException {
         var client = getDummyClient();
 
         // A batch with only 1 item
@@ -264,7 +262,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testCreateAccountEndRequest() {
+    public void testCreateAccountEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new AccountBatch(2);
         batch.add();
@@ -275,10 +273,12 @@ public class BlockingRequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
+        dummyReplyBuffer.putLong(100);
+        dummyReplyBuffer.putInt(CreateAccountStatus.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
-        dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
+        dummyReplyBuffer.putLong(101);
+        dummyReplyBuffer.putInt(CreateAccountStatus.Exists.value);
+        dummyReplyBuffer.putInt(0);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value,
@@ -287,20 +287,18 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
-        assertEquals(0, result.getIndex());
-        assertEquals(CreateAccountResult.IdMustNotBeZero, result.getResult());
+        assertEquals(100, result.getTimestamp());
+        assertEquals(CreateAccountStatus.IdMustNotBeZero, result.getStatus());
 
         assertTrue(result.next());
-        assertEquals(1, result.getIndex());
-        assertEquals(CreateAccountResult.Exists, result.getResult());
+        assertEquals(101, result.getTimestamp());
+        assertEquals(CreateAccountStatus.Exists, result.getStatus());
     }
 
     @Test
-    public void testCreateTransferEndRequest() {
+    public void testCreateTransferEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(2);
         batch.add();
@@ -311,10 +309,12 @@ public class BlockingRequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
+        dummyReplyBuffer.putLong(100);
+        dummyReplyBuffer.putInt(CreateTransferStatus.IdMustNotBeZero.value);
         dummyReplyBuffer.putInt(0);
-        dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
-        dummyReplyBuffer.putInt(1);
-        dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
+        dummyReplyBuffer.putLong(101);
+        dummyReplyBuffer.putInt(CreateTransferStatus.Exists.value);
+        dummyReplyBuffer.putInt(0);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value,
@@ -323,20 +323,18 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
-        assertEquals(0, result.getIndex());
-        assertEquals(CreateTransferResult.IdMustNotBeZero, result.getResult());
+        assertEquals(100, result.getTimestamp());
+        assertEquals(CreateTransferStatus.IdMustNotBeZero, result.getStatus());
 
         assertTrue(result.next());
-        assertEquals(1, result.getIndex());
-        assertEquals(CreateTransferResult.Exists, result.getResult());
+        assertEquals(101, result.getTimestamp());
+        assertEquals(CreateTransferStatus.Exists, result.getStatus());
     }
 
     @Test
-    public void testLookupAccountEndRequest() {
+    public void testLookupAccountEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -357,8 +355,6 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -370,7 +366,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testLookupTransferEndRequest() {
+    public void testLookupTransferEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -391,8 +387,6 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -404,7 +398,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testSuccessCompletion() {
+    public void testSuccessCompletion() throws InterruptedException {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -427,8 +421,6 @@ public class BlockingRequestTest {
         // Wait for completion
         var result = callback.request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));

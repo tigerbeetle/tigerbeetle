@@ -26,10 +26,10 @@ const mappings_state_machine = .{
     .{ tb.QueryFilterFlags, "QueryFilterFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
+    .{ tb.CreateAccountStatus, "CreateAccountStatus" },
+    .{ tb.CreateTransferStatus, "CreateTransferStatus" },
     .{ tb.CreateAccountResult, "CreateAccountResult" },
     .{ tb.CreateTransferResult, "CreateTransferResult" },
-    .{ tb.CreateAccountsResult, "CreateAccountsResult" },
-    .{ tb.CreateTransfersResult, "CreateTransfersResult" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
     .{ tb.QueryFilter, "QueryFilter" },
@@ -174,9 +174,13 @@ fn emit_enum(
         if (!skip) {
             const field_name = to_uppercase(field.name);
             if (@typeInfo(Type) == .@"enum") {
-                buffer.print("    {s} = {}\n", .{
+                const int_value = @intFromEnum(@field(Type, field.name));
+                buffer.print("    {s} = {s}\n", .{
                     @as([]const u8, &field_name),
-                    @intFromEnum(@field(Type, field.name)),
+                    if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                        std.fmt.comptimePrint("0x{X}", .{int_value})
+                    else
+                        std.fmt.comptimePrint("{}", .{int_value}),
                 });
             } else {
                 // Packed structs.
@@ -194,7 +198,7 @@ fn emit_enum(
 fn emit_struct_ctypes(
     buffer: *Buffer,
     comptime type_info: anytype,
-    comptime c_name: []const u8,
+    comptime python_name: []const u8,
     generate_ctypes_to_python: bool,
 ) !void {
     buffer.print(
@@ -203,7 +207,7 @@ fn emit_struct_ctypes(
         \\    def from_param(cls, obj: Any) -> Self:
         \\
     , .{
-        .type_name = c_name,
+        .type_name = python_name,
     });
 
     inline for (type_info.fields) |field| {
@@ -247,7 +251,7 @@ fn emit_struct_ctypes(
             \\        return {[type_name]s}(
             \\
         , .{
-            .type_name = c_name,
+            .type_name = python_name,
         });
 
         inline for (type_info.fields) |field| {
@@ -261,7 +265,7 @@ fn emit_struct_ctypes(
         buffer.print("        )\n\n", .{});
     }
 
-    buffer.print("C{s}._fields_ = [ # noqa: SLF001\n", .{c_name});
+    buffer.print("C{s}._fields_ = [ # noqa: SLF001\n", .{python_name});
 
     inline for (type_info.fields) |field| {
         buffer.print("    (\"{s}\", {s}),", .{
@@ -293,32 +297,42 @@ fn convert_ctypes_to_python(comptime name: []const u8, comptime Type: type) []co
 fn emit_struct_dataclass(
     buffer: *Buffer,
     comptime type_info: anytype,
-    comptime c_name: []const u8,
+    comptime python_name: []const u8,
+    has_default_initialization: bool,
 ) !void {
     buffer.print("@dataclass\n", .{});
-    buffer.print("class {s}:\n", .{c_name});
+    buffer.print("class {s}:\n", .{python_name});
 
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
         if (comptime !std.mem.eql(u8, field.name, "reserved")) {
             const python_type = zig_to_python(field.type);
-            buffer.print("    {[name]s}: {[python_type]s} = ", .{
+            buffer.print("    {[name]s}: {[python_type]s}", .{
                 .name = field.name,
                 .python_type = python_type,
             });
 
-            if (field_type_info == .@"struct" and field_type_info.@"struct".layout == .@"packed") {
-                // Flags:
-                buffer.print("{s}.NONE\n", .{python_type});
-            } else {
-                if (field_type_info == .@"enum") {
-                    // Enums - the only ones exposed by the client call `.0` as `.OK`:
-                    buffer.print("{s}.OK\n", .{python_type});
+            if (has_default_initialization) {
+                buffer.print(" = ", .{});
+                if (field_type_info == .@"struct" and
+                    field_type_info.@"struct".layout == .@"packed")
+                {
+                    // Flags:
+                    buffer.print("{s}.NONE", .{python_type});
                 } else {
-                    // Simple integer types:
-                    buffer.print("0\n", .{});
+                    if (field_type_info == .@"enum") {
+                        // Enums - initialized with the default value.
+                        buffer.print("{s}.{s}", .{
+                            python_type,
+                            to_uppercase(@tagName(@as(field.type, @enumFromInt(0)))),
+                        });
+                    } else {
+                        // Simple integer types:
+                        buffer.print("0", .{});
+                    }
                 }
             }
+            buffer.print("\n", .{});
         }
     }
 
@@ -357,7 +371,7 @@ fn emit_method(
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
         \\        return {[prefix_call]s}self._submit(  # type: ignore[no-any-return]
-        \\            Operation.{[uppercase_name]s},
+        \\            Operation.{[operation_name]s},
         \\            {[event_name_or_list]s},
         \\            {[event_type_c]s},
         \\            {[result_type_c]s},
@@ -373,7 +387,7 @@ fn emit_method(
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
-            .uppercase_name = to_uppercase(@tagName(operation)),
+            .operation_name = to_uppercase(@tagName(operation)),
             .event_type_c = ctype_type_name(operation.EventType()),
             .result_type_c = ctype_type_name(operation.ResultType()),
         },
@@ -445,11 +459,20 @@ pub fn main() !void {
     // Emit dataclass declarations
     inline for (mappings_state_machine) |type_mapping| {
         const ZigType, const python_name = type_mapping;
+        const has_default_initialization = switch (ZigType) {
+            tb.CreateAccountResult, tb.CreateTransferResult, tb.AccountBalance => false,
+            else => true,
+        };
 
         // Enums, non-extern structs and everything else have been emitted by the first pass.
         switch (@typeInfo(ZigType)) {
             .@"struct" => |info| switch (info.layout) {
-                .@"extern" => try emit_struct_dataclass(&buffer, info, python_name),
+                .@"extern" => try emit_struct_dataclass(
+                    &buffer,
+                    info,
+                    python_name,
+                    has_default_initialization,
+                ),
                 else => {},
             },
             else => {},

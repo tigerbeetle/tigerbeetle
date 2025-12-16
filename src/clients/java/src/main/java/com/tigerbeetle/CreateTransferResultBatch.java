@@ -12,10 +12,11 @@ public final class CreateTransferResultBatch extends Batch {
 
 
     interface Struct {
-        int SIZE = 8;
+        int SIZE = 16;
 
-        int Index = 0;
-        int Result = 4;
+        int Timestamp = 0;
+        int Status = 8;
+        int Reserved = 12;
     }
 
     /**
@@ -38,35 +39,52 @@ public final class CreateTransferResultBatch extends Batch {
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
-    public int getIndex() {
-        final var value = getUInt32(at(Struct.Index));
+    public long getTimestamp() {
+        final var value = getUInt64(at(Struct.Timestamp));
         return value;
     }
 
     /**
-     * @param index
+     * @param timestamp
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
-    void setIndex(final int index) {
-        putUInt32(at(Struct.Index), index);
+    void setTimestamp(final long timestamp) {
+        putUInt64(at(Struct.Timestamp), timestamp);
     }
 
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
-    public CreateTransferResult getResult() {
-        final var value = getUInt32(at(Struct.Result));
-        return CreateTransferResult.fromValue(value);
+    public CreateTransferStatus getStatus() {
+        final var value = getUInt32(at(Struct.Status));
+        return CreateTransferStatus.fromValue(value);
     }
 
     /**
-     * @param result
+     * @param status
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
-    void setResult(final CreateTransferResult result) {
-        putUInt32(at(Struct.Result), result.value);
+    void setStatus(final CreateTransferStatus status) {
+        putUInt32(at(Struct.Status), status.value);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    int getReserved() {
+        final var value = getUInt32(at(Struct.Reserved));
+        return value;
+    }
+
+    /**
+     * @param reserved
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    void setReserved(final int reserved) {
+        putUInt32(at(Struct.Reserved), reserved);
     }
 
 }

@@ -6,7 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = tb::Client::new(0, &port)?;
 
     // Create two accounts
-    let account_errors = client
+    let account_results = client
         .create_accounts(&[
             tb::Account {
                 id: 1,
@@ -23,13 +23,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .await?;
 
-    for error in &account_errors {
-        eprintln!("Error creating account {}: {:?}", error.index, error.result);
-    }
-    assert!(account_errors.is_empty());
+    assert!(account_results.len() == 2);
+    assert!(account_results[0].status == tb::CreateAccountStatus::Created);
+    assert!(account_results[1].status == tb::CreateAccountStatus::Created);
 
     // Start a pending transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 1,
             debit_account_id: 1,
@@ -42,10 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
     let accounts = client.lookup_accounts(&[1, 2]).await?;
@@ -86,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create a second transfer simply posting the first transfer
-    let transfer_errors = client
+    let transfer_results = client
         .create_transfers(&[tb::Transfer {
             id: 2,
             debit_account_id: 1,
@@ -100,10 +97,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }])
         .await?;
 
-    for error in &transfer_errors {
-        eprintln!("Error creating transfer: {:?}", error.result);
-    }
-    assert!(transfer_errors.is_empty());
+    assert!(transfer_results.len() == 1);
+    assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate the contents of all transfers
     let transfers = client.lookup_transfers(&[1, 2]).await?;
@@ -157,6 +152,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("ok");
     Ok(())
 }
