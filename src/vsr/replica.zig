@@ -119,6 +119,19 @@ pub const CommitStage = union(enum) {
 
 const Nonce = u128;
 
+const star_commit_history_max = constants.pipeline_prepare_queue_max * 2;
+
+const StarCommitEntry = struct {
+    op: u64 = 0,
+    start: stdx.Instant = .{ .ns = 0 },
+    logged: stdx.BitSetType(constants.replicas_max) = .{},
+    active: bool = false,
+
+    fn reset(entry: *StarCommitEntry) void {
+        entry.* = .{};
+    }
+};
+
 const Prepare = struct {
     /// The current prepare message (used to cross-check prepare_ok messages, and for resending).
     message: *Message.Prepare,
@@ -622,6 +635,8 @@ pub fn ReplicaType(
         aof: ?*AOF,
 
         replicate_options: ReplicateOptions,
+
+        star_commit_history: [star_commit_history_max]StarCommitEntry,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -1334,6 +1349,7 @@ pub fn ReplicaType(
                     .replica_count = replica_count,
                     .standby_count = standby_count,
                 }),
+                .star_commit_history = std.mem.zeroes([star_commit_history_max]StarCommitEntry),
                 .view_headers = vsr.Headers.ViewChangeArray.init(
                     self.superblock.working.view_headers().command,
                     self.superblock.working.view_headers().slice,
@@ -2167,12 +2183,15 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.syncing == .idle);
 
+            const now = self.clock.monotonic();
+
             // Routing tracks latencies even for prepares outside of the pipeline.
             self.routing.op_prepare_ok(
                 message.header.op,
                 message.header.replica,
-                self.clock.monotonic(),
+                now,
             );
+            self.star_log_prepare_latency(message.header.op, message.header.replica, now);
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
@@ -2208,6 +2227,7 @@ pub fn ReplicaType(
             assert(message.header.commit_min <=
                 self.commit_min + constants.pipeline_prepare_queue_max);
             prepare.commit_mins[message.header.replica] = message.header.commit_min;
+            self.star_commit_log(message.header.replica, message.header.commit_min, now);
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -5213,6 +5233,14 @@ pub fn ReplicaType(
                         commit_completion_time_request,
                     );
                 }
+            }
+
+            if (self.replicate_options.star and self.primary()) {
+                log.info("{}: star_latency: local_commit op={} latency_us={}", .{
+                    self.log_prefix(),
+                    self.commit_prepare.?.header.op,
+                    commit_completion_time_local.to_us(),
+                });
             }
 
             self.message_bus.unref(self.commit_prepare.?);
@@ -8485,6 +8513,79 @@ pub fn ReplicaType(
             self.reset_quorum_counter(&self.start_view_change_from_all_replicas);
         }
 
+        fn star_log_prepare_latency(
+            self: *Replica,
+            op: u64,
+            replica_index: u8,
+            now: stdx.Instant,
+        ) void {
+            if (!self.replicate_options.star) return;
+            if (!self.primary()) return;
+
+            const slot = @as(usize, @intCast(op % @as(u64, self.routing.history.len)));
+            const history = &self.routing.history[slot];
+            if (history.op != op) return;
+            if (now.ns < history.prepare.ns) return;
+
+            const latency = now.duration_since(history.prepare);
+            log.info("{}: star_latency: prepare replica={} op={} latency_us={}", .{
+                self.log_prefix(),
+                replica_index,
+                op,
+                latency.to_us(),
+            });
+        }
+
+        fn star_commit_start(self: *Replica, op: u64, now: stdx.Instant) void {
+            if (!self.replicate_options.star) return;
+            if (!self.primary()) return;
+
+            const slot = @as(usize, @intCast(op % @as(u64, star_commit_history_max)));
+            var entry = &self.star_commit_history[slot];
+
+            if (entry.active and entry.op == op) return;
+
+            entry.* = .{
+                .op = op,
+                .start = now,
+                .logged = .{},
+                .active = true,
+            };
+            entry.logged.set(self.replica);
+        }
+
+        fn star_commit_log(
+            self: *Replica,
+            replica_index: u8,
+            commit_min: u64,
+            now: stdx.Instant,
+        ) void {
+            if (!self.replicate_options.star) return;
+            if (!self.primary()) return;
+            if (replica_index >= self.replica_count) return;
+
+            for (&self.star_commit_history) |*entry| {
+                if (!entry.active) continue;
+                if (commit_min < entry.op) continue;
+                if (entry.logged.is_set(replica_index)) continue;
+                if (entry.start.ns == 0 or now.ns < entry.start.ns) continue;
+
+                entry.logged.set(replica_index);
+
+                const latency = now.duration_since(entry.start);
+                log.info("{}: star_latency: commit replica={} op={} latency_us={}", .{
+                    self.log_prefix(),
+                    replica_index,
+                    entry.op,
+                    latency.to_us(),
+                });
+
+                if (entry.logged.count() == self.replica_count) {
+                    entry.reset();
+                }
+            }
+        }
+
         fn send_prepare_ok(self: *Replica, header: *const Header.Prepare) void {
             assert(header.command == .prepare);
             assert(header.cluster == self.cluster);
@@ -11218,6 +11319,9 @@ pub fn ReplicaType(
                 });
                 return;
             }
+
+            const now = self.clock.monotonic();
+            self.star_commit_start(self.commit_max, now);
 
             const latest_committed_entry = checksum: {
                 if (self.commit_max == self.superblock.working.vsr_state.checkpoint.header.op) {
