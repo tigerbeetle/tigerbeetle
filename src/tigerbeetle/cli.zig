@@ -133,7 +133,7 @@ const CLIArgs = union(enum) {
         log_debug_replica: bool = false,
         /// The probability distribution used to select accounts when making transfers or queries.
         account_distribution: Command.Benchmark.Distribution = .uniform,
-        flag_history: bool = false,
+        no_history: bool = false,
         flag_imported: bool = false,
         account_batch_size: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
@@ -1145,7 +1145,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
         .account_distribution = benchmark.account_distribution,
-        .flag_history = benchmark.flag_history,
+        .flag_history = !benchmark.no_history,
         .flag_imported = benchmark.flag_imported,
         .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
