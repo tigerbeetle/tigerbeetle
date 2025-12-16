@@ -286,6 +286,12 @@ pub fn TableType(
                 assert(builder.value_count_total == 0);
 
                 builder.index_block = block;
+                if (index.value_hints_size > 0) {
+                    @memset(
+                        builder.index_block[index.value_hints_offset..][0..index.value_hints_size],
+                        0,
+                    );
+                }
                 builder.state = .index_block;
             }
 
@@ -362,7 +368,6 @@ pub fn TableType(
                         builder.index_block,
                         builder.value_block_count,
                     );
-                    @memset(mem.sliceAsBytes(hints), 0);
 
                     var hint_index: usize = 0;
                     while (hint_index < hint_count) : (hint_index += 1) {
@@ -525,6 +530,49 @@ pub fn TableType(
             return @divFloor(hint_index * (value_count - 1), hint_count - 1);
         }
 
+        inline fn hint_range(
+            value_count: usize,
+            hint_count: usize,
+            chunk_index: usize,
+        ) struct { start: usize, end: usize } {
+            assert(value_count > 0);
+            assert(hint_count > 0);
+            assert(chunk_index < hint_count);
+            if (hint_count == 1) return .{ .start = 0, .end = value_count };
+
+            const count_minus_one = value_count - 1;
+            const denom = hint_count - 1;
+            const start = @divFloor(chunk_index * count_minus_one, denom);
+            const end = if (chunk_index + 1 == hint_count)
+                value_count
+            else
+                @divFloor((chunk_index + 1) * count_minus_one, denom) + 1;
+            return .{ .start = start, .end = end };
+        }
+
+        inline fn hint_upper_bound(hints: []const Key, key: Key) usize {
+            const log_hint_strategy = false;
+            if (hints.len == 0) return 0;
+
+            if (log_hint_strategy) {
+                std.log.info("hint_upper_bound: linear-unrolled len={}", .{hints.len});
+            }
+
+            const chunk = 8;
+            var i: usize = 0;
+            const limit = hints.len - (hints.len % chunk);
+            while (i < limit) : (i += chunk) {
+                inline for (0..chunk) |j| {
+                    if (hints[i + j] > key) return i + j;
+                }
+            }
+
+            while (i < hints.len) : (i += 1) {
+                if (hints[i] > key) return i;
+            }
+            return hints.len;
+        }
+
         pub inline fn index_value_hints(index_block: BlockPtr) []Key {
             if (index.value_hints_size == 0) return &[_]Key{};
             return mem.bytesAsSlice(
@@ -642,18 +690,11 @@ pub fn TableType(
             const hint_count = @min(hints.len, values.len);
 
             if (hint_count > 0) {
-                const hint_index = binary_search.binary_search_keys_upsert_index(
-                    Key,
-                    hints[0..hint_count],
-                    key,
-                    .{ .mode = .upper_bound, .prefetch = false },
-                );
+                const hint_index = hint_upper_bound(hints[0..hint_count], key);
                 const chunk_index = if (hint_index == 0) 0 else hint_index - 1;
-                const start = hint_position(values.len, hint_count, chunk_index);
-                const end = if (hint_index == hint_count)
-                    values.len
-                else
-                    hint_position(values.len, hint_count, hint_index) + 1;
+                const range = hint_range(values.len, hint_count, chunk_index);
+                const start = range.start;
+                const end = range.end;
                 if (log_hint_ranges) {
                     std.log.info(
                         "value_block_search narrowed: range={} total={}",

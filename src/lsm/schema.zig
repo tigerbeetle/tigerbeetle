@@ -103,7 +103,7 @@ pub const TableIndex = struct {
         }
     };
 
-    pub const hints_bytes_per_value_block_max: usize = 2048;
+    pub const hints_bytes_per_value_block_max: usize = 512;
 
     key_size: u32,
     value_block_count_max: u32,
