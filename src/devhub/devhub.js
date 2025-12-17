@@ -17,7 +17,7 @@ window.onload = () =>
 function assert(condition) {
   if (!condition) {
     alert("Assertion failed");
-    throw "Assertion failed";
+    throw new Error("Assertion failed");
   }
 }
 
