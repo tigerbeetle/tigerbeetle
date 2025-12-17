@@ -1,17 +1,7 @@
 const std = @import("std");
-const assert = std.debug.assert;
+const stdx = @import("stdx");
 
-pub fn find_first_unset(self: std.DynamicBitSetUnmanaged) ?u64 {
-    var offset: u64 = 0;
-    var mask = self.masks;
-    while (offset < self.bit_length) {
-        if (~mask[0] != 0) break;
-        mask += 1;
-        offset += @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt);
-    } else return null;
-    const first_unset = offset + @ctz(~mask[0]);
-    return if (first_unset < self.bit_length) first_unset else null;
-}
+const assert = std.debug.assert;
 
 pub fn PoolType(comptime T: type) type {
     return struct {
@@ -20,7 +10,7 @@ pub fn PoolType(comptime T: type) type {
         items: []T,
         busy: std.DynamicBitSetUnmanaged,
 
-        pub fn init(gpa: std.mem.Allocator, capacity: u64) !Pool {
+        pub fn init(gpa: std.mem.Allocator, capacity: u8) !Pool {
             const items = try gpa.alloc(T, capacity);
             errdefer gpa.free(items);
             const busy = try std.DynamicBitSetUnmanaged.initEmpty(gpa, capacity);
@@ -34,7 +24,7 @@ pub fn PoolType(comptime T: type) type {
         }
 
         pub fn acquire(self: *Pool) ?*T {
-            const i = find_first_unset(self.busy) orelse return null;
+            const i = stdx.find_bit(self.busy, 0, self.busy.capacity(), .unset) orelse return null;
             self.busy.set(i);
             return &self.items[i];
         }
@@ -85,28 +75,6 @@ pub fn PoolType(comptime T: type) type {
             };
         }
     };
-}
-
-test find_first_unset {
-    const alloc = std.testing.allocator;
-    const capacity = 4;
-    var bitset = try std.DynamicBitSetUnmanaged.initEmpty(alloc, capacity);
-    defer bitset.deinit(alloc);
-    for (0..capacity) |index| {
-        bitset.set(index);
-        if (index + 1 == capacity) {
-            try std.testing.expectEqual(null, find_first_unset(bitset));
-        } else {
-            try std.testing.expectEqual(index + 1, find_first_unset(bitset));
-        }
-    }
-    try std.testing.expectEqual(capacity, bitset.count());
-    for (1..capacity + 1) |index| {
-        const reverse_index = capacity - index;
-        bitset.unset(reverse_index);
-        try std.testing.expectEqual(find_first_unset(bitset), reverse_index);
-    }
-    try std.testing.expectEqual(0, bitset.count());
 }
 
 test PoolType {
