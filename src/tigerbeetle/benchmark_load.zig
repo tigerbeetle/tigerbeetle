@@ -260,7 +260,7 @@ const Benchmark = struct {
     transfer_id_permutation: IdPermutation,
     transfer_batch_size: u32,
     transfer_batch_delay: Duration,
-    transfer_count: u32,
+    transfer_count: u64,
     transfer_hot_percent: u32,
     transfer_pending: bool,
     query_count: u32,
@@ -417,7 +417,7 @@ const Benchmark = struct {
             return;
         }
 
-        const transfer_count: u32 = @intCast(@min(
+        const transfer_count: u64 = @intCast(@min(
             b.transfer_count - b.transfer_index,
             b.transfer_batch_size,
         ));
@@ -669,7 +669,7 @@ const Benchmark = struct {
             return;
         }
 
-        const transfer_count: u32 = @intCast(@min(
+        const transfer_count: u64 = @intCast(@min(
             b.transfer_count - b.transfer_index,
             b.transfer_batch_size,
         ));
@@ -761,7 +761,7 @@ const Benchmark = struct {
         client_index: usize,
         operation: tb.Operation,
         options: struct {
-            batch_count: u32,
+            batch_count: u64,
             event_size: u32,
         },
     ) void {
@@ -777,7 +777,7 @@ const Benchmark = struct {
             &b.client_requests[client_index],
             .{ .element_size = options.event_size },
         );
-        encoder.add(options.batch_count * options.event_size);
+        encoder.add(@as(u32, @intCast(options.batch_count)) * options.event_size);
         const bytes_written = encoder.finish();
 
         b.clients[client_index].request(
