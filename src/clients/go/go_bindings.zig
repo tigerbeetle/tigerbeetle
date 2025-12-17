@@ -64,11 +64,12 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
         var output = [_]u8{' '} ** (min_len orelse input.len);
         var iterator = std.mem.tokenizeScalar(u8, input, '_');
         while (iterator.next()) |word| {
+            assert(word.len > 0);
             if (is_upper_case(word)) {
                 _ = std.ascii.upperString(output[len..], word);
             } else {
-                @memcpy(output[len..][0..word.len], word); // Bypass tidy's ban, for go_bindings.
-                output[len] = std.ascii.toUpper(output[len]);
+                output[len] = std.ascii.toUpper(word[0]);
+                for (word[1..], 1..) |c, i| output[len + i] = c;
             }
             len += word.len;
         }

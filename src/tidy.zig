@@ -1,6 +1,7 @@
 //! Checks for various non-functional properties of the code itself.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
@@ -9,280 +10,519 @@ const Ast = std.zig.Ast;
 const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
 
+const Snap = stdx.Snap;
+const module_path = "src";
+const snap = Snap.snap_fn(module_path);
+
 const MiB = stdx.MiB;
 
-const UsedDeclarations = std.StringHashMapUnmanaged(struct {
-    count: u32,
-    offset: u32,
-});
-
 test "tidy" {
-    const allocator = std.testing.allocator;
+    const gpa = std.testing.allocator;
 
-    const shell = try Shell.create(allocator);
+    var errors: Errors = .{};
+
+    const shell = try Shell.create(gpa);
     defer shell.destroy();
 
+    var counter: IdentifierCounter = try .init(gpa);
+    defer counter.deinit(gpa);
+
+    var dead_files_detector = DeadFilesDetector.init(gpa);
+    defer dead_files_detector.deinit(gpa);
+
+    // NB: all checks are intentionally implemented in a streaming fashion,
+    // such that we only need to read the files once.
+    const file_buffer = try gpa.alloc(u8, 1 * MiB);
+    defer gpa.free(file_buffer);
+
     const paths = try list_file_paths(shell);
+    for (paths) |file_path| {
+        const bytes_read = (try std.fs.cwd().readFile(file_path, file_buffer)).len;
+        if (bytes_read >= file_buffer.len - 1) return error.FileTooLong;
+        file_buffer[bytes_read] = 0;
 
-    const buffer_size = 1 * MiB;
-    const buffer = try allocator.alloc(u8, buffer_size);
-    defer allocator.free(buffer);
+        const source_file = SourceFile{ .path = file_path, .text = file_buffer[0..bytes_read :0] };
+        try tidy_file(gpa, &counter, source_file, &errors);
 
-    var dead_files_detector = DeadFilesDetector.init(allocator);
-    defer dead_files_detector.deinit();
-
-    var dead_declarations: UsedDeclarations = .{};
-    defer dead_declarations.deinit(allocator);
-
-    try dead_declarations.ensureTotalCapacity(allocator, identifiers_per_file_max);
-
-    // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
-    // to read the files once.
-    for (paths) |path| {
-        const bytes_read = (try std.fs.cwd().readFile(path, buffer)).len;
-        if (bytes_read >= buffer.len - 1) return error.FileTooLong;
-        buffer[bytes_read] = 0;
-
-        const source_file = SourceFile{ .path = path, .text = buffer[0..bytes_read :0] };
-
-        if (tidy_control_characters(source_file)) |control_character| {
-            std.debug.print(
-                "{s}: error: contains control character: code={} symbol='{c}'\n",
-                .{ source_file.path, control_character, control_character },
-            );
-            return error.BannedControlCharacter;
-        }
-
-        if (mem.endsWith(u8, source_file.path, ".zig")) {
-            if (tidy_banned(source_file.text)) |ban_reason| {
-                std.debug.print(
-                    "{s}: error: banned, {s}\n",
-                    .{ source_file.path, ban_reason },
-                );
-                return error.Banned;
-            }
-
-            if (try tidy_long_line(source_file)) |line_index| {
-                std.debug.print(
-                    "{s}:{d}: error: line exceeds 100 columns\n",
-                    .{ source_file.path, line_index + 1 },
-                );
-                return error.LineTooLong;
-            }
-
-            var tree = try std.zig.Ast.parse(allocator, source_file.text, .zig);
-            defer tree.deinit(allocator);
-
-            if (tidy_dead_declarations(&tree, &dead_declarations)) |name| {
-                std.debug.print("{s}: error: '{s}' is dead code\n", .{ source_file.path, name });
-                return error.DeadDeclaration;
-            }
-
-            try tidy_ast(source_file, &tree);
-
-            if (tidy_generic_functions(source_file)) |function| {
-                std.debug.print(
-                    "{s}:{d}: error: '{s}' should end with the 'Type' suffix\n",
-                    .{
-                        source_file.path,
-                        function.line,
-                        function.name,
-                    },
-                );
-                return error.GenericFunctionWithoutType;
-            }
-
+        if (source_file.has_extension(".zig")) {
             try dead_files_detector.visit(source_file);
         }
-
-        if (mem.endsWith(u8, source_file.path, ".md")) {
-            tidy_markdown_title(source_file.text) catch |err| {
-                std.debug.print(
-                    "{s}: error: invalid markdown headings, {}\n",
-                    .{ source_file.path, err },
-                );
-                return err;
-            };
-        }
     }
 
-    try dead_files_detector.finish();
+    dead_files_detector.finish(&errors);
+
+    if (errors.count > 0) return error.Untidy;
+    assert(errors.count == 0);
 }
 
-const SourceFile = struct { path: []const u8, text: [:0]const u8 };
+const Errors = struct {
+    count: u32 = 0,
+    captured: ?std.ArrayListUnmanaged(u8) = null, // For tests.
 
-fn tidy_banned(source: []const u8) ?[]const u8 {
-    // Note: must avoid banning ourselves!
-    if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
-        return "use stdx.BoundedArrayType instead of std version";
+    pub fn add_control_character(
+        errors: *Errors,
+        file: SourceFile,
+        offset: usize,
+        character: u8,
+    ) void {
+        errors.emit(
+            "{s}:{d}: error: control character code={}\n",
+            .{ file.path, file.line_number(offset), character },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "Static" ++ "BitSet") != null) {
-        return "use stdx.BitSetType instead of std version";
+    pub fn add_banned(
+        errors: *Errors,
+        file: SourceFile,
+        offset: usize,
+        banned_item: []const u8,
+        replacement: []const u8,
+    ) void {
+        errors.emit(
+            "{s}:{d}: error: {s} is banned, use {s}\n",
+            .{ file.path, file.line_number(offset), banned_item, replacement },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {
-        return "use stdx.Duration instead of std version";
+    pub fn add_banned_reminder(
+        errors: *Errors,
+        file: SourceFile,
+        offset: usize,
+        banned_item: []const u8,
+    ) void {
+        errors.emit(
+            "{s}:{d}: error: leftover {s}, remove before merge\n",
+            .{ file.path, file.line_number(offset), banned_item },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "std.time." ++ "Instant") != null) {
-        return "use stdx.Instant instead of std version";
+    pub fn add_long_line(errors: *Errors, file: SourceFile, line_index: usize) void {
+        const line_number = line_index + 1;
+        errors.emit(
+            "{s}:{d}: error: line exceeds 100 columns\n",
+            .{ file.path, line_number },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
-        return "use stdx.has_unique_representation instead of std version";
+    pub fn add_bad_type_function_name(
+        errors: *Errors,
+        file: SourceFile,
+        line_index: usize,
+        function_name: []const u8,
+    ) void {
+        const line_number = line_index + 1;
+        errors.emit(
+            "{s}:{d}: error: type function name '{s}' should end in 'Type'\n",
+            .{ file.path, line_number, function_name },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "mem." ++ "copy(") != null) {
-        return "use stdx.copy_disjoint instead of std version";
+    pub fn add_long_function(errors: *Errors, file: SourceFile, line_index: usize) void {
+        const line_number = line_index + 1;
+        errors.emit(
+            "{s}:{d}: error: functions exceeds 70 lines\n",
+            .{ file.path, line_number },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "mem." ++ "copyForwards(") != null) {
-        return "use stdx.copy_left instead of std version";
+    pub fn add_ambiguous_precedence(errors: *Errors, file: SourceFile, line_index: usize) void {
+        const line_number = line_index + 1;
+        errors.emit(
+            "{s}:{d}: error: ambiguous operator precedence, add parenthesis\n",
+            .{ file.path, line_number },
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "mem." ++ "copyBackwards(") != null) {
-        return "use stdx.copy_right instead of std version";
+    pub fn add_dead_declaration(errors: *Errors, file: SourceFile, declaration: []const u8) void {
+        errors.emit("{s}: error: '{s}' is dead code\n", .{ file.path, declaration });
     }
 
-    // TODO(zig): Remove when upgrading to Zig 0.15.x:
-    if (std.mem.indexOf(u8, source, "using" ++ "namespace") != null) {
-        return "using" ++ "namespace was removed from Zig";
+    pub fn add_invalid_markdown_title(errors: *Errors, file: SourceFile) void {
+        errors.emit(
+            "{s}: error: document should have exactly one top-level '# Title'\n",
+            .{file.path},
+        );
     }
 
-    if (std.mem.indexOf(u8, source, "@memcpy(") != null) {
-        if (std.mem.indexOf(u8, source, "// Bypass tidy's ban, for stdx.") == null and
-            std.mem.indexOf(u8, source, "// Bypass tidy's ban, for go_bindings.") == null)
-        {
-            return "use stdx.copy_disjoint instead of @memcpy";
+    pub fn add_file_untracked(errors: *Errors, file: []const u8) void {
+        errors.emit(
+            "{s}: error: imported file untracked by git\n",
+            .{file},
+        );
+    }
+
+    pub fn add_file_dead(errors: *Errors, file: []const u8) void {
+        errors.emit(
+            "{s}: error: file never imported\n",
+            .{file},
+        );
+    }
+
+    fn emit(errors: *Errors, comptime fmt: []const u8, args: anytype) void {
+        comptime assert(fmt[fmt.len - 1] == '\n');
+        errors.count += 1;
+        if (errors.captured) |*captured| {
+            captured.writer(std.testing.allocator).print(fmt, args) catch @panic("OOM");
+        } else {
+            std.debug.print(fmt, args);
         }
     }
+};
 
-    if (std.mem.indexOf(u8, source, "posix." ++ "unexpectedErrno(") != null) {
-        return "use stdx.unexpected_errno instead of std version";
+const SourceFile = struct {
+    path: []const u8,
+    text: [:0]const u8,
+
+    fn has_extension(file: SourceFile, extension: []const u8) bool {
+        assert(extension.len > 0);
+        assert(extension[0] == '.');
+        return std.mem.endsWith(u8, file.path, extension);
     }
 
-    if (std.mem.indexOf(u8, source, "uint" ++ "LessThan") != null or
-        std.mem.indexOf(u8, source, "int" ++ "RangeLessThan") != null or
-        std.mem.indexOf(u8, source, "int" ++ "RangeAtMost") != null or
-        std.mem.indexOf(u8, source, "int" ++ "RangeAtMostBiased") != null)
-    {
-        return "use stdx.PRNG instead of std.Random";
+    // O(1), but only invoked on the cold path (when there are errors).
+    fn line_number(file: SourceFile, offset: usize) usize {
+        assert(offset <= file.text.len);
+        // +1: Line _index_ is zero-based, line _number_ is one-based.
+        return std.mem.count(u8, file.text[0..offset], "\n") + 1;
     }
+};
 
-    // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
-    // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
-    // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
-    // - use fixme for issues to be fixed in the same pull request,
-    // - use todo as general-purpose long-term remainders without enforcement.
-    if (std.mem.indexOf(u8, source, "FIX" ++ "ME") != null) {
-        return "FIX" ++ "ME comments must be addressed before getting to main";
+fn tidy_file(
+    gpa: Allocator,
+    counter: *IdentifierCounter,
+    file: SourceFile,
+    errors: *Errors,
+) Allocator.Error!void {
+    tidy_control_characters(file, errors);
+    if (file.has_extension(".zig")) {
+        tidy_banned(file, errors);
+        tidy_lines(file, errors);
+        tidy_type_functions(file, errors);
+
+        var tree = try std.zig.Ast.parse(gpa, file.text, .zig);
+        defer tree.deinit(gpa);
+
+        tidy_dead_declarations(file, &tree, counter, errors);
+        tidy_ast(file, &tree, errors);
     }
-
-    if (std.mem.indexOf(u8, source, "dbg(") != null) {
-        if (std.mem.indexOf(u8, source, "fn dbg(") == null) {
-            return "dbg" ++ "() must be removed before getting to main";
-        }
+    if (file.has_extension(".md")) {
+        tidy_markdown_title(file, errors);
     }
-
-    if (std.mem.indexOf(u8, source, "Self = " ++ "@This()") != null) {
-        return "use a type name instead of Self";
-    }
-
-    if (std.mem.indexOf(u8, source, "!" ++ "comptime") != null) {
-        return "use ! inside comptime";
-    }
-
-    if (std.mem.indexOf(u8, source, "debug." ++ "assert(") != null) {
-        return "use unqualified assert()";
-    }
-
-    if (std.mem.indexOf(u8, source, "== error" ++ ".") != null or
-        std.mem.indexOf(u8, source, "!= error" ++ ".") != null)
-    {
-        return "switch on error to avoid silent anyerror upcast";
-    }
-
-    if (std.mem.indexOf(u8, source, "posix." ++ "send(") != null) {
-        return "use posix.sendto() to avoid connection race condition";
-    }
-
-    return null;
 }
 
-fn tidy_long_line(file: SourceFile) !?u32 {
-    if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return null;
+fn check_tidy_file(file_path: []const u8, file_text: [:0]const u8, want: Snap) !void {
+    const gpa = std.testing.allocator;
+
+    var counter: IdentifierCounter = try .init(gpa);
+    defer counter.deinit(gpa);
+
+    var errors: Errors = .{ .captured = .{} };
+    defer errors.captured.?.deinit(std.testing.allocator);
+
+    try tidy_file(gpa, &counter, .{ .path = file_path, .text = file_text }, &errors);
+    const got = errors.captured.?.items;
+
+    try want.diff(got);
+    assert(errors.count == std.mem.count(u8, got, "\n"));
+}
+
+fn tidy_control_characters(file: SourceFile, errors: *Errors) void {
+    const binary_file_extensions: []const []const u8 = &.{ ".ico", ".png", ".webp" };
+    for (binary_file_extensions) |extension| {
+        if (file.has_extension(extension)) return;
+    }
+
+    const allowed = .{
+        .@"\r" = file.has_extension(".bat"),
+
+        // Visual Studio insists on \t, taking the best from `make`.
+        // Go uses tabs.
+        .@"\t" = file.has_extension(".sln") or
+            (file.has_extension(".go") or
+                (file.has_extension(".md") and mem.indexOf(u8, file.text, "```go") != null)),
+    };
+
+    var remaining = file.text;
+    while (mem.indexOfAny(u8, remaining, "\r\t")) |index| {
+        const offset = index + (file.text.len - remaining.len);
+        inline for (comptime std.meta.fieldNames(@TypeOf(allowed))) |field| {
+            if (remaining[index] == field[0]) {
+                if (!@field(allowed, field)) {
+                    errors.add_control_character(file, offset, field[0]);
+                }
+                break;
+            }
+        } else unreachable;
+
+        remaining = remaining[index + 1 ..];
+    }
+}
+
+test tidy_control_characters {
+    try check_tidy_file(
+        "hello.txt",
+        "Hello\t\nWorld\r\n",
+        snap(@src(),
+            \\hello.txt:1: error: control character code=9
+            \\hello.txt:2: error: control character code=13
+            \\
+        ),
+    );
+}
+
+fn tidy_banned(file: SourceFile, errors: *Errors) void {
+    // Vendored code is exempt from bans.
+    if (std.mem.eql(u8, file.path, "src/stdx/vendored/aegis.zig")) return;
+    // Don't ban ourselves!
+    if (std.mem.eql(u8, file.path, "src/tidy.zig")) return;
+
+    const ban_list: []const struct { []const u8, []const u8 } = &.{
+        // Functionality provided by stdx:
+        .{ "std.BoundedArray", "stdx.BoundedArrayType" },
+        .{ "StaticBitSet", "stdx.BitSetType" },
+        .{ "std.time.Duration", "stdx.Duration" },
+        .{ "std.time.Instant", "stdx.Instant" },
+        .{ "hasUniqueRepresentation", "stdx.has_unique_representation" },
+        .{ "@memcpy(", "stdx.copy_disjoint" },
+        .{ "mem.copyForwards(", "stdx.copy_left" },
+        .{ "mem.copyBackwards(", "stdx.copy_right" },
+        .{ "uintLessThan", "stdx.PRNG" },
+        .{ "intRangeLessThan", "stdx.PRNG" },
+        .{ "intRangeAtMost", "stdx.PRNG" },
+        .{ "intRangeAtMostBiased", "stdx.PRNG" },
+
+        // Library footguns:
+        .{ "unexpectedErrno", "stdx.unexpected_errno" },
+        .{ "posix.send(", "posix.sendto to avoid connection race condition" },
+
+        // Language footguns:
+        .{ "== error.", "switch to avoid silent anyerror upcast" },
+        .{ "!= error.", "switch to avoid silent anyerror upcast" },
+
+        // Everything else:
+        .{ "debug.assert(", "unqualified assert" },
+        .{ "Self = @This()", "proper type name" },
+        .{ "!comptime", "! inside comptime" },
+        .{ "usingnamespace", "something else" },
+    };
+
+    for (ban_list) |ban_item| {
+        const banned, const replacement = ban_item;
+        if (std.mem.indexOf(u8, file.text, banned)) |offset| {
+            errors.add_banned(file, offset, banned, replacement);
+        }
+    }
+
+    // Reminders:
+    // Do use FIXME comments proactively while iterating on the code when you want to make sure
+    // something is revisited before getting into the main branch.
+    inline for (.{ "FIXME", "dbg(" }) |banned| {
+        if (std.mem.indexOf(u8, file.text, banned)) |offset| {
+            if (std.mem.startsWith(u8, file.text[offset..], "dbg(prefix: []const u8")) {
+                // Allow fn dbg( function definition.
+
+            } else {
+                errors.add_banned_reminder(file, offset, banned);
+            }
+        }
+    }
+}
+
+test tidy_banned {
+    try check_tidy_file(
+        \\banned.zig
+    ,
+        \\//FIXME: use copy_disjoint:
+        \\@memcpy(foo, bar)
+    ,
+        snap(@src(),
+            \\banned.zig:2: error: @memcpy( is banned, use stdx.copy_disjoint
+            \\banned.zig:1: error: leftover FIXME, remove before merge
+            \\
+        ),
+    );
+}
+
+fn tidy_lines(file: SourceFile, errors: *Errors) void {
+    if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return;
+
     var line_iterator = mem.splitScalar(u8, file.text, '\n');
     var line_index: u32 = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
-        const line_length = try std.unicode.utf8CountCodepoints(line);
-        if (line_length > 100) {
-            if (has_link(line)) continue;
+        tidy_line(file, line, line_index, errors);
+    }
+}
 
-            // Journal recovery table
-            if (std.mem.indexOf(u8, line, "Case.init(") != null) continue;
+fn tidy_line(file: SourceFile, line: []const u8, line_index: usize, errors: *Errors) void {
+    const line_length = tidy_line_length(line);
+    if (line_length <= 100) return;
 
-            // For multiline strings, we care that the _result_ fits 100 characters,
-            // but we don't mind indentation in the source.
-            if (parse_multiline_string(line)) |string_value| {
-                const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
-                if (string_value_length <= 100) continue;
+    if (tidy_line_link(line)) return;
 
-                if (std.mem.endsWith(u8, file.path, "state_machine_tests.zig") and
-                    (std.mem.startsWith(u8, string_value, " account A") or
-                        std.mem.startsWith(u8, string_value, " transfer T") or
-                        std.mem.startsWith(u8, string_value, " transfer   ")))
-                {
-                    // Table tests from state_machine.zig. They are intentionally wide.
-                    continue;
-                }
+    // Journal recovery table
+    if (std.mem.indexOf(u8, line, "Case.init(") != null) return;
 
-                // vsr.zig's Checkpoint ops diagram.
-                if (std.mem.endsWith(u8, file.path, "vsr.zig") and
-                    std.mem.startsWith(u8, string_value, "OPS: ")) continue;
+    // For multiline strings, we care that the _result_ fits 100 characters,
+    // but we don't mind indentation in the source.
+    if (tidy_line_raw_literal(line)) |string_value| {
+        const string_value_length = tidy_line_length(string_value);
+        if (string_value_length <= 100) return;
 
-                // trace.zig's JSON snapshot test.
-                if (std.mem.endsWith(u8, file.path, "trace.zig") and
-                    std.mem.startsWith(u8, string_value, "{\"pid\":1,\"tid\":")) continue;
+        if (std.mem.endsWith(u8, file.path, "state_machine_tests.zig") and
+            (std.mem.startsWith(u8, string_value, " account A") or
+                std.mem.startsWith(u8, string_value, " transfer T") or
+                std.mem.startsWith(u8, string_value, " transfer   ")))
+        {
+            // Table tests from state_machine.zig. They are intentionally wide.
+            return;
+        }
 
-                // AMQP JSON snapshot test.
-                if (std.mem.endsWith(u8, file.path, "cdc/runner.zig") and
-                    std.mem.startsWith(u8, string_value, "{\"timestamp\":")) continue;
+        // vsr.zig's Checkpoint ops diagram.
+        if (std.mem.endsWith(u8, file.path, "vsr.zig") and
+            std.mem.startsWith(u8, string_value, "OPS: ")) return;
+
+        // trace.zig's JSON snapshot test.
+        if (std.mem.endsWith(u8, file.path, "trace.zig") and
+            std.mem.startsWith(u8, string_value, "{\"pid\":1,\"tid\":")) return;
+
+        // AMQP JSON snapshot test.
+        if (std.mem.endsWith(u8, file.path, "cdc/runner.zig") and
+            std.mem.startsWith(u8, string_value, "{\"timestamp\":")) return;
+    }
+
+    errors.add_long_line(file, line_index);
+}
+
+fn tidy_line_length(line: []const u8) usize {
+    // Count codepoints for simplicity, even if it is wrong.
+    return std.unicode.utf8CountCodepoints(line) catch @panic("invalid utf-8");
+}
+
+/// Heuristically checks if a `line` contains an URL.
+fn tidy_line_link(line: []const u8) bool {
+    return std.mem.indexOf(u8, line, "https://") != null;
+}
+
+/// If a line is a `\\` string literal, extract its value.
+fn tidy_line_raw_literal(line: []const u8) ?[]const u8 {
+    const indentation, const value = stdx.cut(line, "\\\\") orelse return null;
+    for (indentation) |c| if (c != ' ') return null;
+    return value;
+}
+
+test tidy_lines {
+    try check_tidy_file(
+        \\lines.zig
+    ,
+        "" ++
+            "pub const x = 92;\n" ++
+            "pub const x = " ++ ("9" ** 199) ++ ";\n" ++
+            "pub const url = \"https://example." ++ ("0" ** 199) ++ " \";\n" ++
+            "        \\\\" ++ ("9" ** 99) ++ "\n" ++
+            "        \"" ++ ("9" ** 99) ++ "\"\n",
+        snap(@src(),
+            \\lines.zig:2: error: line exceeds 100 columns
+            \\lines.zig:5: error: line exceeds 100 columns
+            \\
+        ),
+    );
+}
+
+/// All functions using the `CamelCase` naming convention return a type,
+/// so we enforce that the function name also ends with the `Type` suffix.
+fn tidy_type_functions(file: SourceFile, errors: *Errors) void {
+    var line_index: u32 = 0;
+    var it = std.mem.splitScalar(u8, file.text, '\n');
+    while (it.next()) |line| : (line_index += 1) {
+        // Zig fmt enforces that the pattern `fn Foo(` is not split across multiple lines.
+
+        const prefix, const suffix = stdx.cut(line, "fn ") orelse continue;
+        // Not all `fn ` tokens are functions, some may be `callback_fn` for example.
+        // Functions appear at the beginning of a line or after a whitespace.
+        if (prefix.len > 0 and prefix[prefix.len - 1] != ' ') continue;
+        const function_name, _ = stdx.cut(suffix, "(") orelse continue;
+        if (function_name.len == 0) continue; // E.g: `*const fn (*anyopaque) void`.
+        assert(function_name.len > 0);
+
+        // Skipping naming convention that requires upper-case functions.
+        if (std.mem.startsWith(u8, function_name, "JNI_")) continue;
+        // Windows use CamelCase functions.
+        if (std.mem.indexOf(u8, line, "extern \"kernel32\"") != null) continue;
+
+        if (std.ascii.isUpper(function_name[0])) {
+            if (!std.mem.endsWith(u8, function_name, "Type")) {
+                errors.add_bad_type_function_name(file, line_index, function_name);
             }
-
-            return line_index;
         }
     }
-    return null;
 }
 
-fn tidy_control_characters(file: SourceFile) ?u8 {
-    const binary_file_extensions: []const []const u8 = &.{ ".ico", ".png", ".webp" };
-    for (binary_file_extensions) |extension| {
-        if (std.mem.endsWith(u8, file.path, extension)) return null;
-    }
-
-    if (mem.indexOfScalar(u8, file.text, '\r') != null) {
-        if (std.mem.endsWith(u8, file.path, ".bat")) return null;
-        return '\r';
-    }
-
-    // Learning the best from UNIX, Visual Studio, like make, insists on tabs.
-    if (std.mem.endsWith(u8, file.path, ".sln")) return null;
-    // Go code uses tabs.
-    if (std.mem.endsWith(u8, file.path, ".go") or
-        (std.mem.endsWith(u8, file.path, ".md") and mem.indexOf(u8, file.text, "```go") != null))
-    {
-        return null;
-    }
-
-    if (mem.indexOfScalar(u8, file.text, '\t') != null) {
-        return '\t';
-    }
-    return null;
+test tidy_type_functions {
+    try check_tidy_file(
+        \\type_functions.zig
+    ,
+        \\pub fn MyArrayType() type { }
+    ++ "\npub fn" ++ " MyArray() type { }" ++ "\n" ++
+        \\ pub const callback = *const fn (*anyopaque) void;
+    ,
+        snap(@src(),
+            \\type_functions.zig:2: error: type function name 'MyArray' should end in 'Type'
+            \\
+        ),
+    );
 }
 
-const identifiers_per_file_max = 100_000;
+const IdentifierCounter = struct {
+    const file_identifier_count_max = 100_000;
+
+    map: std.StringHashMapUnmanaged(struct { count: u32, offset: u32 }) = .{},
+
+    pub fn init(gpa: Allocator) !IdentifierCounter {
+        var counter: IdentifierCounter = .{};
+        try counter.map.ensureTotalCapacity(gpa, file_identifier_count_max + 1);
+        return counter;
+    }
+
+    pub fn deinit(counter: *IdentifierCounter, gpa: Allocator) void {
+        counter.map.deinit(gpa);
+        counter.* = undefined;
+    }
+
+    pub fn empty(counter: *const IdentifierCounter) bool {
+        return counter.map.count() == 0;
+    }
+
+    pub fn clear(counter: *IdentifierCounter) void {
+        counter.map.clearRetainingCapacity();
+    }
+
+    pub fn record(
+        counter: *IdentifierCounter,
+        tree: *const Ast,
+        token_text: []const u8,
+        token_offset: u32,
+    ) void {
+        const gop = counter.map.getOrPutAssumeCapacity(token_text);
+        if (counter.map.count() > file_identifier_count_max) @panic("file too large");
+
+        if (gop.found_existing) {
+            // Count occurrences on a single line as one, as a special case for imports:
+            // const foo = std.foo;
+            const between_tokens_text = tree.source[gop.value_ptr.offset..token_offset];
+            const same_line_occurrence = mem.indexOfScalar(u8, between_tokens_text, '\n') == null;
+            if (same_line_occurrence) return;
+        }
+
+        if (!gop.found_existing) gop.value_ptr.* = .{ .count = 0, .offset = 0 };
+        gop.value_ptr.count += 1;
+        gop.value_ptr.offset = token_offset;
+    }
+
+    pub fn get(counter: *const IdentifierCounter, token_text: []const u8) u32 {
+        return counter.map.get(token_text).?.count;
+    }
+};
+
 /// Detects unused constants and functions.
 ///
 /// This is a one-side heuristic: there might be false negatives, but no false positives.
@@ -295,19 +535,22 @@ const identifiers_per_file_max = 100_000;
 /// At the moment, this is implemented using only the lexer, without looking at the AST, as that
 /// seemed simpler.
 fn tidy_dead_declarations(
-    tree: *const std.zig.Ast,
-    used: *UsedDeclarations,
-) ?[]const u8 {
-    assert(used.count() == 0);
-    defer used.clearRetainingCapacity();
+    file: SourceFile,
+    tree: *const Ast,
+    counter: *IdentifierCounter,
+    errors: *Errors,
+) void {
+    assert(counter.empty());
+    defer counter.clear();
 
-    var identifier_start: ?std.zig.Ast.ByteOffset = 0;
+    var identifier_start: ?Ast.ByteOffset = 0;
     inline for (.{ .fill, .check }) |phase| {
         next_token: for (
             tree.tokens.items(.tag),
             tree.tokens.items(.start),
             0..,
-        ) |tag, start, index| {
+        ) |tag, start, index_usize| {
+            const index: Ast.TokenIndex = @intCast(index_usize);
             const identifier_start_previous = identifier_start;
             identifier_start = switch (tag) {
                 .identifier => start,
@@ -322,71 +565,78 @@ fn tidy_dead_declarations(
             );
 
             switch (phase) {
-                .fill => {
-                    const gop = used.getOrPutAssumeCapacity(token_text);
-                    if (used.count() >= identifiers_per_file_max) @panic("file to large");
-
-                    if (gop.found_existing) {
-                        const same_line_occurrence = mem.indexOfScalar(
-                            u8,
-                            tree.source[gop.value_ptr.offset..start],
-                            '\n',
-                        ) == null;
-                        // Count occurrences on a single line as one, as a special case for imports:
-                        // const foo = std.foo;
-                        if (same_line_occurrence) continue :next_token;
-                    }
-
-                    if (!gop.found_existing) gop.value_ptr.* = .{ .count = 0, .offset = 0 };
-                    gop.value_ptr.count += 1;
-                    gop.value_ptr.offset = start;
-
-                    continue :next_token;
-                },
+                .fill => counter.record(tree, token_text, start),
                 .check => {
-                    const usages = used.get(token_text).?.count;
+                    const usages = counter.get(token_text);
                     assert(usages >= 1);
-                    if (usages > 1) continue :next_token;
+                    if (usages == 1) {
+                        if (tidy_dead_declarations_is_private_declaration(tree, index - 1)) {
+                            errors.add_dead_declaration(file, token_text);
+                        }
+                    }
                 },
                 else => comptime unreachable,
             }
-
-            assert(phase == .check);
-            assert(used.get(token_text).?.count == 1);
-            var declaration_keyword = false;
-            for (0..3) |context_offset| {
-                const context_tag = if (index - context_offset < 2)
-                    .eof
-                else
-                    tree.tokens.get(index - context_offset - 2).tag;
-                if (!declaration_keyword) {
-                    switch (context_tag) {
-                        .keyword_fn, .keyword_const => declaration_keyword = true,
-                        // Not a declaration.
-                        else => continue :next_token,
-                    }
-                } else {
-                    switch (context_tag) {
-                        .keyword_inline, .keyword_extern, .string_literal => {},
-                        // Public declaration can be used in a different file.
-                        .keyword_pub, .keyword_export => continue :next_token,
-                        // []const u8 or *const u8, not a declaration.
-                        .r_bracket, .asterisk => continue :next_token,
-                        // Non public declarations, never used.
-                        else => return token_text,
-                    }
-                }
-            }
         }
     }
+}
 
-    return null;
+// Checks if the given identifier token refers to non-public declaration.
+fn tidy_dead_declarations_is_private_declaration(
+    tree: *const Ast,
+    token_index: Ast.TokenIndex,
+) bool {
+    assert(tree.tokens.items(.tag)[token_index] == .identifier);
+    var declaration_keyword = false;
+    for (0..4) |context_offset| {
+        const context_tag = if (token_index - context_offset < 1)
+            .eof
+        else
+            tree.tokens.get(token_index - context_offset - 1).tag;
+
+        if (!declaration_keyword) {
+            switch (context_tag) {
+                .keyword_fn, .keyword_const => declaration_keyword = true,
+                // Not a declaration.
+                else => return false,
+            }
+        } else {
+            switch (context_tag) {
+                .keyword_inline, .keyword_extern, .string_literal => {},
+                // Public declaration can be used in a different file.
+                .keyword_pub, .keyword_export => return false,
+                // []const u8 or *const u8, not a declaration.
+                .r_bracket, .asterisk => return false,
+                // Non public declarations, never used.
+                else => return true,
+            }
+        }
+    } else unreachable;
+}
+
+test tidy_dead_declarations {
+    try check_tidy_file(
+        \\dead.zig
+    ,
+        \\ const std = @import("std");
+        \\ const import_unused = std.import_unused;
+        \\ pub fn public_used() void { private_used(); }
+        \\ fn private_used() void {}
+        \\ fn private_unused() void {}
+    ,
+        snap(@src(),
+            \\dead.zig: error: 'import_unused' is dead code
+            \\dead.zig: error: 'private_unused' is dead code
+            \\
+        ),
+    );
 }
 
 fn tidy_ast(
     file: SourceFile,
     tree: *const Ast,
-) !void {
+    errors: *Errors,
+) void {
     if (std.mem.eql(u8, file.path, "build.zig")) return;
     if (std.mem.endsWith(u8, file.path, "build_multiversion.zig")) return;
     if (std.mem.endsWith(u8, file.path, "bindings.zig")) return;
@@ -417,7 +667,7 @@ fn tidy_ast(
             };
             functions_count += 1;
         }
-        if (is_bin_op(tag)) { // Forbid mixing bitops and arithmetics without paraenthesis.
+        if (is_bin_op(tag)) { // Forbid mixing bitops and arithmetics without parentheses.
             inline for (.{ data.lhs, data.rhs }) |child| {
                 const tag_child = tags[child];
                 if ((is_bin_op_bitwise(tag) and is_bin_op_arithmetic(tag_child)) or
@@ -425,11 +675,7 @@ fn tidy_ast(
                 {
                     const token_opening = tree.firstToken(@intCast(node));
                     const line_opening = tree.tokenLocation(0, token_opening).line;
-                    std.debug.print("{s}:{}: error: ambiguous precedence, add '()'\n", .{
-                        file.path,
-                        line_opening + 1,
-                    });
-                    return error.AmbiguousPrecedence;
+                    errors.add_ambiguous_precedence(file, line_opening);
                 }
             }
         }
@@ -454,12 +700,7 @@ fn tidy_ast(
             if (function_length_red_zone.min < function_length and
                 function_length < function_length_red_zone.max)
             {
-                std.debug.print("{s}:{}: error: long function ({} > 70)\n", .{
-                    file.path,
-                    f.line_opening + 1,
-                    function_length,
-                });
-                return error.LongFunction;
+                errors.add_long_function(file, f.line_opening);
             }
         }
     }
@@ -488,52 +729,18 @@ fn is_bin_op_arithmetic(tag: Ast.Node.Tag) bool {
     };
 }
 
-/// All functions using the `CamelCase` naming convention return a type,
-/// so we enforce that the function name also ends with the `Type` suffix.
-fn tidy_generic_functions(
-    file: SourceFile,
-) ?struct {
-    line: usize,
-    name: []const u8,
-} {
-    var line_count: u32 = 0;
-    var it = std.mem.splitScalar(u8, file.text, '\n');
-    while (it.next()) |line| {
-        line_count += 1;
-        // Zig fmt enforces that the pattern `fn Foo(` is not split across multiple lines.
-        const function_name = function_name: {
-            const fn_prefix = "fn ";
-            const index = std.mem.indexOf(u8, line, fn_prefix) orelse continue;
-            // Not all `fn ` tokens are functions, some may be `callback_fn` for example.
-            // They should appear at the beginning of a line or after a whitespace.
-            if (index == 0 or std.ascii.isWhitespace(line[index - 1])) {
-                const begin = index + fn_prefix.len;
-                const end = std.mem.indexOf(u8, line[begin..], "(") orelse continue;
-                if (end == 0) continue;
-
-                if (std.mem.indexOf(u8, line, "extern \"kernel32\"") != null) {
-                    continue; // Windows use CamelCase functions.
-                }
-                assert(begin + end < line.len);
-                break :function_name line[begin..][0..end];
-            }
-            continue;
-        };
-
-        // Skipping naming convention that requires upper-case functions.
-        if (std.mem.startsWith(u8, function_name, "JNI_")) continue;
-
-        if (std.ascii.isUpper(function_name[0])) {
-            if (!std.mem.endsWith(u8, function_name, "Type")) {
-                return .{
-                    .line = line_count,
-                    .name = function_name,
-                };
-            }
-        }
-    }
-
-    return null;
+test tidy_ast {
+    try check_tidy_file(
+        \\precedence.zig
+    ,
+        \\ pub const confusing = 1 + foo << 3;
+        \\ pub const ok = 1 + (foo << 3);
+    ,
+        snap(@src(),
+            \\precedence.zig:1: error: ambiguous operator precedence, add parenthesis
+            \\
+        ),
+    );
 }
 
 /// Checks that each markdown document has exactly one h1.
@@ -549,12 +756,12 @@ fn tidy_generic_functions(
 ///
 /// <https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements#avoid_using_multiple_h1_elements_on_one_page>
 ///
-/// For this reason,  we follow the second convention.
-fn tidy_markdown_title(text: []const u8) !void {
+/// For this reason, we follow the second convention.
+fn tidy_markdown_title(file: SourceFile, errors: *Errors) void {
     var fenced_block = false; // Avoid interpreting `# ` shell comments as titles.
     var heading_count: u32 = 0;
     var line_count: u32 = 0;
-    var it = std.mem.splitScalar(u8, text, '\n');
+    var it = std.mem.splitScalar(u8, file.text, '\n');
     while (it.next()) |line| {
         line_count += 1;
         if (mem.startsWith(u8, line, "```")) fenced_block = !fenced_block;
@@ -562,10 +769,44 @@ fn tidy_markdown_title(text: []const u8) !void {
     }
     assert(!fenced_block);
     switch (heading_count) {
-        0 => if (line_count > 2) return error.MissingTitle, // No need for a title for a short note.
+        // No need for a title for a short note.
+        0 => if (line_count > 2) errors.add_invalid_markdown_title(file),
         1 => {},
-        else => return error.DuplicateTitle,
+        else => errors.add_invalid_markdown_title(file),
     }
+}
+
+test tidy_markdown_title {
+    try check_tidy_file(
+        \\ok.md
+    ,
+        \\# TigerStyle
+        \\
+        \\Style applies everywhere!
+        \\For example, we check that markdowns contains exactly one top-level title:
+        \\
+        \\```
+        \\# Good Document
+        \\```
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+    try check_tidy_file(
+        \\bad.md
+    ,
+        \\# Top Level Header
+        \\
+        \\Lorem Ipsum
+        \\
+        \\# And Another Top Level Header
+    ,
+        snap(@src(),
+            \\bad.md: error: document should have exactly one top-level '# Title'
+            \\
+        ),
+    );
 }
 
 // Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
@@ -582,15 +823,16 @@ const DeadFilesDetector = struct {
 
     files: FileMap,
 
-    fn init(allocator: std.mem.Allocator) DeadFilesDetector {
-        return .{ .files = FileMap.init(allocator) };
+    fn init(gpa: Allocator) DeadFilesDetector {
+        return .{ .files = FileMap.init(gpa) };
     }
 
-    fn deinit(detector: *DeadFilesDetector) void {
+    fn deinit(detector: *DeadFilesDetector, _: Allocator) void {
         detector.files.deinit();
     }
 
-    fn visit(detector: *DeadFilesDetector, file: SourceFile) !void {
+    fn visit(detector: *DeadFilesDetector, file: SourceFile) Allocator.Error!void {
+        assert(file.has_extension(".zig"));
         (try detector.file_state(file.path)).definition_count += 1;
 
         var rest: []const u8 = file.text;
@@ -605,17 +847,15 @@ const DeadFilesDetector = struct {
         }
     }
 
-    fn finish(detector: *DeadFilesDetector) !void {
+    fn finish(detector: *DeadFilesDetector, errors: *Errors) void {
         defer detector.files.clearRetainingCapacity();
 
         for (detector.files.keys(), detector.files.values()) |name, state| {
             if (state.definition_count == 0) {
-                std.debug.print("imported file untracked by git: {s}\n", .{name});
-                return error.DeadFile;
+                errors.add_file_untracked(&name);
             }
             if (state.import_count == 0 and !is_entry_point(name)) {
-                std.debug.print("file never imported: {s}\n", .{name});
-                return error.DeadFile;
+                errors.add_file_dead(&name);
             }
         }
     }
@@ -683,8 +923,8 @@ test "tidy changelog" {
             std.debug.print("CHANGELOG.md:{d} trailing whitespace", .{line_index + 1});
             return error.TrailingWhitespace;
         }
-        const line_length = try std.unicode.utf8CountCodepoints(line);
-        if (line_length > 100 and !has_link(line)) {
+        const line_length = tidy_line_length(line);
+        if (line_length > 100 and !tidy_line_link(line)) {
             std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
             return error.LineTooLong;
         }
@@ -843,23 +1083,12 @@ test "tidy extensions" {
     if (bad_extension) return error.BadExtension;
 }
 
-/// Heuristically checks if a `line` contains an URL.
-fn has_link(line: []const u8) bool {
-    return std.mem.indexOf(u8, line, "https://") != null;
-}
-
-/// If a line is a `\\` string literal, extract its value.
-fn parse_multiline_string(line: []const u8) ?[]const u8 {
-    const indentation, const value = stdx.cut(line, "\\\\") orelse return null;
-    for (indentation) |c| if (c != ' ') return null;
-    return value;
-}
-
 /// Lists all files in the repository.
 fn list_file_paths(shell: *Shell) ![]const []const u8 {
     var result = std.ArrayList([]const u8).init(shell.arena.allocator());
 
     const files = try shell.exec_stdout("git ls-files -z", .{});
+    assert(files.len > 0);
     assert(files[files.len - 1] == 0);
     var lines = std.mem.splitScalar(u8, files[0 .. files.len - 1], 0);
     while (lines.next()) |line| {
