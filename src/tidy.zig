@@ -160,6 +160,7 @@ const Errors = struct {
 
     fn emit(errors: *Errors, comptime fmt: []const u8, args: anytype) void {
         comptime assert(fmt[fmt.len - 1] == '\n');
+        errors.count += 1;
         if (errors.captured) |*captured| {
             captured.writer(std.testing.allocator).print(fmt, args) catch @panic("OOM");
         } else {
@@ -219,8 +220,10 @@ fn check_tidy_file(file_path: []const u8, file_text: [:0]const u8, want: Snap) !
     defer errors.captured.?.deinit(std.testing.allocator);
 
     try tidy_file(gpa, &counter, .{ .path = file_path, .text = file_text }, &errors);
+    const got = errors.captured.?.items;
 
-    try want.diff(errors.captured.?.items);
+    try want.diff(got);
+    assert(errors.count == std.mem.count(u8, got, "\n"));
 }
 
 fn tidy_control_characters(file: SourceFile, errors: *Errors) void {
