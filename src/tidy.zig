@@ -233,7 +233,7 @@ fn tidy_control_characters(file: SourceFile, errors: *Errors) void {
         .@"\r" = file.has_extension(".bat"),
 
         // Visual Studio insists on \t, taking the best from `make`.
-        // Go uses tabs. e
+        // Go uses tabs.
         .@"\t" = file.has_extension(".sln") or
             (file.has_extension(".go") or
                 (file.has_extension(".md") and mem.indexOf(u8, file.text, "```go") != null)),
@@ -500,7 +500,7 @@ const IdentifierCounter = struct {
         token_offset: u32,
     ) void {
         const gop = counter.map.getOrPutAssumeCapacity(token_text);
-        if (counter.map.count() > file_identifier_count_max) @panic("file to large");
+        if (counter.map.count() > file_identifier_count_max) @panic("file too large");
 
         if (gop.found_existing) {
             // Count occurrences on a single line as one, as a special case for imports:
@@ -780,7 +780,7 @@ test tidy_markdown_title {
         \\# TigerStyle
         \\
         \\Style applies everywhere!
-        \\For example, we check that makrdowns contains exactly one top-level title:
+        \\For example, we check that markdowns contains exactly one top-level title:
         \\
         \\```
         \\# Good Document
