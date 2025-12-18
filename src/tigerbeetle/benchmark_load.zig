@@ -260,7 +260,7 @@ const Benchmark = struct {
     transfer_id_permutation: IdPermutation,
     transfer_batch_size: u32,
     transfer_batch_delay: Duration,
-    transfer_count: u32,
+    transfer_count: u64,
     transfer_hot_percent: u32,
     transfer_pending: bool,
     query_count: u32,

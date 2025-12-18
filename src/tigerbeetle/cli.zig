@@ -138,7 +138,7 @@ const CLIArgs = union(enum) {
         account_batch_size: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
         ),
-        transfer_count: u32 = 10_000_000,
+        transfer_count: u64 = 10_000_000,
         transfer_hot_percent: u32 = 100,
         transfer_pending: bool = false,
         transfer_batch_size: u32 = Operation.create_transfers.event_max(
@@ -582,7 +582,7 @@ pub const Command = union(enum) {
         flag_history: bool,
         flag_imported: bool,
         account_batch_size: u32,
-        transfer_count: u32,
+        transfer_count: u64,
         transfer_hot_percent: u32,
         transfer_pending: bool,
         transfer_batch_size: u32,
