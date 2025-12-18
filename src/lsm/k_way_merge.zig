@@ -36,6 +36,11 @@ const Options = struct {
     deduplicate: bool,
 };
 
+pub fn TreeOfLosersType(
+    comptime Key: type,
+    // no precedence, no values, no nothing!
+) type {}
+
 pub fn KWayMergeIteratorType(
     comptime Context: type,
     comptime Key: type,
