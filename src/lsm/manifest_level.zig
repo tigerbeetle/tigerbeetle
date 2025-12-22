@@ -190,9 +190,9 @@ pub fn ManifestLevelType(
             level.* = undefined;
         }
 
-        pub fn reset(level: *ManifestLevel) void {
-            level.keys.reset();
-            level.tables.reset();
+        pub fn reset(level: *ManifestLevel, node_pool: *NodePool) void {
+            level.keys.reset(node_pool);
+            level.tables.reset(node_pool);
 
             level.* = .{
                 .keys = level.keys,

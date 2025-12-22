@@ -221,7 +221,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn reset(manifest: *Manifest) void {
-            for (&manifest.levels) |*level| level.reset();
+            for (&manifest.levels) |*level| level.reset(manifest.node_pool);
 
             manifest.* = .{
                 .node_pool = manifest.node_pool,
