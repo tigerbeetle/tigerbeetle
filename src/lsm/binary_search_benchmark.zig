@@ -45,13 +45,8 @@ test "benchmark: binary search" {
 
     const blob_size = bench.parameter("blob_size", MiB, GiB);
     const searches = bench.parameter("searches", 500, 20_000);
-    // Benchmarks require a fixed seed for reproducibility; smoke mode may use a random seed.
-    const seed = bench.parameter(
-        "seed",
-        std.crypto.random.intRangeLessThan(u64, 0, std.math.maxInt(u64)),
-        std.math.maxInt(u64),
-    );
-    var prng = stdx.PRNG.from_seed(seed);
+
+    var prng = stdx.PRNG.from_seed(bench.seed);
 
     bench.report("WT: Wall time/search", .{});
 

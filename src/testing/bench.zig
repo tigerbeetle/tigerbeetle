@@ -58,17 +58,23 @@ const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 const TimeOS = @import("../time.zig").TimeOS;
 
+const seed_benchmark: u64 = 42;
+
 const mode: enum { smoke, benchmark } =
     // See build.zig for how this is ultimately determined.
     if (@import("test_options").benchmark) .benchmark else .smoke;
 
+seed: u64,
 time: TimeOS = .{},
 instant_start: ?Instant = null,
 
 const Bench = @This();
 
 pub fn init() Bench {
-    return .{};
+    return .{
+        // Benchmarks require a fixed seed for reproducibility; smoke mode uses a random seed.
+        .seed = if (mode == .benchmark) seed_benchmark else std.testing.random_seed,
+    };
 }
 
 pub fn deinit(bench: *Bench) void {
