@@ -141,7 +141,7 @@ fn run_benchmark(
     std.mem.doNotOptimizeAway(checksum);
 
     std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
-    const result = duration_samples[2]; // discard the fastest two, report the 3rd fastest.
+    const result = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
 
     bench.report(body_fmt, .{
         scenario_name,
