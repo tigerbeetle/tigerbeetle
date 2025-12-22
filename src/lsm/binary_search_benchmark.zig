@@ -86,7 +86,7 @@ fn run_benchmark(
     comptime layout: Layout,
     search_count: u64,
     page_buffer: []u8,
-    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
     prng: *stdx.PRNG,
 ) !void {
     const V = ValueType(layout);
@@ -99,12 +99,10 @@ fn run_benchmark(
     assert(page_count > 0);
     if (page_count > 1024 * 1024) @panic("page_count too large");
 
-    const page_picker = try allocator.alloc(usize, page_count);
-    defer allocator.free(page_picker);
+    const page_picker = try arena.alloc(usize, page_count);
     shuffled_index(prng, page_picker);
 
-    const value_picker = try allocator.alloc(usize, layout.values_count);
-    defer allocator.free(value_picker);
+    const value_picker = try arena.alloc(usize, layout.values_count);
     shuffled_index(prng, value_picker);
 
     var page_alloc = std.heap.FixedBufferAllocator.init(page_buffer);
