@@ -53,12 +53,13 @@ test "benchmark: binary search" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const blob = try arena.allocator().alignedAlloc(u8, 64, blob_size);
+    var checksum: u64 = 0;
 
     inline for (kv_types) |kv| {
         inline for (scenarios) |scenario| {
             // Clamp for `smoke` mode.
             const page_buffer_size = @min(blob_size, scenario.page_buffer_size);
-            try run_benchmark(
+            checksum +%= try run_benchmark(
                 &bench,
                 scenario.name,
                 .{
@@ -73,6 +74,7 @@ test "benchmark: binary search" {
             );
         }
     }
+    bench.report("checksum {}", .{checksum});
 }
 
 fn run_benchmark(
@@ -83,7 +85,7 @@ fn run_benchmark(
     page_buffer: []u8,
     arena: std.mem.Allocator,
     prng: *stdx.PRNG,
-) !void {
+) !u64 {
     const V = ValueType(layout);
     const K = V.Key;
     const Page = struct {
@@ -131,7 +133,6 @@ fn run_benchmark(
         duration.* = bench.stop();
         duration.ns /= search_count;
     }
-    std.mem.doNotOptimizeAway(checksum);
 
     std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
     const result = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
@@ -143,6 +144,8 @@ fn run_benchmark(
         layout.values_count,
         result,
     });
+
+    return checksum;
 }
 
 const Layout = struct {
