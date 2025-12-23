@@ -20,6 +20,7 @@ comptime {
     _ = @import("lsm/forest.zig");
     _ = @import("lsm/forest_table_iterator.zig");
     _ = @import("lsm/k_way_merge.zig");
+    _ = @import("lsm/k_way_merge_benchmark.zig");
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
     _ = @import("lsm/scratch_memory.zig");

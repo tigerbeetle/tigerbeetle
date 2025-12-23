@@ -1,0 +1,174 @@
+const std = @import("std");
+const assert = std.debug.assert;
+
+const stdx = @import("stdx");
+
+const Bench = @import("../testing/bench.zig");
+const Pending = error{Pending};
+const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
+
+const streams_count_max = 32;
+const repetitions: usize = 32;
+
+const body_fmt = "K={:_>2} L={:_>3} WT={}";
+
+// Those Values are close to the real-world use case.
+const Values = .{
+    ValueType(u64, 128),
+    ValueType(u256, 32),
+    ValueType(u256, 32),
+    ValueType(u256, 32),
+    ValueType(u128, 16),
+    ValueType(u64, 8),
+    ValueType(u128, 16),
+};
+
+test "benchmark: k-way-merge" {
+    var bench: Bench = .init();
+    defer bench.deinit();
+
+    bench.report("WT: Wall time/merged element", .{});
+
+    const streams_count: usize = @intCast(bench.parameter("streams_count", 4, 32));
+    const stream_length: usize = @intCast(bench.parameter("stream_length", 128, 8192));
+    assert(streams_count <= streams_count_max);
+
+    var prng = stdx.PRNG.from_seed(bench.seed);
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    const streams = .{
+        try prepare_streams(Values[0], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[1], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[2], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[3], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[4], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[5], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[6], &prng, allocator, streams_count, stream_length),
+    };
+    assert(streams.len == Values.len);
+
+    var checksum: u64 = 0;
+    var duration_samples: [repetitions]stdx.Duration = undefined;
+
+    for (&duration_samples) |*duration| {
+        bench.start();
+        inline for (streams) |pair| {
+            var context = pair.context;
+            context.merge(pair.output);
+            checksum +%= @truncate(pair.output[0].key);
+        }
+        duration.* = bench.stop();
+
+        inline for (streams) |pair| {
+            const Value = @TypeOf(pair.output[0]);
+            assert(std.sort.isSorted(Value, pair.output, {}, Value.sort.asc));
+        }
+    }
+
+    std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
+    const result = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
+
+    bench.report(body_fmt, .{
+        streams_count,
+        stream_length,
+        result,
+    });
+}
+
+pub fn prepare_streams(
+    comptime Value: type,
+    prng: *stdx.PRNG,
+    arena: std.mem.Allocator,
+    streams_count: usize,
+    stream_length: usize,
+) !struct { context: KWayMergeContextType(Value), output: []Value } {
+    var streams = try arena.alignedAlloc(Value, 64, streams_count * stream_length);
+    var context: KWayMergeContextType(Value) = .{
+        .streams = undefined,
+        .streams_count = @intCast(streams_count),
+    };
+    const output = try arena.alignedAlloc(Value, 64, streams_count * stream_length);
+
+    for (0..streams_count) |stream_id| {
+        const stream_begin = stream_id * stream_length;
+        const stream_end = stream_begin + stream_length;
+        const stream = streams[stream_begin..stream_end];
+
+        for (stream) |*value| {
+            value.key = prng.int_inclusive(Value.Key, 2_000_000);
+        }
+
+        std.mem.sort(Value, stream, {}, Value.sort.asc);
+
+        context.streams[stream_id] = stream;
+    }
+
+    return .{ .context = context, .output = output };
+}
+
+fn KWayMergeContextType(comptime Value: type) type {
+    return struct {
+        const Context = @This();
+
+        streams: [streams_count_max][]const Value,
+        streams_count: u16,
+
+        fn stream_peek(context: *const Context, stream_index: u32) Pending!?Value.Key {
+            const stream = context.streams[stream_index];
+            if (stream.len == 0) return null;
+            return stream[0].key;
+        }
+
+        fn stream_pop(context: *Context, stream_index: u32) Value {
+            const stream = context.streams[stream_index];
+            context.streams[stream_index] = stream[1..];
+            return stream[0];
+        }
+
+        fn stream_precedence(context: *const Context, a: u32, b: u32) bool {
+            _ = context;
+            return a > b;
+        }
+
+        fn merge(context: *Context, output: []Value) void {
+            const KWayIterator = KWayMergeIteratorType(Context, Value.Key, Value, .{
+                .streams_max = streams_count_max,
+                .deduplicate = false,
+            }, Value.key_from_value, stream_peek, stream_pop, stream_precedence);
+
+            var k_way_iterator = KWayIterator.init(context, context.streams_count, .ascending);
+
+            var index: usize = 0;
+            while (k_way_iterator.pop() catch unreachable) |value| : (index += 1) {
+                output[index] = value;
+            }
+        }
+    };
+}
+
+fn ValueType(comptime KeyType: type, comptime value_size: u32) type {
+    return struct {
+        const Value = @This();
+        const Key = KeyType;
+        key: Key,
+        body: [value_size - @sizeOf(Key)]u8,
+
+        comptime {
+            assert(@sizeOf(Value) == value_size);
+        }
+
+        inline fn key_from_value(self: *const Value) Key {
+            return self.key;
+        }
+
+        pub const sort = struct {
+            pub fn asc(ctx: void, lhs: Value, rhs: Value) bool {
+                return std.sort.asc(Key)(ctx, lhs.key, rhs.key);
+            }
+        };
+    };
+}
