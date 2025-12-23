@@ -1779,10 +1779,14 @@ test "header prints correctly" {
     // Checksums are present, enums are properly formatted and reserved_* + *_padding are omitted
     const formatted = try std.fmt.bufPrint(&buf, "{}", .{prepare});
     try std.testing.expectStringStartsWith(formatted, "Prepare{");
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".checksum=00000000000000000123456789abcdef").? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".checksum_body=0000000000000000fedcba9876543210").? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".parent=000000000abcdeffedcba00123456789").? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".request_checksum=00000000000000012345678987654321").? > 0);
+    const checksum_field_val = ".checksum=00000000000000000123456789abcdef";
+    try std.testing.expect(std.mem.indexOf(u8, formatted, checksum_field_val).? > 0);
+    const checksum_body_field_val = ".checksum_body=0000000000000000fedcba9876543210";
+    try std.testing.expect(std.mem.indexOf(u8, formatted, checksum_body_field_val).? > 0);
+    const parent_field_val = ".parent=000000000abcdeffedcba00123456789";
+    try std.testing.expect(std.mem.indexOf(u8, formatted, parent_field_val).? > 0);
+    const request_checksum_field_val = ".request_checksum=00000000000000012345678987654321";
+    try std.testing.expect(std.mem.indexOf(u8, formatted, request_checksum_field_val).? > 0);
     try std.testing.expect(std.mem.indexOf(u8, formatted, ".command=prepare").? > 0);
     try std.testing.expect(std.mem.indexOf(u8, formatted, ".operation=pulse").? > 0);
     try std.testing.expect(std.mem.indexOf(u8, formatted, ".reserved_frame=[]").? > 0);
