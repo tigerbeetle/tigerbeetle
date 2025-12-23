@@ -43,15 +43,15 @@ test "benchmark: binary search" {
     var bench: Bench = .init();
     defer bench.deinit();
 
+    bench.report("WT: Wall time/search", .{});
+
     const blob_size = bench.parameter("blob_size", MiB, GiB);
     const searches = bench.parameter("searches", 500, 20_000);
 
     var prng = stdx.PRNG.from_seed(bench.seed);
-
-    bench.report("WT: Wall time/search", .{});
-
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+
     const blob = try arena.allocator().alignedAlloc(u8, 64, blob_size);
     var checksum: u64 = 0;
 
