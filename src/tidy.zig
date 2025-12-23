@@ -137,6 +137,14 @@ const Errors = struct {
         errors.emit("{s}: error: '{s}' is dead code\n", .{ file.path, declaration });
     }
 
+    pub fn add_defer_newline(errors: *Errors, file: SourceFile, line_index: usize) void {
+        const line_number = line_index + 1;
+        errors.emit(
+            "{s}:{d}: error: defer must be followed by a blank line\n",
+            .{ file.path, line_number },
+        );
+    }
+
     pub fn add_invalid_markdown_title(errors: *Errors, file: SourceFile) void {
         errors.emit(
             "{s}: error: document should have exactly one top-level '# Title'\n",
@@ -681,6 +689,8 @@ fn tidy_ast(
         }
     }
 
+    tidy_defer_newlines(file, tree, errors);
+
     // We ratchet 70-lines-per-function TigerStyle rule from the bottom up. Some functions want
     // to be really long, and that is big. The most values is in preventing originally small
     // functions to grow over time.
@@ -704,6 +714,75 @@ fn tidy_ast(
             }
         }
     }
+}
+
+fn tidy_defer_newlines(file: SourceFile, tree: *const Ast, errors: *Errors) void {
+    const tags = tree.tokens.items(.tag);
+
+    var index: usize = 0;
+    while (index < tags.len) : (index += 1) {
+        const tag = tags[index];
+        if (tag != .keyword_defer) continue;
+
+        const semicolon_index = tidy_defer_statement_end(tags, index) orelse continue;
+        const semicolon_line = tree.tokenLocation(0, @intCast(semicolon_index)).line;
+
+        var next_index = semicolon_index + 1;
+        while (next_index < tags.len and
+            tidy_is_comment_token(tags[next_index])) : (next_index += 1)
+        {}
+
+        if (next_index >= tags.len) break;
+        if (tags[next_index] == .eof) continue;
+
+        const next_line = tree.tokenLocation(0, @intCast(next_index)).line;
+        const next_tag = tags[next_index];
+        if (next_tag == .r_brace or next_tag == .keyword_errdefer or next_tag == .keyword_defer) {
+            continue;
+        }
+
+        if (next_line <= semicolon_line + 1) {
+            errors.add_defer_newline(file, semicolon_line);
+        }
+    }
+}
+
+fn tidy_defer_statement_end(tags: []const std.zig.Token.Tag, defer_index: usize) ?usize {
+    var depth: i32 = 0;
+
+    var index: usize = defer_index + 1;
+    while (index < tags.len) : (index += 1) {
+        switch (tags[index]) {
+            .l_paren, .l_brace, .l_bracket => depth += 1,
+            .r_paren, .r_brace, .r_bracket => depth -= 1,
+            else => {},
+        }
+
+        if (depth == 0) {
+            switch (tags[index]) {
+                .semicolon => return index,
+                .r_brace => {
+                    if (index + 1 < tags.len and tags[index + 1] == .semicolon) {
+                        return index + 1;
+                    }
+                    return index; // defer { ... } without trailing semicolon.
+                },
+                else => {},
+            }
+        } else if (depth < 0) {
+            // Unterminated defer; bail out.
+            return null;
+        }
+    }
+
+    return null;
+}
+
+fn tidy_is_comment_token(tag: std.zig.Token.Tag) bool {
+    return switch (tag) {
+        .doc_comment, .container_doc_comment => true,
+        else => false,
+    };
 }
 
 fn is_bin_op(tag: Ast.Node.Tag) bool {
@@ -738,6 +817,215 @@ test tidy_ast {
     ,
         snap(@src(),
             \\precedence.zig:1: error: ambiguous operator precedence, add parenthesis
+            \\
+        ),
+    );
+}
+
+test tidy_defer_newlines {
+    try check_tidy_file(
+        \\defer_newline.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer bar();
+        \\    baz();
+        \\}
+        \\pub fn bar() void {}
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\defer_newline.zig:2: error: defer must be followed by a blank line
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_newline_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer bar();
+        \\
+        \\    baz();
+        \\}
+        \\pub fn bar() void {}
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_end_of_scope_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer bar();
+        \\}
+        \\pub fn bar() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_block_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer {
+        \\        _ = bar() catch {};
+        \\    }
+        \\
+        \\    baz();
+        \\}
+        \\pub fn bar() anyerror!void { return; }
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_block_missing_blank_line.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer {
+        \\        _ = bar() catch {};
+        \\    }
+        \\    baz();
+        \\}
+        \\pub fn bar() anyerror!void { return; }
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\defer_block_missing_blank_line.zig:4: error: defer must be followed by a blank line
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_followed_by_errdefer_ok.zig
+    ,
+        \\pub fn foo() !void {
+        \\    var tmp: i32 = undefined;
+        \\    defer tmp_deinit();
+        \\    errdefer tmp_log();
+        \\    return tmp_use(tmp);
+        \\}
+        \\pub fn tmp_deinit() void {}
+        \\pub fn tmp_log() void {}
+        \\pub fn tmp_use(_: i32) !void { return; }
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_group_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer stdout();
+        \\    defer stderr();
+        \\
+        \\    baz();
+        \\}
+        \\pub fn stdout() void {}
+        \\pub fn stderr() void {}
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_inline_if_blank_line_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer if (bar()) {
+        \\        baz();
+        \\    };
+        \\
+        \\    baz();
+        \\}
+        \\pub fn bar() bool { return true; }
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_inline_block_with_comment_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer if (bar()) {
+        \\        baz();
+        \\    };
+        \\
+        \\    // next statements
+        \\    qux();
+        \\}
+        \\pub fn bar() bool { return true; }
+        \\pub fn baz() void {}
+        \\pub fn qux() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_switch_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer switch (bar()) {
+        \\        .ok => {},
+        \\        .leak => {},
+        \\    };
+        \\
+        \\    baz();
+        \\}
+        \\pub fn bar() enum { ok, leak } { return .ok; }
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_inline_for_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer inline for (.{1, 2}) |s| {
+        \\        _ = s;
+        \\    };
+        \\
+        \\    baz();
+        \\}
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_with_catch_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer bar() catch {};
+        \\
+        \\    baz();
+        \\}
+        \\pub fn bar() anyerror!void { return; }
+        \\pub fn baz() void {}
+    ,
+        snap(@src(),
             \\
         ),
     );
