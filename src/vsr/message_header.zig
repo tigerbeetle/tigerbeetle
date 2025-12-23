@@ -1778,10 +1778,7 @@ test "header prints correctly" {
     };
     // Checksums are present, enums are properly formatted and reserved_* + *_padding are omitted
     const formatted = try std.fmt.bufPrint(&buf, "{}", .{prepare});
-    // try std.testing.expectEqualStrings(formatted, "Prepare{");
-
     try std.testing.expectStringStartsWith(formatted, "Prepare{");
-
     try std.testing.expect(std.mem.indexOf(u8, formatted, ".checksum=00000000000000000123456789abcdef").? > 0);
     try std.testing.expect(std.mem.indexOf(u8, formatted, ".checksum_body=0000000000000000fedcba9876543210").? > 0);
     try std.testing.expect(std.mem.indexOf(u8, formatted, ".parent=000000000abcdeffedcba00123456789").? > 0);
