@@ -240,19 +240,105 @@ pub const Header = extern struct {
 
     pub fn format(
         self: *const Header,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
         switch (self.into_any()) {
-            inline else => |header| return try std.fmt.formatType(
-                header,
-                fmt,
-                options,
-                writer,
-                std.options.fmt_max_depth,
-            ),
+            inline else => |header| return try print_header(header, writer),
         }
+    }
+
+    /// Print specific data frame's header fields with several fomratting rules:
+    /// - This data type's name is printed as a simple name dropping fully qualified prefix.
+    /// - Checksums (including the `parent` field) are formatted in hex.
+    /// - `*_reserved` fields are omitted if they contain only zeroes.
+    /// - `*_padding` fields and `nonce_reserved` are omitted.
+    /// - `enum` values are printed as a string literal representing their tag name.
+    fn print_header(value_ptr: anytype, writer: anytype) !void {
+        assert(@typeInfo(@TypeOf(value_ptr)) == .pointer);
+        const T = @TypeOf(value_ptr.*);
+        switch (@typeInfo(T)) {
+            .@"struct" => |info| {
+                const simple_type_name = comptime name_blk: {
+                    const type_name = @typeName(T);
+                    const last_part_idx = std.mem.lastIndexOf(u8, type_name, ".");
+                    break :name_blk if (last_part_idx) |idx| type_name[idx + 1 ..] else type_name;
+                };
+                try writer.writeAll(simple_type_name ++ "{");
+                inline for (info.fields, 0..) |field, i| {
+                    comptime {
+                        if (std.mem.endsWith(u8, field.name, "_padding")) {
+                            // Skip printing padding field e.g.
+                            // checksum_padding: u128 or route_padding: [6]u8
+                            continue;
+                        }
+                        if (std.mem.eql(u8, field.name, "nonce_reserved")) {
+                            // Skip nonce_reserved
+                            continue;
+                        }
+                    }
+                    const printable_field_name = comptime field_name_blk: {
+                        const separator = if (i == 0) " ." else ", .";
+                        break :field_name_blk separator ++ field.name ++ "=";
+                    };
+                    try writer.writeAll(printable_field_name);
+                    const v = @field(value_ptr.*, field.name);
+                    switch (@typeInfo(field.type)) {
+                        // Special handling for: checksum, checksum_body and parent fields
+                        // which are going to be printed in 32 character wide hex
+                        // otherwise print as ints.
+                        .int, .comptime_int => {
+                            const int_field_fmt = comptime checksum_fmt_blk: {
+                                const is_checksum =
+                                    std.mem.startsWith(u8, field.name, "checksum") or
+                                    std.mem.endsWith(u8, field.name, "checksum") or
+                                    std.mem.eql(u8, field.name, "parent");
+                                break :checksum_fmt_blk if (is_checksum) "{x:0>32}" else "{d}";
+                            };
+                            try std.fmt.format(writer, int_field_fmt, .{v});
+                        },
+                        .@"enum" => |enum_info| {
+                            // Exhaustive enums can be printed out as a simple tag name
+                            // while non-exhaustive may cause panic. Fall back to the
+                            // default formatting if latter.
+                            // See https://github.com/ziglang/zig/issues/12845.
+                            const printed = try print_enum_pretty(v, enum_info, writer);
+                            if (!printed) try std.fmt.format(writer, "{any}", .{v});
+                        },
+                        .array => |array_info| {
+                            // Print reserved* fields only if they have at least one non-zero byte
+                            if (array_info.child == u8 and
+                                std.mem.startsWith(u8, field.name, "reserved") and
+                                std.mem.allEqual(u8, @as([]const u8, &v), 0))
+                            {
+                                try writer.writeAll("[]");
+                            } else {
+                                try std.fmt.format(writer, "{any}", .{v});
+                            }
+                        },
+                        else => try std.fmt.format(writer, "{any}", .{v}),
+                    }
+                }
+                try writer.writeAll(" }");
+            },
+            else => unreachable,
+        }
+    }
+
+    fn print_enum_pretty(e: anytype, enum_info: std.builtin.Type.Enum, writer: anytype) !bool {
+        if (enum_info.is_exhaustive) {
+            try writer.writeAll(@tagName(e));
+            return true;
+        } else {
+            inline for (enum_info.fields) |field| {
+                if (@intFromEnum(e) == field.value) {
+                    try writer.writeAll(@tagName(e));
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     fn HeaderFunctionsType(comptime CommandHeader: type) type {
@@ -292,6 +378,16 @@ pub const Header = extern struct {
             pub fn valid_checksum_body(self: *const CommandHeader, body: []const u8) bool {
                 return self.frame_const().valid_checksum_body(body);
             }
+
+            pub fn format(
+                self: *const CommandHeader,
+                comptime fmt: []const u8,
+                options: std.fmt.FormatOptions,
+                writer: anytype,
+            ) !void {
+                const header = self.frame_const();
+                try std.fmt.formatType(header, fmt, options, writer, std.fmt.default_max_depth);
+            }
         };
     }
 
@@ -324,6 +420,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
@@ -360,6 +457,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(_: *const @This()) ?[]const u8 {
             return "deprecated message type";
@@ -405,6 +503,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -457,6 +556,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
@@ -499,6 +599,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
@@ -541,6 +642,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
@@ -618,6 +720,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
@@ -749,6 +852,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
@@ -905,6 +1009,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
@@ -1001,6 +1106,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
@@ -1070,6 +1176,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
@@ -1110,6 +1217,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
@@ -1161,6 +1269,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
@@ -1210,6 +1319,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
@@ -1255,6 +1365,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
@@ -1298,6 +1409,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
@@ -1341,6 +1453,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
@@ -1385,6 +1498,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
@@ -1426,6 +1540,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
@@ -1468,6 +1583,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
@@ -1531,6 +1647,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
@@ -1582,6 +1699,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .block);
@@ -1635,4 +1753,53 @@ comptime {
             assert(a == b);
         }
     }
+}
+
+test "header prints correctly" {
+    var buf: [1024]u8 = undefined;
+    var prepare = Header.Prepare{
+        .checksum = 0x0123456789ABCDEF,
+        .checksum_body = 0xFEDCBA9876543210,
+        .cluster = 1,
+        .size = 321,
+        .view = 2,
+        .release = vsr.Release.zero,
+        .command = .prepare,
+        .replica = 3,
+        .parent = 0xABCDEFFEDCBA00123456789,
+        .request_checksum = 0x12345678987654321,
+        .checkpoint_id = 4,
+        .client = 5,
+        .op = 5,
+        .commit = 6,
+        .timestamp = 123456789,
+        .request = 7,
+        .operation = .pulse,
+    };
+    // Checksums are present, enums are properly formatted and reserved_* + *_padding are omitted
+    const formatted = try std.fmt.bufPrint(&buf, "{}", .{prepare});
+    // try std.testing.expectEqualStrings(formatted, "Prepare{");
+
+    try std.testing.expectStringStartsWith(formatted, "Prepare{");
+
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".checksum=00000000000000000123456789abcdef").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".checksum_body=0000000000000000fedcba9876543210").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".parent=000000000abcdeffedcba00123456789").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".request_checksum=00000000000000012345678987654321").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".command=prepare").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".operation=pulse").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".reserved_frame=[]").? > 0);
+    try std.testing.expect(std.mem.indexOf(u8, formatted, ".reserved=[]").? > 0);
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, formatted, ".checksum_padding"));
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, formatted, ".checksum_body_padding"));
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, formatted, ".route_padding"));
+
+    // Modify single byte of reserved_* fields so they are logged
+    prepare.reserved_frame[0] = 1;
+    prepare.reserved[0] = 1;
+    const with_reserved = try std.fmt.bufPrint(&buf, "{}", .{prepare.frame_const()});
+    try std.testing.expect(std.mem.indexOf(u8, with_reserved, ".reserved_frame").? > 0);
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, with_reserved, ".reserved_frame=[]"));
+    try std.testing.expect(std.mem.indexOf(u8, with_reserved, ".reserved").? > 0);
+    try std.testing.expectEqual(null, std.mem.indexOf(u8, with_reserved, ".reserved=[]"));
 }

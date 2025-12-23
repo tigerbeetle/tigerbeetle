@@ -1165,7 +1165,8 @@ pub fn GridType(comptime Storage: type) type {
                 const header =
                     mem.bytesAsValue(vsr.Header.Block, block.*[0..@sizeOf(vsr.Header)]);
                 log.warn(
-                    "{}: {s}: expected address={} checksum={}, found address={} checksum={}",
+                    "{}: {s}: expected address={} checksum={x:0>32}, " ++
+                        "found address={} checksum={x:0>32}",
                     .{
                         grid.superblock.replica_index.?,
                         @tagName(result),
@@ -1289,7 +1290,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(read_remote_head.callback == .from_local_or_global_storage);
                 assert(read_remote_head.coherent);
 
-                log.debug("{}: read_block: fault: address={} checksum={}", .{
+                log.debug("{}: read_block: fault: address={} checksum={x:0>32}", .{
                     grid.superblock.replica_index.?,
                     read_remote_head.address,
                     read_remote_head.checksum,

@@ -194,7 +194,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             assert(client_replies.read_reply_sync(slot, session) == null);
 
             const read = client_replies.reads.acquire() orelse {
-                log.debug("{}: read_reply: busy (client={} reply={})", .{
+                log.debug("{}: read_reply: busy (client={} reply={x:0>32})", .{
                     client_replies.replica,
                     session.header.client,
                     session.header.checksum,
@@ -203,7 +203,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 return error.Busy;
             };
 
-            log.debug("{}: read_reply: start (client={} reply={})", .{
+            log.debug("{}: read_reply: start (client={} reply={x:0>32})", .{
                 client_replies.replica,
                 session.header.client,
                 session.header.checksum,
@@ -243,7 +243,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             defer client_replies.message_pool.unref(message);
 
             const callback = callback_or_null orelse {
-                log.debug("{}: read_reply: already resolved (client={} reply={})", .{
+                log.debug("{}: read_reply: already resolved (client={} reply={x:0>32})", .{
                     client_replies.replica,
                     header.client,
                     header.checksum,
@@ -254,7 +254,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             if (!message.header.valid_checksum() or
                 !message.header.valid_checksum_body(message.body_used()))
             {
-                log.warn("{}: read_reply: corrupt reply (client={} reply={})", .{
+                log.warn("{}: read_reply: corrupt reply (client={} reply={x:0>32})", .{
                     client_replies.replica,
                     header.client,
                     header.checksum,
@@ -269,7 +269,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // - The read targets a newer reply (that we haven't seen/written yet).
             // - The read targets a reply that we wrote, but was misdirected.
             if (message.header.checksum != header.checksum) {
-                log.warn("{}: read_reply: unexpected header (client={} reply={} found={})", .{
+                log.warn("{}: read_reply: unexpected header " ++
+                    "(client={} reply={x:0>32} found={x:0>32})", .{
                     client_replies.replica,
                     header.client,
                     header.checksum,
@@ -283,7 +284,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             assert(message.header.command == .reply);
             assert(message.header.cluster == header.cluster);
 
-            log.debug("{}: read_reply: done (client={} reply={})", .{
+            log.debug("{}: read_reply: done (client={} reply={x:0>32})", .{
                 client_replies.replica,
                 header.client,
                 header.checksum,

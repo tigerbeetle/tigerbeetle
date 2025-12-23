@@ -1179,7 +1179,7 @@ pub const Simulator = struct {
                 v.value_ptr.set(replica.replica);
 
                 log.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} corrupt={} (remote read)", .{
+                    "missing address={} checksum={x:0>32} corrupt={} (remote read)", .{
                     replica.replica,
                     faulty_read.address,
                     faulty_read.checksum,
@@ -1198,7 +1198,7 @@ pub const Simulator = struct {
                 v.value_ptr.set(replica.replica);
 
                 log.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} corrupt={} (GridBlocksMissing)", .{
+                    "missing address={} checksum={x:0>32} corrupt={} (GridBlocksMissing)", .{
                     replica.replica,
                     fault.key_ptr.*,
                     fault.value_ptr.checksum,
@@ -1231,7 +1231,7 @@ pub const Simulator = struct {
                 const block = storage.grid_block(block_missing.address) orelse continue;
                 const block_header = schema.header_from_block(block);
                 if (block_header.checksum == block_missing.checksum) {
-                    log.err("{}: core_missing_blocks: found address={} checksum={}", .{
+                    log.err("{}: core_missing_blocks: found address={} checksum={x:0>32}", .{
                         replica.replica,
                         block_missing.address,
                         block_missing.checksum,
