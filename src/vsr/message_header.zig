@@ -240,105 +240,13 @@ pub const Header = extern struct {
 
     pub fn format(
         self: *const Header,
-        comptime _: []const u8,
-        _: std.fmt.FormatOptions,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
         switch (self.into_any()) {
-            inline else => |header| return try print_header(header, writer),
+            inline else => |header| return try header.format(fmt, options, writer),
         }
-    }
-
-    /// Print specific data frame's header fields with several fomratting rules:
-    /// - This data type's name is printed as a simple name dropping fully qualified prefix.
-    /// - Checksums (including the `parent` field) are formatted in hex.
-    /// - `*_reserved` fields are omitted if they contain only zeroes.
-    /// - `*_padding` fields and `nonce_reserved` are omitted.
-    /// - `enum` values are printed as a string literal representing their tag name.
-    fn print_header(value_ptr: anytype, writer: anytype) !void {
-        assert(@typeInfo(@TypeOf(value_ptr)) == .pointer);
-        const T = @TypeOf(value_ptr.*);
-        switch (@typeInfo(T)) {
-            .@"struct" => |info| {
-                const simple_type_name = comptime name_blk: {
-                    const type_name = @typeName(T);
-                    const last_part_idx = std.mem.lastIndexOf(u8, type_name, ".");
-                    break :name_blk if (last_part_idx) |idx| type_name[idx + 1 ..] else type_name;
-                };
-                try writer.writeAll(simple_type_name ++ "{");
-                inline for (info.fields, 0..) |field, i| {
-                    comptime {
-                        if (std.mem.endsWith(u8, field.name, "_padding")) {
-                            // Skip printing padding field e.g.
-                            // checksum_padding: u128 or route_padding: [6]u8
-                            continue;
-                        }
-                        if (std.mem.eql(u8, field.name, "nonce_reserved")) {
-                            // Skip nonce_reserved
-                            continue;
-                        }
-                    }
-                    const printable_field_name = comptime field_name_blk: {
-                        const separator = if (i == 0) " ." else ", .";
-                        break :field_name_blk separator ++ field.name ++ "=";
-                    };
-                    try writer.writeAll(printable_field_name);
-                    const v = @field(value_ptr.*, field.name);
-                    switch (@typeInfo(field.type)) {
-                        // Special handling for: checksum, checksum_body and parent fields
-                        // which are going to be printed in 32 character wide hex
-                        // otherwise print as ints.
-                        .int, .comptime_int => {
-                            const int_field_fmt = comptime checksum_fmt_blk: {
-                                const is_checksum =
-                                    std.mem.startsWith(u8, field.name, "checksum") or
-                                    std.mem.endsWith(u8, field.name, "checksum") or
-                                    std.mem.eql(u8, field.name, "parent");
-                                break :checksum_fmt_blk if (is_checksum) "{x:0>32}" else "{d}";
-                            };
-                            try std.fmt.format(writer, int_field_fmt, .{v});
-                        },
-                        .@"enum" => |enum_info| {
-                            // Exhaustive enums can be printed out as a simple tag name
-                            // while non-exhaustive may cause panic. Fall back to the
-                            // default formatting if latter.
-                            // See https://github.com/ziglang/zig/issues/12845.
-                            const printed = try print_enum_pretty(v, enum_info, writer);
-                            if (!printed) try std.fmt.format(writer, "{any}", .{v});
-                        },
-                        .array => |array_info| {
-                            // Print reserved* fields only if they have at least one non-zero byte
-                            if (array_info.child == u8 and
-                                std.mem.startsWith(u8, field.name, "reserved") and
-                                std.mem.allEqual(u8, @as([]const u8, &v), 0))
-                            {
-                                try writer.writeAll("[]");
-                            } else {
-                                try std.fmt.format(writer, "{any}", .{v});
-                            }
-                        },
-                        else => try std.fmt.format(writer, "{any}", .{v}),
-                    }
-                }
-                try writer.writeAll(" }");
-            },
-            else => unreachable,
-        }
-    }
-
-    fn print_enum_pretty(e: anytype, enum_info: std.builtin.Type.Enum, writer: anytype) !bool {
-        if (enum_info.is_exhaustive) {
-            try writer.writeAll(@tagName(e));
-            return true;
-        } else {
-            inline for (enum_info.fields) |field| {
-                if (@intFromEnum(e) == field.value) {
-                    try writer.writeAll(@tagName(e));
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     fn HeaderFunctionsType(comptime CommandHeader: type) type {
@@ -381,12 +289,11 @@ pub const Header = extern struct {
 
             pub fn format(
                 self: *const CommandHeader,
-                comptime fmt: []const u8,
-                options: std.fmt.FormatOptions,
+                comptime _: []const u8,
+                _: std.fmt.FormatOptions,
                 writer: anytype,
             ) !void {
-                const header = self.frame_const();
-                try std.fmt.formatType(header, fmt, options, writer, std.fmt.default_max_depth);
+                return format_header(CommandHeader, self, writer);
             }
         };
     }
@@ -1717,6 +1624,83 @@ pub const Header = extern struct {
     };
 };
 
+/// Messages are printed fairly frequently, so we provide a custom formatting function:
+/// - checksums are printed in hex,
+/// - padding and reserved fields are skipped if they are zeroed-out.
+fn format_header(T: type, header: *const T, writer: anytype) !void {
+    const simple_type_name = comptime name_blk: {
+        const type_name = @typeName(T);
+        const last_part_idx = std.mem.lastIndexOf(u8, type_name, ".");
+        break :name_blk if (last_part_idx) |idx| type_name[idx + 1 ..] else type_name;
+    };
+
+    try writer.writeAll(simple_type_name ++ "{");
+    inline for (@typeInfo(T).@"struct".fields, 0..) |field, field_index| {
+        comptime assert((field_index == 0) == std.mem.eql(u8, field.name, "checksum"));
+        try format_header_field(field.name, field.type, &@field(header, field.name), writer);
+    }
+    try writer.writeAll(" }");
+}
+
+fn format_header_field(
+    comptime field_name: []const u8,
+    comptime T: type,
+    field_value: *const T,
+    writer: anytype,
+) !void {
+    if (format_header_field_skip(field_name, T, field_value)) return;
+
+    const separator = comptime if (std.mem.eql(u8, field_name, "checksum")) " " else ", ";
+    try writer.writeAll(separator ++ "." ++ field_name ++ "=");
+
+    if (T == u128) {
+        // Exhaustively list all checksum and non-checksum fields.
+        inline for (.{
+            "checksum",         "checksum_padding",
+            "checksum_body",    "checksum_body_padding",
+            "prepare_checksum", "prepare_checksum_padding",
+            "commit_checksum",  "commit_checksum_padding",
+            "request_checksum", "request_checksum_padding",
+            "reply_checksum",   "reply_checksum_padding",
+            "parent",           "parent_padding",
+            "context",          "context_padding",
+            "checkpoint_id",
+        }) |field_name_checksum| {
+            if (comptime std.mem.eql(u8, field_name, field_name_checksum)) {
+                return try writer.print("{x:0>32}", .{field_value.*});
+            }
+        }
+        inline for (.{
+            "cluster",        "client",
+            "present_bitset", "nack_bitset",
+            "nonce",          "nonce_reserved",
+            "reply_client",
+        }) |field_name_non_checksum| {
+            if (comptime std.mem.eql(u8, field_name, field_name_non_checksum)) {
+                return try writer.print("{d}", .{field_value.*});
+            }
+        }
+        @compileError("unhandled field: " ++ field_name);
+    }
+
+    try writer.print("{any}", .{field_value.*});
+}
+
+fn format_header_field_skip(
+    comptime field_name: []const u8,
+    comptime T: type,
+    field_value: *const T,
+) bool {
+    if (comptime std.mem.startsWith(u8, field_name, "reserved") or
+        std.mem.endsWith(u8, field_name, "reserved") or
+        std.mem.endsWith(u8, field_name, "padding"))
+    {
+        return if (@typeInfo(T) == .int) field_value.* == 0 else stdx.zeroed(field_value);
+    } else {
+        return false;
+    }
+}
+
 // Verify each Command's header type.
 comptime {
     @setEvalBranchQuota(20_000);
@@ -1755,8 +1739,11 @@ comptime {
     }
 }
 
-test "header prints correctly" {
-    var buf: [1024]u8 = undefined;
+const Snap = stdx.Snap;
+const module_path = "src";
+const snap = Snap.snap_fn(module_path);
+
+test format_header {
     var prepare = Header.Prepare{
         .checksum = 0x0123456789ABCDEF,
         .checksum_body = 0xFEDCBA9876543210,
@@ -1776,31 +1763,16 @@ test "header prints correctly" {
         .request = 7,
         .operation = .pulse,
     };
-    // Checksums are present, enums are properly formatted and reserved_* + *_padding are omitted
-    const formatted = try std.fmt.bufPrint(&buf, "{}", .{prepare});
-    try std.testing.expectStringStartsWith(formatted, "Prepare{");
-    const checksum_field_val = ".checksum=00000000000000000123456789abcdef";
-    try std.testing.expect(std.mem.indexOf(u8, formatted, checksum_field_val).? > 0);
-    const checksum_body_field_val = ".checksum_body=0000000000000000fedcba9876543210";
-    try std.testing.expect(std.mem.indexOf(u8, formatted, checksum_body_field_val).? > 0);
-    const parent_field_val = ".parent=000000000abcdeffedcba00123456789";
-    try std.testing.expect(std.mem.indexOf(u8, formatted, parent_field_val).? > 0);
-    const request_checksum_field_val = ".request_checksum=00000000000000012345678987654321";
-    try std.testing.expect(std.mem.indexOf(u8, formatted, request_checksum_field_val).? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".command=prepare").? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".operation=pulse").? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".reserved_frame=[]").? > 0);
-    try std.testing.expect(std.mem.indexOf(u8, formatted, ".reserved=[]").? > 0);
-    try std.testing.expectEqual(null, std.mem.indexOf(u8, formatted, ".checksum_padding"));
-    try std.testing.expectEqual(null, std.mem.indexOf(u8, formatted, ".checksum_body_padding"));
-    try std.testing.expectEqual(null, std.mem.indexOf(u8, formatted, ".route_padding"));
 
-    // Modify single byte of reserved_* fields so they are logged
-    prepare.reserved_frame[0] = 1;
-    prepare.reserved[0] = 1;
-    const with_reserved = try std.fmt.bufPrint(&buf, "{}", .{prepare.frame_const()});
-    try std.testing.expect(std.mem.indexOf(u8, with_reserved, ".reserved_frame").? > 0);
-    try std.testing.expectEqual(null, std.mem.indexOf(u8, with_reserved, ".reserved_frame=[]"));
-    try std.testing.expect(std.mem.indexOf(u8, with_reserved, ".reserved").? > 0);
-    try std.testing.expectEqual(null, std.mem.indexOf(u8, with_reserved, ".reserved=[]"));
+    try snap(@src(),
+        \\Prepare{ .checksum=00000000000000000123456789abcdef, .checksum_body=0000000000000000fedcba9876543210, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse }
+    ).diff_fmt("{}", .{prepare});
+
+    // Check that non-zero padding/reserved fields are printed.
+    prepare.checksum_padding = 1;
+    prepare.reserved_frame[0] = 2;
+    prepare.reserved[0] = 3;
+    try snap(@src(),
+        \\Prepare{ .checksum=00000000000000000123456789abcdef, .checksum_padding=00000000000000000000000000000001, .checksum_body=0000000000000000fedcba9876543210, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .reserved_frame={ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse, .reserved={ 3, 0, 0 } }
+    ).diff_fmt("{}", .{prepare});
 }
