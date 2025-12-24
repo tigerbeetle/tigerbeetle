@@ -60,15 +60,15 @@ pub const AOFEntry = extern struct {
         // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid
         // chain. Still, log when that happens. The `aof merge` command can generate a consistent
         // file from entries like these.
-        log.debug("from_message: parent {} (should == {?}) our checksum {}", .{
+        log.debug("from_message: parent {x:0>32} (should == {x:0>32}) our checksum {x:0>32}", .{
             message.header.parent,
-            last_checksum.*,
+            last_checksum.* orelse 0,
             message.header.checksum,
         });
         if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
-            log.info("from_message: parent {}, expected {?} instead", .{
+            log.info("from_message: parent {x:0>32}, expected {x:0>32} instead", .{
                 message.header.parent,
-                last_checksum.*,
+                last_checksum.* orelse 0,
             });
         }
         last_checksum.* = message.header.checksum;
@@ -284,8 +284,8 @@ pub fn AOFType(comptime IO: type) type {
                 if (last_entry.?.header().checksum != checksum) {
                     return error.ChecksumMismatch;
                 }
-                log.debug("validated all aof entries. last entry checksum {} matches " ++
-                    " supplied {}", .{ last_entry.?.header().checksum, checksum });
+                log.debug("validated all aof entries. last entry checksum {x:0>32} matches " ++
+                    " supplied {x:0>32}", .{ last_entry.?.header().checksum, checksum });
             } else {
                 log.debug("validated present aof entries.", .{});
             }
@@ -652,7 +652,7 @@ pub fn AOFType(comptime IO: type) type {
 
                     if (current_parent == null) {
                         try stdout.print(
-                            "The root checksum will be {} from {s}.\n",
+                            "The root checksum will be {x:0>32} from {s}.\n",
                             .{ parent, input_paths[i] },
                         );
                         current_parent = parent;
@@ -739,8 +739,8 @@ pub fn AOFType(comptime IO: type) type {
             }
 
             try stdout.print(
-                "AOF {s} validated. Starting checksum: {?} Ending checksum: {?}\n",
-                .{ output_path, first_checksum, last_checksum },
+                "AOF {s} validated. Starting checksum: {x:0>32} Ending checksum: {x:0>32}\n",
+                .{ output_path, first_checksum orelse 0, last_checksum orelse 0 },
             );
         }
     };
