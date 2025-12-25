@@ -653,7 +653,7 @@ pub fn ClientType(
             assert(message.header.checksum == self.parent);
             assert(message.header.session == self.session);
 
-            log.debug("{}: on_request_timeout: resending request={} checksum={}", .{
+            log.debug("{}: on_request_timeout: resending request={} checksum={x:0>32}", .{
                 self.id,
                 message.header.request,
                 message.header.checksum,
@@ -759,7 +759,7 @@ pub fn ClientType(
             // The checksum of this request becomes the parent of our next reply:
             self.parent = message.header.checksum;
 
-            log.debug("{}: send_request_for_the_first_time: request={} checksum={}", .{
+            log.debug("{}: send_request_for_the_first_time: request={} checksum={x:0>32}", .{
                 self.id,
                 message.header.request,
                 message.header.checksum,

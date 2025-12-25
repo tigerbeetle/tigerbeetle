@@ -61,6 +61,7 @@ comptime {
     _ = @import("vsr/grid_scrubber.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
+    _ = @import("vsr/message_header.zig");
     _ = @import("vsr/multi_batch.zig");
     _ = @import("vsr/replica_format.zig");
     _ = @import("vsr/replica_test.zig");

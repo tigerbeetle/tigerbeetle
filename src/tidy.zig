@@ -388,6 +388,10 @@ fn tidy_line(file: SourceFile, line: []const u8, line_index: usize, errors: *Err
         // AMQP JSON snapshot test.
         if (std.mem.endsWith(u8, file.path, "cdc/runner.zig") and
             std.mem.startsWith(u8, string_value, "{\"timestamp\":")) return;
+
+        // Message fromatting tests.
+        if (std.mem.endsWith(u8, file.path, "message_header.zig") and
+            std.mem.startsWith(u8, string_value, "Prepare{")) return;
     }
 
     errors.add_long_line(file, line_index);
