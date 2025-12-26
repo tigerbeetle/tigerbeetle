@@ -35,19 +35,19 @@ test "benchmark: k-way-merge" {
 
     var prng = stdx.PRNG.from_seed(bench.seed);
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_instance.deinit();
 
-    const allocator = arena.allocator();
+    const arena = arena_instance.allocator();
 
     const streams = .{
-        try prepare_streams(Values[0], &prng, allocator, streams_count, stream_length),
-        try prepare_streams(Values[1], &prng, allocator, streams_count, stream_length),
-        try prepare_streams(Values[2], &prng, allocator, streams_count, stream_length),
-        try prepare_streams(Values[3], &prng, allocator, streams_count, stream_length),
-        try prepare_streams(Values[4], &prng, allocator, streams_count, stream_length),
-        try prepare_streams(Values[5], &prng, allocator, streams_count, stream_length),
-        try prepare_streams(Values[6], &prng, allocator, streams_count, stream_length),
+        try prepare_streams(Values[0], &prng, arena, streams_count, stream_length),
+        try prepare_streams(Values[1], &prng, arena, streams_count, stream_length),
+        try prepare_streams(Values[2], &prng, arena, streams_count, stream_length),
+        try prepare_streams(Values[3], &prng, arena, streams_count, stream_length),
+        try prepare_streams(Values[4], &prng, arena, streams_count, stream_length),
+        try prepare_streams(Values[5], &prng, arena, streams_count, stream_length),
+        try prepare_streams(Values[6], &prng, arena, streams_count, stream_length),
     };
     comptime assert(streams.len == Values.len);
 
