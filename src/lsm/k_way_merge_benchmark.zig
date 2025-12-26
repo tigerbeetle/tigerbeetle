@@ -49,7 +49,7 @@ test "benchmark: k-way-merge" {
         try prepare_streams(Values[5], &prng, allocator, streams_count, stream_length),
         try prepare_streams(Values[6], &prng, allocator, streams_count, stream_length),
     };
-    assert(streams.len == Values.len);
+    comptime assert(streams.len == Values.len);
 
     var checksum: u64 = 0;
     var duration_samples: [repetitions]stdx.Duration = undefined;
