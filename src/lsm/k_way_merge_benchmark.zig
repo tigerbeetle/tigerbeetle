@@ -47,26 +47,25 @@ test "benchmark: k-way-merge" {
     };
     comptime assert(streams.len == Values.len);
 
-    var checksum: u64 = 0;
     var duration_samples: [repetitions]stdx.Duration = undefined;
 
     for (&duration_samples) |*duration| {
         bench.start();
         inline for (streams) |pair| {
-            var context = pair.context;
-            context.merge(pair.output);
-            checksum +%= @truncate(pair.output[0].key);
+            var context, const output = pair;
+            context.merge(output);
         }
         duration.* = bench.stop();
 
         inline for (streams) |pair| {
-            const Value = @TypeOf(pair.output[0]);
-            assert(std.sort.isSorted(Value, pair.output, {}, Value.sort.asc));
+            _, const output = pair;
+            const Value = @TypeOf(output[0]);
+            assert(std.sort.isSorted(Value, output, {}, Value.sort.asc));
         }
     }
 
     std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
-    const duration_streams = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
+    const duration_streams = duration_samples[2]; //Discard the fastest two.
     var duration_element = duration_streams;
     duration_element.ns /= (streams_count * stream_length * streams.len);
 
@@ -84,7 +83,7 @@ pub fn prepare_streams(
     arena: std.mem.Allocator,
     streams_count: usize,
     stream_length: usize,
-) !struct { context: KWayMergeContextType(Value), output: []Value } {
+) !struct { KWayMergeContextType(Value), []Value } {
     var streams = try arena.alignedAlloc(Value, 64, streams_count * stream_length);
     var context: KWayMergeContextType(Value) = .{
         .streams = undefined,
@@ -106,7 +105,7 @@ pub fn prepare_streams(
         context.streams[stream_id] = stream;
     }
 
-    return .{ .context = context, .output = output };
+    return .{ context, output };
 }
 
 fn KWayMergeContextType(comptime Value: type) type {
