@@ -149,10 +149,11 @@ fn KWayMergeContextType(comptime Value: type) type {
 
 fn ValueType(comptime KeyType: type, comptime value_size: u32) type {
     return struct {
-        const Value = @This();
-        const Key = KeyType;
         key: Key,
         body: [value_size - @sizeOf(Key)]u8,
+
+        const Key = KeyType;
+        const Value = @This();
 
         comptime {
             assert(@sizeOf(Value) == value_size);
