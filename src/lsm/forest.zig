@@ -501,6 +501,35 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
         }
 
+        // We need to find a way to make sure that if we have some remote compactions scheduled,
+        // even if there is no local work scheduled, we need to drive object storage compaction.
+        // It could be that we have 10 bars before L5 is full, and we have started 10 remote
+        // compactions, but then we get very small batches for the next 10 bars, and therefore
+        // no compaction work. In this case, a bar is very small as we don't do any IO work at
+        // all, so we have no choice but to eat object storage latency in that case. You still
+        // need to find a way to keep driving object storage work every beat, but how would you do
+        // that? So every beat, you completely exhaust your object storage IO, or rather your
+        // queues. So, you run `compaction_dispatch`, and it either reads/merges/writes. Either way
+        // you use up your entire queue to read/write/merge as much as possible, which is what
+        // compaction_dispatch_enter guarantees. We also need to make sure that there is enough
+        // egress to object storage to exploit its latency effectively. So, we choose 10 tables
+        // to compact in each tree in which the limit has overrun. We would have to store these
+        // 10 TableInfo in the compaction as input tables, and also their corresponding output
+        // tables (potentially) on object storage. One thing to consider here is that the references
+        // to these tables in this level become unstable once we insert a new table into the level.
+        // So, we would likely have to just store a *copy* of the table, and not a reference.
+        // So, store list of 10 input tables, and at max 90 output tables, we need to merge all
+        // of them together. Would we then also have to make sure that the 10 input tables we choose
+        // their intersecting tables don't intersect? No, we are actually considering 10 input
+        // tables and their corresponding output tables as the input to a SINGLE compaction. So,
+        // we have 10 input tables from Level A, and 80 input tables from level B. You are merging
+        // them all together, and atomically updating the metadata for these after 10 bars. But what
+        // if there are overlaps in the intersections? Well, we need to make sure that the
+        // tables in the CompactionRange are then unique, or we just treat this as one mega
+        // compaction with 10 input tables from level A and 80 from level B? Can we perform a
+        // 2-way merge on these two data streams, one of which is sorted and the second of which is
+        // sorted too? Yes, you can and the same logic works! This is perfect.
+        // The other question is
         fn compact_finish(forest: *Forest) void {
             assert(forest.progress.? == .compact);
             assert(forest.compaction_progress != null);

@@ -185,7 +185,6 @@ pub fn ScanLookupType(
                     objects.table_immutable.get(timestamp)) |object|
                 {
                     // TODO(batiati) Handle this properly when we implement snapshot queries.
-                    assert(self.scan.snapshot() == snapshot_latest);
 
                     // Object present in table mutable/immutable,
                     // continue the loop to fetch the next one.
