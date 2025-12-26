@@ -641,10 +641,8 @@ test Reservoir {
 }
 
 pub fn shuffle(prng: *PRNG, T: type, slice: []T) void {
-    if (slice.len <= 1) return;
-
-    for (0..slice.len - 1) |i| {
-        const j = prng.range_inclusive(u64, i, slice.len - 1);
+    for (0..slice.len) |i| {
+        const j = prng.int_inclusive(u64, i);
         std.mem.swap(T, &slice[i], &slice[j]);
     }
 }
@@ -660,7 +658,7 @@ test shuffle {
     }
 
     try snap(@src(),
-        \\g_first_count = 144 expected_value=142
+        \\g_first_count = 152 expected_value=142
     ).diff_fmt("g_first_count = {} expected_value={}", .{ g_first_count, 1000 / 7 });
 }
 
