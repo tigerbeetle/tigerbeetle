@@ -140,9 +140,8 @@ fn KWayMergeContextType(comptime Value: type) type {
 
             var k_way_iterator = KWayIterator.init(context, context.streams_count, .ascending);
 
-            var index: usize = 0;
-            while (k_way_iterator.pop() catch unreachable) |value| : (index += 1) {
-                output[index] = value;
+            for (output) |*slot| {
+                slot.* = (k_way_iterator.pop() catch unreachable).?;
             }
         }
     };
