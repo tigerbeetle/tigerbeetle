@@ -10,8 +10,6 @@ const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 const streams_count_max = 32;
 const repetitions: usize = 32;
 
-const body_fmt = "K={:_>2} L={:_>3} WT={}";
-
 // Those Values are close to the real-world use case.
 const Values = .{
     ValueType(u64, 128),
@@ -26,8 +24,6 @@ const Values = .{
 test "benchmark: k-way-merge" {
     var bench: Bench = .init();
     defer bench.deinit();
-
-    bench.report("WT: Wall time/merged element", .{});
 
     const streams_count: usize = @intCast(bench.parameter("streams_count", 4, 32));
     const stream_length: usize = @intCast(bench.parameter("stream_length", 128, 8192));
@@ -70,12 +66,15 @@ test "benchmark: k-way-merge" {
     }
 
     std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
-    const result = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
+    const duration_streams = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
+    var duration_element = duration_streams;
+    duration_element.ns /= (streams_count * stream_length * streams.len);
 
-    bench.report(body_fmt, .{
-        streams_count,
-        stream_length,
-        result,
+    bench.report("{} total", .{
+        duration_streams,
+    });
+    bench.report("{} per element", .{
+        duration_element,
     });
 }
 
