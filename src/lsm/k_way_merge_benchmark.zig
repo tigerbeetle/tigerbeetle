@@ -64,8 +64,7 @@ test "benchmark: k-way-merge" {
         }
     }
 
-    std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
-    const duration_streams = duration_samples[2]; //Discard the fastest two.
+    const duration_streams = bench.estimate(&duration_samples);
     var duration_element = duration_streams;
     duration_element.ns /= (streams_count * stream_length * streams.len);
 
@@ -127,16 +126,11 @@ fn KWayMergeContextType(comptime Value: type) type {
             return stream[0];
         }
 
-        fn stream_precedence(context: *const Context, a: u32, b: u32) bool {
-            _ = context;
-            return a > b;
-        }
-
         fn merge(context: *Context, output: []Value) void {
             const KWayIterator = KWayMergeIteratorType(Context, Value.Key, Value, .{
                 .streams_max = streams_count_max,
                 .deduplicate = false,
-            }, Value.key_from_value, stream_peek, stream_pop, stream_precedence);
+            }, Value.key_from_value, stream_peek, stream_pop);
 
             var k_way_iterator = KWayIterator.init(context, context.streams_count, .ascending);
 
