@@ -13,6 +13,7 @@ const constants = vsr.constants;
 
 const div_ceil = stdx.div_ceil;
 const maybe = stdx.maybe;
+const find_bit = stdx.find_bit;
 
 /// This is logically a range of addresses within the FreeSet, but its actual fields are block
 /// indexes for ease of calculation.
@@ -1241,84 +1242,6 @@ test "FreeSet encode/decode manual" {
     decoded_actual.checkpoint_durable = true;
     const encoded_actual_length = decoded_actual.encode(.blocks_acquired, &.{encoded_actual});
     try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
-}
-
-/// Returns the index of the first set/unset bit (relative to the start of the bitset) within
-/// the range bit_min…bit_max (inclusive…exclusive).
-fn find_bit(
-    bit_set: DynamicBitSetUnmanaged,
-    bit_min: usize,
-    bit_max: usize,
-    comptime bit_kind: std.bit_set.IteratorOptions.Type,
-) ?usize {
-    assert(bit_max >= bit_min);
-    assert(bit_max <= bit_set.bit_length);
-
-    const word_start = @divFloor(bit_min, @bitSizeOf(MaskInt)); // Inclusive.
-    const word_offset = @mod(bit_min, @bitSizeOf(MaskInt));
-    const word_end = div_ceil(bit_max, @bitSizeOf(MaskInt)); // Exclusive.
-    const words_total = div_ceil(bit_set.bit_length, @bitSizeOf(MaskInt));
-    if (word_end == word_start) return null;
-    assert(word_end > word_start);
-
-    // Only iterate over the subset of bits that were requested.
-    var iterator = bit_set.iterator(.{ .kind = bit_kind });
-    iterator.words_remain = bit_set.masks[word_start + 1 .. word_end];
-
-    const mask = ~@as(MaskInt, 0);
-    var word = bit_set.masks[word_start];
-    if (bit_kind == .unset) word = ~word;
-    iterator.bits_remain = word & std.math.shl(MaskInt, mask, word_offset);
-
-    if (word_end != words_total) iterator.last_word_mask = mask;
-
-    const b = bit_min - word_offset + (iterator.next() orelse return null);
-    return if (b < bit_max) b else null;
-}
-
-test "find_bit" {
-    var prng = stdx.PRNG.from_seed_testing();
-
-    const gpa = std.testing.allocator;
-    for (1..(@bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt) * 4) + 1) |bit_length| {
-        var bit_set = try std.DynamicBitSetUnmanaged.initEmpty(gpa, bit_length);
-        defer bit_set.deinit(gpa);
-
-        const p = prng.int_inclusive(usize, 100);
-
-        for (0..bit_length) |b| bit_set.setValue(b, p < prng.int_inclusive(usize, 100));
-
-        for (0..20) |_| try test_find_bit(&prng, bit_set, .set);
-        for (20..40) |_| try test_find_bit(&prng, bit_set, .unset);
-    }
-}
-
-fn test_find_bit(
-    prng: *stdx.PRNG,
-    bit_set: DynamicBitSetUnmanaged,
-    comptime bit_kind: std.bit_set.IteratorOptions.Type,
-) !void {
-    const bit_min = prng.int_inclusive(usize, bit_set.bit_length - 1);
-    const bit_max = prng.range_inclusive(usize, bit_min, bit_set.bit_length);
-    assert(bit_max >= bit_min);
-    assert(bit_max <= bit_set.bit_length);
-
-    const bit_actual = find_bit(bit_set, bit_min, bit_max, bit_kind);
-    if (bit_actual) |bit| {
-        assert(bit_set.isSet(bit) == (bit_kind == .set));
-        assert(bit >= bit_min);
-        assert(bit < bit_max);
-    }
-
-    var iterator = bit_set.iterator(.{ .kind = bit_kind });
-    while (iterator.next()) |bit| {
-        if (bit_min <= bit and bit < bit_max) {
-            try std.testing.expectEqual(bit_actual, bit);
-            break;
-        }
-    } else {
-        try std.testing.expectEqual(bit_actual, null);
-    }
 }
 
 test "FreeSet.acquire part-way through a shard" {
