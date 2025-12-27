@@ -762,8 +762,9 @@ fn tidy_defer_statement_end(tags: []const std.zig.Token.Tag, defer_index: usize)
             switch (tags[index]) {
                 .semicolon => return index,
                 .r_brace => {
-                    if (index + 1 < tags.len and tags[index + 1] == .semicolon) {
-                        return index + 1;
+                    if (index + 1 < tags.len) {
+                        if (tags[index + 1] == .semicolon) return index + 1;
+                        if (tags[index + 1] == .keyword_else) continue;
                     }
                     return index; // defer { ... } without trailing semicolon.
                 },
@@ -952,6 +953,28 @@ test tidy_defer_newlines {
         \\}
         \\pub fn bar() bool { return true; }
         \\pub fn baz() void {}
+    ,
+        snap(@src(),
+            \\
+        ),
+    );
+
+    try check_tidy_file(
+        \\defer_inline_if_else_no_blank_line_ok.zig
+    ,
+        \\pub fn foo() void {
+        \\    defer if (bar()) {
+        \\        baz();
+        \\    } else {
+        \\        qux();
+        \\    };
+        \\    // else must be part of the defer statement; no blank line required here.
+        \\    zap();
+        \\}
+        \\pub fn bar() bool { return true; }
+        \\pub fn baz() void {}
+        \\pub fn qux() void {}
+        \\pub fn zap() void {}
     ,
         snap(@src(),
             \\
