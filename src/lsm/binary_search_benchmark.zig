@@ -134,8 +134,7 @@ fn run_benchmark(
         duration.ns /= search_count;
     }
 
-    std.sort.block(stdx.Duration, &duration_samples, {}, stdx.Duration.sort.asc);
-    const result = duration_samples[2]; // Discard the fastest two, report the 3rd fastest.
+    const result = bench.estimate(&duration_samples);
 
     bench.report(body_fmt, .{
         scenario_name,
