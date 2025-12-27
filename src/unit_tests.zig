@@ -57,6 +57,7 @@ comptime {
     _ = @import("trace/event.zig");
     _ = @import("vsr.zig");
     _ = @import("vsr/checksum.zig");
+    _ = @import("vsr/checksum_benchmark.zig");
     _ = @import("vsr/clock.zig");
     _ = @import("vsr/free_set.zig");
     _ = @import("vsr/grid_scrubber.zig");
