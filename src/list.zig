@@ -177,6 +177,7 @@ test "DoublyLinkedList fuzz" {
 
     const nodes = try allocator.alloc(Node, nodes_count);
     defer allocator.free(nodes);
+
     for (nodes, 0..) |*node, i| node.* = .{ .id = @intCast(i) };
 
     var nodes_free = try std.DynamicBitSetUnmanaged.initFull(allocator, nodes_count);

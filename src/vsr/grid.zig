@@ -517,6 +517,7 @@ pub fn GridType(comptime Storage: type) type {
             // and also mark the checkpoint as durable.
             assert(!grid.free_set.checkpoint_durable);
             defer assert(grid.free_set.checkpoint_durable);
+
             grid.free_set.mark_checkpoint_durable();
 
             const callback = grid.callback.checkpoint_durable;

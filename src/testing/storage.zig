@@ -989,6 +989,7 @@ const SectorRange = struct {
     fn next(range: *SectorRange) ?usize {
         if (range.min == range.max) return null;
         defer range.min += 1;
+
         return range.min;
     }
 

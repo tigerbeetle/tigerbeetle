@@ -192,6 +192,7 @@ pub fn register_log_callback(
 ) callconv(.c) tb_register_log_callback_status {
     Logging.global.mutex.lock();
     defer Logging.global.mutex.unlock();
+
     if (Logging.global.callback == null) {
         if (callback_maybe) |callback| {
             Logging.global.callback = callback;

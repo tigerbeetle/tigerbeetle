@@ -613,6 +613,7 @@ pub const GridBlocksMissing = struct {
     ) void {
         queue.verify();
         defer if (constants.verify) queue.verify();
+
         assert(queue.state == .sync_jump);
 
         for (tables) |table| {
@@ -655,6 +656,7 @@ pub const GridBlocksMissing = struct {
     fn sync_complete(queue: *GridBlocksMissing, free_set: *const vsr.FreeSet) void {
         queue.verify();
         defer if (constants.verify) queue.verify();
+
         assert(queue.state == .sync_jump);
         assert(free_set.opened);
 
@@ -684,6 +686,7 @@ pub const GridBlocksMissing = struct {
     ) void {
         queue.verify();
         defer if (constants.verify) queue.verify();
+
         assert(queue.state == .repairing);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_repair + queue.enqueued_blocks_sync);

@@ -19,6 +19,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         message_body_size_max,
     );
     defer gpa.free(buffer_expected);
+
     const buffer_actual = try gpa.alignedAlloc(
         u8,
         @alignOf(vsr.Header),

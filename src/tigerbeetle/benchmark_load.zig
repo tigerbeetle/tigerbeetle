@@ -81,6 +81,7 @@ pub fn main(
 
     var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
     defer for (message_pools.slice()) |*message_pool| message_pool.deinit(allocator);
+
     for (0..cli_args.clients) |_| {
         message_pools.push(try MessagePool.init(allocator, .client));
     }

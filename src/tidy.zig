@@ -52,6 +52,7 @@ test "tidy" {
     dead_files_detector.finish(&errors);
 
     if (errors.count > 0) return error.Untidy;
+
     assert(errors.count == 0);
 }
 

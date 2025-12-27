@@ -301,6 +301,7 @@ pub const RepairBudgetGrid = struct {
     pub fn decrement(budget: *RepairBudgetGrid, block_identifier: BlockIdentifier) bool {
         budget.assert_invariants();
         defer budget.assert_invariants();
+
         assert(budget.available > 0);
         assert(block_identifier.address > 0);
 

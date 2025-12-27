@@ -670,6 +670,7 @@ test "no floating point please" {
         @src().file,
     });
     defer std.testing.allocator.free(path);
+
     const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * KiB);
     defer std.testing.allocator.free(file_text);
 
