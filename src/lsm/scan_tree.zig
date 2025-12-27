@@ -63,8 +63,8 @@ pub fn ScanTreeType(
             const streams_count = constants.lsm_levels + 2;
 
             // Tables mutable and immutable are well-known indexes.
-            table_mutable = constants.lsm_levels,
-            table_immutable = constants.lsm_levels + 1,
+            table_mutable = 0,
+            table_immutable = 1,
 
             // The rest of the lsm levels are represented as a non-exhaustive enum.
             _,
@@ -82,7 +82,11 @@ pub fn ScanTreeType(
                     return switch (@as(KWayMergeStreams, @enumFromInt(stream_index))) {
                         .table_mutable => scan.merge_table_mutable_peek(),
                         .table_immutable => scan.merge_table_immutable_peek(),
-                        _ => |index| scan.merge_level_peek(@intFromEnum(index)),
+                        _ => |index| blk: {
+                            const level_index = @intFromEnum(index) - 2;
+                            assert(level_index < constants.lsm_levels);
+                            break :blk scan.merge_level_peek(level_index);
+                        },
                     };
                 }
 
@@ -92,24 +96,11 @@ pub fn ScanTreeType(
                     return switch (@as(KWayMergeStreams, @enumFromInt(stream_index))) {
                         .table_mutable => scan.merge_table_mutable_pop(),
                         .table_immutable => scan.merge_table_immutable_pop(),
-                        _ => |index| scan.merge_level_pop(@intFromEnum(index)),
-                    };
-                }
-
-                // Precedence is: table_mutable > table_immutable > level 0 > level 1 > ...
-                fn precedence(scan: *const ScanTree, a: u32, b: u32) bool {
-                    _ = scan;
-                    assert(a != b);
-                    assert(a < KWayMergeStreams.streams_count);
-                    assert(b < KWayMergeStreams.streams_count);
-
-                    return switch (@as(KWayMergeStreams, @enumFromInt(a))) {
-                        .table_mutable => true,
-                        .table_immutable => @as(
-                            KWayMergeStreams,
-                            @enumFromInt(b),
-                        ) != .table_mutable,
-                        else => a < b and b < constants.lsm_levels,
+                        _ => |index| blk: {
+                            const level_index = @intFromEnum(index) - 2;
+                            assert(level_index < constants.lsm_levels);
+                            break :blk scan.merge_level_pop(level_index);
+                        },
                     };
                 }
             };
@@ -125,7 +116,6 @@ pub fn ScanTreeType(
                 ScanTree.key_from_value,
                 stream.peek,
                 stream.pop,
-                stream.precedence,
             );
         };
 

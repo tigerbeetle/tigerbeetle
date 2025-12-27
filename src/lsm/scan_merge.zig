@@ -99,7 +99,6 @@ fn ScanMergeType(
             key_from_value,
             merge_stream_peek,
             merge_stream_pop,
-            merge_stream_precedence,
         );
 
         const ZigZagMergeIterator = ZigZagMergeIteratorType(
@@ -347,11 +346,6 @@ fn ScanMergeType(
 
             var stream = &self.streams.slice()[stream_index];
             return stream.pop();
-        }
-
-        fn merge_stream_precedence(self: *const ScanMerge, a: u32, b: u32) bool {
-            _ = self;
-            return a < b;
         }
 
         fn merge_stream_probe(

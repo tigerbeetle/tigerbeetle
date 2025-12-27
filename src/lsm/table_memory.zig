@@ -89,7 +89,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         const MergeContext = struct {
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
-            stream_origins: [sorted_runs_max]RunOrigin,
 
             fn stream_peek(
                 context: *const MergeContext,
@@ -109,17 +108,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                 context.streams[stream_index] = stream[1..];
                 return stream[0];
             }
-
-            // Prefer immutable over mutable on ties; otherwise stable by index.
-            // This preserves the correct order for deduplication and annihilation.
-            fn stream_precedence(context: *const MergeContext, a: u32, b: u32) bool {
-                // TODO: Enable the asserts once `constants.verify` is disabled on release.
-                //assert(a < context.streams_count);
-                //assert(b < context.streams_count);
-                if (context.stream_origins[a] != context.stream_origins[b])
-                    return context.stream_origins[a] == .immutable;
-                return a < b;
-            }
         };
 
         const KWayMergeIterator = KWayMergeIteratorType(
@@ -133,7 +121,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             key_from_value,
             MergeContext.stream_peek,
             MergeContext.stream_pop,
-            MergeContext.stream_precedence,
         );
 
         const SortedRunTracker = struct {
@@ -195,14 +182,24 @@ pub fn TableMemoryType(comptime Table: type) type {
                 var context = MergeContext{
                     .streams = undefined,
                     .streams_count = undefined,
-                    .stream_origins = undefined,
                 };
 
-                for (tracker.runs[0..tracker.count()], 0..) |run, i| {
-                    context.streams[i] = values[run.min..run.max];
-                    context.stream_origins[i] = run.origin;
+                var stream_idx: u32 = 0;
+
+                // Place the immutable run first so smaller stream_id wins on ties.
+                for (tracker.runs[0..tracker.count()]) |run| {
+                    if (run.origin != .immutable) continue;
+                    context.streams[stream_idx] = values[run.min..run.max];
+                    stream_idx += 1;
+                    break;
                 }
-                context.streams_count = tracker.count();
+                // Now place all the mutable runs.
+                for (tracker.runs[0..tracker.count()]) |run| {
+                    if (run.origin == .immutable) continue;
+                    context.streams[stream_idx] = values[run.min..run.max];
+                    stream_idx += 1;
+                }
+                context.streams_count = stream_idx;
                 return context;
             }
 

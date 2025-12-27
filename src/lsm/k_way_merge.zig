@@ -52,9 +52,6 @@ pub fn KWayMergeIteratorType(
         stream_index: u32,
     ) Pending!?Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
-    /// Returns true if stream A has higher precedence than stream B.
-    /// This is used to break ties across streams.
-    comptime stream_precedence: fn (context: *const Context, a: u32, b: u32) bool,
 ) type {
     comptime assert(options.streams_max >= 1);
     comptime assert(options.streams_max < std.math.maxInt(@TypeOf(options.streams_max)));
@@ -89,20 +86,18 @@ pub fn KWayMergeIteratorType(
             sentinel: bool,
 
             // Returns true iff `a` wins over `b` under `direction`.
-            // If keys are equal, `stream_precedence` decides.
+            // If keys are equal, smaller stream_id wins.
             inline fn beats(
                 a: *const Node,
                 b: *const Node,
                 direction: Direction,
-                ctx: *const Context,
             ) bool {
                 // A sentinel always loses.
                 if (b.sentinel) return true;
                 if (a.sentinel) return false;
 
                 const ordered = if (direction == .ascending) a.key < b.key else a.key > b.key;
-                const stabler = (a.key == b.key) and
-                    stream_precedence(ctx, a.stream_id, b.stream_id);
+                const stabler = (a.key == b.key) and (a.stream_id < b.stream_id);
                 return ordered or stabler; // “true”  means  a wins.
             }
         };
@@ -181,7 +176,7 @@ pub fn KWayMergeIteratorType(
                     const competitor_a = contestants[competitor_index * 2];
                     const competitor_b = contestants[competitor_index * 2 + 1];
 
-                    if (competitor_a.beats(&competitor_b, self.direction, self.context)) {
+                    if (competitor_a.beats(&competitor_b, self.direction)) {
                         contestants[competitor_index] = competitor_a;
                         self.losers[loser_index] = competitor_b;
                     } else {
@@ -228,7 +223,7 @@ pub fn KWayMergeIteratorType(
                 opponent_id = (opponent_id - 1) >> 1;
 
                 const opponent = &self.losers[opponent_id];
-                const winner = determine_winner(&self.contender, opponent, direction, self.context);
+                const winner = determine_winner(&self.contender, opponent, direction);
                 swap_nodes(winner, &self.contender);
             }
 
@@ -265,9 +260,8 @@ pub fn KWayMergeIteratorType(
             contender: *Node,
             challenger: *Node,
             direction: Direction,
-            ctx: *const Context,
         ) *Node {
-            const challenger_wins: bool = challenger.beats(contender, direction, ctx);
+            const challenger_wins: bool = challenger.beats(contender, direction);
             const winner: *Node = select(challenger_wins, challenger, contender);
             return winner;
         }
@@ -316,13 +310,6 @@ fn TestContextType(comptime streams_max: u32) type {
             return stream[0];
         }
 
-        fn stream_precedence(context: *const TestContext, a: u32, b: u32) bool {
-            _ = context;
-
-            // Higher streams have higher precedence.
-            return a > b;
-        }
-
         fn merge(
             direction: Direction,
             streams_keys: []const []const u32,
@@ -339,7 +326,6 @@ fn TestContextType(comptime streams_max: u32) type {
                 Value.to_key,
                 stream_peek,
                 stream_pop,
-                stream_precedence,
             );
             var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();
@@ -412,11 +398,11 @@ test "k_way_merge: unit" {
         &[_]TestContextType(3).Value{
             .{ .key = 0, .version = 0 },
             .{ .key = 1, .version = 2 },
-            .{ .key = 2, .version = 2 },
+            .{ .key = 2, .version = 1 },
             .{ .key = 3, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 8, .version = 0 },
-            .{ .key = 11, .version = 2 },
+            .{ .key = 11, .version = 0 },
             .{ .key = 12, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 15, .version = 1 },
@@ -433,11 +419,11 @@ test "k_way_merge: unit" {
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
-            .{ .key = 11, .version = 2 },
+            .{ .key = 11, .version = 0 },
             .{ .key = 8, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 3, .version = 0 },
-            .{ .key = 2, .version = 2 },
+            .{ .key = 2, .version = 1 },
             .{ .key = 1, .version = 2 },
             .{ .key = 0, .version = 0 },
         },
@@ -467,11 +453,11 @@ test "k_way_merge: unit" {
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
-            .{ .key = 11, .version = 2 },
+            .{ .key = 11, .version = 0 },
             .{ .key = 8, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 3, .version = 0 },
-            .{ .key = 2, .version = 2 },
+            .{ .key = 2, .version = 1 },
             .{ .key = 1, .version = 2 },
             .{ .key = 0, .version = 0 },
         },
@@ -507,10 +493,6 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
             return context.inner.stream_pop(stream_index);
         }
 
-        fn stream_precedence(context: *const FuzzTestContext, a: u32, b: u32) bool {
-            return context.inner.stream_precedence(a, b);
-        }
-
         fn merge(
             direction: Direction,
             streams_keys: []const []const u32,
@@ -529,7 +511,6 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                 Value.to_key,
                 fuzz_stream_peek,
                 stream_pop,
-                stream_precedence,
             );
             var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();
@@ -675,7 +656,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
         fn value_less_than(_: void, a: Value, b: Value) bool {
             return switch (math.order(a.key, b.key)) {
                 .lt => true,
-                .eq => a.version > b.version,
+                .eq => a.version < b.version,
                 .gt => false,
             };
         }
