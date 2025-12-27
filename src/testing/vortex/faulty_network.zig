@@ -276,6 +276,7 @@ const Connection = struct {
 
         assert(connection.remote_fd == null);
         defer assert(connection.remote_fd != null);
+
         assert(connection.remote_address != null);
 
         const fd = result catch |err| {

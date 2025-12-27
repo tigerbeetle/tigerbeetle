@@ -729,11 +729,13 @@ pub const MultiversionOS = struct {
                 const suffix = if (builtin.target.os.tag == .windows) ".exe" else "";
                 const temporary_directory = try system_temporary_directory(allocator);
                 defer allocator.free(temporary_directory);
+
                 const filename = try std.fmt.allocPrint(allocator, "{s}-{}" ++ suffix, .{
                     multiversion_uuid,
                     nonce,
                 });
                 defer allocator.free(filename);
+
                 break :blk try std.fs.path.joinZ(allocator, &.{ temporary_directory, filename });
             },
             else => @panic("unsupported platform"),

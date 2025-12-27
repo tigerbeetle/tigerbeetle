@@ -103,6 +103,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             };
         }
     }
+
     log.info("output directory: {s}", .{output_directory});
     log.info("starting test with target runtime of {}", .{args.test_duration});
 

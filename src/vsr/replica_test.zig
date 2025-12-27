@@ -938,6 +938,7 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
+
     var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -1744,6 +1745,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
+
     var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -1840,6 +1842,7 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
+
     var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);

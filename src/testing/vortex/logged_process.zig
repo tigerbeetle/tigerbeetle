@@ -179,6 +179,7 @@ test "LoggedProcess: starts and stops" {
             @src().file,
         });
         defer allocator.free(path_relative);
+
         const this_file = try std.fs.cwd().realpath(
             path_relative,
             test_exe_buf,

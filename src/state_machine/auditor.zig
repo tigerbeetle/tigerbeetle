@@ -207,6 +207,7 @@ pub const AccountingAuditor = struct {
             },
         }) void {
             defer assert(self.current.count_total() <= self.changes_events_max);
+
             const count: u32 = switch (change) {
                 .transfer => 1,
                 .expiry => |expiry| expiry.expired_count,
@@ -280,6 +281,7 @@ pub const AccountingAuditor = struct {
         fn release_snapshot(self: *ChangesTracker) Counter {
             assert(self.snapshot != null);
             defer self.snapshot = null;
+
             return self.snapshot.?;
         }
     };
@@ -875,6 +877,7 @@ pub fn IteratorForCreateType(comptime Result: type) type {
         ) ?@FieldType(Result, "result") {
             if (self.results.len > 0 and self.results[0].index == event_index) {
                 defer self.results = self.results[1..];
+
                 return self.results[0].result;
             } else {
                 return null;
@@ -898,6 +901,7 @@ pub fn IteratorForLookupType(comptime Result: type) type {
         pub fn take(self: *IteratorForLookup, id: u128) ?*const Result {
             if (self.results.len > 0 and self.results[0].id == id) {
                 defer self.results = self.results[1..];
+
                 return &self.results[0];
             } else {
                 return null;

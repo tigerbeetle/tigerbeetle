@@ -283,6 +283,7 @@ test "Queue: fuzz" {
 
         var items = try gpa.alloc(Item, N);
         defer gpa.free(items);
+
         for (items, 0..) |*item, value| {
             item.* = .{ .value = value, .link = .{} };
         }

@@ -2721,6 +2721,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
                         assert(self.scan_lookup_buffer_index >= scan_size + offset);
                         defer offset += scan_size;
+
                         break :size self.execute_get_account_transfers(
                             batch,
                             self.scan_lookup_buffer[offset..][0..scan_size],
@@ -2732,6 +2733,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
                         assert(self.scan_lookup_buffer_index >= scan_size + offset);
                         defer offset += scan_size;
+
                         break :size self.execute_get_account_balances(
                             batch,
                             self.scan_lookup_buffer[offset..][0..scan_size],
@@ -2743,6 +2745,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
                         assert(self.scan_lookup_buffer_index >= scan_size + offset);
                         defer offset += scan_size;
+
                         break :size self.execute_query_transfers(
                             batch,
                             self.scan_lookup_buffer[offset..][0..scan_size],
@@ -2754,6 +2757,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
                         assert(self.scan_lookup_buffer_index >= scan_size + offset);
                         defer offset += scan_size;
+
                         break :size self.execute_query_accounts(
                             batch,
                             self.scan_lookup_buffer[offset..][0..scan_size],

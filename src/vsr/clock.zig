@@ -714,6 +714,7 @@ test "ideal clocks get clamped to cluster time" {
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
+
     const allocator = arena.allocator();
 
     var ideal_constant_drift_clock: ClockUnitTestContainer = undefined;

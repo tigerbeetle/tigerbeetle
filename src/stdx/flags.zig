@@ -723,6 +723,7 @@ test "flags" {
                     @src().file,
                 });
                 defer gpa.free(path_relative);
+
                 const this_file = try std.fs.cwd().realpath(
                     path_relative,
                     flags_exe_buf,

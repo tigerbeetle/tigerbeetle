@@ -3447,6 +3447,7 @@ pub fn ReplicaType(
             defer {
                 self.grid_repair_writes.release(write);
             }
+
             log.debug("{}: on_block: repair done address={}", .{
                 self.log_prefix(),
                 grid_write.address,
