@@ -567,18 +567,6 @@ pub fn ClientType(
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.operation == inflight_vsr_operation);
 
-            const request_completion_duration = self.request_completion_timer.read();
-            if (request_completion_duration.to_ms() > constants.client_request_completion_warn_ms) {
-                log.warn("{}: on_reply: slow request, request={} op={} size={} {s} time={}ms", .{
-                    self.id,
-                    inflight.message.header.request,
-                    reply.header.op,
-                    inflight.message.header.size,
-                    inflight.message.header.operation.tag_name(Operation),
-                    request_completion_duration.to_ms(),
-                });
-            }
-
             // The context of this reply becomes the parent of our next request:
             self.parent = reply.header.context;
 

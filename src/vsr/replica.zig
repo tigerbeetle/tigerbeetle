@@ -5174,20 +5174,10 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
-
-            const commit_completion_time_local = self.clock.monotonic()
-                .duration_since(self.commit_started.?);
-            self.commit_started = null;
-            if (commit_completion_time_local.to_ms() >
-                constants.client_request_completion_warn_ms)
-            {
-                log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
-                    self.log_prefix(),
-                    self.commit_prepare.?.header.request,
-                    self.commit_prepare.?.header.size,
-                    self.commit_prepare.?.header.operation.tag_name(StateMachine.Operation),
-                    commit_completion_time_local.to_ms(),
-                });
+            defer {
+                self.message_bus.unref(self.commit_prepare.?);
+                self.commit_started = null;
+                self.commit_prepare = null;
             }
 
             // This is the timestamp from when the primary first saw the request to now. It
@@ -5199,6 +5189,8 @@ pub fn ReplicaType(
                 .ns = @as(u64, @intCast(self.clock.realtime())) -|
                     self.commit_prepare.?.header.timestamp,
             };
+            const commit_completion_time_local = self.clock.monotonic()
+                .duration_since(self.commit_started.?);
 
             // Only time operations when:
             // * Running with the real state machine - as otherwise there's a circular dependency,
@@ -5220,9 +5212,6 @@ pub fn ReplicaType(
                     );
                 }
             }
-
-            self.message_bus.unref(self.commit_prepare.?);
-            self.commit_prepare = null;
         }
 
         // For each op, in addition to the primary, a randomly chosen backup also sends a reply
