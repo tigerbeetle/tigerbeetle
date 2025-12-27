@@ -194,7 +194,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             state_machine.callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
-            state_machine.forest.grooves.things.prefetch_setup(null);
+            state_machine.forest.grooves.things.prefetch_setup(op);
             state_machine.forest.grooves.things.prefetch_enqueue(op);
             state_machine.forest.grooves.things.prefetch(
                 prefetch_callback,

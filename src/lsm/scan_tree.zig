@@ -172,8 +172,6 @@ pub fn ScanTreeType(
             assert(key_min <= key_max);
 
             const table_mutable_values: []const Value = blk: {
-                if (snapshot != snapshot_latest) break :blk &.{};
-
                 tree.table_mutable.sort();
                 const values = tree.table_mutable.values_used();
                 const range = binary_search.binary_search_values_range(

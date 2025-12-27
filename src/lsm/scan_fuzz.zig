@@ -664,6 +664,7 @@ const Environment = struct {
                 env.scan_lookup = ScanLookup.init(&env.forest.grooves.things, scan);
 
                 const scan_lookup_buffer = env.scan_lookup_buffer[0..query_results_max];
+
                 env.change_state(.fuzzing, .scanning);
                 env.scan_lookup.read(scan_lookup_buffer, &scan_lookup_callback);
                 try env.tick_until_state_change(.scanning, .fuzzing);
@@ -735,7 +736,7 @@ const Environment = struct {
                         inline else => |comptime_index| scan_builder.scan_prefix(
                             comptime_index,
                             scan_buffer_pool.acquire_assume_capacity(),
-                            lsm.snapshot_latest,
+                            env.op + 1,
                             field.value,
                             timestamp_range,
                             query_spec.direction,

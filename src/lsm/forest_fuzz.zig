@@ -39,8 +39,14 @@ const FuzzOpAction = union(enum) {
         op: u64,
         account: Account,
     },
-    get_account: u128,
-    exists_account: u64,
+    get_account: struct {
+        snapshot: u64,
+        id: u128,
+    },
+    exists_account: struct {
+        snapshot: u64,
+        timestamp: u64,
+    },
     scan_account: ScanParams,
 };
 const FuzzOpActionTag = std.meta.Tag(FuzzOpAction);
@@ -63,6 +69,7 @@ const GrooveAccounts = type: {
 
 const ScanParams = struct {
     index: std.meta.FieldEnum(GrooveAccounts.IndexTrees),
+    snapshot: u64,
     min: u128, // Type-erased field min.
     max: u128, // Type-erased field max.
     direction: Direction,
@@ -297,9 +304,10 @@ const Environment = struct {
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
-    fn prefetch_account(env: *Environment, id: u128) !void {
+    fn prefetch_account(env: *Environment, id: u128, snapshot: u64) !void {
         const Context = struct {
             _id: u128,
+            _snapshot: u64,
             _groove_accounts: *GrooveAccounts,
 
             finished: bool = false,
@@ -307,7 +315,7 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove_accounts;
-                groove.prefetch_setup(null);
+                groove.prefetch_setup(getter._snapshot);
                 groove.prefetch_enqueue(getter._id);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
@@ -321,6 +329,7 @@ const Environment = struct {
 
         var context = Context{
             ._id = id,
+            ._snapshot = snapshot,
             ._groove_accounts = &env.forest.grooves.accounts,
         };
         context.prefetch_start();
@@ -331,9 +340,10 @@ const Environment = struct {
         }
     }
 
-    fn prefetch_exists_account(env: *Environment, timestamp: u64) !void {
+    fn prefetch_exists_account(env: *Environment, timestamp: u64, snapshot: u64) !void {
         const Context = struct {
             _timestamp: u64,
+            _snapshot: u64,
             _groove_accounts: *GrooveAccounts,
 
             finished: bool = false,
@@ -341,7 +351,7 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove_accounts;
-                groove.prefetch_setup(null);
+                groove.prefetch_setup(getter._snapshot);
                 groove.prefetch_enqueue_by_timestamp(getter._timestamp);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
@@ -354,6 +364,7 @@ const Environment = struct {
         };
 
         var context = Context{
+            ._snapshot = snapshot,
             ._timestamp = timestamp,
             ._groove_accounts = &env.forest.grooves.accounts,
         };
@@ -448,7 +459,7 @@ const Environment = struct {
                     {},
                     &@field(groove_accounts.indexes, @tagName(index)),
                     scan_buffer,
-                    lsm.snapshot_latest,
+                    params.snapshot,
                     Value.key_from_value(&.{
                         .field = min,
                         .timestamp = TimestampRange.timestamp_min,
@@ -655,7 +666,7 @@ const Environment = struct {
                     const entry = model.log.peekItem(log_index);
                     const id = entry.account.id;
                     if (model.checkpointed.objects.get(id)) |*checkpointed_account| {
-                        try env.prefetch_account(id);
+                        try env.prefetch_account(id, lsm.snapshot_latest);
                         if (env.get_account(id)) |lsm_account| {
                             assert(stdx.equal_bytes(Account, &lsm_account, checkpointed_account));
                         } else {
@@ -700,30 +711,31 @@ const Environment = struct {
                     try env.checkpoint(c.op);
                 }
             },
-            .put_account => |put| {
+            .put_account => |params| {
                 // The forest requires prefetch before put.
-                try env.prefetch_account(put.account.id);
-                const lsm_account = env.get_account(put.account.id);
-                env.put_account(&put.account, lsm_account);
-                try model.put_account(&put.account, put.op);
+                try env.prefetch_account(params.account.id, params.op);
+                const lsm_account = env.get_account(params.account.id);
+
+                env.put_account(&params.account, lsm_account);
+                try model.put_account(&params.account, params.op);
             },
-            .get_account => |id| {
+            .get_account => |params| {
                 // Get account from lsm.
-                try env.prefetch_account(id);
-                const lsm_account = env.get_account(id);
+                try env.prefetch_account(params.id, params.snapshot);
+                const lsm_account = env.get_account(params.id);
 
                 // Compare result to model.
-                const model_account = model.get_account(id);
+                const model_account = model.get_account(params.id);
                 if (model_account == null) {
                     assert(lsm_account == null);
                 } else {
                     assert(stdx.equal_bytes(Account, &model_account.?, &lsm_account.?));
                 }
             },
-            .exists_account => |timestamp| {
-                try env.prefetch_exists_account(timestamp);
-                const lsm_found = env.exists(timestamp);
-                const model_found = model.exists_account(timestamp);
+            .exists_account => |params| {
+                try env.prefetch_exists_account(params.timestamp, params.snapshot);
+                const lsm_found = env.exists(params.timestamp);
+                const model_found = model.exists_account(params.timestamp);
                 assert(lsm_found == model_found);
             },
             .scan_account => |params| {
@@ -886,14 +898,20 @@ pub fn generate_fuzz_ops(
                 try id_to_account.put(action.put_account.account.id, action.put_account.account);
                 break :action action;
             },
-            .get_account => FuzzOpAction{ .get_account = random_id(prng, u128) },
+            .get_account => FuzzOpAction{ .get_account = .{
+                .snapshot = op,
+                .id = random_id(prng, u128),
+            } },
             .exists_account => FuzzOpAction{
                 // Not all ops generate accounts, so the timestamp may or may not be found.
-                .exists_account = prng.range_inclusive(
-                    u64,
-                    TimestampRange.timestamp_min,
-                    fuzz_op_index + 1,
-                ),
+                .exists_account = .{
+                    .snapshot = op,
+                    .timestamp = prng.range_inclusive(
+                        u64,
+                        TimestampRange.timestamp_min,
+                        fuzz_op_index + 1,
+                    ),
+                },
             },
             .scan_account => blk: {
                 @setEvalBranchQuota(10_000);
@@ -918,6 +936,7 @@ pub fn generate_fuzz_ops(
 
                         break :blk FuzzOpAction{
                             .scan_account = .{
+                                .snapshot = op,
                                 .index = index,
                                 .min = min,
                                 .max = max,
@@ -960,7 +979,15 @@ pub fn generate_fuzz_ops(
         };
         switch (modifier) {
             .normal => {},
-            .crash_after_ticks => op = persisted_op,
+            .crash_after_ticks => {
+                op = blk: {
+                    if (vsr.Checkpoint.trigger_for_checkpoint(persisted_op)) |trigger| {
+                        break :blk trigger + 1;
+                    } else {
+                        break :blk 0;
+                    }
+                };
+            },
         }
         fuzz_op.* = .{
             .action = action,
