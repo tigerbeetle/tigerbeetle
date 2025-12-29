@@ -34,6 +34,20 @@ const Direction = @import("../direction.zig").Direction;
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
+// mutable
+//  - buffers the new values
+//  - detected sorted runs
+//  - makes sorted runs (sorting)
+//  - mutable -> immutable two possible options:
+//      -(a) compact
+//      -(b) absorb
+//  - sorting also deduplicates (special cases primary vs secondary_index)
+
+// immutable
+//  - provided the immutable table iterator
+//  - pruning info (min, max)
+//  - get()
+
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -572,14 +586,22 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.value_context.count += 1;
         }
 
-        /// This must be called on sorted tables (single run from 0..count).
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
+            // TODO: make more comments
+            // TODO: add assert that we have every entry in a sorted run.
+            // only on primary tables
+            // [_][_]
+            //   ^ end of beat (after batch processing).
+            //          ^ this is only called in prefetch.
+            // assert(run_tracker.values_indexed() == table.count()) // ensure that no unsorted values are there
             assert(table.count() <= table.values.len);
             // NOTE: we do not yet have key range contains here?
             //assert(table.sorted());
             const run_count = table.value_context.run_tracker.count();
             if (run_count == 0) return null;
 
+            // backward loop
+            // Why ? -> [][][][][1][1]  oldest <- newest.
             for (0..run_count) |i| {
                 const run_info = table.value_context.run_tracker.runs[run_count - 1 - i];
                 const run_sorted = table.values_used()[run_info.min..run_info.max];
