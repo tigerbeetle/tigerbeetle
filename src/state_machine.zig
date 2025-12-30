@@ -4948,23 +4948,24 @@ fn ExpirePendingTransfersType(
                 .pulse_next_timestamp = self.pulse_next_timestamp,
                 .phase = .{ .running = .{
                     .expires_at_max = filter.expires_at_max,
-                    .scan = ScanRange.init(
-                        &self.context,
-                        tree,
-                        buffer,
-                        filter.snapshot,
-                        Tree.Table.key_from_value(&.{
-                            .field = TimestampRange.timestamp_min,
-                            .timestamp = TimestampRange.timestamp_min,
-                        }),
-                        Tree.Table.key_from_value(&.{
-                            .field = TimestampRange.timestamp_max,
-                            .timestamp = TimestampRange.timestamp_max,
-                        }),
-                        .ascending,
-                    ),
+                    .scan = undefined,
                 } },
             };
+            self.phase.running.scan.init(
+                &self.context,
+                tree,
+                buffer,
+                filter.snapshot,
+                Tree.Table.key_from_value(&.{
+                    .field = TimestampRange.timestamp_min,
+                    .timestamp = TimestampRange.timestamp_min,
+                }),
+                Tree.Table.key_from_value(&.{
+                    .field = TimestampRange.timestamp_max,
+                    .timestamp = TimestampRange.timestamp_max,
+                }),
+                .ascending,
+            );
             return &self.phase.running.scan;
         }
 
@@ -5069,16 +5070,17 @@ fn ChangeEventsScanLookupType(
             timestamp_range: TimestampRange,
         ) void {
             self.* = .{
-                .scan_tree = ScanTree.init(
-                    tree,
-                    scan_buffer,
-                    snapshot,
-                    timestamp_range.min,
-                    timestamp_range.max,
-                    .ascending,
-                ),
+                .scan_tree = undefined,
                 .state = .idle,
             };
+            self.scan_tree.init(
+                tree,
+                scan_buffer,
+                snapshot,
+                timestamp_range.min,
+                timestamp_range.max,
+                .ascending,
+            );
         }
 
         fn read(

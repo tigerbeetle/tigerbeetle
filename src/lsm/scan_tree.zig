@@ -171,13 +171,14 @@ pub fn ScanTreeType(
         merge_iterator: ?KWayMergeIterator,
 
         pub fn init(
+            self: *ScanTree,
             tree: *Tree,
             buffer: *const ScanBuffer,
             snapshot: u64,
             key_min: Key,
             key_max: Key,
             direction: Direction,
-        ) ScanTree {
+        ) void {
             assert(key_min <= key_max);
 
             const table_mutable_values: []const Value = blk: {
@@ -205,27 +206,7 @@ pub fn ScanTreeType(
             for (0..context.streams_count) |s_i| {
                 count += @intCast(context.streams[s_i].len);
             }
-            var table_immutable_iterator: ImmutableTableIterator = .init(
-                context,
-                if (direction == .ascending) key_max else key_min,
-                direction,
-            );
-
-            while (true) {
-                // if the slice is empty we just return here and leave it to handle in the core.
-                const key_peek = table_immutable_iterator.peek() catch break;
-                switch (direction) {
-                    .ascending => {
-                        if (key_peek >= key_min) break;
-                    },
-                    .descending => {
-                        if (key_peek <= key_max) break;
-                    },
-                }
-                _ = table_immutable_iterator.pop() catch unreachable;
-            }
-
-            return .{
+            self.* = .{
                 .tree = tree,
                 .buffer = buffer,
                 .state = .idle,
@@ -234,10 +215,28 @@ pub fn ScanTreeType(
                 .key_max = key_max,
                 .direction = direction,
                 .table_mutable_values = table_mutable_values,
-                .table_immutable_iterator = table_immutable_iterator,
+                .table_immutable_iterator = .init(
+                    context,
+                    if (direction == .ascending) key_max else key_min,
+                    direction,
+                ),
                 .levels = undefined,
                 .merge_iterator = null,
             };
+
+            while (true) {
+                // if the slice is empty we just return here and leave it to handle in the core.
+                const key_peek = self.table_immutable_iterator.peek() catch break;
+                switch (direction) {
+                    .ascending => {
+                        if (key_peek >= key_min) break;
+                    },
+                    .descending => {
+                        if (key_peek <= key_max) break;
+                    },
+                }
+                _ = self.table_immutable_iterator.pop() catch unreachable;
+            }
         }
 
         pub fn read(self: *ScanTree, context: Context, callback: Callback) void {

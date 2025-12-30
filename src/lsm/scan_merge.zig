@@ -153,7 +153,7 @@ fn ScanMergeType(
             .merge_difference => stdx.unimplemented("merge_difference"),
         },
 
-        pub fn init(scans: []const *Scan) ScanMerge {
+        pub fn init(self: *ScanMerge, scans: []const *Scan) void {
             assert(scans.len > 0);
             assert(scans.len <= constants.lsm_scans_max);
 
@@ -169,7 +169,7 @@ fn ScanMergeType(
                 assert(scan.snapshot() == snapshot_first);
             };
 
-            var self = ScanMerge{
+            self.* = .{
                 .direction = direction_first,
                 .snapshot = snapshot_first,
                 .state = .idle,
@@ -185,8 +185,6 @@ fn ScanMergeType(
                 scan.assigned = true;
                 self.streams.push(.{ .scan = scan });
             }
-
-            return self;
         }
 
         pub fn read(self: *ScanMerge, context: *Scan.Context, callback: Callback) void {

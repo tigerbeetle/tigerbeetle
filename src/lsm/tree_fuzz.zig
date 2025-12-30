@@ -480,7 +480,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(key_min <= key_max);
 
             env.change_state(.fuzzing, .scan_tree);
-            env.scan_tree = ScanTree.init(
+            env.scan_tree.init(
                 &env.tree,
                 &env.scan_buffer,
                 snapshot_latest,

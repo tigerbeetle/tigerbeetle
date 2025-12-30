@@ -99,18 +99,17 @@ pub fn ScanBuilderType(
             direction: Direction,
         ) *Scan {
             const field = comptime std.enums.nameCast(std.meta.FieldEnum(Scan.Dispatcher), index);
-            const ScanImpl = ScanImplType(field);
-            return self.scan_add(
-                field,
-                ScanImpl.init(
-                    &@field(self.groove().indexes, @tagName(index)),
-                    buffer,
-                    snapshot,
-                    key_from_value(index, prefix, timestamp_range.min),
-                    key_from_value(index, prefix, timestamp_range.max),
-                    direction,
-                ),
-            ) catch unreachable; //TODO: define error handling for the query API.
+            const scan = self.scan_add(field) catch unreachable;
+            var scan_impl = &@field(scan.dispatcher, @tagName(field));
+            scan_impl.init(
+                &@field(self.groove().indexes, @tagName(index)),
+                buffer,
+                snapshot,
+                key_from_value(index, prefix, timestamp_range.min),
+                key_from_value(index, prefix, timestamp_range.max),
+                direction,
+            );
+            return scan;
         }
 
         /// Initializes a Scan over the `id` searching for an exact match.
@@ -125,18 +124,17 @@ pub fn ScanBuilderType(
         ) *Scan {
             comptime assert(Groove.IdTree != void);
 
-            const ScanImpl = ScanImplType(.id);
-            return self.scan_add(
-                .id,
-                ScanImpl.init(
-                    &self.groove().ids,
-                    buffer,
-                    snapshot,
-                    id,
-                    id,
-                    direction,
-                ),
-            ) catch unreachable; //TODO: define error handling for the query API.
+            const scan = self.scan_add(.id) catch unreachable;
+            var scan_impl = &@field(scan.dispatcher, "id");
+            scan_impl.init(
+                &self.groove().ids,
+                buffer,
+                snapshot,
+                id,
+                id,
+                direction,
+            );
+            return scan;
         }
 
         /// Initializes a Scan over a timestamp range.
@@ -149,18 +147,17 @@ pub fn ScanBuilderType(
             timestamp_range: TimestampRange,
             direction: Direction,
         ) *Scan {
-            const ScanImpl = ScanImplType(.timestamp);
-            return self.scan_add(
-                .timestamp,
-                ScanImpl.init(
-                    &self.groove().objects,
-                    buffer,
-                    snapshot,
-                    timestamp_range.min,
-                    timestamp_range.max,
-                    direction,
-                ),
-            ) catch unreachable; //TODO: define error handling for the query API.
+            const scan = self.scan_add(.timestamp) catch unreachable;
+            var scan_impl = &@field(scan.dispatcher, "timestamp");
+            scan_impl.init(
+                &self.groove().objects,
+                buffer,
+                snapshot,
+                timestamp_range.min,
+                timestamp_range.max,
+                direction,
+            );
+            return scan;
         }
 
         /// Initializes a Scan performing the union operation over multiple scans.
@@ -173,11 +170,10 @@ pub fn ScanBuilderType(
             self: *ScanBuilder,
             scans: []const *Scan,
         ) *Scan {
-            const Impl = ScanImplType(.merge_union);
-            return self.merge_add(
-                .merge_union,
-                Impl.init(scans),
-            ) catch unreachable; //TODO: define error handling for the query API.;
+            const scan = self.merge_add(.merge_union) catch unreachable;
+            var scan_impl = &@field(scan.dispatcher, "merge_union");
+            scan_impl.init(scans);
+            return scan;
         }
 
         /// Initializes a Scan performing the intersection operation over multiple scans.
@@ -190,11 +186,10 @@ pub fn ScanBuilderType(
             self: *ScanBuilder,
             scans: []const *Scan,
         ) *Scan {
-            const Impl = ScanImplType(.merge_intersection);
-            return self.merge_add(
-                .merge_intersection,
-                Impl.init(scans),
-            ) catch unreachable; //TODO: define error handling for the query API.;
+            const scan = self.merge_add(.merge_intersection) catch unreachable;
+            var scan_impl = &@field(scan.dispatcher, "merge_intersection");
+            scan_impl.init(scans);
+            return scan;
         }
 
         /// Initializes a Scan performing the difference (minus) of two scans.
@@ -217,7 +212,6 @@ pub fn ScanBuilderType(
         fn scan_add(
             self: *ScanBuilder,
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
-            init_expression: ScanImplType(field),
         ) Error!*Scan {
             if (self.scan_count == self.scans.len) {
                 return Error.ScansMaxExceeded;
@@ -231,7 +225,7 @@ pub fn ScanBuilderType(
                 .dispatcher = @unionInit(
                     Scan.Dispatcher,
                     @tagName(field),
-                    init_expression,
+                    undefined,
                 ),
                 .assigned = false,
             };
@@ -242,7 +236,6 @@ pub fn ScanBuilderType(
         fn merge_add(
             self: *ScanBuilder,
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
-            init_expression: ScanImplType(field),
         ) Error!*Scan {
             if (self.merge_count == self.merges.len) {
                 return Error.ScansMaxExceeded;
@@ -256,7 +249,7 @@ pub fn ScanBuilderType(
                 .dispatcher = @unionInit(
                     Scan.Dispatcher,
                     @tagName(field),
-                    init_expression,
+                    undefined,
                 ),
                 .assigned = false,
             };

@@ -445,7 +445,8 @@ const Environment = struct {
                 // It's not expected to exceed `lsm_scans_max` here.
                 const scan_buffer = scan_buffer_pool.acquire() catch unreachable;
 
-                var scan_range = ScanRange.init(
+                var scan_range: ScanRange = undefined;
+                scan_range.init(
                     {},
                     &@field(groove_accounts.indexes, @tagName(index)),
                     scan_buffer,
