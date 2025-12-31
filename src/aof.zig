@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
@@ -29,6 +28,10 @@ pub const AOFEntry = extern struct {
 
     comptime {
         assert(stdx.no_padding(AOFEntry));
+
+        // Ensure the message is the last field in the struct. When writing, the struct is truncated
+        // based on the message length, so any fields after it would be truncated.
+        assert(std.meta.fieldIndex(AOFEntry, "message").? == std.meta.fields(AOFEntry).len - 1);
     }
 
     /// Calculate the actual length of the AOFEntry that needs to be written to disk.
@@ -138,16 +141,12 @@ pub fn AOFType(comptime IO: type) type {
         ) !AOF {
             stdx.maybe(std.fs.path.isAbsolute(path));
             assert(std.mem.endsWith(u8, path, ".aof"));
-            assert(IO == @import("io.zig").IO);
 
-            var aof = AOF{
+            return AOF{
                 .io = io,
                 .path = path,
+                .fd = try io.aof_blocking_open(path),
             };
-
-            try aof.open();
-
-            return aof;
         }
 
         pub fn close(self: *AOF) void {
@@ -155,37 +154,6 @@ pub fn AOFType(comptime IO: type) type {
 
             self.io.aof_blocking_close(self.fd.?);
             self.fd = null;
-        }
-
-        fn open(self: *AOF) !void {
-            assert(IO == @import("io.zig").IO);
-            assert(self.fd == null);
-
-            const dir_path = std.fs.path.dirname(self.path) orelse ".";
-
-            const dir_fd = try IO.open_dir(dir_path);
-            defer self.io.aof_blocking_close(dir_fd);
-
-            const dir = std.fs.Dir{ .fd = dir_fd };
-
-            const file = try dir.createFile(self.path, .{
-                .read = true,
-                .truncate = false,
-                .exclusive = false,
-                .lock = .exclusive,
-            });
-
-            try file.sync();
-
-            // We cannot fsync the directory handle on Windows.
-            // We have no way to open a directory with write access.
-            if (builtin.os.tag != .windows) {
-                try std.posix.fsync(dir_fd);
-            }
-
-            try file.seekFromEnd(0);
-
-            self.fd = file.handle;
         }
 
         /// Write a message to disk, with standard blocking IO but using the OS's page cache. The
@@ -250,11 +218,12 @@ pub fn AOFType(comptime IO: type) type {
             const replica_callback = self.state.checkpoint.replica_callback;
             self.state = .{ .writing = .{ .unflushed = 0 } };
 
-            _ = std.fs.cwd().statFile(self.path) catch |err| switch (err) {
+            _ = self.io.aof_blocking_stat(self.path) catch |err| switch (err) {
                 error.FileNotFound => {
                     log.info("{s} removed - reopening", .{self.path});
                     self.close();
-                    self.open() catch |e| {
+                    assert(self.fd == null);
+                    self.fd = self.io.aof_blocking_open(self.path) catch |e| {
                         std.debug.panic("failed to reopen {s} after rotate: {}", .{ self.path, e });
                     };
                 },
@@ -267,8 +236,6 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub fn validate(self: *AOF, allocator: std.mem.Allocator, last_checksum: ?u128) !void {
-            assert(IO == @import("testing/io.zig").IO);
-
             var validation_target: AOFEntry = undefined;
 
             var validation_checksums = std.AutoHashMap(u128, void).init(allocator);
@@ -320,7 +287,6 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub fn reset(self: *AOF) void {
-            assert(IO == @import("testing/io.zig").IO);
             self.state = .{ .writing = .{ .unflushed = 0 } };
         }
 
@@ -485,8 +451,6 @@ pub fn AOFType(comptime IO: type) type {
             last_checksum: ?u128 = null,
 
             pub fn init(io: *IO, path: []const u8) !Iterator {
-                assert(IO == @import("io.zig").IO);
-
                 const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
                 errdefer file.close();
 
