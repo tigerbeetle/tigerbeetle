@@ -40,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     println!("hello world");
+    Ok(())
 }
 ```
 
