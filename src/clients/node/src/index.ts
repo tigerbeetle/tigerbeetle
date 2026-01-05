@@ -33,22 +33,23 @@ const binding: Binding = (() => {
     throw new Error(`Unsupported platform: ${platform}`)
   }
 
-  let linuxLibc = ''
+  let linuxABI = ''
 
   /**
    * We need to detect during runtime which libc we're running on to load the correct NAPI.
    * binary.
    */
   if (platform === 'linux') {
-    const glibcVersionRuntime = process.report.getReport().header.glibcVersionRuntime
+    const glibcVersionRuntime = (process.report.getReport() as any).header.glibcVersionRuntime
     if (glibcVersionRuntime) {
-      linuxLibc = '-gnu'
+      linuxABI = '-gnu'
     } else {
-      linuxLibc = '-musl'
+      linuxABI = '-musl'
     }
   }
 
-  const filename = `./bin/${archMap[arch]}-${platformMap[platform]}${linuxLibc}/client.node`
+  const filename = `./bin/${archMap[arch as keyof typeof archMap]}-` +
+                    `${platformMap[platform as keyof typeof platformMap]}${linuxABI}/client.node`
   return require(filename)
 })()
 
