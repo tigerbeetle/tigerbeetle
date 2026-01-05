@@ -79,6 +79,7 @@ pub const ClientInterface = extern struct {
 
         client.locker.lock();
         defer client.locker.unlock();
+
         const context = client.context.ptr orelse return Error.ClientInvalid;
         client.vtable.ptr.submit_fn(context, packet);
     }
@@ -89,6 +90,7 @@ pub const ClientInterface = extern struct {
 
         client.locker.lock();
         defer client.locker.unlock();
+
         const context = client.context.ptr orelse return Error.ClientInvalid;
         return client.vtable.ptr.completion_context_fn(context);
     }
@@ -100,9 +102,11 @@ pub const ClientInterface = extern struct {
         const context: *anyopaque = context: {
             client.locker.lock();
             defer client.locker.unlock();
+
             if (client.context.ptr == null) return Error.ClientInvalid;
 
             defer client.context.ptr = null;
+
             break :context client.context.ptr.?;
         };
         client.vtable.ptr.deinit_fn(context);
@@ -114,6 +118,7 @@ pub const ClientInterface = extern struct {
 
         client.locker.lock();
         defer client.locker.unlock();
+
         const context = client.context.ptr orelse return Error.ClientInvalid;
         return client.vtable.ptr.init_parameters_fn(context, out_parameters);
     }
@@ -700,6 +705,7 @@ pub fn ContextType(
                 const packet: *Packet = pop: {
                     self.interface.locker.lock();
                     defer self.interface.locker.unlock();
+
                     break :pop self.submitted.pop() orelse return;
                 };
                 self.packet_enqueue(packet);
@@ -717,6 +723,7 @@ pub fn ContextType(
             const empty: bool = empty: {
                 self.interface.locker.lock();
                 defer self.interface.locker.unlock();
+
                 break :empty self.submitted.empty();
             };
             if (!empty) {
@@ -1054,6 +1061,7 @@ test "Locker: contended" {
             while (true) {
                 self.state.locker.lock();
                 defer self.state.locker.unlock();
+
                 if (self.state.counter == increments) break;
                 self.state.counter += 1;
             }

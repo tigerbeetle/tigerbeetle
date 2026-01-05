@@ -260,6 +260,7 @@ pub fn RingBufferType(
                 if (it.ring.buffer.len == 0) return null;
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
+
                 return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
             }
         };
@@ -279,6 +280,7 @@ pub fn RingBufferType(
                 if (it.ring.buffer.len == 0) return null;
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
+
                 return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
             }
         };
@@ -424,6 +426,7 @@ test "RingBuffer: low level interface" {
     const PointerRing = RingBufferType(u32, .slice);
     var pointer_ring = try PointerRing.init(testing.allocator, 2);
     defer pointer_ring.deinit(testing.allocator);
+
     try test_low_level_interface(PointerRing, &pointer_ring);
 }
 

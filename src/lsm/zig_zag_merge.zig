@@ -373,6 +373,7 @@ fn TestContextType(comptime streams_max: u32) type {
                     var dummy: [10]Value = .{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
                     const replaced = streams[streams_count - 1];
                     defer streams[streams_count - 1] = replaced;
+
                     streams[streams_count - 1] = &dummy;
                     try merge(streams[0..streams_count], &.{});
                 }
@@ -382,6 +383,7 @@ fn TestContextType(comptime streams_max: u32) type {
                     const empty: [0]Value = .{};
                     const replaced = streams[streams_count - 1];
                     defer streams[streams_count - 1] = replaced;
+
                     streams[streams_count - 1] = &empty;
                     try merge(streams[0..streams_count], &.{});
                 }

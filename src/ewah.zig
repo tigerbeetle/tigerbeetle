@@ -292,6 +292,7 @@ pub fn ewah(comptime Word: type) type {
 
             var encoder = encode_chunks(source_words);
             defer assert(encoder.done());
+
             return encoder.encode_chunk(target);
         }
 

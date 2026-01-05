@@ -82,6 +82,7 @@ const quine =
     \\test quine {
     \\    var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
     \\    defer arena_instance.deinit();
+    \\
     \\    const arena = arena_instance.allocator();
     \\
     \\    // build.zig runs this in the root dir.
@@ -205,6 +206,7 @@ const MiB = stdx.MiB;
 test quine {
     var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_instance.deinit();
+
     const arena = arena_instance.allocator();
 
     // build.zig runs this in the root dir.

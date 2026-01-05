@@ -378,6 +378,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
 
             const read = scrubber.reads_done.pop() orelse return null;
             defer scrubber.reads.release(read);
+
             assert(read.done);
 
             const block: BlockId = .{

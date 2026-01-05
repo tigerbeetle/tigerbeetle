@@ -610,6 +610,7 @@ test "pipe data over socket" {
         fn run() !void {
             const tx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(tx_buf);
+
             const rx_buf = try testing.allocator.alloc(u8, buffer_size);
             defer testing.allocator.free(rx_buf);
 
@@ -788,6 +789,7 @@ test "cancel_all" {
                 // Initialize a file filled with test data.
                 const file_buffer = try allocator.alloc(u8, read_size);
                 defer allocator.free(file_buffer);
+
                 for (file_buffer, 0..) |*b, i| b.* = @intCast(i % 256);
 
                 try std.fs.cwd().writeFile(.{ .sub_path = file_path, .data = file_buffer });
@@ -877,6 +879,7 @@ test "cancel" {
             const allocator = std.testing.allocator;
             var io = try IO.init(32, 0);
             defer io.deinit();
+
             const buffer_size = 512 * KiB;
 
             const buffer: []u8 = try allocator.alloc(u8, buffer_size);

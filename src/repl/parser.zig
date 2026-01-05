@@ -678,6 +678,7 @@ test "parser.zig: Parser single transfer successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -746,6 +747,7 @@ test "parser.zig: Parser multiple transfers successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -844,6 +846,7 @@ test "parser.zig: Parser single account successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -921,6 +924,7 @@ test "parser.zig: Parser account filter successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -994,6 +998,7 @@ test "parser.zig: Parser query filter successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -1062,6 +1067,7 @@ test "parser.zig: Parser multiple accounts successfully" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -1200,6 +1206,7 @@ test "parser.zig: Parser odd but correct formatting" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -1285,6 +1292,7 @@ test "parser.zig: Handle parsing errors" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
@@ -1328,6 +1336,7 @@ test "parser.zig: Parser fails for operations not supporting multiple objects" {
     for (vectors) |vector| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
