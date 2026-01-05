@@ -167,21 +167,11 @@ pub fn build(b: *std.Build) !void {
         .config_aof_recovery = build_options.config_aof_recovery,
     });
 
-    const tb_client_header = blk: {
-        const tb_client_header_generator = b.addExecutable(.{
-            .name = "tb_client_header",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
-                .target = b.graph.host,
-            }),
-        });
-        tb_client_header_generator.root_module.addImport("vsr", vsr_module);
-        tb_client_header_generator.root_module.addOptions("vsr_options", vsr_options);
-        break :blk Generated.file(b, .{
-            .generator = tb_client_header_generator,
-            .path = "./src/clients/c/tb_client.h",
-        });
-    };
+    const tb_client = build_tb_client(b, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .mode = mode,
+    });
 
     // zig build check
     build_check(b, build_steps.check, .{
@@ -227,7 +217,7 @@ pub fn build(b: *std.Build) !void {
         .stdx_module = stdx_module,
         .vsr_options = vsr_options,
         .llvm_objcopy = build_options.llvm_objcopy,
-        .tb_client_header = tb_client_header,
+        .tb_client_header = tb_client.header,
         .target = target,
         .mode = mode,
     });
@@ -284,7 +274,7 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
-        .tb_client_header = tb_client_header.path,
+        .tb_client_header = tb_client.header,
         .print_exe = build_options.print_exe,
     });
 
@@ -292,13 +282,13 @@ pub fn build(b: *std.Build) !void {
     build_rust_client(b, build_steps.clients_rust, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
-        .tb_client_header = tb_client_header.path,
+        .tb_client_header = tb_client.header,
         .mode = mode,
     });
     build_go_client(b, build_steps.clients_go, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
-        .tb_client_header = tb_client_header.path,
+        .tb_client_header = tb_client.header,
         .mode = mode,
     });
     build_java_client(b, build_steps.clients_java, .{
@@ -309,6 +299,7 @@ pub fn build(b: *std.Build) !void {
     build_dotnet_client(b, build_steps.clients_dotnet, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .tb_client = tb_client,
         .mode = mode,
     });
     build_node_client(b, build_steps.clients_node, .{
@@ -319,13 +310,13 @@ pub fn build(b: *std.Build) !void {
     build_python_client(b, build_steps.clients_python, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
-        .tb_client_header = tb_client_header.path,
+        .tb_client = tb_client,
         .mode = mode,
     });
     build_c_client(b, build_steps.clients_c, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
-        .tb_client_header = tb_client_header,
+        .tb_client_header = tb_client.header,
         .mode = mode,
     });
 
@@ -845,7 +836,7 @@ fn build_test(
         llvm_objcopy: ?[]const u8,
         stdx_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
-        tb_client_header: *Generated,
+        tb_client_header: std.Build.LazyPath,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
@@ -902,7 +893,7 @@ fn build_test(
         .test_integration = steps.test_integration,
         .test_integration_build = steps.test_integration_build,
     }, .{
-        .tb_client_header = options.tb_client_header.path,
+        .tb_client_header = options.tb_client_header,
         .llvm_objcopy = options.llvm_objcopy,
         .stdx_module = options.stdx_module,
         .target = options.target,
@@ -1266,23 +1257,158 @@ fn build_vortex_executable(
     return vortex;
 }
 
-// Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
-const platforms = .{
-    .{ "x86_64-linux-gnu.2.27", "linux-x64", "x86_64_v3+aes" },
-    .{ "x86_64-linux-musl", "linux-musl-x64", "x86_64_v3+aes" },
-    .{ "x86_64-macos", "osx-x64", "x86_64_v3+aes" },
-    .{ "aarch64-linux-gnu.2.27", "linux-arm64", "baseline+aes+neon" },
-    .{ "aarch64-linux-musl", "linux-musl-arm64", "baseline+aes+neon" },
-    .{ "aarch64-macos", "osx-arm64", "baseline+aes+neon" },
-    .{ "x86_64-windows", "win-x64", "x86_64_v3+aes" },
+// TigerBeetle clients ship as precompiled binaries and support this closed set of targets:
+const Platform = enum {
+    @"aarch64-linux-gnu.2.27",
+    @"aarch64-linux-musl",
+    @"aarch64-macos",
+    @"x86_64-linux-gnu.2.27",
+    @"x86_64-linux-musl",
+    @"x86_64-macos",
+    @"x86_64-windows",
+
+    const all: []const Platform = std.enums.values(Platform);
+
+    pub fn target(platform: Platform) []const u8 {
+        return @tagName(platform);
+    }
+
+    pub fn target_no_glibc_version(platform: Platform) []const u8 {
+        if (std.mem.endsWith(u8, platform.target(), "gnu.2.27")) {
+            return platform.target()[0 .. platform.target().len - ".2.27".len];
+        }
+        assert(std.mem.indexOf(u8, platform.target(), "gnu") == null);
+        return platform.target();
+    }
+
+    pub fn target_resolved(platform: Platform, b: *std.Build) std.Build.ResolvedTarget {
+        const query = Query.parse(.{
+            .arch_os_abi = platform.target(),
+            .cpu_features = platform.cpu_features(),
+        }) catch unreachable;
+        return b.resolveTargetQuery(query);
+    }
+
+    pub fn cpu_features(platform: Platform) []const u8 {
+        return switch (platform) {
+            .@"aarch64-linux-gnu.2.27",
+            .@"aarch64-linux-musl",
+            .@"aarch64-macos",
+            => "baseline+aes+neon",
+
+            .@"x86_64-linux-gnu.2.27",
+            .@"x86_64-linux-musl",
+            .@"x86_64-macos",
+            .@"x86_64-windows",
+            => "x86_64_v3+aes",
+        };
+    }
+
+    pub fn dotnet_RID(platform: Platform) []const u8 {
+        return switch (platform) {
+            .@"aarch64-linux-gnu.2.27" => "linux-arm64",
+            .@"aarch64-linux-musl" => "linux-musl-arm64",
+            .@"aarch64-macos" => "osx-arm64",
+
+            .@"x86_64-linux-gnu.2.27" => "linux-x64",
+            .@"x86_64-linux-musl" => "linux-musl-x64",
+            .@"x86_64-macos" => "osx-x64",
+            .@"x86_64-windows" => "win-x64",
+        };
+    }
+
+    pub fn go_target(platform: Platform) []const u8 {
+        return switch (platform) {
+            // Go statically links musl.
+            .@"aarch64-linux-gnu.2.27", .@"x86_64-linux-gnu.2.27" => unreachable,
+            .@"aarch64-linux-musl" => "aarch64-linux",
+            .@"x86_64-linux-musl" => "x86_64-linux",
+
+            .@"aarch64-macos",
+            .@"x86_64-macos",
+            .@"x86_64-windows",
+            => platform.target(),
+        };
+    }
 };
 
-fn strip_glibc_version(triple: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, triple, "gnu.2.27")) {
-        return triple[0 .. triple.len - ".2.27".len];
+/// Produces a directory with tb_client precompiled as dynamic libraries
+/// for all platforms we support. These precompiled libraries are then
+/// redistributed with our language clients.
+const TBClientPrebuilt = struct {
+    header: std.Build.LazyPath,
+    all_platforms: std.Build.LazyPath,
+    per_platform: []PerPlatform,
+
+    const PerPlatform = struct {
+        platform: Platform,
+        file_name: []const u8,
+        lazy_path: std.Build.LazyPath,
+    };
+};
+
+fn build_tb_client(
+    b: *std.Build,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        mode: std.builtin.OptimizeMode,
+    },
+) TBClientPrebuilt {
+    var per_platform: std.ArrayListUnmanaged(TBClientPrebuilt.PerPlatform) = .empty;
+    const all_platforms = b.addWriteFiles();
+    for (Platform.all) |platform| {
+        const resolved_target = platform.target_resolved(b);
+
+        const root_module = b.createModule(.{
+            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+        const shared_lib = b.addLibrary(.{
+            .name = "tb_client",
+            .linkage = .dynamic,
+            .root_module = root_module,
+        });
+        shared_lib.linkLibC();
+        if (resolved_target.result.os.tag == .windows) {
+            shared_lib.linkSystemLibrary("ws2_32");
+            shared_lib.linkSystemLibrary("advapi32");
+        }
+
+        per_platform.append(b.allocator, .{
+            .platform = platform,
+            .file_name = shared_lib.out_filename,
+            .lazy_path = all_platforms.addCopyFile(
+                shared_lib.getEmittedBin(),
+                b.pathJoin(&.{ platform.target(), shared_lib.out_filename }),
+            ),
+        }) catch @panic("OOM");
     }
-    assert(std.mem.indexOf(u8, triple, "gnu") == null);
-    return triple;
+
+    const tb_client_header_generator = b.addExecutable(.{
+        .name = "tb_client_header",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    tb_client_header_generator.root_module.addImport("vsr", options.vsr_module);
+    tb_client_header_generator.root_module.addOptions("vsr_options", options.vsr_options);
+    const header = Generated.file(b, .{
+        .generator = tb_client_header_generator,
+        .path = "./src/clients/c/tb_client.h",
+    });
+
+    return .{
+        .header = header.path,
+        .all_platforms = all_platforms.getDirectory(),
+        .per_platform = per_platform.items,
+    };
 }
 
 fn build_rust_client(
@@ -1305,12 +1431,8 @@ fn build_rust_client(
     });
     step_clients_rust.dependOn(&tb_client_header_copy.step);
 
-    inline for (platforms) |platform| {
-        const query = Query.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
+    for (Platform.all) |platform| {
+        const resolved_target = platform.target_resolved(b);
 
         const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
@@ -1332,7 +1454,7 @@ fn build_rust_client(
 
         step_clients_rust.dependOn(&b.addInstallFile(static_lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/rust/assets/lib/",
-            platform[0],
+            platform.target(),
             static_lib.out_filename,
         })).step);
     }
@@ -1385,22 +1507,13 @@ fn build_go_client(
         .path = "./src/clients/go/pkg/types/bindings.go",
     });
 
-    inline for (platforms) |platform| {
+    for (Platform.all) |platform| {
         // We don't need the linux-gnu builds.
-        if (comptime std.mem.indexOf(u8, platform[0], "linux-gnu") != null) continue;
+        if (platform == .@"aarch64-linux-gnu.2.27" or platform == .@"x86_64-linux-gnu.2.27") {
+            continue;
+        }
 
-        const platform_name = if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-musl"))
-            "x86_64-linux"
-        else if (comptime std.mem.eql(u8, platform[0], "aarch64-linux-musl"))
-            "aarch64-linux"
-        else
-            platform[0];
-
-        const query = Query.parse(.{
-            .arch_os_abi = platform_name,
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
+        const resolved_target = platform.target_resolved(b);
 
         const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
@@ -1434,7 +1547,7 @@ fn build_go_client(
             lib.getEmittedBin(),
             b.fmt("../src/clients/go/pkg/native/{s}_{s}.{s}", .{
                 file_name,
-                platform_name,
+                platform.go_target(),
                 extension,
             }),
         ).step);
@@ -1464,12 +1577,8 @@ fn build_java_client(
         .path = "./src/clients/java/src/main/java/com/tigerbeetle/",
     });
 
-    inline for (platforms) |platform| {
-        const query = Query.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
+    for (Platform.all) |platform| {
+        const resolved_target = platform.target_resolved(b);
 
         const root_module = b.createModule(.{
             .root_source_file = b.path("src/clients/java/src/client.zig"),
@@ -1495,7 +1604,7 @@ fn build_java_client(
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         step_clients_java.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/java/src/main/resources/lib/",
-            strip_glibc_version(platform[0]),
+            platform.target_no_glibc_version(),
             lib.out_filename,
         })).step);
     }
@@ -1507,6 +1616,7 @@ fn build_dotnet_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
@@ -1524,39 +1634,13 @@ fn build_dotnet_client(
         .path = "./src/clients/dotnet/TigerBeetle/Bindings.cs",
     });
 
-    inline for (platforms) |platform| {
-        const query = Query.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
-
-        const root_module = b.createModule(.{
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
-            .target = resolved_target,
-            .optimize = options.mode,
-        });
-        root_module.addImport("vsr", options.vsr_module);
-        root_module.addOptions("vsr_options", options.vsr_options);
-        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
-
-        const lib = b.addLibrary(.{
-            .name = "tb_client",
-            .linkage = .dynamic,
-            .root_module = root_module,
-        });
-        lib.linkLibC();
-        if (resolved_target.result.os.tag == .windows) {
-            lib.linkSystemLibrary("ws2_32");
-            lib.linkSystemLibrary("advapi32");
-        }
-        lib.step.dependOn(&bindings.step);
-
-        step_clients_dotnet.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
+    step_clients_dotnet.dependOn(&bindings.step);
+    for (options.tb_client.per_platform) |platform| {
+        step_clients_dotnet.dependOn(&b.addInstallFile(platform.lazy_path, b.pathJoin(&.{
             "../src/clients/dotnet/TigerBeetle/runtimes/",
-            platform[1],
+            platform.platform.dotnet_RID(),
             "native",
-            lib.out_filename,
+            platform.file_name,
         })).step);
     }
 }
@@ -1619,12 +1703,8 @@ fn build_node_client(
     run_dll_tool.addFileArg(write_def_file.captureStdOut());
     run_dll_tool.cwd = b.path("./src/clients/node");
 
-    inline for (platforms) |platform| {
-        const query = Query.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
+    for (Platform.all) |platform| {
+        const resolved_target = platform.target_resolved(b);
 
         const root_module = b.createModule(.{
             .root_source_file = b.path("src/clients/node/node.zig"),
@@ -1658,7 +1738,7 @@ fn build_node_client(
         lib.step.dependOn(&bindings.step);
         step_clients_node.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/node/dist/bin",
-            strip_glibc_version(platform[0]),
+            platform.target_no_glibc_version(),
             "/client.node",
         })).step);
     }
@@ -1670,7 +1750,7 @@ fn build_python_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
-        tb_client_header: std.Build.LazyPath,
+        tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
@@ -1687,45 +1767,13 @@ fn build_python_client(
         .generator = python_bindings_generator,
         .path = "./src/clients/python/src/tigerbeetle/bindings.py",
     });
-
-    inline for (platforms) |platform| {
-        const query = Query.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
-
-        const root_module = b.createModule(.{
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
-            .target = resolved_target,
-            .optimize = options.mode,
-        });
-        root_module.addImport("vsr", options.vsr_module);
-        root_module.addOptions("vsr_options", options.vsr_options);
-        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
-
-        const shared_lib = b.addLibrary(.{
-            .name = "tb_client",
-            .linkage = .dynamic,
-            .root_module = root_module,
-        });
-        shared_lib.linkLibC();
-        if (resolved_target.result.os.tag == .windows) {
-            shared_lib.linkSystemLibrary("ws2_32");
-            shared_lib.linkSystemLibrary("advapi32");
-        }
-
-        step_clients_python.dependOn(&b.addInstallFile(
-            shared_lib.getEmittedBin(),
-            b.pathJoin(&.{
-                "../src/clients/python/src/tigerbeetle/lib/",
-                platform[0],
-                shared_lib.out_filename,
-            }),
-        ).step);
-    }
-
     step_clients_python.dependOn(&bindings.step);
+
+    step_clients_python.dependOn(&b.addInstallDirectory(.{
+        .source_dir = options.tb_client.all_platforms,
+        .install_dir = .prefix,
+        .install_subdir = "../src/clients/python/src/tigerbeetle/lib/",
+    }).step);
 }
 
 fn build_c_client(
@@ -1734,18 +1782,14 @@ fn build_c_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
-        tb_client_header: *Generated,
+        tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
-    step_clients_c.dependOn(&options.tb_client_header.step);
+    options.tb_client_header.addStepDependencies(step_clients_c);
 
-    inline for (platforms) |platform| {
-        const query = Query.parse(.{
-            .arch_os_abi = platform[0],
-            .cpu_features = platform[2],
-        }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(query);
+    for (Platform.all) |platform| {
+        const resolved_target = platform.target_resolved(b);
 
         const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
@@ -1779,7 +1823,7 @@ fn build_c_client(
 
             step_clients_c.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
                 "../src/clients/c/lib/",
-                platform[0],
+                platform.target(),
                 lib.out_filename,
             })).step);
         }
