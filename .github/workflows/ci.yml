@@ -115,7 +115,7 @@ jobs:
 
       - if: matrix.language == 'java'
         uses: actions/setup-java@v4
-        with: { java-version: "${{ matrix.language_version }}", distribution: 'temurin' }
+        with: { java-version: "${{ matrix.language_version }}", distribution: 'temurin', cache: 'maven'}
 
       - if: matrix.language == 'node'
         uses: actions/setup-node@v4
