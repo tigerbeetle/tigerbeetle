@@ -184,7 +184,7 @@ const Pipe = struct {
                 timeout_duration_ns,
             );
         } else {
-            pipe.send(pipe.buffer[pipe.send_count..pipe.recv_count]);
+            pipe.send();
         }
     }
 
@@ -193,10 +193,10 @@ const Pipe = struct {
             return;
         }
         result catch @panic("timeout error");
-        pipe.send(pipe.buffer[pipe.send_count..pipe.recv_count]);
+        pipe.send();
     }
 
-    fn send(pipe: *Pipe, buffer: []u8) void {
+    fn send(pipe: *Pipe) void {
         assert(!pipe.send_inflight);
         assert(pipe.connection.state == .proxying);
 
@@ -207,7 +207,7 @@ const Pipe = struct {
             on_send,
             &pipe.send_completion,
             pipe.output.?,
-            buffer,
+            pipe.buffer[pipe.send_count..pipe.recv_count],
         );
     }
 
@@ -228,7 +228,7 @@ const Pipe = struct {
         pipe.send_count += send_count;
 
         if (pipe.send_count < pipe.recv_count) {
-            pipe.send(pipe.buffer[pipe.send_count..pipe.recv_count]);
+            pipe.send();
         } else {
             pipe.recv();
         }
