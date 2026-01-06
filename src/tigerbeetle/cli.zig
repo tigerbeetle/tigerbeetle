@@ -101,7 +101,7 @@ const CLIArgs = union(enum) {
         /// Enabling this will have performance implications.
         aof_file: ?[]const u8 = null,
 
-        /// Legacy AOF option. Mututally exclusive with aof_file, and will have the same effect as
+        /// Legacy AOF option. Mutually exclusive with aof_file, and will have the same effect as
         /// setting aof_file to '<data file path>.aof'.
         aof: bool = false,
 
