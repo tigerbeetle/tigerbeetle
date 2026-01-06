@@ -56,7 +56,7 @@ const Pipe = struct {
     input: ?std.posix.socket_t = null,
     output: ?std.posix.socket_t = null,
     buffer: [constants.vsr.message_size_max]u8 = undefined,
-    status: enum { idle, recv, send } = .idle,
+    status: enum { idle, recv, send, send_timeout } = .idle,
     recv_count: usize = 0,
     send_count: usize = 0,
 
@@ -171,22 +171,20 @@ const Pipe = struct {
                 pipe.connection.replica_index,
                 pipe.connection.connection_index,
             });
-            pipe.io.timeout(
-                *Pipe,
-                pipe,
-                on_timeout,
-                &pipe.send_completion,
-                timeout_duration_ns,
-            );
+
+            pipe.status = .send_timeout;
+            pipe.io.timeout(*Pipe, pipe, on_timeout, &pipe.send_completion, timeout_duration_ns);
         } else {
             pipe.send();
         }
     }
 
     fn on_timeout(pipe: *Pipe, _: *IO.Completion, result: IO.TimeoutError!void) void {
-        if (pipe.connection.state != .proxying) {
-            return;
-        }
+        assert(pipe.status == .send_timeout);
+
+        pipe.status = .idle;
+        if (pipe.connection.state != .proxying) return;
+
         result catch @panic("timeout error");
         pipe.send();
     }
