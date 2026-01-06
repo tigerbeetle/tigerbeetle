@@ -57,8 +57,8 @@ const Pipe = struct {
     output: ?std.posix.socket_t = null,
     buffer: [constants.vsr.message_size_max]u8 = undefined,
     status: enum { idle, recv, send, send_timeout } = .idle,
-    recv_count: usize = 0,
-    send_count: usize = 0,
+    recv_size: u32 = 0,
+    send_size: u32 = 0,
 
     recv_completion: IO.Completion = undefined,
     send_completion: IO.Completion = undefined,
@@ -73,21 +73,22 @@ const Pipe = struct {
 
         pipe.input = input;
         pipe.output = output;
-        pipe.recv_count = 0;
-        pipe.send_count = 0;
+        pipe.recv_size = 0;
+        pipe.send_size = 0;
 
         // Kick off the recv/send loop.
         pipe.recv();
     }
 
     fn recv(pipe: *Pipe) void {
-        assert(pipe.status == .idle);
-        assert(pipe.send_count <= pipe.recv_count);
+        assert(pipe.send_size <= pipe.recv_size);
         assert(pipe.connection.state == .proxying);
 
-        pipe.recv_count = 0;
-        pipe.send_count = 0;
+        assert(pipe.status == .idle);
         pipe.status = .recv;
+
+        pipe.recv_size = 0;
+        pipe.send_size = 0;
 
         // We don't need to recv a certain count of bytes, because whatever we recv, we send along.
         pipe.connection.io.recv(
@@ -101,12 +102,15 @@ const Pipe = struct {
     }
 
     fn on_recv(pipe: *Pipe, _: *IO.Completion, result: IO.RecvError!usize) void {
-        assert(pipe.status == .recv);
+        assert(pipe.recv_size == 0);
+        assert(pipe.send_size == 0);
 
+        assert(pipe.status == .recv);
         pipe.status = .idle;
+
         if (pipe.connection.state != .proxying) return;
 
-        pipe.recv_count = result catch |err| {
+        const recv_size = result catch |err| {
             log.warn("recv error ({d},{d}): {any}", .{
                 pipe.connection.replica_index,
                 pipe.connection.connection_index,
@@ -114,7 +118,9 @@ const Pipe = struct {
             });
             return pipe.connection.try_close();
         };
-        if (pipe.recv_count == 0) {
+
+        pipe.recv_size = @intCast(recv_size);
+        if (pipe.recv_size == 0) {
             // Zero bytes means EOF.
             return pipe.connection.try_close();
         }
@@ -122,7 +128,7 @@ const Pipe = struct {
         if (pipe.connection.network.faults.lose) |lose| {
             if (pipe.connection.network.prng.chance(lose)) {
                 log.debug("losing {d} bytes ({d},{d})", .{
-                    pipe.recv_count,
+                    pipe.recv_size,
                     pipe.connection.replica_index,
                     pipe.connection.connection_index,
                 });
@@ -136,19 +142,19 @@ const Pipe = struct {
                 switch (pipe.connection.network.prng.enum_uniform(enum { shuffle, zero })) {
                     .shuffle => {
                         log.debug("shuffling {d} bytes ({d},{d})", .{
-                            pipe.recv_count,
+                            pipe.recv_size,
                             pipe.connection.replica_index,
                             pipe.connection.connection_index,
                         });
-                        pipe.connection.network.prng.shuffle(u8, pipe.buffer[0..pipe.recv_count]);
+                        pipe.connection.network.prng.shuffle(u8, pipe.buffer[0..pipe.recv_size]);
                     },
                     .zero => {
                         log.debug("zeroing {d} bytes ({d},{d})", .{
-                            pipe.recv_count,
+                            pipe.recv_size,
                             pipe.connection.replica_index,
                             pipe.connection.connection_index,
                         });
-                        @memset(pipe.buffer[0..pipe.recv_count], 0);
+                        @memset(pipe.buffer[0..pipe.recv_size], 0);
                     },
                 }
             }
@@ -172,6 +178,7 @@ const Pipe = struct {
                 pipe.connection.connection_index,
             });
 
+            assert(pipe.status == .idle);
             pipe.status = .send_timeout;
             pipe.io.timeout(*Pipe, pipe, on_timeout, &pipe.send_completion, timeout_duration_ns);
         } else {
@@ -181,8 +188,8 @@ const Pipe = struct {
 
     fn on_timeout(pipe: *Pipe, _: *IO.Completion, result: IO.TimeoutError!void) void {
         assert(pipe.status == .send_timeout);
-
         pipe.status = .idle;
+
         if (pipe.connection.state != .proxying) return;
 
         result catch @panic("timeout error");
@@ -190,29 +197,31 @@ const Pipe = struct {
     }
 
     fn send(pipe: *Pipe) void {
-        assert(pipe.status == .idle);
         assert(pipe.connection.state == .proxying);
-        assert(pipe.send_count < pipe.recv_count);
+        assert(pipe.send_size < pipe.recv_size);
 
+        assert(pipe.status == .idle);
         pipe.status = .send;
+
         pipe.io.send(
             *Pipe,
             pipe,
             on_send,
             &pipe.send_completion,
             pipe.output.?,
-            pipe.buffer[pipe.send_count..pipe.recv_count],
+            pipe.buffer[pipe.send_size..pipe.recv_size],
         );
     }
 
     fn on_send(pipe: *Pipe, _: *IO.Completion, result: IO.SendError!usize) void {
-        assert(pipe.status == .send);
-        assert(pipe.send_count < pipe.recv_count);
+        assert(pipe.send_size < pipe.recv_size);
 
+        assert(pipe.status == .send);
         pipe.status = .idle;
+
         if (pipe.connection.state != .proxying) return;
 
-        const send_count = result catch |err| {
+        const send_size = result catch |err| {
             log.warn("send error ({d},{d}): {any}", .{
                 pipe.connection.replica_index,
                 pipe.connection.connection_index,
@@ -220,12 +229,12 @@ const Pipe = struct {
             });
             return pipe.connection.try_close();
         };
-        pipe.send_count += send_count;
+        pipe.send_size += @intCast(send_size);
 
-        if (pipe.send_count < pipe.recv_count) {
+        if (pipe.send_size < pipe.recv_size) {
             pipe.send();
         } else {
-            assert(pipe.send_count == pipe.recv_count);
+            assert(pipe.send_size == pipe.recv_size);
             pipe.recv();
         }
     }
