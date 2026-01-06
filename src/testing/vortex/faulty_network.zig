@@ -70,6 +70,8 @@ const Pipe = struct {
         output: std.posix.socket_t,
     ) void {
         assert(pipe.connection.state == .proxying);
+        assert(!pipe.send_inflight);
+        assert(!pipe.recv_inflight);
 
         pipe.input = input;
         pipe.output = output;
@@ -86,6 +88,8 @@ const Pipe = struct {
 
     fn recv(pipe: *Pipe) void {
         assert(!pipe.recv_inflight);
+        assert(!pipe.send_inflight);
+        assert(pipe.send_count <= pipe.recv_count);
         assert(pipe.connection.state == .proxying);
 
         pipe.recv_count = 0;
@@ -104,12 +108,11 @@ const Pipe = struct {
     }
 
     fn on_recv(pipe: *Pipe, _: *IO.Completion, result: IO.RecvError!usize) void {
+        assert(!pipe.send_inflight);
         assert(pipe.recv_inflight);
-        pipe.recv_inflight = false;
 
-        if (pipe.connection.state != .proxying) {
-            return;
-        }
+        pipe.recv_inflight = false;
+        if (pipe.connection.state != .proxying) return;
 
         pipe.recv_count = result catch |err| {
             log.warn("recv error ({d},{d}): {any}", .{
@@ -198,7 +201,9 @@ const Pipe = struct {
 
     fn send(pipe: *Pipe) void {
         assert(!pipe.send_inflight);
+        assert(!pipe.recv_inflight);
         assert(pipe.connection.state == .proxying);
+        assert(pipe.send_count < pipe.recv_count);
 
         pipe.send_inflight = true;
         pipe.io.send(
@@ -213,8 +218,10 @@ const Pipe = struct {
 
     fn on_send(pipe: *Pipe, _: *IO.Completion, result: IO.SendError!usize) void {
         assert(pipe.send_inflight);
-        pipe.send_inflight = false;
+        assert(!pipe.recv_inflight);
+        assert(pipe.send_count < pipe.recv_count);
 
+        pipe.send_inflight = false;
         if (pipe.connection.state != .proxying) return;
 
         const send_count = result catch |err| {
@@ -230,6 +237,7 @@ const Pipe = struct {
         if (pipe.send_count < pipe.recv_count) {
             pipe.send();
         } else {
+            assert(pipe.send_count == pipe.recv_count);
             pipe.recv();
         }
     }
