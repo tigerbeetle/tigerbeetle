@@ -56,8 +56,7 @@ const Pipe = struct {
     input: ?std.posix.socket_t = null,
     output: ?std.posix.socket_t = null,
     buffer: [constants.vsr.message_size_max]u8 = undefined,
-    send_inflight: bool = false,
-    recv_inflight: bool = false,
+    status: enum { idle, recv, send } = .idle,
     recv_count: usize = 0,
     send_count: usize = 0,
 
@@ -70,8 +69,7 @@ const Pipe = struct {
         output: std.posix.socket_t,
     ) void {
         assert(pipe.connection.state == .proxying);
-        assert(!pipe.send_inflight);
-        assert(!pipe.recv_inflight);
+        assert(pipe.status == .idle);
 
         pipe.input = input;
         pipe.output = output;
@@ -82,19 +80,14 @@ const Pipe = struct {
         pipe.recv();
     }
 
-    fn has_inflight_operations(pipe: *const Pipe) bool {
-        return pipe.recv_inflight or pipe.send_inflight;
-    }
-
     fn recv(pipe: *Pipe) void {
-        assert(!pipe.recv_inflight);
-        assert(!pipe.send_inflight);
+        assert(pipe.status == .idle);
         assert(pipe.send_count <= pipe.recv_count);
         assert(pipe.connection.state == .proxying);
 
         pipe.recv_count = 0;
         pipe.send_count = 0;
-        pipe.recv_inflight = true;
+        pipe.status = .recv;
 
         // We don't need to recv a certain count of bytes, because whatever we recv, we send along.
         pipe.connection.io.recv(
@@ -108,10 +101,9 @@ const Pipe = struct {
     }
 
     fn on_recv(pipe: *Pipe, _: *IO.Completion, result: IO.RecvError!usize) void {
-        assert(!pipe.send_inflight);
-        assert(pipe.recv_inflight);
+        assert(pipe.status == .recv);
 
-        pipe.recv_inflight = false;
+        pipe.status = .idle;
         if (pipe.connection.state != .proxying) return;
 
         pipe.recv_count = result catch |err| {
@@ -200,12 +192,11 @@ const Pipe = struct {
     }
 
     fn send(pipe: *Pipe) void {
-        assert(!pipe.send_inflight);
-        assert(!pipe.recv_inflight);
+        assert(pipe.status == .idle);
         assert(pipe.connection.state == .proxying);
         assert(pipe.send_count < pipe.recv_count);
 
-        pipe.send_inflight = true;
+        pipe.status = .send;
         pipe.io.send(
             *Pipe,
             pipe,
@@ -217,11 +208,10 @@ const Pipe = struct {
     }
 
     fn on_send(pipe: *Pipe, _: *IO.Completion, result: IO.SendError!usize) void {
-        assert(pipe.send_inflight);
-        assert(!pipe.recv_inflight);
+        assert(pipe.status == .send);
         assert(pipe.send_count < pipe.recv_count);
 
-        pipe.send_inflight = false;
+        pipe.status = .idle;
         if (pipe.connection.state != .proxying) return;
 
         const send_count = result catch |err| {
@@ -350,8 +340,8 @@ const Connection = struct {
             connection.state == .closing_remote) return;
 
         const has_inflight_operations =
-            connection.origin_to_remote_pipe.has_inflight_operations() or
-            connection.remote_to_origin_pipe.has_inflight_operations();
+            connection.origin_to_remote_pipe.status != .idle or
+            connection.remote_to_origin_pipe.status != .idle;
 
         if (connection.state != .closing and has_inflight_operations) {
             log.debug("try_close ({d},{d}): marking connection as closing", .{
@@ -555,8 +545,8 @@ pub const Network = struct {
                 // have no outstanding IO submissions racing with reusing the pipes for new
                 // connections.
                 if (connection.state == .free) {
-                    assert(!connection.origin_to_remote_pipe.has_inflight_operations());
-                    assert(!connection.remote_to_origin_pipe.has_inflight_operations());
+                    assert(connection.origin_to_remote_pipe.status == .idle);
+                    assert(connection.remote_to_origin_pipe.status == .idle);
 
                     log.debug("accepting ({d},{d})", .{
                         connection.replica_index,
