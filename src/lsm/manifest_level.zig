@@ -170,17 +170,17 @@ pub fn ManifestLevelType(
         /// TableInfo references.
         generation: u32 = 0,
 
-        pub fn init(level: *ManifestLevel, allocator: mem.Allocator) !void {
+        pub fn init(level: *ManifestLevel, allocator: mem.Allocator, node_pool: *NodePool) !void {
             level.* = .{
                 .keys = undefined,
                 .tables = undefined,
             };
 
             level.keys = try Keys.init(allocator);
-            errdefer level.keys.deinit(allocator, null);
+            errdefer level.keys.deinit(allocator, node_pool);
 
             level.tables = try Tables.init(allocator);
-            errdefer level.tables.deinit(allocator, null);
+            errdefer level.tables.deinit(allocator, node_pool);
         }
 
         pub fn deinit(level: *ManifestLevel, allocator: mem.Allocator, node_pool: *NodePool) void {
@@ -190,9 +190,9 @@ pub fn ManifestLevelType(
             level.* = undefined;
         }
 
-        pub fn reset(level: *ManifestLevel) void {
-            level.keys.reset();
-            level.tables.reset();
+        pub fn reset(level: *ManifestLevel, node_pool: *NodePool) void {
+            level.keys.reset(node_pool);
+            level.tables.reset(node_pool);
 
             level.* = .{
                 .keys = level.keys,
@@ -852,7 +852,7 @@ pub fn TestContextType(
             );
             errdefer context.pool.deinit(testing.allocator);
 
-            try context.level.init(testing.allocator);
+            try context.level.init(testing.allocator, &context.pool);
             errdefer context.level.deinit(testing.allocator, &context.pool);
 
             context.reference = std.ArrayList(TableInfo).init(testing.allocator);

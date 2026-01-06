@@ -147,20 +147,25 @@ fn SegmentedArrayBaseType(
             return array;
         }
 
-        pub fn deinit(array: SegmentedArray, allocator: mem.Allocator, node_pool: ?*NodePool) void {
+        pub fn deinit(array: SegmentedArray, allocator: mem.Allocator, node_pool: *NodePool) void {
             if (options.verify) array.verify();
 
             for (array.nodes[0..array.node_count]) |node| {
-                node_pool.?.release(@ptrCast(@alignCast(node.?)));
+                node_pool.release(@ptrCast(@alignCast(node.?)));
             }
             allocator.free(array.nodes);
             allocator.free(array.indexes);
         }
 
-        pub fn reset(array: *SegmentedArray) void {
-            @memset(array.nodes, null);
-            array.indexes[0] = 0;
+        pub fn reset(array: *SegmentedArray, node_pool: *NodePool) void {
+            if (options.verify) array.verify();
 
+            for (array.nodes[0..array.node_count]) |node| {
+                node_pool.release(@ptrCast(@alignCast(node.?)));
+            }
+            @memset(array.nodes, null);
+
+            array.indexes[0] = 0;
             array.* = .{
                 .nodes = array.nodes,
                 .indexes = array.indexes,
