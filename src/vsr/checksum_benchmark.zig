@@ -10,7 +10,7 @@ const MiB = stdx.MiB;
 
 const Bench = @import("../testing/bench.zig");
 
-const repititions = 35;
+const repetitions = 35;
 
 test "benchmark: checksum" {
     var bench: Bench = .init();
@@ -26,7 +26,7 @@ test "benchmark: checksum" {
     const blob = try arena.alignedAlloc(u8, cache_line_size, blob_size);
     prng.fill(blob);
 
-    var duration_samples: [repititions]stdx.Duration = undefined;
+    var duration_samples: [repetitions]stdx.Duration = undefined;
     var checksum_counter: u128 = 0;
 
     for (&duration_samples) |*duration| {
@@ -36,6 +36,8 @@ test "benchmark: checksum" {
     }
 
     const result = bench.estimate(&duration_samples);
+
+    // See "benchmark: API tutorial" to understand why we print out the "hash" of this run.
     bench.report("checksum {x:0>32}", .{checksum_counter});
     bench.report("{} for whole blob", .{result});
 }
