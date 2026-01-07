@@ -257,8 +257,8 @@ fn on_completion(
     completion_ctx: usize,
     packet_extern: *tb_client.Packet,
     timestamp: u64,
-    result_ptr: ?[*]const u8,
-    result_len: u32,
+    result: ?[*]const u8,
+    result_size: u32,
 ) callconv(.c) void {
     _ = timestamp;
 
@@ -277,7 +277,7 @@ fn on_completion(
                     // This is optimal for create_* operations.
                     const reply_buffer: []align(@alignOf(Result)) u8 = global_allocator.realloc(
                         request_buffer,
-                        result_len,
+                        result_size,
                     ) catch {
                         // We can't throw Js exceptions from the native callback.
                         @panic("Failed to allocated the request buffer.");
@@ -286,7 +286,7 @@ fn on_completion(
                     const source = stdx.bytes_as_slice(
                         .exact,
                         Result,
-                        result_ptr.?[0..result_len],
+                        result.?[0..result_size],
                     );
                     const target = stdx.bytes_as_slice(
                         .exact,
