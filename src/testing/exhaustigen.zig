@@ -96,11 +96,24 @@ pub fn range_inclusive(g: *Gen, Int: type, min: Int, max: Int) Int {
 }
 
 pub fn shuffle(g: *Gen, T: type, slice: []T) void {
-    if (slice.len <= 1) return;
-
-    for (0..slice.len - 1) |i| {
-        const j = g.range_inclusive(u64, i, slice.len - 1);
+    for (0..slice.len) |i| {
+        const j = g.int_inclusive(u64, i);
         std.mem.swap(T, &slice[i], &slice[j]);
+    }
+}
+
+test shuffle {
+    var n_factorial: u32 = 1;
+    inline for (0..5) |n| {
+        var g: Gen = .{};
+        var count: u32 = 0;
+        while (!g.done()) {
+            var array: [n]u8 = @splat(0);
+            g.shuffle(u8, &array);
+            count += 1;
+        }
+        assert(count == n_factorial);
+        n_factorial *= (n + 1);
     }
 }
 

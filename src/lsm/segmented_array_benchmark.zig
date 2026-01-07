@@ -95,6 +95,7 @@ test "benchmark: segmented array" {
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
+
         const allocator = arena.allocator();
 
         var node_pool: NodePool = undefined;

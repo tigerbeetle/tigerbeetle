@@ -20,6 +20,8 @@ const ScanState = @import("scan_state.zig").ScanState;
 const TableValueIteratorType =
     @import("table_value_iterator.zig").TableValueIteratorType;
 
+const Pending = error{Pending};
+
 /// Scans a range of keys over a Tree, in ascending or descending order.
 /// At a high level, this is an ordered iterator over the values in a tree, at a particular
 /// snapshot, within a given key range, merged across all levels (including the in-memory tables).
@@ -61,8 +63,8 @@ pub fn ScanTreeType(
             const streams_count = constants.lsm_levels + 2;
 
             // Tables mutable and immutable are well-known indexes.
-            table_mutable = constants.lsm_levels,
-            table_immutable = constants.lsm_levels + 1,
+            table_mutable = 0,
+            table_immutable = 1,
 
             // The rest of the lsm levels are represented as a non-exhaustive enum.
             _,
@@ -74,13 +76,17 @@ pub fn ScanTreeType(
                 fn peek(
                     scan: *ScanTree,
                     stream_index: u32,
-                ) error{ Drained, Empty }!ScanTree.Key {
+                ) Pending!?ScanTree.Key {
                     assert(stream_index < KWayMergeStreams.streams_count);
 
                     return switch (@as(KWayMergeStreams, @enumFromInt(stream_index))) {
                         .table_mutable => scan.merge_table_mutable_peek(),
                         .table_immutable => scan.merge_table_immutable_peek(),
-                        _ => |index| scan.merge_level_peek(@intFromEnum(index)),
+                        _ => |index| blk: {
+                            const level_index = @intFromEnum(index) - 2;
+                            assert(level_index < constants.lsm_levels);
+                            break :blk scan.merge_level_peek(level_index);
+                        },
                     };
                 }
 
@@ -90,24 +96,11 @@ pub fn ScanTreeType(
                     return switch (@as(KWayMergeStreams, @enumFromInt(stream_index))) {
                         .table_mutable => scan.merge_table_mutable_pop(),
                         .table_immutable => scan.merge_table_immutable_pop(),
-                        _ => |index| scan.merge_level_pop(@intFromEnum(index)),
-                    };
-                }
-
-                // Precedence is: table_mutable > table_immutable > level 0 > level 1 > ...
-                fn precedence(scan: *const ScanTree, a: u32, b: u32) bool {
-                    _ = scan;
-                    assert(a != b);
-                    assert(a < KWayMergeStreams.streams_count);
-                    assert(b < KWayMergeStreams.streams_count);
-
-                    return switch (@as(KWayMergeStreams, @enumFromInt(a))) {
-                        .table_mutable => true,
-                        .table_immutable => @as(
-                            KWayMergeStreams,
-                            @enumFromInt(b),
-                        ) != .table_mutable,
-                        else => a < b and b < constants.lsm_levels,
+                        _ => |index| blk: {
+                            const level_index = @intFromEnum(index) - 2;
+                            assert(level_index < constants.lsm_levels);
+                            break :blk scan.merge_level_pop(level_index);
+                        },
                     };
                 }
             };
@@ -123,7 +116,6 @@ pub fn ScanTreeType(
                 ScanTree.key_from_value,
                 stream.peek,
                 stream.pop,
-                stream.precedence,
             );
         };
 
@@ -284,21 +276,21 @@ pub fn ScanTreeType(
 
         /// Moves the iterator to the next position and returns its `Value` or `null` if the
         /// iterator has no more values to iterate.
-        /// May return `error.ReadAgain` if a value block needs to be loaded, in this case
+        /// May return `error.Pending` if a value block needs to be loaded, in this case
         /// call `read()` and resume the iteration after the read callback.
-        pub fn next(self: *ScanTree) error{ReadAgain}!?Value {
+        pub fn next(self: *ScanTree) Pending!?Value {
             switch (self.state) {
                 .idle => {
                     assert(self.merge_iterator == null);
-                    return error.ReadAgain;
+                    return error.Pending;
                 },
                 .seeking => return self.merge_iterator.?.pop() catch |err| switch (err) {
-                    error.Drained => {
+                    error.Pending => {
                         self.state = .needs_data;
-                        return error.ReadAgain;
+                        return error.Pending;
                     },
                 },
-                .needs_data => return error.ReadAgain,
+                .needs_data => return error.Pending,
                 .buffering => unreachable,
                 .aborted => return null,
             }
@@ -306,7 +298,7 @@ pub fn ScanTreeType(
 
         /// Modifies the key_min/key_max range and moves the scan to the next value such that
         /// `value.key >= probe_key` (ascending) or `value.key <= probe_key` (descending).
-        /// The scan may become `Empty` or `Drained` _after_ probing.
+        /// The scan may become empty or `Pending` _after_ probing.
         /// Should not be called when the current key already matches the `probe_key`.
         pub fn probe(self: *ScanTree, probe_key: Key) void {
             if (self.state == .aborted) return;
@@ -415,11 +407,11 @@ pub fn ScanTreeType(
             callback(context, self);
         }
 
-        fn merge_table_mutable_peek(self: *const ScanTree) error{ Drained, Empty }!Key {
+        fn merge_table_mutable_peek(self: *const ScanTree) Pending!?Key {
             return self.table_memory_peek(self.table_mutable_values);
         }
 
-        fn merge_table_immutable_peek(self: *const ScanTree) error{ Drained, Empty }!Key {
+        fn merge_table_immutable_peek(self: *const ScanTree) Pending!?Key {
             return self.table_memory_peek(self.table_immutable_values);
         }
 
@@ -434,10 +426,10 @@ pub fn ScanTreeType(
         inline fn table_memory_peek(
             self: *const ScanTree,
             values: []const Value,
-        ) error{ Drained, Empty }!Key {
+        ) Pending!?Key {
             assert(self.state == .seeking);
 
-            if (values.len == 0) return error.Empty;
+            if (values.len == 0) return null;
 
             const value: *const Value = switch (self.direction) {
                 .ascending => &values[0],
@@ -482,7 +474,7 @@ pub fn ScanTreeType(
             }
         }
 
-        fn merge_level_peek(self: *const ScanTree, level_index: u32) error{ Drained, Empty }!Key {
+        fn merge_level_peek(self: *const ScanTree, level_index: u32) Pending!?Key {
             assert(self.state == .seeking);
             assert(level_index < constants.lsm_levels);
 
@@ -648,7 +640,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             }
         }
 
-        pub fn peek(self: *const ScanTreeLevel) error{ Drained, Empty }!Key {
+        pub fn peek(self: *const ScanTreeLevel) Pending!?Key {
             // `peek` can be called in any state during `seeking`.
             assert(self.state == .loading_manifest or
                 self.state == .loading_index or
@@ -657,7 +649,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state == .seeking);
 
             switch (self.values) {
-                .fetching => return error.Drained,
+                .fetching => return error.Pending,
                 .buffered => |values| {
                     assert(values.len > 0);
                     assert(@intFromPtr(values.ptr) >= @intFromPtr(self.buffer.value_block));
@@ -672,7 +664,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                     const key = key_from_value(value);
                     return key;
                 },
-                .finished => return error.Empty,
+                .finished => return null,
             }
         }
 
@@ -693,7 +685,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 assert(self.values == .buffered);
                 if (self.values.buffered.len == 0) {
                     // Moving to the next `value_block` or `table_info`.
-                    // This will cause the next `peek()` to return `Drained`.
+                    // This will cause the next `peek()` to return `Pending`.
                     self.move_next();
                 }
             }
@@ -729,7 +721,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
                     if (slice.len == 0) {
                         // Moving to the next `value_block` or `table_info`.
-                        // This will cause the next `peek()` to return `Drained`.
+                        // This will cause the next `peek()` to return `Pending`.
                         self.move_next();
                     } else {
                         // The next exclusive key must be ahead of (or equals) the probe key,

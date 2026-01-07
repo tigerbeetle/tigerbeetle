@@ -19,6 +19,15 @@ const TimestampRange = @import("timestamp_range.zig").TimestampRange;
 
 const Error = @import("scan_buffer.zig").Error;
 
+/// Scans work with asynchronous iterators --- streams.
+///
+/// Iterator has       `fn next() ?Item`,
+/// while a stream has `fn next() Pending!?Item`
+///
+/// When a stream returns `error.Pending`, this means that it is unknown
+/// whether a stream has more items or not, and further IO is required.
+const Pending = error{Pending};
+
 /// ScanBuilder is a helper to create and combine scans using
 /// any of the Groove's indexes.
 pub fn ScanBuilderType(
@@ -413,7 +422,7 @@ pub fn ScanType(
             }
         }
 
-        pub fn next(scan: *Scan) error{ReadAgain}!?u64 {
+        pub fn next(scan: *Scan) Pending!?u64 {
             switch (scan.dispatcher) {
                 inline .merge_union,
                 .merge_intersection,

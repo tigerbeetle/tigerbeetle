@@ -141,6 +141,7 @@ test "tb_client echo" {
     );
 
     defer client.deinit() catch unreachable;
+
     var prng = stdx.PRNG.from_seed(tb_context);
 
     const requests: []RequestContext = try testing.allocator.alloc(
@@ -261,6 +262,7 @@ test "tb_client init" {
                 RequestContextType(0).on_complete,
             );
             defer if (!std.meta.isError(result)) client_out.deinit() catch unreachable;
+
             try testing.expectEqual(expected, result);
         }
     }.action;

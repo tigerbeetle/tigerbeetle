@@ -201,7 +201,7 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this transfer to an external entity or
 event.
 
-When set to zero, no secondary identifier will be associated with the account, therefore only
+When set to zero, no secondary identifier will be associated with the transfer, therefore only
 non-zero values can be used as [query filter](./query-filter.md).
 
 When set to zero, if
@@ -224,7 +224,7 @@ Constraints:
 This is an optional 64-bit secondary identifier to link this transfer to an external entity or
 event.
 
-When set to zero, no secondary identifier will be associated with the account, therefore only
+When set to zero, no secondary identifier will be associated with the transfer, therefore only
 non-zero values can be used as [query filter](./query-filter.md).
 
 When set to zero, if
@@ -245,7 +245,7 @@ Constraints:
 This is an optional 32-bit secondary identifier to link this transfer to an external entity or
 event.
 
-When set to zero, no secondary identifier will be associated with the account, therefore only
+When set to zero, no secondary identifier will be associated with the transfer, therefore only
 non-zero values can be used as [query filter](./query-filter.md).
 
 When set to zero, if

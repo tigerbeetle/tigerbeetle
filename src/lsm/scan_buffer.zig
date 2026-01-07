@@ -106,6 +106,7 @@ pub const ScanBufferPool = struct {
         if (self.scan_buffer_used == constants.lsm_scans_max) return Error.ScansMaxExceeded;
 
         defer self.scan_buffer_used += 1;
+
         return &self.scan_buffers[self.scan_buffer_used];
     }
 

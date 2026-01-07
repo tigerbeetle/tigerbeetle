@@ -624,6 +624,7 @@ fn check_version(
 
     var request = std.ArrayListAligned(u8, 16).init(allocator);
     defer request.deinit();
+
     try request.ensureTotalCapacity(constants.message_body_size_max);
 
     var reply = std.ArrayListAligned(u8, 16).init(allocator);
@@ -947,6 +948,7 @@ fn check_version(
                     constants.message_body_size_max,
                 );
                 defer allocator.free(reply_actual_buffer);
+
                 const payload_size: u32 = @intCast(request.items.len);
                 request.expandToCapacity();
 

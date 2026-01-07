@@ -144,6 +144,7 @@ test "Stack: fuzz" {
     // Allocate a pool of nodes.
     var items = try allocator.alloc(Item, item_count_max);
     defer allocator.free(items);
+
     for (items, 0..) |*item, i| {
         item.* = Item{ .id = @intCast(i), .link = .{} };
     }

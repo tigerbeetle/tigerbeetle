@@ -324,7 +324,7 @@ Beyond these rules:
   const ProcessID = struct { cluster: u128, replica: u8 };
   const Tracer = @This(); // This alias concludes the types section.
 
-  pub fn init(gpa: std.mem.Alocator, time: Time) !Tracer {
+  pub fn init(gpa: std.mem.Allocator, time: Time) !Tracer {
       ...
   }
   ```

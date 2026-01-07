@@ -232,6 +232,7 @@ test "JNI: References" {
 
     const obj = env.alloc_object(boolean_class);
     defer env.delete_local_ref(obj);
+
     try testing.expect(obj != null);
     try testing.expect(env.get_object_ref_type(obj) == .local);
 
@@ -311,6 +312,7 @@ test "JNI: AllocObject" {
 
         const obj = env.alloc_object(boolean_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
     }
 
@@ -322,6 +324,7 @@ test "JNI: AllocObject" {
 
         const obj = env.alloc_object(serializable_interface);
         defer env.exception_clear();
+
         try testing.expect(obj == null);
         try testing.expect(env.exception_check() == .jni_true);
     }
@@ -334,6 +337,7 @@ test "JNI: AllocObject" {
 
         const obj = env.alloc_object(calendar_abstract_class);
         defer env.exception_clear();
+
         try testing.expect(obj == null);
         try testing.expect(env.exception_check() == .jni_true);
     }
@@ -368,6 +372,7 @@ test "JNI: IsInstanceOf" {
 
     const obj = env.alloc_object(boolean_class);
     defer env.delete_local_ref(obj);
+
     try testing.expect(obj != null);
 
     try testing.expect(env.is_instance_of(obj, boolean_class) == .jni_true);
@@ -391,6 +396,7 @@ test "JNI: GetFieldId" {
 
     const invalid_field = env.get_field_id(boolean_class, "not_a_valid_field", "I");
     defer env.exception_clear();
+
     try testing.expect(invalid_field == null);
     try testing.expect(env.exception_check() == .jni_true);
 }
@@ -409,6 +415,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(boolean_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_boolean_field(obj, value_field_id);
@@ -432,6 +439,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(byte_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_byte_field(obj, value_field_id);
@@ -455,6 +463,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(char_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_char_field(obj, value_field_id);
@@ -478,6 +487,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(short_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_short_field(obj, value_field_id);
@@ -501,6 +511,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(int_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_int_field(obj, value_field_id);
@@ -524,6 +535,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(long_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_long_field(obj, value_field_id);
@@ -547,6 +559,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(float_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_float_field(obj, value_field_id);
@@ -570,6 +583,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(double_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_double_field(obj, value_field_id);
@@ -593,6 +607,7 @@ test "JNI: Get<Type>Field, Set<Type>Field" {
 
         const obj = env.alloc_object(object_class);
         defer env.delete_local_ref(obj);
+
         try testing.expect(obj != null);
 
         const value_before = env.get_object_field(obj, value_field_id);
@@ -618,6 +633,7 @@ test "JNI: GetMethodId" {
 
     const invalid_method = env.get_method_id(object_class, "invalid_method", "()V");
     defer env.exception_clear();
+
     try testing.expect(invalid_method == null);
     try testing.expect(env.exception_check() == .jni_true);
 }
@@ -890,6 +906,7 @@ test "JNI: GetStaticFieldId" {
 
     const invalid_field_id = env.get_static_field_id(boolean_class, "invalid_field", "J");
     defer env.exception_clear();
+
     try testing.expect(invalid_field_id == null);
     try testing.expect(env.exception_check() == .jni_true);
 }
@@ -1057,6 +1074,7 @@ test "JNI: GetStaticMethodId" {
 
     const invalid_method_id = env.get_static_method_id(boolean_class, "invalid_method", "()J");
     defer env.exception_clear();
+
     try testing.expect(invalid_method_id == null);
     try testing.expect(env.exception_check() == .jni_true);
 }
@@ -1232,6 +1250,7 @@ test "JNI: CallStatic<Type>Method" {
         );
         try testing.expect(env.exception_check() == .jni_false);
         defer env.delete_local_ref(ret);
+
         try testing.expect(env.is_instance_of(ret, class) == .jni_true);
     }
 

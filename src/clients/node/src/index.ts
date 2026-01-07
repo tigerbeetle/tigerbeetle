@@ -33,36 +33,23 @@ const binding: Binding = (() => {
     throw new Error(`Unsupported platform: ${platform}`)
   }
 
-  let extra = ''
+  let linuxABI = ''
 
   /**
    * We need to detect during runtime which libc we're running on to load the correct NAPI.
    * binary.
-   *
-   * Rationale: The /proc/self/map_files/ subdirectory contains entries corresponding to
-   * memory-mapped files loaded by Node.
-   * https://man7.org/linux/man-pages/man5/proc.5.html: We detect a musl-based distro by
-   * checking if any library contains the name "musl".
-   *
-   * Prior art: https://github.com/xerial/sqlite-jdbc/issues/623
    */
-
-  const fs = require('fs')
-  const path = require('path')
-
   if (platform === 'linux') {
-    extra = '-gnu'
-
-    for (const file of fs.readdirSync("/proc/self/map_files/")) {
-      const realPath = fs.readlinkSync(path.join("/proc/self/map_files/", file))
-      if (realPath.includes('musl')) {
-        extra = '-musl'
-        break
-      }
+    const glibcVersionRuntime = (process.report.getReport() as any).header.glibcVersionRuntime
+    if (glibcVersionRuntime) {
+      linuxABI = '-gnu'
+    } else {
+      linuxABI = '-musl'
     }
   }
 
-  const filename = `./bin/${archMap[arch]}-${platformMap[platform]}${extra}/client.node`
+  const filename = `./bin/${archMap[arch as keyof typeof archMap]}-` +
+                    `${platformMap[platform as keyof typeof platformMap]}${linuxABI}/client.node`
   return require(filename)
 })()
 
@@ -189,7 +176,7 @@ export function id(): bigint {
   idLastBuffer.setUint32(4, randomHi32 & 0xFFFFFFFF, littleEndian)
   idLastBuffer.setUint16(8, randomHi16, littleEndian) // No need to mask since checked above.
   idLastBuffer.setUint16(10, timestamp & 0xFFFF, littleEndian) // timestamp lo.
-  idLastBuffer.setUint32(12, (timestamp >>> 16) & 0xFFFFFFFF, littleEndian) // timestamp hi.
+  idLastBuffer.setUint32(12, (timestamp / 0x10000) | 0, littleEndian) // timestamp hi.
 
   // Then return the buffer's contents as a little-endian u128 bigint.
   const lo = idLastBuffer.getBigUint64(0, littleEndian)

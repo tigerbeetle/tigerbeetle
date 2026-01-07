@@ -933,8 +933,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
             log.info(
-                "{}: read_prepare: op={} checksum={?}: {s}",
-                .{ journal.replica, op, checksum, notice },
+                "{}: read_prepare: op={} checksum={x:0>32}: {s}",
+                .{ journal.replica, op, checksum orelse 0, notice },
             );
         }
 
@@ -1318,7 +1318,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
                     if (header.operation != .reserved and !view_range.contains(header.view)) {
                         log.warn("{}: recover_slots: drop header " ++
-                            "view_range={}..{} view={} op={} checksum={}", .{
+                            "view_range={}..{} view={} op={} checksum={x:0>32}", .{
                             journal.replica,
                             view_range.min,
                             view_range.max,
@@ -1751,7 +1751,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(header.command == .prepare);
             assert(header.operation != .reserved);
 
-            log.debug("{}: set_header_as_dirty: op={} checksum={}", .{
+            log.debug("{}: set_header_as_dirty: op={} checksum={x:0>32}", .{
                 journal.replica,
                 header.op,
                 header.checksum,
@@ -2001,7 +2001,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(header.command == .prepare);
             assert(header.operation != .reserved);
 
-            log_fn("{}: write: view={} slot={} op={} len={}: {} {s}", .{
+            log_fn("{}: write: view={} slot={} op={} len={}: {x:0>32} {s}", .{
                 journal.replica,
                 header.view,
                 journal.slot_for_header(header).index,

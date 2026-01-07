@@ -245,7 +245,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             try env.pool.init(gpa, node_pool_size);
             errdefer env.pool.deinit(gpa);
 
-            try env.level.init(gpa);
+            try env.level.init(gpa, &env.pool);
             errdefer env.level.deinit(gpa, &env.pool);
 
             env.buffer = TableBuffer.init(gpa);

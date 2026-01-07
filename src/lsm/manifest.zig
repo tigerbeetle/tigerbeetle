@@ -211,7 +211,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             for (&manifest.levels, 0..) |*level, i| {
                 errdefer for (manifest.levels[0..i]) |*l| l.deinit(allocator, node_pool);
-                try level.init(allocator);
+                try level.init(allocator, node_pool);
             }
             errdefer for (&manifest.levels) |*level| level.deinit(allocator, node_pool);
         }
@@ -221,7 +221,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn reset(manifest: *Manifest) void {
-            for (&manifest.levels) |*level| level.reset();
+            for (&manifest.levels) |*level| level.reset(manifest.node_pool);
 
             manifest.* = .{
                 .node_pool = manifest.node_pool,

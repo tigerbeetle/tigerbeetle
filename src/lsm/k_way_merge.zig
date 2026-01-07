@@ -29,6 +29,7 @@ const math = std.math;
 const mem = std.mem;
 
 const Direction = @import("../direction.zig").Direction;
+const Pending = error{Pending};
 
 const Options = struct {
     streams_max: u32,
@@ -43,17 +44,14 @@ pub fn KWayMergeIteratorType(
     comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
-    /// Returns Drained if the stream was consumed and
+    /// Returns Pending if the stream was consumed and
     /// must be refilled before calling peek() again.
-    /// Returns Empty if the stream was fully consumed and reached the end.
+    /// Returns null if the stream was fully consumed and reached the end.
     comptime stream_peek: fn (
         context: *Context,
         stream_index: u32,
-    ) error{ Empty, Drained }!Key,
+    ) Pending!?Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
-    /// Returns true if stream A has higher precedence than stream B.
-    /// This is used to break ties across streams.
-    comptime stream_precedence: fn (context: *const Context, a: u32, b: u32) bool,
 ) type {
     comptime assert(options.streams_max >= 1);
     comptime assert(options.streams_max < std.math.maxInt(@TypeOf(options.streams_max)));
@@ -88,21 +86,19 @@ pub fn KWayMergeIteratorType(
             sentinel: bool,
 
             // Returns true iff `a` wins over `b` under `direction`.
-            // If keys are equal, `stream_precedence` decides.
+            // If keys are equal, smaller stream_id wins.
             inline fn beats(
                 a: *const Node,
                 b: *const Node,
                 direction: Direction,
-                ctx: *const Context,
             ) bool {
                 // A sentinel always loses.
                 if (b.sentinel) return true;
                 if (a.sentinel) return false;
 
                 const ordered = if (direction == .ascending) a.key < b.key else a.key > b.key;
-                const stabler = (a.key == b.key) and
-                    stream_precedence(ctx, a.stream_id, b.stream_id);
-                return ordered or stabler; // “true”  means  a  loses
+                const stabler = (a.key == b.key) and (a.stream_id < b.stream_id);
+                return ordered or stabler; // “true”  means  a wins.
             }
         };
 
@@ -144,7 +140,7 @@ pub fn KWayMergeIteratorType(
             };
         }
 
-        fn load(self: *KWayMergeIterator) error{Drained}!void {
+        fn load(self: *KWayMergeIterator) Pending!void {
             assert(self.state == .loading);
             assert(self.nodes_count == 0);
             assert(self.tree_height == 0);
@@ -154,10 +150,7 @@ pub fn KWayMergeIteratorType(
             var contestants: [node_max]Node = @splat(sentinel);
             var contestants_count: u16 = 0;
             for (0..self.streams_count) |id| {
-                const key = stream_peek(self.context, @intCast(id)) catch |err| switch (err) {
-                    error.Empty => continue,
-                    error.Drained => return error.Drained,
-                };
+                const key = try stream_peek(self.context, @intCast(id)) orelse continue;
                 contestants[id] = .{ .key = key, .stream_id = @intCast(id), .sentinel = false };
                 contestants_count += 1;
             }
@@ -183,7 +176,7 @@ pub fn KWayMergeIteratorType(
                     const competitor_a = contestants[competitor_index * 2];
                     const competitor_b = contestants[competitor_index * 2 + 1];
 
-                    if (competitor_a.beats(&competitor_b, self.direction, self.context)) {
+                    if (competitor_a.beats(&competitor_b, self.direction)) {
                         contestants[competitor_index] = competitor_a;
                         self.losers[loser_index] = competitor_b;
                     } else {
@@ -202,7 +195,7 @@ pub fn KWayMergeIteratorType(
             self.state = .iterating;
         }
 
-        pub fn pop(self: *KWayMergeIterator) error{Drained}!?Value {
+        pub fn pop(self: *KWayMergeIterator) Pending!?Value {
             if (self.state == .loading) try self.load();
             assert(self.state == .iterating);
 
@@ -218,7 +211,7 @@ pub fn KWayMergeIteratorType(
             return null;
         }
 
-        fn next(self: *KWayMergeIterator) error{Drained}!?Value {
+        fn next(self: *KWayMergeIterator) Pending!?Value {
             const direction = self.direction;
             const stream_id = self.contender.stream_id;
             assert(!self.contender.sentinel);
@@ -230,7 +223,7 @@ pub fn KWayMergeIteratorType(
                 opponent_id = (opponent_id - 1) >> 1;
 
                 const opponent = &self.losers[opponent_id];
-                const winner = determine_winner(&self.contender, opponent, direction, self.context);
+                const winner = determine_winner(&self.contender, opponent, direction);
                 swap_nodes(winner, &self.contender);
             }
 
@@ -242,14 +235,11 @@ pub fn KWayMergeIteratorType(
             return stream_pop(self.context, self.contender.stream_id);
         }
 
-        fn next_contender(self: *KWayMergeIterator, stream_id: u32) error{Drained}!Node {
+        fn next_contender(self: *KWayMergeIterator, stream_id: u32) Pending!Node {
             assert(stream_id < self.streams_count);
-            const next_key = stream_peek(self.context, stream_id) catch |err| switch (err) {
-                error.Drained => return error.Drained,
-                error.Empty => {
-                    self.streams_active -= 1;
-                    return sentinel;
-                },
+            const next_key = try stream_peek(self.context, stream_id) orelse {
+                self.streams_active -= 1;
+                return sentinel;
             };
             return .{ .key = next_key, .stream_id = stream_id, .sentinel = false };
         }
@@ -270,9 +260,8 @@ pub fn KWayMergeIteratorType(
             contender: *Node,
             challenger: *Node,
             direction: Direction,
-            ctx: *const Context,
         ) *Node {
-            const challenger_wins: bool = challenger.beats(contender, direction, ctx);
+            const challenger_wins: bool = challenger.beats(contender, direction);
             const winner: *Node = select(challenger_wins, challenger, contender);
             return winner;
         }
@@ -309,9 +298,9 @@ fn TestContextType(comptime streams_max: u32) type {
         fn stream_peek(
             context: *const TestContext,
             stream_index: u32,
-        ) error{ Empty, Drained }!u32 {
+        ) Pending!?u32 {
             const stream = context.streams[stream_index];
-            if (stream.len == 0) return error.Empty;
+            if (stream.len == 0) return null;
             return stream[0].key;
         }
 
@@ -319,13 +308,6 @@ fn TestContextType(comptime streams_max: u32) type {
             const stream = context.streams[stream_index];
             context.streams[stream_index] = stream[1..];
             return stream[0];
-        }
-
-        fn stream_precedence(context: *const TestContext, a: u32, b: u32) bool {
-            _ = context;
-
-            // Higher streams have higher precedence.
-            return a > b;
         }
 
         fn merge(
@@ -344,7 +326,6 @@ fn TestContextType(comptime streams_max: u32) type {
                 Value.to_key,
                 stream_peek,
                 stream_pop,
-                stream_precedence,
             );
             var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();
@@ -417,11 +398,11 @@ test "k_way_merge: unit" {
         &[_]TestContextType(3).Value{
             .{ .key = 0, .version = 0 },
             .{ .key = 1, .version = 2 },
-            .{ .key = 2, .version = 2 },
+            .{ .key = 2, .version = 1 },
             .{ .key = 3, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 8, .version = 0 },
-            .{ .key = 11, .version = 2 },
+            .{ .key = 11, .version = 0 },
             .{ .key = 12, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 15, .version = 1 },
@@ -438,11 +419,11 @@ test "k_way_merge: unit" {
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
-            .{ .key = 11, .version = 2 },
+            .{ .key = 11, .version = 0 },
             .{ .key = 8, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 3, .version = 0 },
-            .{ .key = 2, .version = 2 },
+            .{ .key = 2, .version = 1 },
             .{ .key = 1, .version = 2 },
             .{ .key = 0, .version = 0 },
         },
@@ -472,11 +453,11 @@ test "k_way_merge: unit" {
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
-            .{ .key = 11, .version = 2 },
+            .{ .key = 11, .version = 0 },
             .{ .key = 8, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 3, .version = 0 },
-            .{ .key = 2, .version = 2 },
+            .{ .key = 2, .version = 1 },
             .{ .key = 1, .version = 2 },
             .{ .key = 0, .version = 0 },
         },
@@ -485,6 +466,7 @@ test "k_way_merge: unit" {
 
 fn FuzzTestContextType(comptime streams_max: u32) type {
     const testing = std.testing;
+    const ratio = stdx.PRNG.ratio;
 
     return struct {
         const FuzzTestContext = @This();
@@ -500,22 +482,15 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
         fn fuzz_stream_peek(
             context: *const FuzzTestContext,
             stream_index: u32,
-        ) error{ Empty, Drained }!u32 {
-            switch (context.prng.enum_weighted(
-                enum { normal, drained },
-                .{ .normal = 95, .drained = 5 },
-            )) {
-                .normal => return context.inner.stream_peek(stream_index),
-                .drained => return error.Drained,
+        ) Pending!?u32 {
+            if (context.prng.chance(ratio(5, 100))) {
+                return error.Pending;
             }
+            return context.inner.stream_peek(stream_index);
         }
 
         fn stream_pop(context: *FuzzTestContext, stream_index: u32) Value {
             return context.inner.stream_pop(stream_index);
-        }
-
-        fn stream_precedence(context: *const FuzzTestContext, a: u32, b: u32) bool {
-            return context.inner.stream_precedence(a, b);
         }
 
         fn merge(
@@ -536,7 +511,6 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                 Value.to_key,
                 fuzz_stream_peek,
                 stream_pop,
-                stream_precedence,
             );
             var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();
@@ -583,22 +557,20 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
 
         fn fuzz(prng: *stdx.PRNG, stream_key_count_max: u32) !void {
             if (log) std.debug.print("\n", .{});
-            const allocator = testing.allocator;
+            const gpa = testing.allocator;
 
             var streams: [streams_max][]u32 = undefined;
 
-            const streams_buffer = try allocator.alloc(u32, streams_max * stream_key_count_max);
-            defer allocator.free(streams_buffer);
+            const streams_buffer = try gpa.alloc(u32, streams_max * stream_key_count_max);
+            defer gpa.free(streams_buffer);
 
-            const expect_buffer = try allocator.alloc(Value, streams_max * stream_key_count_max);
-            defer allocator.free(expect_buffer);
+            const expect_buffer = try gpa.alloc(Value, streams_max * stream_key_count_max);
+            defer gpa.free(expect_buffer);
 
-            var k: u32 = 0;
-            while (k < streams_max) : (k += 1) {
+            for (0..streams_max) |k| {
                 if (log) std.debug.print("k = {}\n", .{k});
                 {
-                    var i: u32 = 0;
-                    while (i < k) : (i += 1) {
+                    for (0..k) |i| {
                         const len = fuzz_stream_len(prng, stream_key_count_max);
                         streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
                         fuzz_stream_keys(prng, streams[i]);
@@ -684,7 +656,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
         fn value_less_than(_: void, a: Value, b: Value) bool {
             return switch (math.order(a.key, b.key)) {
                 .lt => true,
-                .eq => a.version > b.version,
+                .eq => a.version < b.version,
                 .gt => false,
             };
         }

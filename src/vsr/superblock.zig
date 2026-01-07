@@ -1321,15 +1321,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "free_set_blocks_released_size={[free_set_blocks_released_size]} " ++
                         "client_sessions_size={[client_sessions_size]} " ++
                         "checkpoint_id={[checkpoint_id]x:0>32} " ++
-                        "commit_min_checksum={[commit_min_checksum]} commit_min={[commit_min]} " ++
+                        "commit_min_checksum={[commit_min_checksum]x:0>32} " ++
+                        "commit_min={[commit_min]} " ++
                         "commit_max={[commit_max]} log_view={[log_view]} view={[view]} " ++
                         "sync_op_min={[sync_op_min]} sync_op_max={[sync_op_max]} " ++
-                        "manifest_oldest_checksum={[manifest_oldest_checksum]} " ++
+                        "manifest_oldest_checksum={[manifest_oldest_checksum]x:0>32} " ++
                         "manifest_oldest_address={[manifest_oldest_address]} " ++
-                        "manifest_newest_checksum={[manifest_newest_checksum]} " ++
+                        "manifest_newest_checksum={[manifest_newest_checksum]x:0>32} " ++
                         "manifest_newest_address={[manifest_newest_address]} " ++
                         "manifest_block_count={[manifest_block_count]} " ++
-                        "snapshots_block_checksum={[snapshots_block_checksum]} " ++
+                        "snapshots_block_checksum={[snapshots_block_checksum]x:0>32} " ++
                         "snapshots_block_address={[snapshots_block_address]}",
                     .{
                         .replica = superblock.replica_index,
@@ -1363,7 +1364,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     },
                 );
                 for (superblock.working.view_headers().slice) |*header| {
-                    log.debug("{?}: {s}: vsr_header: op={} checksum={}", .{
+                    log.debug("{?}: {s}: vsr_header: op={} checksum={x:0>32}", .{
                         superblock.replica_index,
                         @tagName(context.caller),
                         header.op,
@@ -1520,10 +1521,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
             log.debug("{[replica]?}: {[caller]s}: " ++
                 "commit_min={[commit_min_old]}..{[commit_min_new]} " ++
                 "commit_max={[commit_max_old]}..{[commit_max_new]} " ++
-                "commit_min_checksum={[commit_min_checksum_old]}..{[commit_min_checksum_new]} " ++
+                "commit_min_checksum={[commit_min_checksum_old]x:0>32}.." ++
+                "{[commit_min_checksum_new]x:0>32} " ++
                 "log_view={[log_view_old]}..{[log_view_new]} " ++
                 "view={[view_old]}..{[view_new]} " ++
-                "head={[head_old]}..{[head_new]?}", .{
+                "head={[head_old]x:0>32}..{[head_new]x:0>32}", .{
                 .replica = superblock.replica_index,
                 .caller = @tagName(context.caller),
 
@@ -1544,9 +1546,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 .head_old = superblock.staging.view_headers().slice[0].checksum,
                 .head_new = if (context.view_headers) |*headers|
-                    @as(?u128, headers.array.get(0).checksum)
+                    headers.array.get(0).checksum
                 else
-                    null,
+                    0,
             });
         }
     };

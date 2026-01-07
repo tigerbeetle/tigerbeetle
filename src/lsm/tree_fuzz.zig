@@ -498,7 +498,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         fn on_scan_read(env: *Environment, scan_tree: *ScanTree) void {
             while (scan_tree.next() catch |err| switch (err) {
-                error.ReadAgain => return scan_tree.read(env, on_scan_read),
+                error.Pending => return scan_tree.read(env, on_scan_read),
             }) |value| {
                 if (env.scan_results_count == scan_results_max) break;
 

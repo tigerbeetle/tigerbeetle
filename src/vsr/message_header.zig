@@ -245,13 +245,7 @@ pub const Header = extern struct {
         writer: anytype,
     ) !void {
         switch (self.into_any()) {
-            inline else => |header| return try std.fmt.formatType(
-                header,
-                fmt,
-                options,
-                writer,
-                std.options.fmt_max_depth,
-            ),
+            inline else => |header| return try header.format(fmt, options, writer),
         }
     }
 
@@ -292,6 +286,15 @@ pub const Header = extern struct {
             pub fn valid_checksum_body(self: *const CommandHeader, body: []const u8) bool {
                 return self.frame_const().valid_checksum_body(body);
             }
+
+            pub fn format(
+                self: *const CommandHeader,
+                comptime _: []const u8,
+                _: std.fmt.FormatOptions,
+                writer: anytype,
+            ) !void {
+                return format_header(CommandHeader, self, writer);
+            }
         };
     }
 
@@ -324,6 +327,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
@@ -360,6 +364,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(_: *const @This()) ?[]const u8 {
             return "deprecated message type";
@@ -405,6 +410,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -457,6 +463,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
@@ -499,6 +506,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
@@ -541,6 +549,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
@@ -618,6 +627,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
@@ -749,6 +759,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
@@ -905,6 +916,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
@@ -1001,6 +1013,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
@@ -1070,6 +1083,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
@@ -1110,6 +1124,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
@@ -1161,6 +1176,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
@@ -1210,6 +1226,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
@@ -1255,6 +1272,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
@@ -1298,6 +1316,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
@@ -1341,6 +1360,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
@@ -1385,6 +1405,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
@@ -1426,6 +1447,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
@@ -1468,6 +1490,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
@@ -1531,6 +1554,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
@@ -1582,6 +1606,7 @@ pub const Header = extern struct {
         pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
         pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
         pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .block);
@@ -1598,6 +1623,83 @@ pub const Header = extern struct {
         }
     };
 };
+
+/// Messages are printed fairly frequently, so we provide a custom formatting function:
+/// - checksums are printed in hex,
+/// - padding and reserved fields are skipped if they are zeroed-out.
+fn format_header(T: type, header: *const T, writer: anytype) !void {
+    const simple_type_name = comptime name_blk: {
+        const type_name = @typeName(T);
+        const last_part_idx = std.mem.lastIndexOf(u8, type_name, ".");
+        break :name_blk if (last_part_idx) |idx| type_name[idx + 1 ..] else type_name;
+    };
+
+    try writer.writeAll(simple_type_name ++ "{");
+    inline for (@typeInfo(T).@"struct".fields, 0..) |field, field_index| {
+        comptime assert((field_index == 0) == std.mem.eql(u8, field.name, "checksum"));
+        try format_header_field(field.name, field.type, &@field(header, field.name), writer);
+    }
+    try writer.writeAll(" }");
+}
+
+fn format_header_field(
+    comptime field_name: []const u8,
+    comptime T: type,
+    field_value: *const T,
+    writer: anytype,
+) !void {
+    if (format_header_field_skip(field_name, T, field_value)) return;
+
+    const separator = comptime if (std.mem.eql(u8, field_name, "checksum")) " " else ", ";
+    try writer.writeAll(separator ++ "." ++ field_name ++ "=");
+
+    if (T == u128) {
+        // Exhaustively list all checksum and non-checksum fields.
+        inline for (.{
+            "checksum",         "checksum_padding",
+            "checksum_body",    "checksum_body_padding",
+            "prepare_checksum", "prepare_checksum_padding",
+            "commit_checksum",  "commit_checksum_padding",
+            "request_checksum", "request_checksum_padding",
+            "reply_checksum",   "reply_checksum_padding",
+            "parent",           "parent_padding",
+            "context",          "context_padding",
+            "checkpoint_id",
+        }) |field_name_checksum| {
+            if (comptime std.mem.eql(u8, field_name, field_name_checksum)) {
+                return try writer.print("{x:0>32}", .{field_value.*});
+            }
+        }
+        inline for (.{
+            "cluster",        "client",
+            "present_bitset", "nack_bitset",
+            "nonce",          "nonce_reserved",
+            "reply_client",
+        }) |field_name_non_checksum| {
+            if (comptime std.mem.eql(u8, field_name, field_name_non_checksum)) {
+                return try writer.print("{d}", .{field_value.*});
+            }
+        }
+        @compileError("unhandled field: " ++ field_name);
+    }
+
+    try writer.print("{any}", .{field_value.*});
+}
+
+fn format_header_field_skip(
+    comptime field_name: []const u8,
+    comptime T: type,
+    field_value: *const T,
+) bool {
+    if (comptime std.mem.startsWith(u8, field_name, "reserved") or
+        std.mem.endsWith(u8, field_name, "reserved") or
+        std.mem.endsWith(u8, field_name, "padding"))
+    {
+        return if (@typeInfo(T) == .int) field_value.* == 0 else stdx.zeroed(field_value);
+    } else {
+        return false;
+    }
+}
 
 // Verify each Command's header type.
 comptime {
@@ -1635,4 +1737,42 @@ comptime {
             assert(a == b);
         }
     }
+}
+
+const Snap = stdx.Snap;
+const module_path = "src";
+const snap = Snap.snap_fn(module_path);
+
+test format_header {
+    var prepare = Header.Prepare{
+        .checksum = 0x0123456789ABCDEF,
+        .checksum_body = 0xFEDCBA9876543210,
+        .cluster = 1,
+        .size = 321,
+        .view = 2,
+        .release = vsr.Release.zero,
+        .command = .prepare,
+        .replica = 3,
+        .parent = 0xABCDEFFEDCBA00123456789,
+        .request_checksum = 0x12345678987654321,
+        .checkpoint_id = 4,
+        .client = 5,
+        .op = 5,
+        .commit = 6,
+        .timestamp = 123456789,
+        .request = 7,
+        .operation = .pulse,
+    };
+
+    try snap(@src(),
+        \\Prepare{ .checksum=00000000000000000123456789abcdef, .checksum_body=0000000000000000fedcba9876543210, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse }
+    ).diff_fmt("{}", .{prepare});
+
+    // Check that non-zero padding/reserved fields are printed.
+    prepare.checksum_padding = 1;
+    prepare.reserved_frame[0] = 2;
+    prepare.reserved[0] = 3;
+    try snap(@src(),
+        \\Prepare{ .checksum=00000000000000000123456789abcdef, .checksum_padding=00000000000000000000000000000001, .checksum_body=0000000000000000fedcba9876543210, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .reserved_frame={ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse, .reserved={ 3, 0, 0 } }
+    ).diff_fmt("{}", .{prepare});
 }

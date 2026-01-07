@@ -20,6 +20,7 @@ comptime {
     _ = @import("lsm/forest.zig");
     _ = @import("lsm/forest_table_iterator.zig");
     _ = @import("lsm/k_way_merge.zig");
+    _ = @import("lsm/k_way_merge_benchmark.zig");
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
     _ = @import("lsm/scratch_memory.zig");
@@ -43,6 +44,7 @@ comptime {
     _ = @import("state_machine.zig");
     _ = @import("state_machine_fuzz.zig");
     _ = @import("state_machine_tests.zig");
+    _ = @import("testing/bench.zig");
     _ = @import("testing/exhaustigen.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
@@ -60,6 +62,7 @@ comptime {
     _ = @import("vsr/grid_scrubber.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
+    _ = @import("vsr/message_header.zig");
     _ = @import("vsr/multi_batch.zig");
     _ = @import("vsr/replica_format.zig");
     _ = @import("vsr/replica_test.zig");
@@ -79,6 +82,7 @@ const quine =
     \\test quine {
     \\    var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
     \\    defer arena_instance.deinit();
+    \\
     \\    const arena = arena_instance.allocator();
     \\
     \\    // build.zig runs this in the root dir.
@@ -202,6 +206,7 @@ const MiB = stdx.MiB;
 test quine {
     var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_instance.deinit();
+
     const arena = arena_instance.allocator();
 
     // build.zig runs this in the root dir.

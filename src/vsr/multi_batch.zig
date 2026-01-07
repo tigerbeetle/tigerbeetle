@@ -450,12 +450,7 @@ pub const MultiBatchEncoder = struct {
         assert(source.len == target.len);
         assert(@intFromPtr(source.ptr) >= @intFromPtr(target.ptr));
         if (source.ptr != target.ptr) {
-            stdx.copy_left(
-                .exact,
-                u8,
-                target,
-                source,
-            );
+            stdx.copy_left(.exact, u8, target, source);
         }
 
         const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
@@ -510,6 +505,7 @@ test "batch: maximum batches with no elements" {
         buffer_size,
     );
     defer testing.allocator.free(buffer);
+
     const written_bytes = try TestRunner.run(.{
         .prng = &prng,
         .element_size = element_size,
@@ -533,6 +529,7 @@ test "batch: maximum batches with a single element" {
 
     const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
     defer testing.allocator.free(buffer);
+
     const written_bytes = try TestRunner.run(.{
         .prng = &prng,
         .element_size = element_size,
@@ -560,6 +557,7 @@ test "batch: maximum elements on a single batch" {
 
     const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
     defer testing.allocator.free(buffer);
+
     const written_bytes = try TestRunner.run(.{
         .prng = &prng,
         .element_size = element_size,

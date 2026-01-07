@@ -1,88 +1,120 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
-const builtin = @import("builtin");
 
 const stdx = @import("stdx");
+const KiB = stdx.KiB;
+const MiB = stdx.MiB;
+const GiB = stdx.GiB;
 
-const binary_search_keys_upsert_index =
-    @import("./binary_search.zig").binary_search_keys_upsert_index;
+const Bench = @import("../testing/bench.zig");
+
 const binary_search_values_upsert_index =
     @import("./binary_search.zig").binary_search_values_upsert_index;
 
-const log = std.log;
-
-const GiB = 1 << 30;
-
-// Bump these up if you want to use this as a real benchmark rather than as a test.
-const blob_size = @divExact(GiB, 1024);
-const searches = 5_000;
-
 const kv_types = .{
     .{ .key_size = @sizeOf(u64), .value_size = 128 },
-    .{ .key_size = @sizeOf(u64), .value_size = 64 },
-    .{ .key_size = @sizeOf(u128), .value_size = 16 },
     .{ .key_size = @sizeOf(u256), .value_size = 32 },
 };
 
-const values_per_page = .{ 128, 256, 512, 1024, 2 * 1024, 4 * 1024, 8 * 1024 };
-const body_fmt = "K={:_>2}B V={:_>3}B N={:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns";
+const Scenario = struct {
+    name: []const u8,
+    values_per_page: u32,
+    page_buffer_size: usize,
+};
+
+const scenarios = [_]Scenario{
+    .{
+        .name = "in-cache",
+        .values_per_page = 64,
+        .page_buffer_size = 256 * KiB,
+    },
+    .{
+        .name = "out-of-cache",
+        .values_per_page = 4_096,
+        .page_buffer_size = 1 * GiB,
+    },
+};
+
+const body_fmt = "{s} K={:_>2}B V={:_>3}B N={:_>5}: WT={}";
+const repetitions: usize = 32;
 
 test "benchmark: binary search" {
-    log.info("Samples: {}", .{searches});
-    log.info("WT: Wall time/search", .{});
-    log.info("UT: utime time/search", .{});
+    var bench: Bench = .init();
+    defer bench.deinit();
 
-    const seed = std.crypto.random.int(u64);
-    var prng = stdx.PRNG.from_seed(seed);
+    bench.report("WT: Wall time/search", .{});
 
-    // Allocate on the heap just once.
-    // All page allocations reuse this buffer to speed up the run time.
+    const blob_size = bench.parameter("blob_size", MiB, GiB);
+    const searches = bench.parameter("searches", 500, 20_000);
+
+    var prng = stdx.PRNG.from_seed(bench.seed);
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const blob = try arena.allocator().alloc(u8, blob_size);
+    const blob = try arena.allocator().alignedAlloc(u8, 64, blob_size);
+    var checksum: u64 = 0;
 
     inline for (kv_types) |kv| {
-        inline for (values_per_page) |values_count| {
-            try run_benchmark(.{
-                .blob_size = blob_size,
-                .key_size = kv.key_size,
-                .value_size = kv.value_size,
-                .values_count = values_count,
-                .searches = searches,
-            }, blob, &prng);
+        inline for (scenarios) |scenario| {
+            // Clamp for `smoke` mode.
+            const page_buffer_size = @min(blob_size, scenario.page_buffer_size);
+            checksum +%= try run_benchmark(
+                &bench,
+                scenario.name,
+                .{
+                    .key_size = kv.key_size,
+                    .value_size = kv.value_size,
+                    .values_count = scenario.values_per_page,
+                },
+                searches,
+                blob[0..page_buffer_size],
+                arena.allocator(),
+                &prng,
+            );
         }
     }
+    bench.report("checksum {}", .{checksum});
 }
 
-fn run_benchmark(comptime layout: Layout, blob: []u8, prng: *stdx.PRNG) !void {
-    assert(blob.len == layout.blob_size);
+fn run_benchmark(
+    bench: *Bench,
+    scenario_name: []const u8,
+    comptime layout: Layout,
+    search_count: u64,
+    page_buffer: []u8,
+    arena: std.mem.Allocator,
+    prng: *stdx.PRNG,
+) !u64 {
     const V = ValueType(layout);
     const K = V.Key;
     const Page = struct {
         values: [layout.values_count]V,
     };
-    const page_count = layout.blob_size / @sizeOf(Page);
 
-    // Search pages and keys in random order.
-    const page_picker = shuffled_index(page_count, prng);
-    const value_picker = shuffled_index(layout.values_count, prng);
+    const page_count = @divFloor(page_buffer.len, @sizeOf(Page));
+    assert(page_count > 0);
+    if (page_count > 1024 * 1024) @panic("page_count too large");
 
-    // Generate 1GiB worth of 24KiB pages.
-    var blob_alloc = std.heap.FixedBufferAllocator.init(blob);
-    const pages = try blob_alloc.allocator().alloc(Page, page_count);
+    const page_picker = try arena.alloc(usize, page_count);
+    shuffled_index(prng, page_picker);
+
+    const value_picker = try arena.alloc(usize, layout.values_count);
+    shuffled_index(prng, value_picker);
+
+    var page_alloc = std.heap.FixedBufferAllocator.init(page_buffer);
+    const pages = try page_alloc.allocator().alloc(Page, page_count);
     prng.fill(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
         for (&page.values, 0..) |*value, i| value.key = i;
     }
 
-    inline for (&.{ true, false }) |prefetch| {
-        var benchmark = try Benchmark.begin();
-        var i: usize = 0;
-        var v: usize = 0;
-        while (i < layout.searches) : (i += 1) {
-            const target = value_picker[v % value_picker.len];
+    var duration_samples: [repetitions]stdx.Duration = undefined;
+    var checksum: u64 = 0;
+    for (&duration_samples) |*duration| {
+        bench.start();
+        for (0..search_count) |i| {
+            const target = value_picker[i % value_picker.len];
             const page = &pages[page_picker[i % page_picker.len]];
             const hit = page.values[
                 binary_search_values_upsert_index(
@@ -91,37 +123,39 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, prng: *stdx.PRNG) !void {
                     V.key_from_value,
                     page.values[0..],
                     target,
-                    .{ .prefetch = prefetch },
+                    .{},
                 )
             ];
 
             assert(hit.key == target);
-            if (i % pages.len == 0) v += 1;
+            checksum +%= @truncate(hit.key);
         }
-        const result = try benchmark.end(layout.searches);
-        log.info(body_fmt, .{
-            layout.key_size,
-            layout.value_size,
-            layout.values_count,
-            if (prefetch) "P" else "_",
-            "B",
-            result.wall_time,
-            result.utime,
-        });
+        duration.* = bench.stop();
+        duration.ns /= search_count;
     }
+
+    const result = bench.estimate(&duration_samples);
+
+    bench.report(body_fmt, .{
+        scenario_name,
+        layout.key_size,
+        layout.value_size,
+        layout.values_count,
+        result,
+    });
+
+    return checksum;
 }
 
 const Layout = struct {
-    blob_size: usize, // bytes allocated for all pages
     key_size: usize, // bytes per key
     value_size: usize, // bytes per value
     values_count: usize, // values per page
-    searches: usize,
 };
 
 fn ValueType(comptime layout: Layout) type {
     return struct {
-        pub const max_key = 1 << (8 * layout.key_size) - 1;
+        pub const max_key = (1 << (8 * layout.key_size)) - 1;
         pub const Key = math.IntFittingRange(0, max_key);
         const Value = @This();
         key: Key,
@@ -138,62 +172,8 @@ fn ValueType(comptime layout: Layout) type {
     };
 }
 
-const BenchmarkResult = struct {
-    wall_time: u64, // nanoseconds
-    utime: u64, // nanoseconds
-};
-
-const Benchmark = struct {
-    timer: std.time.Timer,
-    utime_ns: u128,
-
-    fn begin() !Benchmark {
-        const timer = try std.time.Timer.start();
-        return Benchmark{
-            .timer = timer,
-            .utime_ns = utime_nanos(),
-        };
-    }
-
-    fn end(self: *Benchmark, samples: usize) !BenchmarkResult {
-        const utime_now = utime_nanos();
-        return BenchmarkResult{
-            .wall_time = self.timer.read() / samples,
-            .utime = @intCast((utime_now - self.utime_ns) / samples),
-        };
-    }
-
-    fn utime_nanos() u128 {
-        if (builtin.os.tag == .windows) {
-            var creation_time: std.os.windows.FILETIME = undefined;
-            var exit_time: std.os.windows.FILETIME = undefined;
-            var kernel_time: std.os.windows.FILETIME = undefined;
-            var user_time: std.os.windows.FILETIME = undefined;
-
-            if (stdx.windows.GetProcessTimes(
-                std.os.windows.kernel32.GetCurrentProcess(),
-                &creation_time,
-                &exit_time,
-                &kernel_time,
-                &user_time,
-            ) == std.os.windows.FALSE) {
-                std.debug.panic("GetProcessTimes(): {}", .{std.os.windows.kernel32.GetLastError()});
-            }
-
-            const utime100ns = (@as(u64, user_time.dwHighDateTime) << 32) | user_time.dwLowDateTime;
-            return utime100ns * 100;
-        }
-
-        const utime_tv = std.posix.getrusage(std.posix.rusage.SELF).utime;
-        return (@as(u128, @intCast(utime_tv.sec)) * std.time.ns_per_s) +
-            (@as(u32, @intCast(utime_tv.usec)) * std.time.ns_per_us);
-    }
-};
-
 // shuffle([0,1,…,n-1])
-fn shuffled_index(comptime n: usize, prng: *stdx.PRNG) [n]usize {
-    var indices: [n]usize = undefined;
-    for (&indices, 0..) |*i, j| i.* = j;
-    prng.shuffle(usize, indices[0..]);
-    return indices;
+fn shuffled_index(prng: *stdx.PRNG, indices: []usize) void {
+    for (indices, 0..) |*i, j| i.* = j;
+    prng.shuffle(usize, indices);
 }

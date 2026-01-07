@@ -1634,7 +1634,7 @@ pub fn ReplicaType(
             switch (header.into_any()) {
                 .prepare => |header_prepare| if (self.journal.writes.available() == 0) {
                     log.warn("{}: on_messages: suspending command=prepare " ++
-                        "op={} view={} checksum={}", .{
+                        "op={} view={} checksum={x:0>32}", .{
                         self.log_prefix(),
                         header_prepare.op,
                         header_prepare.view,
@@ -1647,7 +1647,7 @@ pub fn ReplicaType(
                         self.syncing == .updating_checkpoint)
                     {
                         log.warn("{}: on_messages: suspending command=block " ++
-                            "address={} checksum={}", .{
+                            "address={} checksum={x:0>32}", .{
                             self.log_prefix(),
                             header_block.address,
                             header_block.checksum,
@@ -2140,7 +2140,7 @@ pub fn ReplicaType(
             // We must advance our op and set the header as dirty before replicating and
             // journalling. The primary needs this before its journal is outrun by any
             // prepare_ok quorum:
-            log.debug("{}: on_prepare: advancing: op={}..{} checksum={}..{}", .{
+            log.debug("{}: on_prepare: advancing: op={}..{} checksum={x:0>32}..{x:0>32}", .{
                 self.log_prefix(),
                 self.op,
                 message.header.op,
@@ -2176,7 +2176,7 @@ pub fn ReplicaType(
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
-                log.debug("{}: on_prepare_ok: not preparing op={} checksum={}", .{
+                log.debug("{}: on_prepare_ok: not preparing op={} checksum={x:0>32}", .{
                     self.log_prefix(),
                     message.header.op,
                     message.header.prepare_checksum,
@@ -2219,7 +2219,7 @@ pub fn ReplicaType(
             assert(!prepare.ok_quorum_received);
             prepare.ok_quorum_received = true;
 
-            log.debug("{}: on_prepare_ok: quorum received, context={}", .{
+            log.debug("{}: on_prepare_ok: quorum received, prepare_checksum={x:0>32}", .{
                 self.log_prefix(),
                 prepare.message.header.checksum,
             });
@@ -2989,7 +2989,7 @@ pub fn ReplicaType(
                 message.header.prepare_op,
                 checksum,
             )) |prepare| {
-                log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
+                log.debug("{}: on_request_prepare: op={} checksum={x:0>32} reply from pipeline", .{
                     self.log_prefix(),
                     message.header.prepare_op,
                     checksum,
@@ -3020,7 +3020,7 @@ pub fn ReplicaType(
                     },
                 );
             } else {
-                log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
+                log.debug("{}: on_request_prepare: op={} checksum={x:0>32} missing", .{
                     self.log_prefix(),
                     message.header.prepare_op,
                     checksum,
@@ -3042,7 +3042,8 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(destination_replica != self.replica);
 
-            log.debug("{}: on_request_prepare_read: op={} checksum={} sending to replica={}", .{
+            log.debug("{}: on_request_prepare_read: " ++
+                "op={} checksum={x:0>32} sending to replica={}", .{
                 self.log_prefix(),
                 message.header.op,
                 message.header.checksum,
@@ -3123,7 +3124,7 @@ pub fn ReplicaType(
 
             if (entry.header.checksum != message.header.reply_checksum) {
                 log.debug("{}: on_request_reply: ignoring, reply not in table " ++
-                    "(requested={} stored={})", .{
+                    "(requested={x:0>32} stored={x:0>32})", .{
                     self.log_prefix(),
                     message.header.reply_checksum,
                     entry.header.checksum,
@@ -3166,7 +3167,7 @@ pub fn ReplicaType(
             const self: *Replica = @fieldParentPtr("client_replies", client_replies);
             const reply = reply_ orelse {
                 log.debug("{}: on_request_reply: reply not found for replica={} " ++
-                    "(op={} checksum={})", .{
+                    "(op={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     destination_replica.?,
                     reply_header.op,
@@ -3182,7 +3183,8 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.checksum == reply_header.checksum);
 
-            log.debug("{}: on_request_reply: sending reply to replica={} (op={} checksum={})", .{
+            log.debug("{}: on_request_reply: sending reply to replica={} " ++
+                "(op={} checksum={x:0>32})", .{
                 self.log_prefix(),
                 destination_replica.?,
                 reply_header.op,
@@ -3253,7 +3255,7 @@ pub fn ReplicaType(
                         read.destination == message.header.replica)
                     {
                         log.debug("{}: on_request_blocks: ignoring block request;" ++
-                            " already reading (destination={} address={} checksum={})", .{
+                            " already reading (destination={} address={} checksum={x:0>32})", .{
                             self.log_prefix(),
                             message.header.replica,
                             request.block_address,
@@ -3275,7 +3277,7 @@ pub fn ReplicaType(
                 };
 
                 log.debug("{}: on_request_blocks: reading block " ++
-                    "(replica={} address={} checksum={})", .{
+                    "(replica={} address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.replica,
                     request.block_address,
@@ -3317,7 +3319,7 @@ pub fn ReplicaType(
 
             if (result != .valid) {
                 log.debug("{}: on_request_blocks: error: {s}: " ++
-                    "(destination={} address={} checksum={})", .{
+                    "(destination={} address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     @tagName(result),
                     read.destination,
@@ -3327,7 +3329,8 @@ pub fn ReplicaType(
                 return;
             }
 
-            log.debug("{}: on_request_blocks: success: (destination={} address={} checksum={})", .{
+            log.debug("{}: on_request_blocks: success: " ++
+                "(destination={} address={} checksum={x:0>32})", .{
                 self.log_prefix(),
                 read.destination,
                 grid_read.address,
@@ -3354,7 +3357,7 @@ pub fn ReplicaType(
             assert(self.grid_repair_writes.available() > 0);
 
             if (self.release.value < message.header.release.value) {
-                log.debug("{}: on_block: ignoring; release={} (address={} checksum={})", .{
+                log.debug("{}: on_block: ignoring; release={} (address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.release,
                     message.header.address,
@@ -3366,7 +3369,8 @@ pub fn ReplicaType(
             if (self.grid.callback == .cancel) {
                 assert(self.grid.read_global_queue.empty());
 
-                log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={})", .{
+                log.debug("{}: on_block: ignoring; grid is canceling " ++
+                    "(address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
@@ -3380,7 +3384,7 @@ pub fn ReplicaType(
             if (grid_fulfill) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
-                log.debug("{}: on_block: fulfilled address={} checksum={} {s}", .{
+                log.debug("{}: on_block: fulfilled address={} checksum={x:0>32} {s}", .{
                     self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
@@ -3397,7 +3401,7 @@ pub fn ReplicaType(
                 const write_index = self.grid_repair_writes.index(write);
                 const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
 
-                log.debug("{}: on_block: repairing address={} checksum={} {s}", .{
+                log.debug("{}: on_block: repairing address={} checksum={x:0>32} {s}", .{
                     self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
@@ -3428,7 +3432,8 @@ pub fn ReplicaType(
                     self.send_request_blocks();
                 }
             } else {
-                log.debug("{}: on_block: ignoring; block not needed (address={} checksum={})", .{
+                log.debug("{}: on_block: ignoring; block not needed " ++
+                    "(address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
@@ -3442,6 +3447,7 @@ pub fn ReplicaType(
             defer {
                 self.grid_repair_writes.release(write);
             }
+
             log.debug("{}: on_block: repair done address={}", .{
                 self.log_prefix(),
                 grid_write.address,
@@ -4554,7 +4560,8 @@ pub fn ReplicaType(
                 }
 
                 if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
-                    log.debug("{}: commit_start_journal: cached prepare op={} checksum={}", .{
+                    log.debug("{}: commit_start_journal: " ++
+                        "cached prepare op={} checksum={x:0>32}", .{
                         self.log_prefix(),
                         op,
                         header.checksum,
@@ -5168,20 +5175,10 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
-
-            const commit_completion_time_local = self.clock.monotonic()
-                .duration_since(self.commit_started.?);
-            self.commit_started = null;
-            if (commit_completion_time_local.to_ms() >
-                constants.client_request_completion_warn_ms)
-            {
-                log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
-                    self.log_prefix(),
-                    self.commit_prepare.?.header.request,
-                    self.commit_prepare.?.header.size,
-                    self.commit_prepare.?.header.operation.tag_name(StateMachine.Operation),
-                    commit_completion_time_local.to_ms(),
-                });
+            defer {
+                self.message_bus.unref(self.commit_prepare.?);
+                self.commit_started = null;
+                self.commit_prepare = null;
             }
 
             // This is the timestamp from when the primary first saw the request to now. It
@@ -5193,6 +5190,8 @@ pub fn ReplicaType(
                 .ns = @as(u64, @intCast(self.clock.realtime())) -|
                     self.commit_prepare.?.header.timestamp,
             };
+            const commit_completion_time_local = self.clock.monotonic()
+                .duration_since(self.commit_started.?);
 
             // Only time operations when:
             // * Running with the real state machine - as otherwise there's a circular dependency,
@@ -5214,9 +5213,6 @@ pub fn ReplicaType(
                     );
                 }
             }
-
-            self.message_bus.unref(self.commit_prepare.?);
-            self.commit_prepare = null;
         }
 
         // For each op, in addition to the primary, a randomly chosen backup also sends a reply
@@ -5281,7 +5277,8 @@ pub fn ReplicaType(
                 }
             }
 
-            log.debug("{}: execute_op: executing view={} primary={} op={} checksum={} ({s})", .{
+            log.debug("{}: execute_op: " ++
+                "executing view={} primary={} op={} checksum={x:0>32} ({s})", .{
                 self.log_prefix(),
                 self.view,
                 self.primary_index(self.view) == self.replica,
@@ -6818,7 +6815,7 @@ pub fn ReplicaType(
             assert(header.op <= self.op_prepare_max() or
                 vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max));
 
-            log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
+            log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={x:0>32}..{x:0>32}", .{
                 self.log_prefix(),
                 self.op,
                 header.op - 1,
@@ -7158,7 +7155,7 @@ pub fn ReplicaType(
 
             defer self.message_bus.unref(request.message);
 
-            log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
+            log.debug("{}: primary_pipeline_prepare: request checksum={x:0>32} client={}", .{
                 self.log_prefix(),
                 request.message.header.checksum,
                 request.message.header.client,
@@ -7264,7 +7261,7 @@ pub fn ReplicaType(
             const size_ceil = vsr.sector_ceil(message.header.size);
             assert(stdx.zeroed(message.buffer[message.header.size..size_ceil]));
 
-            log.debug("{}: primary_pipeline_prepare: prepare checksum={} op={}", .{
+            log.debug("{}: primary_pipeline_prepare: prepare checksum={x:0>32} op={}", .{
                 self.log_prefix(),
                 message.header.checksum,
                 message.header.op,
@@ -7622,7 +7619,7 @@ pub fn ReplicaType(
             if (self.syncing == .updating_checkpoint) return false;
 
             if (header.view > self.view) {
-                log.debug("{}: repair_header: op={} checksum={} view={} (newer view)", .{
+                log.debug("{}: repair_header: op={} checksum={x:0>32} view={} (newer view)", .{
                     self.log_prefix(),
                     header.op,
                     header.checksum,
@@ -7632,7 +7629,8 @@ pub fn ReplicaType(
             }
 
             if (header.op > self.op) {
-                log.debug("{}: repair_header: op={} checksum={} (advances hash chain head)", .{
+                log.debug("{}: repair_header: op={} checksum={x:0>32} " ++
+                    "(advances hash chain head)", .{
                     self.log_prefix(),
                     header.op,
                     header.checksum,
@@ -7640,7 +7638,8 @@ pub fn ReplicaType(
                 return false;
             } else if (header.op == self.op and !self.journal.has_header(header)) {
                 assert(self.journal.header_with_op(self.op) != null);
-                log.debug("{}: repair_header: op={} checksum={} (changes hash chain head)", .{
+                log.debug("{}: repair_header: op={} checksum={x:0>32} " ++
+                    "(changes hash chain head)", .{
                     self.log_prefix(),
                     header.op,
                     header.checksum,
@@ -7651,7 +7650,7 @@ pub fn ReplicaType(
             if (header.op < self.op_repair_min()) {
                 // Slots too far back belong to the next wrap of the log.
                 log.debug(
-                    "{}: repair_header: op={} checksum={} (precedes op_repair_min={})",
+                    "{}: repair_header: op={} checksum={x:0>32} (precedes op_repair_min={})",
                     .{ self.log_prefix(), header.op, header.checksum, self.op_repair_min() },
                 );
                 return false;
@@ -7659,14 +7658,14 @@ pub fn ReplicaType(
 
             if (self.journal.has_header(header)) {
                 if (self.journal.has_prepare(header)) {
-                    log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
+                    log.debug("{}: repair_header: op={} checksum={x:0>32} (checksum clean)", .{
                         self.log_prefix(),
                         header.op,
                         header.checksum,
                     });
                     return false;
                 } else {
-                    log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
+                    log.debug("{}: repair_header: op={} checksum={x:0>32} (checksum dirty)", .{
                         self.log_prefix(),
                         header.op,
                         header.checksum,
@@ -7678,13 +7677,15 @@ pub fn ReplicaType(
                     // We expect that the same view and op would have had the same checksum.
                     assert(existing.op != header.op);
                     if (existing.op > header.op) {
-                        log.debug("{}: repair_header: op={} checksum={} (same view, newer op)", .{
+                        log.debug("{}: repair_header: op={} checksum={x:0>32} " ++
+                            "(same view, newer op)", .{
                             self.log_prefix(),
                             header.op,
                             header.checksum,
                         });
                     } else {
-                        log.debug("{}: repair_header: op={} checksum={} (same view, older op)", .{
+                        log.debug("{}: repair_header: op={} checksum={x:0>32} " ++
+                            "(same view, older op)", .{
                             self.log_prefix(),
                             header.op,
                             header.checksum,
@@ -7693,14 +7694,14 @@ pub fn ReplicaType(
                 } else {
                     assert(existing.view != header.view);
 
-                    log.debug("{}: repair_header: op={} checksum={} (different view)", .{
+                    log.debug("{}: repair_header: op={} checksum={x:0>32} (different view)", .{
                         self.log_prefix(),
                         header.op,
                         header.checksum,
                     });
                 }
             } else {
-                log.debug("{}: repair_header: op={} checksum={} (gap)", .{
+                log.debug("{}: repair_header: op={} checksum={x:0>32} (gap)", .{
                     self.log_prefix(),
                     header.op,
                     header.checksum,
@@ -7719,7 +7720,8 @@ pub fn ReplicaType(
                 // We cannot replace this op until we are sure that this would not:
                 // 1. undermine any prior prepare_ok guarantee made to the primary, and
                 // 2. leak stale ops back into our in-memory headers (and so into a view change).
-                log.debug("{}: repair_header: op={} checksum={} (disconnected from hash chain)", .{
+                log.debug("{}: repair_header: op={} checksum={x:0>32} " ++
+                    "(disconnected from hash chain)", .{
                     self.log_prefix(),
                     header.op,
                     header.checksum,
@@ -7916,7 +7918,7 @@ pub fn ReplicaType(
 
             const op = self.primary_repair_pipeline_op().?;
             const op_checksum = self.journal.header_with_op(op).?.checksum;
-            log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
+            log.debug("{}: primary_repair_pipeline_read: op={} checksum={x:0>32}", .{
                 self.log_prefix(),
                 op,
                 op_checksum,
@@ -8010,7 +8012,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            log.debug("{}: repair_pipeline_read_callback: op={} checksum={}", .{
+            log.debug("{}: repair_pipeline_read_callback: op={} checksum={x:0>32}", .{
                 self.log_prefix(),
                 prepare.?.header.op,
                 prepare.?.header.checksum,
@@ -8179,7 +8181,7 @@ pub fn ReplicaType(
                 // We may be appending to or repairing the journal concurrently.
                 // We do not want to re-request any of these prepares unnecessarily.
                 if (self.journal.writing(header) == .exact) {
-                    log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
+                    log.debug("{}: repair_prepare: op={} checksum={x:0>32} (already writing)", .{
                         self.log_prefix(),
                         op,
                         checksum,
@@ -8211,7 +8213,8 @@ pub fn ReplicaType(
 
                         // This op won't start writing until all ops in the pipeline preceding it
                         // have been written.
-                        log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
+                        log.debug("{}: repair_prepare: op={} checksum={x:0>32} " ++
+                            "(serializing append)", .{
                             self.log_prefix(),
                             op,
                             checksum,
@@ -8221,7 +8224,7 @@ pub fn ReplicaType(
                         return false;
                     }
 
-                    log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
+                    log.debug("{}: repair_prepare: op={} checksum={x:0>32} (from pipeline)", .{
                         self.log_prefix(),
                         op,
                         checksum,
@@ -8257,7 +8260,8 @@ pub fn ReplicaType(
                 };
 
                 log.debug(
-                    "{}: repair_prepare: op={} checksum={} replica={} latency={}ms ({s}, {s}, {s})",
+                    "{}: repair_prepare: op={} checksum={x:0>32} replica={} latency={}ms " ++
+                        "({s}, {s}, {s})",
                     .{
                         self.log_prefix(),
                         op,
@@ -8536,7 +8540,7 @@ pub fn ReplicaType(
             assert(header.op <= self.op);
 
             if (self.journal.has_prepare(header)) {
-                log.debug("{}: send_prepare_ok: op={} checksum={}", .{
+                log.debug("{}: send_prepare_ok: op={} checksum={x:0>32}", .{
                     self.log_prefix(),
                     header.op,
                     header.checksum,
@@ -9662,7 +9666,7 @@ pub fn ReplicaType(
                     // repair_header() will not repair a header if the hash chain has a gap.
                     if (header.op <= message.header.commit_min) {
                         log.debug(
-                            "{}: on_do_view_change: committed: replica={} op={} checksum={}",
+                            "{}: on_do_view_change: committed: replica={} op={} checksum={x:0>32}",
                             .{
                                 self.log_prefix(),
                                 message.header.replica,
@@ -9707,7 +9711,7 @@ pub fn ReplicaType(
                 const dvc_present = BitSet{ .bits = dvc.header.present_bitset };
                 for (dvc_headers.slice, 0..) |*header, i| {
                     log.debug("{}: {s}: dvc: header: " ++
-                        "replica={} op={} checksum={} nack={} present={} type={s}", .{
+                        "replica={} op={} checksum={x:0>32} nack={} present={} type={s}", .{
                         self.log_prefix(),
                         context,
                         dvc.header.replica,
@@ -9751,7 +9755,7 @@ pub fn ReplicaType(
                     assert(prepare.ok_from_all_replicas.empty());
 
                     log.debug("{}: start_view_as_the_new_primary: pipeline " ++
-                        "(op={} checksum={x} parent={x})", .{
+                        "(op={} checksum={x:0>32} parent={x:0>32})", .{
                         self.log_prefix(),
                         prepare.message.header.op,
                         prepare.message.header.checksum,
@@ -10644,8 +10648,8 @@ pub fn ReplicaType(
                 if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
                     table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
                 {
-                    log.debug("{}: sync_enqueue_tables: " ++
-                        "request address={} checksum={} level={} snapshot_min={} ({}..{})", .{
+                    log.debug("{}: sync_enqueue_tables: request " ++
+                        "address={} checksum={x:0>32} level={} snapshot_min={} ({}..{})", .{
                         self.log_prefix(),
                         table_info.address,
                         table_info.checksum,
@@ -10727,7 +10731,7 @@ pub fn ReplicaType(
             while (self.grid.blocks_missing.reclaim_table()) |table| {
                 log.info(
                     "{}: sync_reclaim_tables: table synced or canceled: " ++
-                        "address={} checksum={} wrote={}/{?}",
+                        "address={} checksum={x:0>32} wrote={}/{?}",
                     .{
                         self.log_prefix(),
                         table.table_info.address,
@@ -11078,7 +11082,7 @@ pub fn ReplicaType(
             assert(message.header.op >= self.op_repair_min());
 
             if (!self.journal.has_header(message.header)) {
-                log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
+                log.debug("{}: write_prepare: ignoring op={} checksum={x:0>32} (header changed)", .{
                     self.log_prefix(),
                     message.header.op,
                     message.header.checksum,
@@ -11090,7 +11094,7 @@ pub fn ReplicaType(
                 .none => {},
                 .slot, .exact => |reason| {
                     log.debug(
-                        "{}: write_prepare: ignoring op={} checksum={} (already writing {s})",
+                        "{}: write_prepare: ignoring op={} checksum={x:0>32} (already writing {s})",
                         .{
                             self.log_prefix(),
                             message.header.op,
@@ -11185,7 +11189,7 @@ pub fn ReplicaType(
             for (requests_buffer[0..requests_count]) |*request| {
                 assert(!self.grid.free_set.is_free(request.block_address));
 
-                log.debug("{}: send_request_blocks: request address={} checksum={}", .{
+                log.debug("{}: send_request_blocks: request address={} checksum={x:0>32}", .{
                     self.log_prefix(),
                     request.block_address,
                     request.block_checksum,

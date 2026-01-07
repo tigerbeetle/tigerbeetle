@@ -77,6 +77,7 @@ fn run_protocol_test(gpa: std.mem.Allocator, options: struct { host: std.net.Add
         stdx.unique_u128(),
     });
     defer gpa.free(testing_queue);
+
     context.queue_declare(.{
         .queue = testing_queue, // Creating the queue.
         .passive = false,
@@ -192,6 +193,7 @@ fn run_protocol_test(gpa: std.mem.Allocator, options: struct { host: std.net.Add
         stdx.unique_u128(),
     });
     defer gpa.free(progress_queue);
+
     context.queue_declare(.{
         .queue = progress_queue,
         .passive = false,
@@ -276,6 +278,7 @@ fn run_serialization_test(
         stdx.unique_u128(),
     });
     defer gpa.free(queue);
+
     context.queue_declare(.{
         .queue = queue,
         .passive = false,
@@ -372,6 +375,7 @@ fn run_cdc_test(
     var amqp_context: AmqpContext = undefined;
     try amqp_context.init(gpa);
     defer amqp_context.deinit(gpa);
+
     try amqp_context.connect(options.host);
 
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -466,6 +470,7 @@ fn run_cdc_test(
         };
         assert(events.len > 0);
         defer timestamp_previous = events[events.len - 1].timestamp;
+
         for (events) |*event| {
             // Keep track of how many transfers will expire:
             switch (event.type) {
@@ -624,6 +629,7 @@ const AmqpContext = struct {
         assert(!self.busy);
         assert(self.message == null);
         defer self.message = null;
+
         self.busy = true;
         self.client.get_message(&get_message_header_callback, options);
         self.wait();

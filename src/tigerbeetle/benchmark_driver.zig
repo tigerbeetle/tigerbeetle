@@ -150,6 +150,7 @@ const TigerBeetleProcess = struct {
         _ = self.child.wait() catch {};
 
         defer self.* = undefined;
+
         return self.child.resource_usage_statistics;
     }
 };

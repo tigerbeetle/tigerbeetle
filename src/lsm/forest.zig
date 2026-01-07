@@ -348,6 +348,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         pub fn reset(forest: *Forest) void {
+            // Components using the node_pool must release all nodes they acquired upon reset.
+            defer assert(forest.node_pool.free.count() == forest.node_pool.free.bit_length);
+
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).reset();
             }
@@ -358,7 +361,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.grid.trace.cancel(.scan_tree_level);
 
             forest.manifest_log.reset();
-            forest.node_pool.reset();
             forest.scan_buffer_pool.reset();
             forest.compaction_schedule.reset();
 

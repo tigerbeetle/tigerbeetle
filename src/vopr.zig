@@ -88,9 +88,8 @@ const CLIArgs = struct {
     replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
 
-    positional: struct {
-        seed: ?[]const u8 = null,
-    },
+    @"--": void,
+    seed: ?[]const u8 = null,
 };
 
 pub fn main() !void {
@@ -128,7 +127,7 @@ pub fn main() !void {
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
-        const seed_argument = cli_args.positional.seed orelse break :seed_from_arg seed_random;
+        const seed_argument = cli_args.seed orelse break :seed_from_arg seed_random;
         break :seed_from_arg vsr.testing.parse_seed(seed_argument);
     };
 
@@ -177,11 +176,11 @@ pub fn main() !void {
         \\          request_probability={}
         \\          idle_on_probability={}
         \\          idle_off_probability={}
-        \\          one_way_delay_mean={} ticks
-        \\          one_way_delay_min={} ticks
+        \\          one_way_delay_mean={}
+        \\          one_way_delay_min={}
         \\          packet_loss_probability={}
         \\          path_maximum_capacity={} messages
-        \\          path_clog_duration_mean={} ticks
+        \\          path_clog_duration_mean={}
         \\          path_clog_probability={}
         \\          packet_replay_probability={}
         \\          partition_mode={s}
@@ -1180,7 +1179,7 @@ pub const Simulator = struct {
                 v.value_ptr.set(replica.replica);
 
                 log.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} corrupt={} (remote read)", .{
+                    "missing address={} checksum={x:0>32} corrupt={} (remote read)", .{
                     replica.replica,
                     faulty_read.address,
                     faulty_read.checksum,
@@ -1199,7 +1198,7 @@ pub const Simulator = struct {
                 v.value_ptr.set(replica.replica);
 
                 log.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} corrupt={} (GridBlocksMissing)", .{
+                    "missing address={} checksum={x:0>32} corrupt={} (GridBlocksMissing)", .{
                     replica.replica,
                     fault.key_ptr.*,
                     fault.value_ptr.checksum,
@@ -1232,7 +1231,7 @@ pub const Simulator = struct {
                 const block = storage.grid_block(block_missing.address) orelse continue;
                 const block_header = schema.header_from_block(block);
                 if (block_header.checksum == block_missing.checksum) {
-                    log.err("{}: core_missing_blocks: found address={} checksum={}", .{
+                    log.err("{}: core_missing_blocks: found address={} checksum={x:0>32}", .{
                         replica.replica,
                         block_missing.address,
                         block_missing.checksum,

@@ -103,7 +103,8 @@ pub fn QuorumsType(comptime options: Options) type {
 
             for (quorums.slice()) |quorum| {
                 if (quorum.copies.full()) {
-                    log.debug("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
+                    log.debug("quorum: checksum={x:0>32} parent={x:0>32} sequence={} count={} " ++
+                        "valid={}", .{
                         quorum.header.checksum,
                         quorum.header.parent,
                         quorum.header.sequence,
@@ -111,7 +112,8 @@ pub fn QuorumsType(comptime options: Options) type {
                         quorum.valid,
                     });
                 } else {
-                    log.warn("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
+                    log.warn("quorum: checksum={x:0>32} parent={x:0>32} sequence={} count={} " ++
+                        "valid={}", .{
                         quorum.header.checksum,
                         quorum.header.parent,
                         quorum.header.sequence,
@@ -209,7 +211,7 @@ pub fn QuorumsType(comptime options: Options) type {
             }
 
             if (copy.copy == slot) {
-                log.debug("copy: {}/{}: checksum={x} parent={x} sequence={}", .{
+                log.debug("copy: {}/{}: checksum={x:0>32} parent={x:0>32} sequence={}", .{
                     slot,
                     options.superblock_copies,
                     copy.checksum,
@@ -217,7 +219,8 @@ pub fn QuorumsType(comptime options: Options) type {
                     copy.sequence,
                 });
             } else if (copy.copy >= options.superblock_copies) {
-                log.warn("copy: {}/{}: checksum={x} parent={x} sequence={} corrupt copy={}", .{
+                log.warn("copy: {}/{}: checksum={x:0>32} parent={x:0>32} sequence={} " ++
+                    "corrupt copy={}", .{
                     slot,
                     options.superblock_copies,
                     copy.checksum,
@@ -229,7 +232,8 @@ pub fn QuorumsType(comptime options: Options) type {
                 // If our read was misdirected, we definitely still want to count the copy.
                 // We must just be careful to count it idempotently.
                 log.warn(
-                    "copy: {}/{}: checksum={x} parent={x} sequence={} misdirected from copy={}",
+                    "copy: {}/{}: checksum={x:0>32} parent={x:0>32} sequence={} " ++
+                        "misdirected from copy={}",
                     .{
                         slot,
                         options.superblock_copies,

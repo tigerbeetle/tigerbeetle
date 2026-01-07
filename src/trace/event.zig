@@ -597,6 +597,7 @@ test "EventMetric slot doesn't have collisions" {
     const allocator = std.testing.allocator;
     var stacks: std.ArrayListUnmanaged(u32) = .{};
     defer stacks.deinit(allocator);
+
     var g: @import("../testing/exhaustigen.zig") = .{};
     while (!g.done()) {
         const event: EventMetric = switch (g.enum_value(EventMetric.Tag)) {
@@ -627,6 +628,7 @@ test "EventTiming slot doesn't have collisions" {
     const allocator = std.testing.allocator;
     var stacks: std.ArrayListUnmanaged(u32) = .{};
     defer stacks.deinit(allocator);
+
     var g: @import("../testing/exhaustigen.zig") = .{};
     while (!g.done()) {
         const event: EventTiming = switch (g.enum_value(Event.Tag)) {

@@ -394,7 +394,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 }
             }
 
-            log.debug("{}: opened: checksum={} address={} entries={}", .{
+            log.debug("{}: opened: checksum={x:0>32} address={} entries={}", .{
                 manifest_log.superblock.replica_index.?,
                 block_checksum,
                 block_address,
@@ -496,7 +496,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks.count - manifest_log.blocks_closed == 1);
 
             log.debug(
-                "{}: {s}: level={} tree={} checksum={} address={} snapshot={}..{}",
+                "{}: {s}: level={} tree={} checksum={x:0>32} address={} snapshot={}..{}",
                 .{
                     manifest_log.superblock.replica_index.?,
                     @tagName(table.label.event),
@@ -621,7 +621,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 assert(block_schema.entry_count == schema.ManifestNode.entry_count_max);
             }
 
-            log.debug("{}: write_block: checksum={} address={} entries={}", .{
+            log.debug("{}: write_block: checksum={x:0>32} address={} entries={}", .{
                 manifest_log.superblock.replica_index.?,
                 header.checksum,
                 header.address,
@@ -806,7 +806,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 }
             }
 
-            log.debug("{}: compacted: checksum={} address={} free={}/{}", .{
+            log.debug("{}: compacted: checksum={x:0>32} address={} free={}/{}", .{
                 manifest_log.superblock.replica_index.?,
                 oldest_checksum,
                 oldest_address,
@@ -975,7 +975,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.log_block_checksums.push_assume_capacity(header.checksum);
             manifest_log.log_block_addresses.push_assume_capacity(header.address);
 
-            log.debug("{}: close_block: checksum={} address={} entries={}/{}", .{
+            log.debug("{}: close_block: checksum={x:0>32} address={} entries={}/{}", .{
                 manifest_log.superblock.replica_index.?,
                 header.checksum,
                 header.address,
