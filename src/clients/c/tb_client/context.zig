@@ -198,8 +198,14 @@ pub fn ContextType(
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
+
+        // The client and message pool are only accessed on the I/O thread.
+        // Access must be protected by checking `eviction_deinited`.
+        // They are deinitialized after eviction to close the connection to the server,
+        // which allows the server to release the session.
         message_pool: MessagePool,
         client: Client,
+
         batch_size_limit: ?u32,
 
         completion_callback: CompletionCallback,
@@ -211,6 +217,7 @@ pub fn ContextType(
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
+        client_deinited: bool,
         thread: std.Thread,
 
         previous_request_instant: ?stdx.Instant = null,
@@ -341,6 +348,7 @@ pub fn ContextType(
             context.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
+            context.client_deinited = false;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.signal_notify_callback);
@@ -372,14 +380,22 @@ pub fn ContextType(
         }
 
         fn tick(self: *Context) void {
-            if (self.eviction_reason == null) {
-                self.client.tick();
-            }
+            if (self.eviction_reason != null) return;
+            self.client.tick();
         }
 
         fn io_thread(self: *Context) void {
             while (self.signal.status() != .stopped) {
                 self.tick();
+
+                // If eviction happened, deinit now to disconnect from server.
+                // This can be set during tick() or during the previous io.run_for_ns().
+                if (self.eviction_reason != null and !self.client_deinited) {
+                    self.client.deinit(self.gpa.allocator());
+                    self.message_pool.deinit(self.gpa.allocator());
+                    self.client_deinited = true;
+                }
+
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
                         self.client_id,
@@ -403,14 +419,22 @@ pub fn ContextType(
 
             self.io.cancel_all();
             self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
+
+            if (!self.client_deinited) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+            }
+
             self.io.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
+            // NB. This is called from `client_eviction_callback` after `eviction_reason` is set
+            // but before the client is deinited. `packet_cancel` needs `eviction_reason` set
+            // in order to return the correct error status to the user.
+            assert(self.eviction_reason != null);
             if (self.client.request_inflight) |*inflight| {
                 assert(inflight.message.header.operation != .register);
                 const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
@@ -578,7 +602,6 @@ pub fn ContextType(
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
             assert(self.batch_size_limit != null);
-            assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
 
             // On shutdown, cancel this packet as well as any others batched onto it.
@@ -590,6 +613,8 @@ pub fn ContextType(
             if (self.eviction_reason != null) {
                 return self.packet_cancel(packet_list);
             }
+
+            assert(self.client.request_inflight == null);
 
             const message = self.client.get_message().build(.request);
             defer {
@@ -695,6 +720,7 @@ pub fn ContextType(
 
             // Don't send any requests until registration completes.
             if (self.batch_size_limit == null) {
+                assert(self.eviction_reason == null);
                 assert(self.client.request_inflight != null);
                 assert(self.client.request_inflight.?.message.header.operation == .register);
                 return;
@@ -736,6 +762,7 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            assert(self.eviction_reason == null);
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
@@ -768,11 +795,19 @@ pub fn ContextType(
             // to this callback, or for client to call both callbacks.
             self.cancel_request_inflight();
 
-            // Cancel every packet.
+            // Cancel every pending packet.
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
                 self.packet_cancel(packet);
             }
+
+            // We need to deinit the client so that it disconnects from the server,
+            // freeing resources for other clients.
+            // But we can't do it here because this is inside a client callback.
+            // When we return to the tick method we'll deinit.
+
+            // Trigger signal_notify_callback to drain submitted packets.
+            self.signal.notify();
         }
 
         fn client_result_callback(
