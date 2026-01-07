@@ -198,8 +198,14 @@ pub fn ContextType(
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
+
+        // The client and message pool are only accessed on the I/O thread.
+        // Access must be protected by checking `eviction_reason == null`.
+        // They are deinitialized after eviction to close the connection to the server,
+        // which allows the server to release the session.
         message_pool: MessagePool,
         client: Client,
+
         batch_size_limit: ?u32,
 
         completion_callback: CompletionCallback,
@@ -402,14 +408,25 @@ pub fn ContextType(
 
             self.io.cancel_all();
             self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
+
+            // Client and message pool are already deinited if evicted.
+            if (self.eviction_reason == null) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+            }
+
             self.io.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
+            // NB. This is the one place where we can access `self.client`
+            // while `self.eviction_reason != null`. It is previously
+            // set by `client_eviction_callback`, which is about to delete the client
+            // after we cancel this request. `packet_cancel` needs `eviction_reason`
+            // set in order to return the correct error. Awkward stuff.
+            assert(self.eviction_reason != null);
             if (self.client.request_inflight) |*inflight| {
                 assert(inflight.message.header.operation != .register);
                 const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
@@ -577,7 +594,6 @@ pub fn ContextType(
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
             assert(self.batch_size_limit != null);
-            assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
 
             // On shutdown, cancel this packet as well as any others batched onto it.
@@ -589,6 +605,8 @@ pub fn ContextType(
             if (self.eviction_reason != null) {
                 return self.packet_cancel(packet_list);
             }
+
+            assert(self.client.request_inflight == null);
 
             const message = self.client.get_message().build(.request);
             defer {
@@ -694,6 +712,7 @@ pub fn ContextType(
 
             // Don't send any requests until registration completes.
             if (self.batch_size_limit == null) {
+                assert(self.eviction_reason == null);
                 assert(self.client.request_inflight != null);
                 assert(self.client.request_inflight.?.message.header.operation == .register);
                 return;
@@ -735,6 +754,7 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            assert(self.eviction_reason == null);
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
@@ -767,11 +787,17 @@ pub fn ContextType(
             // to this callback, or for client to call both callbacks.
             self.cancel_request_inflight();
 
-            // Cancel every packet.
+            // Cancel every pending packet.
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
                 self.packet_cancel(packet);
             }
+
+            // Deinit the client and message pool immediately to release the
+            // connection while keeping the IO thread running to service any
+            // remaining submitted packets (by canceling them).
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
         }
 
         fn client_result_callback(
