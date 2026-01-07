@@ -476,7 +476,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         // endsection:imported-events
     }
 
-    Ok(())
     // section:imports
+    Ok(())
 }
 // endsection:imports
