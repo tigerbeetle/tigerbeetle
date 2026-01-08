@@ -266,7 +266,7 @@ fn build_tigerbeetle_target(
         const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
             .sha = info.sha,
         });
-        break :commit_date_time stdx.DateTimeUTC.from_timestamp_s(
+        break :commit_date_time stdx.InstantUnix.from_timestamp_s(
             try std.fmt.parseInt(u64, timestamp_s, 10),
         );
     };

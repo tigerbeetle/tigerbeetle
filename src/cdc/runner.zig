@@ -1054,9 +1054,7 @@ const Metrics = struct {
                     summary.event_count,
                     event_rate,
                     timestamp_last,
-                    stdx.DateTimeUTC.from_timestamp_ms(
-                        @divTrunc(timestamp_last, std.time.ns_per_ms),
-                    ),
+                    stdx.InstantUnix{ .ns = timestamp_last },
                 });
             }
             summary.* = .{

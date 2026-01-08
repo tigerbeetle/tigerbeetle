@@ -1039,7 +1039,8 @@ pub fn unzip_executable(
     }
 }
 
-fn unix_to_dos_timestamp(date_time: stdx.DateTimeUTC) struct { time: u16, date: u16 } {
+fn unix_to_dos_timestamp(instant_unix: stdx.InstantUnix) struct { time: u16, date: u16 } {
+    const date_time = instant_unix.date_time();
     assert(date_time.year >= 1980 and date_time.year <= 2107);
 
     const time: u16 =
@@ -1060,7 +1061,7 @@ pub fn zip_executable(
     zip_file: std.fs.File,
     input: struct {
         executable_name: []const u8,
-        executable_mtime: stdx.DateTimeUTC,
+        executable_mtime: stdx.InstantUnix,
         max_size: u64,
     },
 ) !void {
