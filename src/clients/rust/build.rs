@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
         ("x86_64", "linux", "musl") => "x86_64-linux-musl",
         ("x86_64", "macos", "") => "x86_64-macos",
         ("x86_64", "windows", "msvc") => "x86_64-windows",
-        _ => todo!(),
+        (arch, os, abi) => todo!("Unsupported platform {arch}-{os}-{abi}"),
     };
 
     let libdir = format!("{libprefix}/{archpath}");
