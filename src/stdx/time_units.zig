@@ -7,7 +7,7 @@ const stdx = @import("stdx.zig");
 /// The absolute value of `ns` is meaningless, but it is possible to compute `Duration` between
 /// two `Instant`s sourced from the same clock.
 ///
-/// See also `DateTimeUTC`.
+/// See also `InstantUnix`.
 pub const Instant = struct {
     ns: u64,
 
@@ -184,36 +184,40 @@ test "Duration.parse_flag_value" {
     });
 }
 
-/// DateTime in UTC, intended primarily for logging.
+/// A moment in non-monotonic Unix time.
+/// Timestamp is relative to epoch 1970-01-1.
 ///
-/// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
-/// timezones or leap seconds is necessary.
-pub const DateTimeUTC = struct {
-    year: u16,
-    month: u8,
-    day: u8,
-    hour: u8,
-    minute: u8,
-    second: u8,
-    millisecond: u16,
+/// See also `Instant`.
+pub const InstantUnix = struct {
+    ns: u64,
 
-    pub fn now() DateTimeUTC {
-        const timestamp_ms = std.time.milliTimestamp();
-        assert(timestamp_ms > 0);
-        return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
+    pub fn now() InstantUnix {
+        const timestamp_ns = std.time.nanoTimestamp();
+        assert(timestamp_ns > 0);
+        assert(timestamp_ns <= std.math.maxInt(u64));
+        return .{ .ns = @intCast(timestamp_ns) };
     }
 
-    pub fn from_timestamp_s(timestamp_s: u64) DateTimeUTC {
-        return DateTimeUTC.from_timestamp_ms(timestamp_s * std.time.ms_per_s);
+    pub fn from_timestamp_s(timestamp_s: u64) InstantUnix {
+        return InstantUnix{ .ns = timestamp_s * std.time.ms_per_s * std.time.ns_per_ms };
     }
 
-    pub fn from_timestamp_ms(timestamp_ms: u64) DateTimeUTC {
+    pub fn date_time(instant: InstantUnix) struct {
+        year: u16,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+        millisecond: u16,
+    } {
+        const timestamp_ms = @divTrunc(instant.ns, std.time.ns_per_ms);
         const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
         const year_day = epoch_seconds.getEpochDay().calculateYearDay();
         const month_day = year_day.calculateMonthDay();
         const time = epoch_seconds.getDaySeconds();
 
-        return DateTimeUTC{
+        return .{
             .year = year_day.year,
             .month = month_day.month.numeric(),
             .day = month_day.day_index + 1,
@@ -225,13 +229,14 @@ pub const DateTimeUTC = struct {
     }
 
     pub fn format(
-        datetime: DateTimeUTC,
+        instant: InstantUnix,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
         _ = fmt;
         _ = options;
+        const datetime = instant.date_time();
         try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
             datetime.year,
             datetime.month,
@@ -243,3 +248,17 @@ pub const DateTimeUTC = struct {
         });
     }
 };
+
+test "InstantUnix format" {
+    const instant_min = InstantUnix{ .ns = 0 };
+    var buffer: [24]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        "1970-01-01 00:00:00.000Z",
+        try std.fmt.bufPrint(&buffer, "{}", .{instant_min}),
+    );
+    const instant_max = InstantUnix{ .ns = std.math.maxInt(u64) };
+    try std.testing.expectEqualStrings(
+        "2554-07-21 23:34:33.709Z",
+        try std.fmt.bufPrint(&buffer, "{}", .{instant_max}),
+    );
+}

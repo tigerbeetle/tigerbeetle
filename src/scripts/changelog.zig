@@ -16,10 +16,10 @@ const changelog_bytes_max = 10 * MiB;
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;
 
-    const now_utc = stdx.DateTimeUTC.now();
+    const date_time = stdx.InstantUnix.now().date_time();
     const today = try shell.fmt(
         "{:0>4}-{:0>2}-{:0>2}",
-        .{ now_utc.year, now_utc.month, now_utc.day },
+        .{ date_time.year, date_time.month, date_time.day },
     );
 
     try shell.exec("git fetch origin --quiet", .{});

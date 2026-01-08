@@ -28,7 +28,7 @@ pub const radix_sort = @import("radix.zig").sort;
 
 pub const Instant = @import("time_units.zig").Instant;
 pub const Duration = @import("time_units.zig").Duration;
-pub const DateTimeUTC = @import("time_units.zig").DateTimeUTC;
+pub const InstantUnix = @import("time_units.zig").InstantUnix;
 
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;
@@ -358,14 +358,14 @@ pub fn log_with_timestamp(
 ) void {
     const level_text = comptime message_level.asText();
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const date_time = DateTimeUTC.now();
+    const instant_unix = InstantUnix.now();
 
     const stderr = std.io.getStdErr().writer();
     var buffered_writer = std.io.bufferedWriter(stderr);
     const writer = buffered_writer.writer();
 
     nosuspend {
-        date_time.format("", .{}, writer) catch return;
+        instant_unix.format("", .{}, writer) catch return;
         writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
         buffered_writer.flush() catch return;
     }

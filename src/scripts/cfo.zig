@@ -185,8 +185,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         });
     }
 
-    log.info("start {}", .{stdx.DateTimeUTC.now()});
-    defer log.info("end {}", .{stdx.DateTimeUTC.now()});
+    log.info("start {}", .{stdx.InstantUnix.now()});
+    defer log.info("end {}", .{stdx.InstantUnix.now()});
 
     try shell.exec("git --version", .{});
 
