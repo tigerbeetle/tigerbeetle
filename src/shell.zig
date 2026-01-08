@@ -1039,8 +1039,8 @@ pub fn unzip_executable(
     }
 }
 
-fn unix_to_dos_timestamp(instant_unix: stdx.InstantUnix) struct { time: u16, date: u16 } {
-    const date_time = instant_unix.date_time();
+fn unix_to_dos_timestamp(instant: stdx.InstantUnix) struct { time: u16, date: u16 } {
+    const date_time = instant.date_time();
     assert(date_time.year >= 1980 and date_time.year <= 2107);
 
     const time: u16 =

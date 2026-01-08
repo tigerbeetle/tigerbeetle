@@ -184,7 +184,7 @@ test "Duration.parse_flag_value" {
     });
 }
 
-/// A moment in non-monotonic Unix time, intended primarily for logging.
+/// A moment in non-monotonic Unix time.
 /// Timestamp is relative to epoch 1970-01-1.
 ///
 /// See also `Instant`.
@@ -211,7 +211,7 @@ pub const InstantUnix = struct {
         second: u8,
         millisecond: u16,
     } {
-        const timestamp_ms = @divTrunc(instant.ns, 1000);
+        const timestamp_ms = @divTrunc(instant.ns, std.time.ns_per_ms);
         const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
         const year_day = epoch_seconds.getEpochDay().calculateYearDay();
         const month_day = year_day.calculateMonthDay();
@@ -248,3 +248,17 @@ pub const InstantUnix = struct {
         });
     }
 };
+
+test "InstantUnix format" {
+    const instant_min = InstantUnix{ .ns = 0 };
+    var buffer: [24]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        "1970-01-01 00:00:00.000Z",
+        try std.fmt.bufPrint(&buffer, "{}", .{instant_min}),
+    );
+    const instant_max = InstantUnix{ .ns = std.math.maxInt(u64) };
+    try std.testing.expectEqualStrings(
+        "2554-07-21 23:34:33.709Z",
+        try std.fmt.bufPrint(&buffer, "{}", .{instant_max}),
+    );
+}
