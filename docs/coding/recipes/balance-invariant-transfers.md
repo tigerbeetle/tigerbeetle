@@ -6,11 +6,13 @@ or
 [`flags.credits_must_not_exceed_debits`](../../reference/account.md#flagscredits_must_not_exceed_debits)
 balance invariants for only a subset of all transfers, rather than all transfers.
 
-This can be achieved by having a **control** account used to test the balance invariants at the desired
-points in time. The control account will have a 0 balance and the **opposite** balance invariant set
-to the invariant that we want to test on the **destination** account. At the point where we want to
-test the destination account balance invariant, we can initiate a pending closing balance transfer
-to the control account in order to test the invariant. The following example will make this clearer.
+This can be achieved by having a **control** account used to test the balance invariants at the
+desired points in time. The control account will have a 0 balance and the balance invariant that we
+want to test on the **destination** account. At the point where we want to test the destination
+account balance invariant, we can initiate a pending balancing transfer for the **oposite** side to
+the control account. If the invariant is violated on the destination account, the balancing transfer
+has non-zero amount, violates the control account invariant, and fails the entire chain. The
+following example will make this clearer.
 
 ## Per-transfer `credits_must_not_exceed_debits`
 
