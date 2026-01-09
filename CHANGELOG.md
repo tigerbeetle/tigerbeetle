@@ -3,6 +3,89 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.68
+
+Released: 2026-01-09
+
+### Safety And Performance
+
+- [#3436](https://github.com/tigerbeetle/tigerbeetle/pull/3436)
+
+  Fix a potential resource leak in `SegmentedArray` during initialization failure.
+
+### Features
+
+- [#3454](https://github.com/tigerbeetle/tigerbeetle/pull/3454)
+
+  Rust client: Display platform information in the error message when attempting to run on
+  unsupported platforms.
+
+- [#3449](https://github.com/tigerbeetle/tigerbeetle/pull/3449)
+
+  Node client: Switch to `process.report.getReport()` for more reliable Musl libc detection.
+
+### Internals
+
+- [#3458](https://github.com/tigerbeetle/tigerbeetle/pull/3458)
+
+  Docs: Clarify the prose in the balance-invariant transfer recipe.
+
+- [#3455](https://github.com/tigerbeetle/tigerbeetle/pull/3455)
+
+  Refactor `DateTimeUTC` to `InstantUnix` for tracking real, non-monotonic time.
+
+- [#3452](https://github.com/tigerbeetle/tigerbeetle/pull/3452)
+
+  Refactor Vörtex network handling.
+
+- [#3432](https://github.com/tigerbeetle/tigerbeetle/pull/3432)
+
+  Remove confusing "slow request" warning from VSR logs.
+
+- [#3439](https://github.com/tigerbeetle/tigerbeetle/pull/3439)
+  [#3448](https://github.com/tigerbeetle/tigerbeetle/pull/3448)
+
+  Improve logging consistency for headers and checksums. Thanks @fdesu!
+
+- [#3435](https://github.com/tigerbeetle/tigerbeetle/pull/3435)
+  [#3438](https://github.com/tigerbeetle/tigerbeetle/pull/3438)
+  [#3434](https://github.com/tigerbeetle/tigerbeetle/pull/3434)
+  [#3430](https://github.com/tigerbeetle/tigerbeetle/pull/3430)
+
+  Various microbenchmark improvements for checksums, k-way-merge, and binary search.
+
+- [#3444](https://github.com/tigerbeetle/tigerbeetle/pull/3444)
+  [#3441](https://github.com/tigerbeetle/tigerbeetle/pull/3441)
+  [#3422](https://github.com/tigerbeetle/tigerbeetle/pull/3422)
+
+  `stdx`: Remove `stream_precedence`, improve shuffle implementation robustness, and document
+  monotonicity of `Instant`.
+
+- [#3451](https://github.com/tigerbeetle/tigerbeetle/pull/3451)
+  [#3450](https://github.com/tigerbeetle/tigerbeetle/pull/3450)
+  [#3447](https://github.com/tigerbeetle/tigerbeetle/pull/3447)
+  [#3428](https://github.com/tigerbeetle/tigerbeetle/pull/3428)
+
+  CI and Build: Reduce Java flakiness, remove APK workarounds, simplify release validation, and
+  deduplicate `tb_client` builds.
+
+- [#3431](https://github.com/tigerbeetle/tigerbeetle/pull/3431)
+  [#3425](https://github.com/tigerbeetle/tigerbeetle/pull/3425)
+
+  Devhub: Throw `Error` instead of `String` in asserts, and support more units.
+
+- [#3446](https://github.com/tigerbeetle/tigerbeetle/pull/3446)
+  [#3437](https://github.com/tigerbeetle/tigerbeetle/pull/3437)
+  [#3445](https://github.com/tigerbeetle/tigerbeetle/pull/3445)
+  [#3427](https://github.com/tigerbeetle/tigerbeetle/pull/3427)
+  [#3419](https://github.com/tigerbeetle/tigerbeetle/pull/3419)
+
+  Minor fixes, tidy ups, and documentation improvements. Thanks @dsp and @amiraliakbari!
+
+### TigerTracks 🎧
+
+- [Wie viele Hände hat der Octopus?](https://www.youtube.com/watch?v=yTLa2VXkflE)
+
 ## TigerBeetle 0.16.67
 
 Released: 2025-12-12
