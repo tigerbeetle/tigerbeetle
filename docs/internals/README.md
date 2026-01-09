@@ -9,9 +9,9 @@ If you want to learn how TigerBeetle works inside, here's what we got:
 
 - [TIGER_STYLE](../TIGER_STYLE.md) is _the_ style guide, and more. This is the philosophy underlining
   all the code here!
-- [HACKING](./HACKING.md) gets you up to speed with building the codebase and running the tests.
-- [ARCHITECTURE](./ARCHITECTURE.md) is a one-page technical intro into TigerBeetle. If you are
+- [ARCHITECTURE](../ARCHITECTURE.md) is a one-page technical intro into TigerBeetle. If you are
   learning the codebase, start here.
+- [HACKING](./HACKING.md) gets you up to speed with building the codebase and running the tests.
 - [Data File](./data_file.md) is a good second read. Following Fred Brooks' advice, it explains what
   data is stored where and why.
 - [VSR](./vsr.md) explains the upper consensus half of TigerBeetle.

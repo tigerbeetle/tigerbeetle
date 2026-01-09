@@ -2,6 +2,7 @@ aarch
 acked
 adduser
 alloc
+Amdahl's
 APIs
 async
 asyncio

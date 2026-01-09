@@ -1,24 +1,24 @@
 # TigerBeetle Architecture
 
-This document is a technical overview of the internals of TigerBeetle.  It includes a problem
+This document is a technical overview of the internals of TigerBeetle. It includes a problem
 statement, overview, motivation for design decisions and list of references that have inspired us.
 
 ## Problem Statement
 
 TigerBeetle is a database for workloads that:
 
-- are very contended and parallelize/shard poorly
+- have contended and parallelize/shard poorly due to Amdahl's Law
 - consist mostly of writes
 - need very high throughput and moderately low latency
 - require strong consistency guarantees
 - demand very high levels of durability.
 
-At present, TigerBeetle is focused on financial transactions (transfers). Each transfer touches
-two accounts. Accounts are Pareto-distributed which means a few accounts are responsible for the bulk of
+At present, TigerBeetle is focused on financial transactions (transfers). Each transfer touches two
+accounts. Accounts are Pareto-distributed which means a few accounts are responsible for the bulk of
 the transfers. Multi-object transactions in combination with contention make traditional database
-architecture inefficient. Locking the two accounts and then crossing the network to the
-application to compute the balances' update is slow. Due to contention, this work also can't be
-efficiently distributed across separate machines.
+architecture inefficient. Locking the two accounts and then crossing the network to the application
+to compute the balances' update is slow. Due to contention, this work also can't be efficiently
+distributed across separate machines.
 
 TigerBeetle implements accounting logic but the underlying state machine can be swapped. TigerBeetle
 does double-entry bookkeeping but _can_ do anything that has the same requirements: safety and
@@ -26,10 +26,10 @@ performance under extreme contention.
 
 ## Overview
 
-TigerBeetle is a distributed system. It is a cluster of six replicas. The state of each replica is
-a single file on disk, called the data file (see [./data_file.md](./data_file.md)). Replicas use a
-consensus protocol (see [./vsr.md](./vsr.md)) to ensure that their respective data files store
-identical data.
+TigerBeetle is a distributed system. It is a cluster of six replicas. The state of each replica is a
+single file on disk, called the data file (see [data_file.md](./internals/data_file.md)). Replicas
+use a consensus protocol (see [vsr.md](./internals/vsr.md)) to ensure that their respective data
+files store identical data.
 
 Specifically, TigerBeetle is a replicated state machine. The ground state of the system is an
 immutable, hash-chained, append-only log of prepares. Each prepare is a batch of 8 thousand
@@ -48,16 +48,16 @@ the prepare is considered committed. This means it can no longer be removed from
 the log.
 
 Replicas execute committed prepares in sequence number order by applying a batch of transfers to
-local state. Because all replicas start with the same (empty) state and the state transition function
-is deterministic, the replicas arrive at the same state.
+local state. Because all replicas start with the same (empty) state and the state transition
+function is deterministic, the replicas arrive at the same state.
 
 If a primary fails, the consensus algorithm proper ensures that a different replica becomes a
 primary. The new primary correctly reconstructs the latest state of the log.
 
 The derived state of the system is the append-only log of immutable transfers and the current
 balances of all accounts. Past transfers are stored for idempotence. Physically on disk, the state
-is stored as a collection (forest) of LSM trees ([./lsm.md](./lsm.md)). Each LSM tree is a sorted
-collection of objects. For example, transfer objects are stored in a tree sorted by a unique
+is stored as a collection (forest) of LSM trees ([lsm.md](./internals/lsm.md)). Each LSM tree is a
+sorted collection of objects. For example, transfer objects are stored in a tree sorted by a unique
 timestamp which allows for efficient lookup. Auxiliary index trees are used to speed up other kinds
 of lookups. For example, there's a tree which stores a tuple of each transfer's debit account id and
 transfer's timestamp sorted by account id. This tree allows looking up all the timestamps for
@@ -69,10 +69,10 @@ organized as a tree of on-disk blocks (a block is 0.5 MiB in size). Blocks refer
 their on-disk address and checksum of their content. From a root block, called the superblock,
 the rest of the state is reachable.
 
-When applying prepares to local state, replicas don't overwrite any existing blocks in the data
-file and instead write new blocks only. This maintains the state of the superblock in memory. Once in
-a while, the superblock is atomically flushed to storage forming a new checkpoint. When a replica
-crashes and restarts it loses access to its previous in-memory superblock. It reads the previous
+When applying prepares to local state, replicas don't overwrite any existing blocks in the data file
+and instead write new blocks only. The current superblock state is kept in memory. Once in a while,
+the superblock is atomically flushed to storage forming a new checkpoint. When a replica crashes and
+restarts it loses access to its previous in-memory superblock. It reads the previous
 checkpoint/superblock from storage and reconstructs the lost state by replaying the suffix of the
 log of prepares after that checkpoint. Determinism guarantees that the replica ends up in the exact
 same state.
@@ -80,8 +80,14 @@ same state.
 TigerBeetle assumes that replica's storage can fail. If a replica writes a prepare to the WAL or a
 block of an LSM trees and the corresponding `fsync` returns `0` it could still be the case that when
 reading this data later it will be found to be corrupted. Given that the system is already replicated
-for high-availability, it would be wasteful not to use redundancy to repair local storage failures. So
-this is exactly what TigerBeetle does.
+for high-availability, it would be wasteful not to use redundancy to repair local storage failures.
+This is exactly what TigerBeetle does.
+
+Logical _and_ physical determinism guarantees that deep hash-chains exactly agree on all the
+replicas, which allows transparent recovery and repair of corrupted data. TigerBeetle doesn't make a
+distinction whether checksummed data comes from a local disk or another replica, and guarantees
+durability and availability even in the presence of latent sector errors and helical corruption
+([Jepsen report](https://jepsen.io/analyses/tigerbeetle-0.16.11#disk-faults)).
 
 ## Design Decisions
 
@@ -92,7 +98,7 @@ software, judge the results and then revert or double down. For TigerBeetle, we 
 different. We think from the first principles what the right solution _should_ be then use
 "experiments" to confirm or disprove the mental model.
 
-For example, our [TigerStyle](../TIGER_STYLE.md) is an explicitly engineered engineering process.
+For example, our [TigerStyle](./TIGER_STYLE.md) is an explicitly engineered engineering process.
 
 ### Systems Thinking
 
@@ -108,9 +114,10 @@ TigerBeetle is as important as what's inside:
 - Gateways are stateless and horizontally scalable. All state is managed by TigerBeetle.
 - End-to-end idempotency keys guarantee that each transfer is processed at most once, even if, due
   to retry and load-balancing logic, it gets routed through several gateways.
-- TigerBeetle records high-volume business transactions using a debit-credit schema, but transactions
-  include a `user_data` field for linking up with a general purpose database (see
-  [system architecture](https://docs.tigerbeetle.com/coding/system-architecture/)).
+- TigerBeetle records high-volume business transactions using a debit-credit schema, but
+  transactions include a `user_data` field for linking up with a general purpose database (see
+  [_System Architecture_](https://docs.tigerbeetle.com/coding/system-architecture/) and
+  [_The Write Last, Read First Rule_](https://tigerbeetle.com/blog/2025-11-06-the-write-last-read-first-rule/)).
 
 ### As Fast as a Hash Table
 
@@ -127,8 +134,8 @@ replicated across six replicas. Even if some of them are down, the cluster as a 
 available.
 
 **Large Data Sets:** an in-memory hash table is good until your data stops fitting in RAM.
-TigerBeetle allows working with larger-than-memory datasets. To keep optimal performance, the
-hot path of the dataset should still fit within RAM.
+TigerBeetle allows working with larger-than-memory datasets. To keep optimal performance, the hot
+working subset of data should still fit within RAM.
 
 ### Don't Waste Durability
 
@@ -305,7 +312,7 @@ TigerBeetle uses a variety of techniques to ensure that the code is correct – 
 tests to strict style guides. The most important technique deployed is simulation testing, as seen
 on [Sim TigerBeetle](https://sim.tigerbeetle.com).
 
-TigerBeetle's simulator, the VOPR ([./vopr.md](./vopr.md)), can run an entire cluster on a single
+TigerBeetle's simulator, the VOPR ([vopr.md](./internals/vopr.md)), can run an entire cluster on a single
 thread, injecting various storage faults and infinitely speeding up time. VOPR combines a smart
 workload generator, swarm testing and a thousand CPU cores. It makes it easy to exercise all the
 possible behaviors of the system.
@@ -573,18 +580,18 @@ TigerBeetle hash-chains:
 **Blocks**. LSM is a functional tree of blocks. Parent blocks (index blocks) contain "pointers" to
 child blocks (value blocks). A block "pointer" is a pair of an `u64` block address and an `u128`
 checksum. On disk, an array of child pointers is stored as Struct-of-Arrays (SoA). Pointers to the
-index blocks themselves are stored in manifest log blocks (see [./data_file.md](./data_file.md) for
-a more thorough overview). Whenever a replica reads a block from disk, it already knows its
-checksum: checksums are stored outside of blocks themselves. This is important to protect from
-misdirected IO: one failure mode for disks is to store correct data at a wrong offset, a failure
-which cannot be detected using only internal checksums. External checksums also make transparent
-repair possible: if a replica fails to read a block from its local storage, it doesn't report an
-error and instead automatically requests other replicas to send the block, using the checksum as an
-identifier. The root checksum is stored on disk in the superblock, where the hash-chain starts. To
-protect the integrity of the superblock itself, it is physically duplicated across four copies on disk.
-Superblock changes over time, and each _version_ of a superblock includes a checksum of the previous
-version --- if two versions co-exist on disk at the same time, their ordering is constrained weakly
-by a sequence number and strongly by hash-chaining.
+index blocks themselves are stored in manifest log blocks (see
+[data_file.md](./internals/data_file.md) for a more thorough overview). Whenever a replica reads a
+block from disk, it already knows its checksum: checksums are stored outside of blocks themselves.
+This is important to protect from misdirected IO: one failure mode for disks is to store correct
+data at a wrong offset, a failure which cannot be detected using only internal checksums. External
+checksums also make transparent repair possible: if a replica fails to read a block from its local
+storage, it doesn't report an error and instead automatically requests other replicas to send the
+block, using the checksum as an identifier. The root checksum is stored on disk in the superblock,
+where the hash-chain starts. To protect the integrity of the superblock itself, it is physically
+duplicated across four copies on disk. Superblock changes over time, and each _version_ of a
+superblock includes a checksum of the previous version --- if two versions co-exist on disk at the
+same time, their ordering is constrained weakly by a sequence number and strongly by hash-chaining.
 
 **Prepares**. Prepare message (units of replication, Write Ahead Log (WAL) and consensus) are hash
 chained. This gives strong ordering guarantees for two adjacent prepares, and, via a transitive
