@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
-const snapshot_latest = @import("tree.zig").snapshot_latest;
 const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
@@ -172,8 +171,8 @@ pub fn ScanTreeType(
             assert(key_min <= key_max);
 
             const table_mutable_values: []const Value = blk: {
-                if (snapshot != snapshot_latest) break :blk &.{};
-
+                // TODO We currently assume that the snapshot passed in is the current snapshot.
+                // This must be changed when persistent snapshots are implemented.
                 tree.table_mutable.sort();
                 const values = tree.table_mutable.values_used();
                 const range = binary_search.binary_search_values_range(

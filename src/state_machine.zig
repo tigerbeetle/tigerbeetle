@@ -11,7 +11,6 @@ const maybe = stdx.maybe;
 const constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
-const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 const GrooveType = @import("lsm/groove.zig").GrooveType;
@@ -231,6 +230,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         commit_timestamp: u64,
         forest: Forest,
 
+        prefetch_snapshot: ?u64 = null,
         prefetch_operation: ?Operation = null,
         prefetch_input: ?[]const u8 = null,
         prefetch_callback: ?*const fn (*StateMachine) void = null,
@@ -757,6 +757,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             self.* = .{
                 .batch_size_limit = options.batch_size_limit,
+                .prefetch_snapshot = 0,
                 .prefetch_timestamp = 0,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
@@ -1054,12 +1055,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             callback: *const fn (*StateMachine) void,
             op: u64,
+            snapshot: u64,
             operation: Operation,
             message_body_used: []align(16) const u8,
         ) void {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op > 0);
+            assert(op <= snapshot);
             assert(self.prefetch_operation == null);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
@@ -1087,14 +1090,15 @@ pub fn StateMachineType(comptime Storage: type) type {
                 break :input body_decoder.payload;
             };
 
+            self.prefetch_snapshot = snapshot;
             self.prefetch_operation = operation;
             self.prefetch_input = prefetch_input;
             self.prefetch_callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
-            self.forest.grooves.accounts.prefetch_setup(null);
-            self.forest.grooves.transfers.prefetch_setup(null);
-            self.forest.grooves.transfers_pending.prefetch_setup(null);
+            self.forest.grooves.accounts.prefetch_setup(snapshot);
+            self.forest.grooves.transfers.prefetch_setup(snapshot);
+            self.forest.grooves.transfers_pending.prefetch_setup(snapshot);
 
             // Prefetch starts timing for an operation.
             self.metrics.timer.reset();
@@ -1141,13 +1145,15 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn prefetch_finish(self: *StateMachine) void {
             assert(self.prefetch_operation != null);
             assert(self.prefetch_input != null);
+            assert(self.prefetch_snapshot != null);
             assert(self.prefetch_context == .null);
             assert(self.scan_lookup == .null);
 
             const callback = self.prefetch_callback.?;
+            self.prefetch_callback = null;
+            self.prefetch_snapshot = null;
             self.prefetch_operation = null;
             self.prefetch_input = null;
-            self.prefetch_callback = null;
 
             callback(self);
         }
@@ -1682,7 +1688,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 scan_conditions.push(scan_builder.scan_prefix(
                     .debit_account_id,
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                    snapshot_latest,
+                    self.prefetch_snapshot.?,
                     filter.account_id,
                     timestamp_range,
                     direction,
@@ -1694,7 +1700,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 scan_conditions.push(scan_builder.scan_prefix(
                     .credit_account_id,
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                    snapshot_latest,
+                    self.prefetch_snapshot.?,
                     filter.account_id,
                     timestamp_range,
                     direction,
@@ -1721,7 +1727,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan_conditions.push(scan_builder.scan_prefix(
                         filter_field,
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                        snapshot_latest,
+                        self.prefetch_snapshot.?,
                         filter_value,
                         timestamp_range,
                         direction,
@@ -1997,7 +2003,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan_conditions.push(groove.scan_builder.scan_prefix(
                         std.enums.nameCast(std.meta.FieldEnum(Groove.IndexTrees), index),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                        snapshot_latest,
+                        self.prefetch_snapshot.?,
                         @field(filter, @tagName(index)),
                         timestamp_range,
                         direction,
@@ -2012,7 +2018,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // It will be implemented as part of the query executor.
                 groove.scan_builder.scan_timestamp(
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                    snapshot_latest,
+                    self.prefetch_snapshot.?,
                     timestamp_range,
                     direction,
                 ),
@@ -2301,7 +2307,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             scan_lookup.init(
                 &self.forest.grooves.account_events.objects,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                snapshot_latest,
+                self.prefetch_snapshot.?,
                 timestamp_range,
             );
 

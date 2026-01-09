@@ -256,6 +256,7 @@ pub const TestContext = struct {
         context.state_machine.prefetch(
             TestContext.callback,
             op,
+            op,
             operation,
             message_body_used,
         );

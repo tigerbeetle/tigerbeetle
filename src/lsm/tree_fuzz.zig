@@ -65,6 +65,7 @@ const Value = packed struct(u128) {
 const FuzzOpTag = std.meta.Tag(FuzzOp);
 const FuzzOp = union(enum) {
     const Scan = struct {
+        snapshot: u64,
         min: u64,
         max: u64,
         direction: Direction,
@@ -84,7 +85,6 @@ const FuzzOp = union(enum) {
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
 const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Value));
 const value_count_max = constants.lsm_compaction_ops * commit_entries_max;
-const snapshot_latest = @import("tree.zig").snapshot_latest;
 const table_count_max = @import("tree.zig").table_count_max;
 
 const node_count = 1024;
@@ -449,7 +449,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.superblock_checkpoint, .fuzzing);
         }
 
-        pub fn get(env: *Environment, key: u64) ?Value {
+        pub fn get(env: *Environment, key: u64, snapshot: u64) ?Value {
             env.change_state(.fuzzing, .tree_lookup);
             env.lookup_value = null;
 
@@ -459,7 +459,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 env.tree.lookup_from_levels_storage(.{
                     .callback = get_callback,
                     .context = &env.lookup_context,
-                    .snapshot = snapshot_latest,
+                    .snapshot = snapshot,
                     .key = key,
                     .level_min = 0,
                 });
@@ -476,14 +476,20 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.tree_lookup, .fuzzing);
         }
 
-        pub fn scan(env: *Environment, key_min: u64, key_max: u64, direction: Direction) []Value {
+        pub fn scan(
+            env: *Environment,
+            key_min: u64,
+            key_max: u64,
+            direction: Direction,
+            snapshot: u64,
+        ) []Value {
             assert(key_min <= key_max);
 
             env.change_state(.fuzzing, .scan_tree);
             env.scan_tree = ScanTree.init(
                 &env.tree,
                 &env.scan_buffer,
-                snapshot_latest,
+                snapshot,
                 key_min,
                 key_max,
                 direction,
@@ -585,7 +591,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     },
                     .get => |key| {
                         // Get account from lsm.
-                        const tree_value = env.get(key);
+                        const tree_value = env.get(key, fuzz_op_index);
 
                         // Compare result to model.
                         const model_value = model.get(key);
@@ -607,6 +613,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 scan_range.min,
                 scan_range.max,
                 scan_range.direction,
+                scan_range.snapshot,
             );
 
             const model_values = model.scan(
@@ -844,6 +851,7 @@ pub fn generate_fuzz_ops(
                         .min = min,
                         .max = max,
                         .direction = direction,
+                        .snapshot = op,
                     },
                 };
             },

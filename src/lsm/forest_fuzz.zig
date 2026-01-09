@@ -10,7 +10,6 @@ const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 
 const log = std.log.scoped(.lsm_forest_fuzz);
-const lsm = @import("tree.zig");
 const tb = @import("../tigerbeetle.zig");
 
 const TimeSim = @import("../testing/time.zig").TimeSim;
@@ -31,14 +30,10 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 
 const FuzzOpAction = union(enum) {
     compact: struct {
-        op: u64,
         checkpoint: bool,
         checkpoint_durable: bool,
     },
-    put_account: struct {
-        op: u64,
-        account: Account,
-    },
+    put_account: Account,
     get_account: u128,
     exists_account: u64,
     scan_account: ScanParams,
@@ -52,6 +47,7 @@ const FuzzOpModifier = union(enum) {
 const FuzzOpModifierTag = std.meta.Tag(FuzzOpModifier);
 
 const FuzzOp = struct {
+    op: u64,
     action: FuzzOpAction,
     modifier: FuzzOpModifier,
 };
@@ -297,9 +293,10 @@ const Environment = struct {
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
-    fn prefetch_account(env: *Environment, id: u128) !void {
+    fn prefetch_account(env: *Environment, id: u128, snapshot: u64) !void {
         const Context = struct {
             _id: u128,
+            _snapshot: u64,
             _groove_accounts: *GrooveAccounts,
 
             finished: bool = false,
@@ -307,7 +304,7 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove_accounts;
-                groove.prefetch_setup(null);
+                groove.prefetch_setup(getter._snapshot);
                 groove.prefetch_enqueue(getter._id);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
@@ -321,6 +318,7 @@ const Environment = struct {
 
         var context = Context{
             ._id = id,
+            ._snapshot = snapshot,
             ._groove_accounts = &env.forest.grooves.accounts,
         };
         context.prefetch_start();
@@ -331,9 +329,10 @@ const Environment = struct {
         }
     }
 
-    fn prefetch_exists_account(env: *Environment, timestamp: u64) !void {
+    fn prefetch_exists_account(env: *Environment, timestamp: u64, snapshot: u64) !void {
         const Context = struct {
             _timestamp: u64,
+            _snapshot: u64,
             _groove_accounts: *GrooveAccounts,
 
             finished: bool = false,
@@ -341,7 +340,7 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove_accounts;
-                groove.prefetch_setup(null);
+                groove.prefetch_setup(getter._snapshot);
                 groove.prefetch_enqueue_by_timestamp(getter._timestamp);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
@@ -354,6 +353,7 @@ const Environment = struct {
         };
 
         var context = Context{
+            ._snapshot = snapshot,
             ._timestamp = timestamp,
             ._groove_accounts = &env.forest.grooves.accounts,
         };
@@ -422,6 +422,7 @@ const Environment = struct {
                 self: *ScannerIndex,
                 env: *Environment,
                 params: ScanParams,
+                snapshot: u64,
             ) ![]const tb.Account {
                 const min: Index, const max: Index = switch (Index) {
                     void => range: {
@@ -448,7 +449,7 @@ const Environment = struct {
                     {},
                     &@field(groove_accounts.indexes, @tagName(index)),
                     scan_buffer,
-                    lsm.snapshot_latest,
+                    snapshot,
                     Value.key_from_value(&.{
                         .field = min,
                         .timestamp = TimestampRange.timestamp_min,
@@ -480,12 +481,12 @@ const Environment = struct {
         };
     }
 
-    fn scan_accounts(env: *Environment, params: ScanParams) ![]const tb.Account {
+    fn scan_accounts(env: *Environment, params: ScanParams, snapshot: u64) ![]const tb.Account {
         switch (params.index) {
             inline else => |index| {
                 const Scanner = ScannerIndexType(index);
                 var scanner = Scanner{};
-                return try scanner.scan(env, params);
+                return try scanner.scan(env, params, snapshot);
             },
         }
     }
@@ -619,7 +620,7 @@ const Environment = struct {
         switch (fuzz_op.modifier) {
             .normal => {
                 env.ticks_remaining = std.math.maxInt(usize);
-                env.apply_op_action(fuzz_op.action, model) catch |err| {
+                env.apply_op_action(fuzz_op, model) catch |err| {
                     switch (err) {
                         error.OutOfTicks => unreachable,
                         else => return err,
@@ -628,7 +629,7 @@ const Environment = struct {
             },
             .crash_after_ticks => |ticks_remaining| {
                 env.ticks_remaining = ticks_remaining;
-                env.apply_op_action(fuzz_op.action, model) catch |err| {
+                env.apply_op_action(fuzz_op, model) catch |err| {
                     switch (err) {
                         error.OutOfTicks => {},
                         else => return err,
@@ -649,13 +650,22 @@ const Environment = struct {
                 // TODO: currently this checks that everything added to the LSM after checkpoint
                 // resets to the last checkpoint on crash by looking through what's been added
                 // afterwards. This won't work if we add account removal to the fuzzer though.
+                const snapshot = blk: {
+                    if (vsr.Checkpoint.trigger_for_checkpoint(
+                        env.superblock.working.vsr_state.checkpoint.header.op,
+                    )) |trigger| {
+                        break :blk trigger + 1;
+                    } else {
+                        break :blk 0;
+                    }
+                };
                 const log_size = model.log.readableLength();
                 var log_index: usize = 0;
                 while (log_index < log_size) : (log_index += 1) {
                     const entry = model.log.peekItem(log_index);
                     const id = entry.account.id;
                     if (model.checkpointed.objects.get(id)) |*checkpointed_account| {
-                        try env.prefetch_account(id);
+                        try env.prefetch_account(id, snapshot);
                         if (env.get_account(id)) |lsm_account| {
                             assert(stdx.equal_bytes(Account, &lsm_account, checkpointed_account));
                         } else {
@@ -683,8 +693,15 @@ const Environment = struct {
         }
     }
 
-    fn apply_op_action(env: *Environment, fuzz_op_action: FuzzOpAction, model: *Model) !void {
-        switch (fuzz_op_action) {
+    fn apply_op_action(env: *Environment, fuzz_op: FuzzOp, model: *Model) !void {
+        const snapshot = if (env.superblock.working.vsr_state.op_compacted(fuzz_op.op))
+            vsr.Checkpoint.trigger_for_checkpoint(
+                env.superblock.working.vsr_state.checkpoint.header.op,
+            ).? + 1
+        else
+            fuzz_op.op;
+
+        switch (fuzz_op.action) {
             .compact => |c| {
 
                 // Checkpoint is marked durable *before* a replica compacts the (pipeline + 1)ᵗʰ
@@ -693,23 +710,24 @@ const Environment = struct {
                 // (see `blocks_released_prior_checkpoint_durability_max` in vsr.zig).
                 if (c.checkpoint_durable) env.grid.free_set.mark_checkpoint_durable();
 
-                try env.compact(c.op);
+                try env.compact(fuzz_op.op);
                 if (c.checkpoint) {
                     assert(!c.checkpoint_durable);
-                    try model.checkpoint(c.op);
-                    try env.checkpoint(c.op);
+                    try model.checkpoint(fuzz_op.op);
+                    try env.checkpoint(fuzz_op.op);
                 }
             },
-            .put_account => |put| {
+            .put_account => |account| {
                 // The forest requires prefetch before put.
-                try env.prefetch_account(put.account.id);
-                const lsm_account = env.get_account(put.account.id);
-                env.put_account(&put.account, lsm_account);
-                try model.put_account(&put.account, put.op);
+                try env.prefetch_account(account.id, snapshot);
+                const lsm_account = env.get_account(account.id);
+
+                env.put_account(&account, lsm_account);
+                try model.put_account(&account, fuzz_op.op);
             },
             .get_account => |id| {
                 // Get account from lsm.
-                try env.prefetch_account(id);
+                try env.prefetch_account(id, snapshot);
                 const lsm_account = env.get_account(id);
 
                 // Compare result to model.
@@ -721,13 +739,13 @@ const Environment = struct {
                 }
             },
             .exists_account => |timestamp| {
-                try env.prefetch_exists_account(timestamp);
+                try env.prefetch_exists_account(timestamp, snapshot);
                 const lsm_found = env.exists(timestamp);
                 const model_found = model.exists_account(timestamp);
                 assert(lsm_found == model_found);
             },
             .scan_account => |params| {
-                const accounts = try env.scan_accounts(params);
+                const accounts = try env.scan_accounts(params, snapshot);
 
                 var timestamp_last: ?u64 = null;
                 var prefix_last: ?u128 = null;
@@ -875,15 +893,15 @@ pub fn generate_fuzz_ops(
                     assert(!action.compact.checkpoint_durable);
                     persisted_op = op - constants.lsm_compaction_ops;
                 }
-                op += 1;
                 break :action action;
             },
             .put_account => action: {
-                const action = generate_put_account(prng, &id_to_account, .{
-                    .op = op,
-                    .timestamp = fuzz_op_index + 1, // Timestamp cannot be zero.
-                });
-                try id_to_account.put(action.put_account.account.id, action.put_account.account);
+                const action = generate_put_account(
+                    prng,
+                    &id_to_account,
+                    fuzz_op_index + 1, // Timestamp cannot be zero.
+                );
+                try id_to_account.put(action.put_account.id, action.put_account);
                 break :action action;
             },
             .get_account => FuzzOpAction{ .get_account = random_id(prng, u128) },
@@ -928,13 +946,7 @@ pub fn generate_fuzz_ops(
                 };
             },
         };
-        switch (action) {
-            .compact => puts_since_compact = 0,
-            .put_account => puts_since_compact += 1,
-            .get_account => {},
-            .exists_account => {},
-            .scan_account => {},
-        }
+
         // TODO(jamii)
         // Currently, crashing is only interesting during a compact.
         // But once we have concurrent compaction, crashing at any point can be interesting.
@@ -958,14 +970,27 @@ pub fn generate_fuzz_ops(
                 ),
             },
         };
+
+        fuzz_op.* = .{
+            .op = op,
+            .action = action,
+            .modifier = modifier,
+        };
+
         switch (modifier) {
             .normal => {},
             .crash_after_ticks => op = persisted_op,
         }
-        fuzz_op.* = .{
-            .action = action,
-            .modifier = modifier,
-        };
+        switch (action) {
+            .compact => {
+                op += 1;
+                puts_since_compact = 0;
+            },
+            .put_account => puts_since_compact += 1,
+            .get_account => {},
+            .exists_account => {},
+            .scan_account => {},
+        }
     }
 
     return fuzz_ops;
@@ -1002,7 +1027,6 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
     };
 
     return FuzzOpAction{ .compact = .{
-        .op = options.op,
         .checkpoint = checkpoint,
         .checkpoint_durable = checkpoint_durable,
     } };
@@ -1011,13 +1035,13 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
 fn generate_put_account(
     prng: *stdx.PRNG,
     id_to_account: *const std.AutoHashMap(u128, Account),
-    options: struct { op: u64, timestamp: u64 },
+    timestamp: u64,
 ) FuzzOpAction {
     const id = random_id(prng, u128);
     var account = id_to_account.get(id) orelse Account{
         .id = id,
         // `timestamp` must be unique.
-        .timestamp = options.timestamp,
+        .timestamp = timestamp,
         .user_data_128 = random_id(prng, u128),
         .user_data_64 = random_id(prng, u64),
         .user_data_32 = random_id(prng, u32),
@@ -1041,10 +1065,7 @@ fn generate_put_account(
     account.debits_posted = prng.int(u64);
     account.credits_pending = prng.int(u64);
     account.credits_posted = prng.int(u64);
-    return FuzzOpAction{ .put_account = .{
-        .op = options.op,
-        .account = account,
-    } };
+    return FuzzOpAction{ .put_account = account };
 }
 
 const io_latency_mean_ticks = 20;

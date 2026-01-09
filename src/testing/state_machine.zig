@@ -184,18 +184,20 @@ pub fn StateMachineType(comptime Storage: type) type {
             state_machine: *StateMachine,
             callback: *const fn (*StateMachine) void,
             op: u64,
+            snapshot: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
             _ = operation;
             _ = input;
+            _ = op;
 
             assert(state_machine.callback == null);
             state_machine.callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
-            state_machine.forest.grooves.things.prefetch_setup(null);
-            state_machine.forest.grooves.things.prefetch_enqueue(op);
+            state_machine.forest.grooves.things.prefetch_setup(snapshot);
+            state_machine.forest.grooves.things.prefetch_enqueue(snapshot);
             state_machine.forest.grooves.things.prefetch(
                 prefetch_callback,
                 &state_machine.prefetch_context,

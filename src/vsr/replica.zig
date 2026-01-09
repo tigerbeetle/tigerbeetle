@@ -4665,11 +4665,22 @@ pub fn ReplicaType(
                 @panic("Cannot commit prepare; batch limit too low.");
             }
 
+            // If we crash and recover from a checkpoint, use trigger+1 as the snapshot to query
+            // the LSM tree. This is because the checkpoint contains output tables from the
+            // compaction in the last bar before trigger, which creates tables with
+            // snapshot_min=trigger+1. Otherwise, we use the op number as the snapshot, as it is
+            // guaranteed to be the latest snapshot.
+            const snapshot = if (self.superblock.working.vsr_state.op_compacted(prepare.header.op))
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).? + 1
+            else
+                prepare.header.op;
+
             if (StateMachine.Operation.from_vsr(prepare.header.operation)) |prepare_operation| {
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_prefetch_callback,
                     prepare.header.op,
+                    snapshot,
                     prepare_operation,
                     prepare.body_used(),
                 );
