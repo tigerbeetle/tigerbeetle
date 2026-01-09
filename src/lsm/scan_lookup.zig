@@ -1,8 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const snapshot_latest = @import("tree.zig").snapshot_latest;
-
 const GridType = @import("../vsr/grid.zig").GridType;
 
 pub const ScanLookupStatus = enum {
@@ -181,12 +179,11 @@ pub fn ScanLookupType(
                 self.object_count = self.object_count.? + 1;
 
                 const objects = &self.groove.objects;
+                // TODO We currently assume that the snapshot passed in is the latest snapshot. This
+                // must be changed when persistent snapshots are implemented.
                 if (objects.table_mutable.get(timestamp) orelse
                     objects.table_immutable.get(timestamp)) |object|
                 {
-                    // TODO(batiati) Handle this properly when we implement snapshot queries.
-                    assert(self.scan.snapshot() == snapshot_latest);
-
                     // Object present in table mutable/immutable,
                     // continue the loop to fetch the next one.
                     self.object_buffer.?[worker.object_index.?] = object.*;

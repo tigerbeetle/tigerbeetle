@@ -813,12 +813,7 @@ pub fn GrooveType(
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
         /// When `snapshot` is null, prefetch from the current snapshot.
-        pub fn prefetch_setup(groove: *Groove, snapshot: ?u64) void {
-            // We currently don't have anything that uses or tests snapshots. Leave this
-            // here as a warning that they're not fully tested yet.
-            assert(snapshot == null);
-
-            const snapshot_target = snapshot orelse snapshot_latest;
+        pub fn prefetch_setup(groove: *Groove, snapshot_target: u64) void {
             assert(snapshot_target <= snapshot_latest);
 
             groove.prefetch_snapshot = snapshot_target;

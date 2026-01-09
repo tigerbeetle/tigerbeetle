@@ -11,7 +11,6 @@ const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_scan_fuzz);
-const lsm = @import("tree.zig");
 
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -497,7 +496,7 @@ const Environment = struct {
     model_matches: [query_spec_max]std.DynamicBitSetUnmanaged,
     ticks_remaining: usize,
 
-    op: u64 = 0,
+    op: u64 = 1,
     checkpoint_op: ?u64 = null,
 
     scan_lookup: ScanLookup = undefined,
@@ -662,8 +661,8 @@ const Environment = struct {
             const query_results = results: {
                 const scan = env.scan_from_condition(query_spec, timestamp_previous);
                 env.scan_lookup = ScanLookup.init(&env.forest.grooves.things, scan);
-
                 const scan_lookup_buffer = env.scan_lookup_buffer[0..query_results_max];
+
                 env.change_state(.fuzzing, .scanning);
                 env.scan_lookup.read(scan_lookup_buffer, &scan_lookup_callback);
                 try env.tick_until_state_change(.scanning, .fuzzing);
@@ -735,7 +734,7 @@ const Environment = struct {
                         inline else => |comptime_index| scan_builder.scan_prefix(
                             comptime_index,
                             scan_buffer_pool.acquire_assume_capacity(),
-                            lsm.snapshot_latest,
+                            env.op,
                             field.value,
                             timestamp_range,
                             query_spec.direction,
@@ -802,7 +801,7 @@ const Environment = struct {
     }
 
     fn commit(env: *Environment) !void {
-        env.op += 1;
+        defer env.op += 1;
 
         // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
         const checkpoint = env.op == vsr.Checkpoint.trigger_for_checkpoint(
