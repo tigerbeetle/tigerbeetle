@@ -804,7 +804,7 @@ pub fn generate_fuzz_ops(
         // Maybe do some gets.
         .get = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan = if (prng.boolean()) 0 else 0,
+        .scan = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
     };
     log.info("fuzz_op_weights = {:.2}", .{fuzz_op_weights});
 

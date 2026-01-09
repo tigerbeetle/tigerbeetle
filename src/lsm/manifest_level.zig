@@ -319,9 +319,9 @@ pub fn ManifestLevelType(
         /// Our key range keeps track of tables that are visible to snapshot_latest, so it cannot
         /// be relied upon for queries to older snapshots.
         pub fn key_range_contains(level: *const ManifestLevel, snapshot: u64, key: Key) bool {
-            // TODO We currently assume that the snapshot passed in is the latest snapshot. This
-            // must be changed when persistent snapshots are implemented.
-            _ = snapshot;
+            // TODO We currently assume that the snapshot passed in is the latest snapshot.
+            // This must be changed when persistent snapshots are implemented.
+            assert(snapshot < lsm.snapshot_latest);
             return level.key_range_latest.contains(key);
         }
 

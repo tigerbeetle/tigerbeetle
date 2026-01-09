@@ -717,6 +717,7 @@ const Environment = struct {
         const scan_buffer_pool = &env.forest.scan_buffer_pool;
         const things_groove = &env.forest.grooves.things;
         const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
+        const snapshot = env.op;
 
         var stack = stdx.BoundedArrayType(*Scan, query_scans_max){};
         for (query_spec.query.const_slice()) |query_part| {
@@ -734,7 +735,7 @@ const Environment = struct {
                         inline else => |comptime_index| scan_builder.scan_prefix(
                             comptime_index,
                             scan_buffer_pool.acquire_assume_capacity(),
-                            env.op,
+                            snapshot,
                             field.value,
                             timestamp_range,
                             query_spec.direction,

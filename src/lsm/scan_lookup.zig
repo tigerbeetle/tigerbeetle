@@ -179,8 +179,8 @@ pub fn ScanLookupType(
                 self.object_count = self.object_count.? + 1;
 
                 const objects = &self.groove.objects;
-                // TODO We currently assume that the snapshot passed in is the latest snapshot. This
-                // must be changed when persistent snapshots are implemented.
+                // TODO We currently assume that the snapshot passed in is the current snapshot.
+                // This must be changed when persistent snapshots are implemented.
                 if (objects.table_mutable.get(timestamp) orelse
                     objects.table_immutable.get(timestamp)) |object|
                 {

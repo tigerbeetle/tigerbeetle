@@ -1062,6 +1062,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op > 0);
+            assert(op <= snapshot);
             assert(self.prefetch_operation == null);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
@@ -1144,6 +1145,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn prefetch_finish(self: *StateMachine) void {
             assert(self.prefetch_operation != null);
             assert(self.prefetch_input != null);
+            assert(self.prefetch_snapshot != null);
             assert(self.prefetch_context == .null);
             assert(self.scan_lookup == .null);
 
