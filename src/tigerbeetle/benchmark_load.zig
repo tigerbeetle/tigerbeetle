@@ -174,7 +174,7 @@ pub fn main(
         .account_count_hot = cli_args.account_count_hot,
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
-        .transfer_id_permutation = account_id_permutation,
+        .transfer_id_generator = .init(&prng),
         .transfer_batch_size = cli_args.transfer_batch_size,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
@@ -226,6 +226,37 @@ pub fn main(
     }
 }
 
+const TbidGenerator = struct {
+    prng: *stdx.PRNG,
+    previous: struct {
+        epoch_ms: u128,
+        random: u80,
+    },
+
+    fn init(prng: *stdx.PRNG) TbidGenerator {
+        return .{ .prng = prng, .previous = .{ .epoch_ms = 0, .random = 0 } };
+    }
+
+    fn next(generator: *TbidGenerator) u128 {
+        var epoch_ms: u128 = @intCast(std.time.milliTimestamp());
+
+        const last = generator.previous.epoch_ms;
+
+        const random_next: u80 = blk: {
+            if (epoch_ms > last) break :blk generator.prng.int(u80);
+
+            epoch_ms = last;
+            break :blk std.math.add(u80, generator.previous.random, 1) catch {
+                // Carry the overflow to the time part and reseed random (as the rust client).
+                epoch_ms = std.math.add(u128, epoch_ms, 1) catch @panic("tbid timestamp overflow");
+                break :blk generator.prng.int(u80);
+            };
+        };
+        generator.previous = .{ .epoch_ms = epoch_ms, .random = random_next };
+        return (@as(u128, epoch_ms) << 80) | @as(u128, random_next);
+    }
+};
+
 const Generator = union(enum) {
     zipfian: ZipfianShuffled,
     latest: ZipfianGenerator,
@@ -258,7 +289,7 @@ const Benchmark = struct {
     account_count_hot: u32,
     account_generator: Generator,
     account_generator_hot: Generator,
-    transfer_id_permutation: IdPermutation,
+    transfer_id_generator: TbidGenerator,
     transfer_batch_size: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
@@ -882,15 +913,15 @@ const Benchmark = struct {
             assert(credit_account_index < b.account_count);
             assert(debit_account_index != credit_account_index);
 
-            const debit_account_id = b.transfer_id_permutation.encode(debit_account_index + 1);
-            const credit_account_id = b.transfer_id_permutation.encode(credit_account_index + 1);
+            const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
+            const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
             assert(debit_account_id != credit_account_id);
 
             // 30% of pending transfers.
             const pending = b.transfer_pending and b.prng.chance(ratio(3, 10));
 
             transfer.* = .{
-                .id = b.transfer_id_permutation.encode(b.transfer_index + 1),
+                .id = b.transfer_id_generator.next(),
                 .debit_account_id = debit_account_id,
                 .credit_account_id = credit_account_id,
                 .user_data_128 = b.prng.int(u128),
