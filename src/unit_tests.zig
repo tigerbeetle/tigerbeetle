@@ -37,6 +37,7 @@ comptime {
     _ = @import("repl/completion.zig");
     _ = @import("repl/parser.zig");
     _ = @import("repl/terminal.zig");
+    _ = @import("repl/line_editor.zig");
     _ = @import("scripts/cfo.zig");
     _ = @import("scripts/changelog.zig");
     _ = @import("shell.zig");
