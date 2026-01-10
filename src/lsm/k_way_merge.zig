@@ -276,6 +276,7 @@ pub fn KWayMergeIteratorType(
         }
     };
 }
+
 fn TestContextType(comptime streams_max: u32) type {
     const testing = std.testing;
 
@@ -290,6 +291,16 @@ fn TestContextType(comptime streams_max: u32) type {
 
             inline fn to_key(v: *const Value) u32 {
                 return v.key;
+            }
+
+            fn less_than(direction: Direction, a: Value, b: Value) bool {
+                var order = math.order(a.key, b.key);
+                if (direction == .descending) order = order.invert();
+                return switch (order) {
+                    .lt => true,
+                    .eq => a.version < b.version,
+                    .gt => false,
+                };
             }
         };
 
@@ -313,7 +324,7 @@ fn TestContextType(comptime streams_max: u32) type {
         fn merge(
             direction: Direction,
             streams_keys: []const []const u32,
-            expect: []const Value,
+            expect: ?[]const Value,
         ) !void {
             const KWay = KWayMergeIteratorType(
                 TestContext,
@@ -327,14 +338,17 @@ fn TestContextType(comptime streams_max: u32) type {
                 stream_peek,
                 stream_pop,
             );
-            var actual = std.ArrayList(Value).init(testing.allocator);
+
+            const gpa = std.testing.allocator;
+
+            var actual = std.ArrayList(Value).init(gpa);
             defer actual.deinit();
 
             var streams: [streams_max][]Value = undefined;
 
             for (streams_keys, 0..) |stream_keys, i| {
-                errdefer for (streams[0..i]) |s| testing.allocator.free(s);
-                streams[i] = try testing.allocator.alloc(Value, stream_keys.len);
+                errdefer for (streams[0..i]) |s| gpa.free(s);
+                streams[i] = try gpa.alloc(Value, stream_keys.len);
                 for (stream_keys, 0..) |key, j| {
                     streams[i][j] = .{
                         .key = key,
@@ -342,7 +356,20 @@ fn TestContextType(comptime streams_max: u32) type {
                     };
                 }
             }
-            defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
+            defer for (streams[0..streams_keys.len]) |s| gpa.free(s);
+
+            const expect_naive_buffer = try gpa.alloc(Value, key_count: {
+                var total_count: u32 = 0;
+                for (streams_keys) |stream| total_count += @intCast(stream.len);
+                break :key_count total_count;
+            });
+            defer gpa.free(expect_naive_buffer);
+
+            const expect_naive = merge_naive(streams_keys, direction, expect_naive_buffer);
+
+            if (expect) |expect_explicit| {
+                try testing.expectEqualSlices(Value, expect_naive, expect_explicit);
+            }
 
             var context: TestContext = .{ .streams = streams };
             var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
@@ -351,7 +378,41 @@ fn TestContextType(comptime streams_max: u32) type {
                 try actual.append(value);
             }
 
-            try testing.expectEqualSlices(Value, expect, actual.items);
+            try testing.expectEqualSlices(Value, expect_naive, actual.items);
+        }
+
+        fn merge_naive(
+            streams: []const []const u32,
+            direction: Direction,
+            result: []Value,
+        ) []Value {
+            var count: u32 = 0;
+            for (streams, 0..) |stream, stream_index| {
+                for (stream) |key| {
+                    result[count] = .{
+                        .key = key,
+                        .version = @intCast(stream_index),
+                    };
+                    count += 1;
+                }
+            }
+            assert(result.len >= count);
+
+            std.mem.sort(Value, result[0..count], direction, Value.less_than);
+
+            const count_duplicates = count;
+            count = 0;
+
+            var previous_key: ?u32 = null;
+            for (result[0..count_duplicates]) |value| {
+                if (previous_key) |p| {
+                    if (value.key == p) continue;
+                }
+                previous_key = value.key;
+                result[count] = value;
+                count += 1;
+            }
+            return result[0..count];
         }
     };
 }
@@ -360,16 +421,16 @@ test "k_way_merge: unit" {
     // Empty stream.
     try TestContextType(1).merge(
         .ascending,
-        &[_][]const u32{},
-        &[_]TestContextType(1).Value{},
+        &.{},
+        &.{},
     );
 
     try TestContextType(1).merge(
         .ascending,
-        &[_][]const u32{
-            &[_]u32{ 0, 3, 4, 8 },
+        &.{
+            &.{ 0, 3, 4, 8 },
         },
-        &[_]TestContextType(1).Value{
+        &.{
             .{ .key = 0, .version = 0 },
             .{ .key = 3, .version = 0 },
             .{ .key = 4, .version = 0 },
@@ -378,10 +439,10 @@ test "k_way_merge: unit" {
     );
     try TestContextType(1).merge(
         .descending,
-        &[_][]const u32{
-            &[_]u32{ 8, 4, 3, 0 },
+        &.{
+            &.{ 8, 4, 3, 0 },
         },
-        &[_]TestContextType(1).Value{
+        &.{
             .{ .key = 8, .version = 0 },
             .{ .key = 4, .version = 0 },
             .{ .key = 3, .version = 0 },
@@ -390,12 +451,12 @@ test "k_way_merge: unit" {
     );
     try TestContextType(3).merge(
         .ascending,
-        &[_][]const u32{
-            &[_]u32{ 0, 3, 4, 8, 11 },
-            &[_]u32{ 2, 11, 12, 13, 15 },
-            &[_]u32{ 1, 2, 11 },
+        &.{
+            &.{ 0, 3, 4, 8, 11 },
+            &.{ 2, 11, 12, 13, 15 },
+            &.{ 1, 2, 11 },
         },
-        &[_]TestContextType(3).Value{
+        &.{
             .{ .key = 0, .version = 0 },
             .{ .key = 1, .version = 2 },
             .{ .key = 2, .version = 1 },
@@ -410,12 +471,12 @@ test "k_way_merge: unit" {
     );
     try TestContextType(3).merge(
         .descending,
-        &[_][]const u32{
-            &[_]u32{ 11, 8, 4, 3, 0 },
-            &[_]u32{ 15, 13, 12, 11, 2 },
-            &[_]u32{ 11, 2, 1 },
+        &.{
+            &.{ 11, 8, 4, 3, 0 },
+            &.{ 15, 13, 12, 11, 2 },
+            &.{ 11, 2, 1 },
         },
-        &[_]TestContextType(3).Value{
+        &.{
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
@@ -431,10 +492,10 @@ test "k_way_merge: unit" {
 
     try TestContextType(32).merge(
         .ascending,
-        &[_][]const u32{
-            &[_]u32{ 0, 3, 4, 8 },
+        &.{
+            &.{ 0, 3, 4, 8 },
         },
-        &[_]TestContextType(32).Value{
+        &.{
             .{ .key = 0, .version = 0 },
             .{ .key = 3, .version = 0 },
             .{ .key = 4, .version = 0 },
@@ -444,12 +505,12 @@ test "k_way_merge: unit" {
 
     try TestContextType(32).merge(
         .descending,
-        &[_][]const u32{
-            &[_]u32{ 11, 8, 4, 3, 0 },
-            &[_]u32{ 15, 13, 12, 11, 2 },
-            &[_]u32{ 11, 2, 1 },
+        &.{
+            &.{ 11, 8, 4, 3, 0 },
+            &.{ 15, 13, 12, 11, 2 },
+            &.{ 11, 2, 1 },
         },
-        &[_]TestContextType(32).Value{
+        &.{
             .{ .key = 15, .version = 1 },
             .{ .key = 13, .version = 1 },
             .{ .key = 12, .version = 1 },
@@ -462,6 +523,36 @@ test "k_way_merge: unit" {
             .{ .key = 0, .version = 0 },
         },
     );
+}
+
+test "k_way_merge: exhaustigen" {
+    const Gen = @import("../testing/exhaustigen.zig");
+    const N = 3;
+    const M = 2;
+
+    var streams_buffer: [N][M]u32 = @splat(@splat(0));
+    var streams: [N][]u32 = @splat(&.{});
+    var g: Gen = .{};
+    while (!g.done()) {
+        const direction = g.enum_value(Direction);
+        for (0..N) |stream_index| {
+            const key_count = g.int_inclusive(u32, M);
+            for (0..key_count) |key_index| {
+                streams_buffer[stream_index][key_index] = g.int_inclusive(u32, M);
+            }
+            streams[stream_index] = streams_buffer[stream_index][0..key_count];
+            std.mem.sort(u32, streams[stream_index], {}, std.sort.asc(u32));
+            if (direction == .descending) {
+                std.mem.reverse(u32, streams[stream_index]);
+            }
+        }
+
+        try TestContextType(N).merge(
+            direction,
+            &streams,
+            null,
+        );
+    }
 }
 
 fn FuzzTestContextType(comptime streams_max: u32) type {
@@ -494,6 +585,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
         }
 
         fn merge(
+            gpa: std.mem.Allocator,
             direction: Direction,
             streams_keys: []const []const u32,
             expect: []const Value,
@@ -512,14 +604,14 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                 fuzz_stream_peek,
                 stream_pop,
             );
-            var actual = std.ArrayList(Value).init(testing.allocator);
+            var actual = std.ArrayList(Value).init(gpa);
             defer actual.deinit();
 
             var streams: [streams_max][]Value = undefined;
 
             for (streams_keys, 0..) |stream_keys, i| {
-                errdefer for (streams[0..i]) |s| testing.allocator.free(s);
-                streams[i] = try testing.allocator.alloc(Value, stream_keys.len);
+                errdefer for (streams[0..i]) |s| gpa.free(s);
+                streams[i] = try gpa.alloc(Value, stream_keys.len);
                 for (stream_keys, 0..) |key, j| {
                     streams[i][j] = .{
                         .key = key,
@@ -527,7 +619,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                     };
                 }
             }
-            defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
+            defer for (streams[0..streams_keys.len]) |s| gpa.free(s);
 
             var context: FuzzTestContext = .{ .inner = .{ .streams = streams }, .prng = prng };
             var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
@@ -583,30 +675,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                     }
                 }
 
-                var expect_buffer_len: usize = 0;
-                for (streams[0..k], 0..) |stream, version| {
-                    for (stream) |key| {
-                        expect_buffer[expect_buffer_len] = .{
-                            .key = key,
-                            .version = @intCast(version),
-                        };
-                        expect_buffer_len += 1;
-                    }
-                }
-                const expect_with_duplicates = expect_buffer[0..expect_buffer_len];
-                std.mem.sort(Value, expect_with_duplicates, {}, value_less_than);
-
-                var target: usize = 0;
-                var previous_key: ?u32 = null;
-                for (expect_with_duplicates) |value| {
-                    if (previous_key) |p| {
-                        if (value.key == p) continue;
-                    }
-                    previous_key = value.key;
-                    expect_with_duplicates[target] = value;
-                    target += 1;
-                }
-                const expect = expect_with_duplicates[0..target];
+                const expect = TestContext.merge_naive(streams[0..k], .ascending, expect_buffer);
 
                 if (log) {
                     std.debug.print("expect = ", .{});
@@ -614,12 +683,12 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                     std.debug.print("\n", .{});
                 }
 
-                try merge(.ascending, streams[0..k], expect, prng);
+                try merge(gpa, .ascending, streams[0..k], expect, prng);
 
                 for (streams[0..k]) |stream| mem.reverse(u32, stream);
                 mem.reverse(Value, expect);
 
-                try merge(.descending, streams[0..k], expect, prng);
+                try merge(gpa, .descending, streams[0..k], expect, prng);
 
                 if (log) std.debug.print("\n", .{});
             }
@@ -646,19 +715,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                 },
             }
             for (stream) |*key| key.* = key.* % key_max;
-            std.mem.sort(u32, stream, {}, key_less_than);
-        }
-
-        fn key_less_than(_: void, a: u32, b: u32) bool {
-            return a < b;
-        }
-
-        fn value_less_than(_: void, a: Value, b: Value) bool {
-            return switch (math.order(a.key, b.key)) {
-                .lt => true,
-                .eq => a.version < b.version,
-                .gt => false,
-            };
+            std.mem.sort(u32, stream, {}, std.sort.asc(u32));
         }
     };
 }
