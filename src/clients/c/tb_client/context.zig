@@ -130,14 +130,14 @@ pub const ClientInterface = extern struct {
 };
 
 /// The function pointer called by the IO thread when a request is completed or fails.
-/// The memory referenced by `result_ptr` is only valid for the duration of this callback.
+/// The memory referenced by `result` is only valid for the duration of this callback.
 /// `result_ptr` is `null` for unsuccessful requests. See `packet.status` for more details.
 pub const CompletionCallback = *const fn (
     context: usize,
     packet: *Packet.Extern,
     timestamp: u64,
-    result_ptr: ?[*]const u8,
-    result_len: u32,
+    result: ?[*]const u8,
+    result_size: u32,
 ) callconv(.c) void;
 
 pub const InitError = std.mem.Allocator.Error || error{
@@ -855,7 +855,7 @@ pub fn ContextType(
                 packet.phase = .complete;
 
                 // The packet completed with an error.
-                (self.completion_callback)(
+                self.completion_callback(
                     self.completion_context,
                     packet.cast(),
                     0,
@@ -868,7 +868,7 @@ pub fn ContextType(
             // The packet completed normally.
             assert(packet.status == .ok);
             packet.phase = .complete;
-            (self.completion_callback)(
+            self.completion_callback(
                 self.completion_context,
                 packet.cast(),
                 result.timestamp,
