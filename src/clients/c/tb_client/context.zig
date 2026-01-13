@@ -217,6 +217,7 @@ pub fn ContextType(
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
+        eviction_deinited: bool,
         thread: std.Thread,
 
         previous_request_instant: ?stdx.Instant = null,
@@ -346,6 +347,7 @@ pub fn ContextType(
             context.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
+            context.eviction_deinited = false;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.signal_notify_callback);
@@ -377,8 +379,26 @@ pub fn ContextType(
         }
 
         fn tick(self: *Context) void {
-            if (self.eviction_reason == null) {
-                self.client.tick();
+            // Already evicted and deinited, nothing to do.
+            if (self.eviction_deinited) return;
+
+            // If eviction happened (e.g., during io.run_for_ns() in a previous iteration),
+            // deinit the client and message pool now that it's safe to do so.
+            if (self.eviction_reason != null) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+                self.eviction_deinited = true;
+                return;
+            }
+
+            self.client.tick();
+
+            // If eviction happened during this tick, deinit the client and message pool
+            // now that we've returned from message processing and it's safe to do so.
+            if (self.eviction_reason != null) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+                self.eviction_deinited = true;
             }
         }
 
@@ -409,8 +429,8 @@ pub fn ContextType(
             self.io.cancel_all();
             self.signal.deinit();
 
-            // Client and message pool are already deinited if evicted.
-            if (self.eviction_reason == null) {
+            // Client and message pool are already deinited if eviction was handled.
+            if (!self.eviction_deinited) {
                 self.client.deinit(self.gpa.allocator());
                 self.message_pool.deinit(self.gpa.allocator());
             }
@@ -421,11 +441,9 @@ pub fn ContextType(
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
-            // NB. This is the one place where we can access `self.client`
-            // while `self.eviction_reason != null`. It is previously
-            // set by `client_eviction_callback`, which is about to delete the client
-            // after we cancel this request. `packet_cancel` needs `eviction_reason`
-            // set in order to return the correct error. Awkward stuff.
+            // NB. This is called from `client_eviction_callback` after `eviction_reason` is set
+            // but before the client is deinited. `packet_cancel` needs `eviction_reason` set
+            // in order to return the correct error status to the user.
             assert(self.eviction_reason != null);
             if (self.client.request_inflight) |*inflight| {
                 assert(inflight.message.header.operation != .register);
@@ -769,6 +787,7 @@ pub fn ContextType(
 
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             const self: *Context = @fieldParentPtr("client", client);
+
             assert(self.eviction_reason == null);
 
             log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
@@ -793,11 +812,13 @@ pub fn ContextType(
                 self.packet_cancel(packet);
             }
 
-            // Deinit the client and message pool immediately to release the
-            // connection while keeping the IO thread running to service any
-            // remaining submitted packets (by canceling them).
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
+            // Note: We do NOT deinit the client/message_pool here because we're
+            // being called from within on_messages(), and there's a defer to unref
+            // the eviction message. The deinit will happen in tick() after this
+            // callback returns and the message processing completes.
+
+            // Trigger signal_notify_callback to drain submitted packets.
+            self.signal.notify();
         }
 
         fn client_result_callback(
