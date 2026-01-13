@@ -79,6 +79,7 @@ impl TestDb {
             // magic address 0: tell us the port to use,
             // shutdown when stdin closes
             "--addresses=0",
+            "--cache-grid=128MiB",
             &database_name,
         ])
         .stdin(Stdio::piped())
