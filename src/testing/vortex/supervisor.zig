@@ -62,6 +62,8 @@ pub const CLIArgs = struct {
     disable_faults: bool = false,
     output_directory: ?[]const u8 = null,
     log_debug: bool = false,
+    /// Log file path.
+    log: ?[]const u8 = null,
 
     @"--": void,
     /// Vortex is non-deterministic, but providing a seed can still help constrain the scenario.
@@ -72,6 +74,14 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
         log.err("vortex is not supported on Windows", .{});
         return error.NotSupported;
+    }
+
+    if (args.log) |log_path| {
+        const log_file = try std.fs.cwd().createFile(log_path, .{});
+        defer log_file.close();
+
+        // Redirect stderr to the file.
+        try std.posix.dup2(log_file.handle, std.posix.STDERR_FILENO);
     }
 
     if (builtin.os.tag == .linux) {
