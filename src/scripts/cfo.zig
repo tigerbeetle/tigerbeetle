@@ -251,6 +251,7 @@ fn run_fuzzers(
     const FuzzerChild = struct {
         fuzzer: Fuzzer,
         child: std.process.Child,
+        log: ?[]const u8, // log file name
         seed: SeedRecord,
     };
 
@@ -262,14 +263,6 @@ fn run_fuzzers(
             fuzzer_or_null.* = null;
         }
     };
-
-    const children_logs = try shell.arena.allocator().alloc(LogTail, options.concurrency);
-    for (children_logs) |*child_log| {
-        child_log.* = try LogTail.init(shell.arena.allocator(), log_size_max);
-    }
-
-    var read_buffer = try gpa.alloc(u8, log_size_max);
-    defer gpa.free(read_buffer);
 
     var tasks = Tasks.init(shell.arena.allocator());
     defer tasks.deinit();
@@ -327,6 +320,7 @@ fn run_fuzzers(
                 child_or_null.* = .{
                     .fuzzer = task.seed_template.fuzzer,
                     .child = child.process,
+                    .log = child.log,
                     .seed = .{
                         .commit_timestamp = task.seed_template.commit_timestamp,
                         .commit_sha = task.seed_template.commit_sha,
@@ -348,31 +342,8 @@ fn run_fuzzers(
         // Wait before polling for completion, to avoid hogging the CPU.
         std.time.sleep(sleep_ns);
 
-        // Flush stderr/stdout into the log tail.
-        for (children, children_logs) |*fuzzer_or_null, *fuzzer_log| {
-            if (fuzzer_or_null.*) |*fuzzer| {
-                assert((fuzzer.child.stdout == null) != fuzzer.fuzzer.capture_logs());
-                assert((fuzzer.child.stderr == null) != fuzzer.fuzzer.capture_logs());
-                for (&[_]?std.fs.File{
-                    fuzzer.child.stdout,
-                    fuzzer.child.stderr,
-                }) |stream_or_null| {
-                    if (stream_or_null) |stream| {
-                        var read_size: ?usize = null;
-                        while (read_size == null or read_size.? > 0) {
-                            read_size = stream.read(read_buffer) catch |err| switch (err) {
-                                error.WouldBlock => break,
-                                else => std.debug.panic("error: {}", .{err}),
-                            };
-                            fuzzer_log.append(read_buffer[0..read_size.?]);
-                        }
-                    }
-                }
-            }
-        }
-
         var running_count: u32 = 0;
-        for (children, children_logs) |*fuzzer_or_null, *fuzzer_log| {
+        for (children) |*fuzzer_or_null| {
             // Poll for completed fuzzers.
 
             if (fuzzer_or_null.*) |*fuzzer| {
@@ -461,11 +432,23 @@ fn run_fuzzers(
                             if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
                                 try seed_logs.append(gpa, null);
                             } else {
-                                const log_data = try gpa.alloc(u8, fuzzer_log.size());
+                                // Copy the tail of the (failing seed's) logs into a buffer.
+                                const log_data = try gpa.alloc(u8, log_size_max);
                                 errdefer gpa.free(log_data);
 
-                                fuzzer_log.write_to(log_data);
-                                try seed_logs.append(gpa, log_data);
+                                try shell.pushd(task.working_directory);
+                                defer shell.popd();
+
+                                const log_file = try shell.cwd.openFile(fuzzer.log.?, .{});
+                                defer log_file.close();
+
+                                const log_size_total = (try log_file.metadata()).size();
+                                try log_file.seekTo(log_size_total -| log_size_max);
+
+                                const log_tail_size = try log_file.readAll(log_data);
+                                assert(log_tail_size == @min(log_size_max, log_size_total));
+
+                                try seed_logs.append(gpa, log_data[0..log_tail_size]);
                                 seed_record.log = try create_log_path(shell.arena.allocator());
                             }
                             try seeds.append(gpa, seed_record);
@@ -478,7 +461,16 @@ fn run_fuzzers(
                     }
                     task.runtime_total_ns += seed_duration_ns;
 
-                    fuzzer_log.clear();
+                    if (fuzzer.log) |log_path| {
+                        // FIXME This is awkward!
+                        try shell.pushd(task.working_directory);
+                        defer shell.popd();
+
+                        shell.cwd.deleteFile(log_path) catch |err| {
+                            log.warn("error deleting log file: {} {s}", .{ err, log_path });
+                        };
+                    }
+
                     fuzzer_or_null.* = null;
                 }
             }
@@ -905,6 +897,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
 }) !struct {
     command: []const u8, // User-visible string on devhub.
     process: std.process.Child,
+    log: ?[]const u8, // Log file name.
 } {
     try shell.pushd(options.working_directory);
     defer shell.popd();
@@ -912,7 +905,12 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     const arg_count_max = comptime arg_count_max: {
         var arg_max: u32 = 0;
         for (std.enums.values(Fuzzer)) |fuzzer| {
-            arg_max = @max(arg_max, fuzzer.args_build().len, fuzzer.args_run().len);
+            arg_max = @max(
+                arg_max,
+                fuzzer.args_build().len,
+                fuzzer.args_exec().len,
+                fuzzer.args_run().len,
+            );
         }
         assert(arg_max > 0);
 
@@ -950,35 +948,23 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     assert(exe.len > 0);
 
     log.debug("will start '{s}'", .{command});
+
+    const log_path = if (options.fuzzer.capture_logs())
+        try shell.fmt("{s}_{d}.log", .{@tagName(options.fuzzer), options.seed})
+    else
+        null;
+    args.clear();
+    args.push_slice(switch (options.fuzzer) { inline else => |f| f.args_exec() });
+    if (log_path) |path| args.push(try shell.fmt("--log={s}", .{path}));
     const process = try shell.spawn(
-        .{
-            .stdin_behavior = .Pipe,
-            .stdout_behavior = if (options.fuzzer.capture_logs()) .Pipe else .Ignore,
-            .stderr_behavior = if (options.fuzzer.capture_logs()) .Pipe else .Ignore,
-        },
+        .{ .stdin_behavior = .Pipe },
         "{exe} {args} {seed}",
         .{
             .exe = exe,
-            .args = switch (options.fuzzer) {
-                inline else => |f| comptime f.args_exec(),
-            },
+            .args = args.const_slice(),
             .seed = options.seed,
         },
     );
-
-    if (options.fuzzer.capture_logs()) {
-        for (&[_]?std.fs.File{
-            process.stdout.?,
-            process.stderr.?,
-        }) |file| {
-            const flags = try std.posix.fcntl(file.?.handle, std.posix.F.GETFL, 0);
-            _ = try std.posix.fcntl(
-                file.?.handle,
-                std.posix.F.SETFL,
-                flags | @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })),
-            );
-        }
-    }
 
     // Zig doesn't have non-blocking version of child.wait, so we use `BrokenPipe`
     // on writing to child's stdin to detect if a child is dead in a non-blocking
@@ -992,6 +978,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     return .{
         .command = command,
         .process = process,
+        .log = log_path,
     };
 }
 
@@ -1307,98 +1294,6 @@ const SeedRecord = struct {
 fn create_log_path(arena: std.mem.Allocator) ![]const u8 {
     const name = std.crypto.random.int(u128);
     return std.fmt.allocPrint(arena, "./fuzzing/logs/{x:0>32}.vopr", .{name});
-}
-
-// TODO(Zig) This should probably be redone once zig's new reader/writer api's are available.
-const LogTail = struct {
-    ring: stdx.RingBufferType(u8, .slice),
-
-    pub fn init(gpa: std.mem.Allocator, suffix_size_max: u32) !LogTail {
-        assert(suffix_size_max > 0);
-
-        const ring = try stdx.RingBufferType(u8, .slice).init(gpa, suffix_size_max);
-        errdefer ring.deinit(gpa);
-
-        return .{ .ring = ring };
-    }
-
-    pub fn deinit(log_tail: *LogTail, gpa: std.mem.Allocator) void {
-        log_tail.ring.deinit(gpa);
-        log_tail.* = undefined;
-    }
-
-    pub fn clear(log_tail: *LogTail) void {
-        log_tail.ring.clear();
-    }
-
-    pub fn append(log_tail: *LogTail, bytes: []const u8) void {
-        const capacity = log_tail.ring.buffer.len;
-        const available = log_tail.ring.spare_capacity();
-        const bytes_suffix = if (bytes.len < capacity) bytes else bytes[bytes.len - capacity ..];
-        assert(bytes_suffix.len <= capacity);
-
-        log_tail.ring.advance_head_many(bytes_suffix.len -| available);
-        log_tail.ring.push_slice(bytes_suffix) catch unreachable;
-    }
-
-    fn suffix(log_tail: *const LogTail) [2][]const u8 {
-        if (log_tail.ring.index + log_tail.ring.count < log_tail.ring.buffer.len) {
-            return .{
-                log_tail.ring.buffer[log_tail.ring.index..][0..log_tail.ring.count],
-                "",
-            };
-        } else {
-            return .{
-                log_tail.ring.buffer[log_tail.ring.index..],
-                log_tail.ring.buffer[0..log_tail.ring.index],
-            };
-        }
-    }
-
-    pub fn size(log_tail: *const LogTail) u32 {
-        const parts = log_tail.suffix();
-        return @intCast(parts[0].len + parts[1].len);
-    }
-
-    pub fn write_to(log_tail: *const LogTail, target: []u8) void {
-        assert(target.len == log_tail.size());
-        const parts = log_tail.suffix();
-        stdx.copy_disjoint(.inexact, u8, target, parts[0]);
-        stdx.copy_disjoint(.inexact, u8, target[parts[0].len..], parts[1]);
-    }
-};
-
-test "cfo: LogTail" {
-    var prng = stdx.PRNG.from_seed_testing();
-
-    const log_tail_size = 8;
-    var log_tail = try LogTail.init(std.testing.allocator, log_tail_size);
-    defer log_tail.deinit(std.testing.allocator);
-
-    var log_tail_model = std.ArrayList(u8).init(std.testing.allocator);
-    defer log_tail_model.deinit();
-
-    var buffer = try std.testing.allocator.alloc(u8, log_tail_size);
-    defer std.testing.allocator.free(buffer);
-
-    for (0..1024) |_| {
-        const append_size = prng.int_inclusive(u32, log_tail_size);
-        const append = buffer[0..append_size];
-        prng.fill(append);
-
-        try log_tail_model.appendSlice(append);
-        log_tail.append(append);
-
-        const suffix = buffer[0..log_tail.size()];
-        assert(suffix.len <= log_tail_size);
-        log_tail.write_to(suffix);
-
-        try std.testing.expectEqualSlices(
-            u8,
-            suffix,
-            log_tail_model.items[log_tail_model.items.len -| log_tail_size..],
-        );
-    }
 }
 
 const Snap = stdx.Snap;
