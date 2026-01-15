@@ -251,7 +251,7 @@ fn run_fuzzers(
     const FuzzerChild = struct {
         fuzzer: Fuzzer,
         child: std.process.Child,
-        log: ?[]const u8, // log file name
+        log_path: ?[]const u8,
         seed: SeedRecord,
     };
 
@@ -320,7 +320,7 @@ fn run_fuzzers(
                 child_or_null.* = .{
                     .fuzzer = task.seed_template.fuzzer,
                     .child = child.process,
-                    .log = child.log,
+                    .log_path = child.log,
                     .seed = .{
                         .commit_timestamp = task.seed_template.commit_timestamp,
                         .commit_sha = task.seed_template.commit_sha,
@@ -436,10 +436,7 @@ fn run_fuzzers(
                                 const log_data = try gpa.alloc(u8, log_size_max);
                                 errdefer gpa.free(log_data);
 
-                                try shell.pushd(task.working_directory);
-                                defer shell.popd();
-
-                                const log_file = try shell.cwd.openFile(fuzzer.log.?, .{});
+                                const log_file = try shell.cwd.openFile(fuzzer.log_path.?, .{});
                                 defer log_file.close();
 
                                 const log_size_total = (try log_file.metadata()).size();
@@ -461,11 +458,7 @@ fn run_fuzzers(
                     }
                     task.runtime_total_ns += seed_duration_ns;
 
-                    if (fuzzer.log) |log_path| {
-                        // FIXME This is awkward!
-                        try shell.pushd(task.working_directory);
-                        defer shell.popd();
-
+                    if (fuzzer.log_path) |log_path| {
                         shell.cwd.deleteFile(log_path) catch |err| {
                             log.warn("error deleting log file: {} {s}", .{ err, log_path });
                         };
@@ -950,11 +943,13 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     log.debug("will start '{s}'", .{command});
 
     const log_path = if (options.fuzzer.capture_logs())
-        try shell.fmt("{s}_{d}.log", .{@tagName(options.fuzzer), options.seed})
+        try shell.fmt("{s}_{d}.log", .{ @tagName(options.fuzzer), options.seed })
     else
         null;
     args.clear();
-    args.push_slice(switch (options.fuzzer) { inline else => |f| f.args_exec() });
+    args.push_slice(switch (options.fuzzer) {
+        inline else => |f| f.args_exec(),
+    });
     if (log_path) |path| args.push(try shell.fmt("--log={s}", .{path}));
     const process = try shell.spawn(
         .{ .stdin_behavior = .Pipe },
@@ -978,7 +973,10 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     return .{
         .command = command,
         .process = process,
-        .log = log_path,
+        .log = if (log_path) |path|
+            try shell.fmt("{s}/{s}", .{ options.working_directory, path })
+        else
+            null,
     };
 }
 
