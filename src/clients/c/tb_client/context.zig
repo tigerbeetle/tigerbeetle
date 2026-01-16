@@ -198,8 +198,14 @@ pub fn ContextType(
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
+
+        // The client and message pool are only accessed on the I/O thread.
+        // Access must be protected by checking `eviction_reason == null`.
+        // They are deinitialized after eviction to close the connection to the server,
+        // which allows the server to release the session.
         message_pool: MessagePool,
         client: Client,
+
         batch_size_limit: ?u32,
 
         completion_callback: CompletionCallback,
@@ -211,6 +217,7 @@ pub fn ContextType(
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
+        eviction_deinited: bool,
         thread: std.Thread,
 
         previous_request_instant: ?stdx.Instant = null,
@@ -340,6 +347,7 @@ pub fn ContextType(
             context.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
+            context.eviction_deinited = false;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.signal_notify_callback);
@@ -371,8 +379,26 @@ pub fn ContextType(
         }
 
         fn tick(self: *Context) void {
-            if (self.eviction_reason == null) {
-                self.client.tick();
+            // Already evicted and deinited, nothing to do.
+            if (self.eviction_deinited) return;
+
+            // If eviction happened (e.g., during io.run_for_ns() in a previous iteration),
+            // deinit the client and message pool now that it's safe to do so.
+            if (self.eviction_reason != null) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+                self.eviction_deinited = true;
+                return;
+            }
+
+            self.client.tick();
+
+            // If eviction happened during this tick, deinit the client and message pool
+            // now that we've returned from message processing and it's safe to do so.
+            if (self.eviction_reason != null) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+                self.eviction_deinited = true;
             }
         }
 
@@ -388,8 +414,6 @@ pub fn ContextType(
                 };
             }
 
-            self.cancel_request_inflight();
-
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
                 self.packet_cancel(packet);
@@ -404,20 +428,28 @@ pub fn ContextType(
 
             self.io.cancel_all();
             self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
+
+            // Client and message pool are already deinited if eviction was handled.
+            if (!self.eviction_deinited) {
+                self.client.deinit(self.gpa.allocator());
+                self.message_pool.deinit(self.gpa.allocator());
+            }
+
             self.io.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
+            // NB. This is called from `client_eviction_callback` after `eviction_reason` is set
+            // but before the client is deinited. `packet_cancel` needs `eviction_reason` set
+            // in order to return the correct error status to the user.
+            assert(self.eviction_reason != null);
             if (self.client.request_inflight) |*inflight| {
-                if (inflight.message.header.operation != .register) {
-                    const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                    packet.assert_phase(.sent);
-                    self.packet_cancel(packet);
-                }
+                assert(inflight.message.header.operation != .register);
+                const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                packet.assert_phase(.sent);
+                self.packet_cancel(packet);
             }
         }
 
@@ -580,13 +612,19 @@ pub fn ContextType(
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
             assert(self.batch_size_limit != null);
-            assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
 
             // On shutdown, cancel this packet as well as any others batched onto it.
             if (self.signal.status() != .running) {
                 return self.packet_cancel(packet_list);
             }
+
+            // On shutdown, cancel this packet as well as any others batched onto it.
+            if (self.eviction_reason != null) {
+                return self.packet_cancel(packet_list);
+            }
+
+            assert(self.client.request_inflight == null);
 
             const message = self.client.get_message().build(.request);
             defer {
@@ -692,6 +730,7 @@ pub fn ContextType(
 
             // Don't send any requests until registration completes.
             if (self.batch_size_limit == null) {
+                assert(self.eviction_reason == null);
                 assert(self.client.request_inflight != null);
                 assert(self.client.request_inflight.?.message.header.operation == .register);
                 return;
@@ -733,6 +772,7 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            assert(self.eviction_reason == null);
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
@@ -747,6 +787,7 @@ pub fn ContextType(
 
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             const self: *Context = @fieldParentPtr("client", client);
+
             assert(self.eviction_reason == null);
 
             log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
@@ -755,11 +796,29 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
-            // Now that the client is evicted, no more requests can be submitted to it and we can
-            // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
-            // client before it exits (see `io_thread`).
+            // After eviction the io_thread will short-circuit packet_send to packet_cancel.
             self.eviction_reason = eviction.header.reason;
-            self.signal.stop();
+
+            // This is subtle and ugly - client _does not_ send us a completion callback
+            // for evicted requests, so if we don't do something with it we'll deadlock.
+            // Here we reach into the guts of client and grab the packet to cancel it.
+            // Should be restructured in the future to just hand us the packet as an argument
+            // to this callback, or for client to call both callbacks.
+            self.cancel_request_inflight();
+
+            // Cancel every pending packet.
+            while (self.pending.pop()) |packet| {
+                packet.assert_phase(.pending);
+                self.packet_cancel(packet);
+            }
+
+            // Note: We do NOT deinit the client/message_pool here because we're
+            // being called from within on_messages(), and there's a defer to unref
+            // the eviction message. The deinit will happen in tick() after this
+            // callback returns and the message processing completes.
+
+            // Trigger signal_notify_callback to drain submitted packets.
+            self.signal.notify();
         }
 
         fn client_result_callback(
@@ -772,6 +831,7 @@ pub fn ContextType(
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
+            assert(self.eviction_reason == null);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
@@ -903,16 +963,10 @@ pub fn ContextType(
                 .phase = .submitted,
             };
 
-            if (self.eviction_reason == null) {
-                // Enqueue the packet and notify the IO thread to process it asynchronously.
-                assert(self.signal.status() == .running);
-                self.submitted.push(packet);
-                self.signal.notify();
-            } else {
-                // Cancel the packet since we stop the IO thread during eviction.
-                assert(self.signal.status() != .running);
-                self.packet_cancel(packet);
-            }
+            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            assert(self.signal.status() == .running);
+            self.submitted.push(packet);
+            self.signal.notify();
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
