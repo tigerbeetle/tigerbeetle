@@ -1040,6 +1040,14 @@ fn upload_results(
         const seeds_merged = try SeedRecord.merge(arena.allocator(), .{}, seeds_old, seeds_new);
         const seeds_json = try SeedRecord.to_json(arena.allocator(), seeds_merged);
 
+        if (std.mem.eql(u8, std.mem.sliceAsBytes(seeds_old), std.mem.sliceAsBytes(seeds_merged))) {
+            // None of the new seeds were merged in, so there is nothing to commit.
+            // This can happen when CFO is being run from a commit that is not one of CFO's targets.
+            // For example, if you run CFO locally on main, but you are a couple commits behind.
+            log.info("no seeds uploaded", .{});
+            return;
+        }
+
         var seeds_merged_logs = std.StringHashMap(void).init(arena.allocator());
         for (seeds_merged) |*seed| {
             if (seed.log) |path| try seeds_merged_logs.putNoClobber(path, {});
