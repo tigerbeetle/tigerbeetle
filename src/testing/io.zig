@@ -299,6 +299,14 @@ pub const IO = struct {
         return target.len;
     }
 
+    pub fn aof_blocking_stat(_: *IO, _: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
+        return error.Unexpected;
+    }
+
+    pub fn aof_blocking_open(_: *IO, _: []const u8) !fd_t {
+        return error.Unexpected;
+    }
+
     pub fn reset(self: *IO) void {
         self.completed.reset();
     }
