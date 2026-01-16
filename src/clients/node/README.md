@@ -65,7 +65,7 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks. This allows events to be 
+between multiple concurrent tasks. This allows events to be
 [automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
@@ -821,3 +821,13 @@ const transfer_errors = await client.createTransfers(transfers);
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
 ```
+
+## Timeouts And Cancellation
+
+The Client retries indefinitely and doesn't impose any per-request timeout. Cancellation is
+provided as a mechanism, and the specific cancellation policy is left to the
+application. A Client instance can be closed at any time. On close, all in-flight
+requests are canceled and return an error to the caller. Even if an error is returned,
+a request might still be processed by the TigerBeetle server.
+[Reliable transaction submission](https://docs.tigerbeetle.com/coding/reliable-transaction-submission/)
+explains how to make transfers retry-proof using IDs for end-to-end idempotency.
