@@ -24,15 +24,15 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             tb_packet: *tb_client.Packet,
             timestamp: u64,
             result: ?[request_size_max]u8,
-            result_len: u32,
+            result_size: u32,
         } = null,
 
         pub fn on_complete(
             tb_context: usize,
             tb_packet: *tb_client.Packet,
             timestamp: u64,
-            result_ptr: ?[*]const u8,
-            result_len: u32,
+            result: ?[*]const u8,
+            result_size: u32,
         ) callconv(.c) void {
             var self: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
             defer self.completion.complete();
@@ -41,15 +41,14 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
                 .tb_context = tb_context,
                 .tb_packet = tb_packet,
                 .timestamp = timestamp,
-                .result = if (result_ptr != null and result_len > 0) blk: {
+                .result = if (result != null and result_size > 0) blk: {
                     // Copy the message's body to the context buffer:
-                    assert(result_len <= request_size_max);
+                    assert(result_size <= request_size_max);
                     var writable: [request_size_max]u8 = undefined;
-                    const readable: [*]const u8 = @ptrCast(result_ptr.?);
-                    stdx.copy_disjoint(.inexact, u8, &writable, readable[0..result_len]);
+                    stdx.copy_disjoint(.inexact, u8, &writable, result.?[0..result_size]);
                     break :blk writable;
                 } else null,
-                .result_len = result_len,
+                .result_size = result_size,
             };
         }
     };
@@ -234,10 +233,10 @@ test "tb_client echo" {
                 @intFromPtr(request.reply.?.tb_packet),
             );
             try testing.expect(request.reply.?.result != null);
-            try testing.expectEqual(request.sent_data_size, request.reply.?.result_len);
+            try testing.expectEqual(request.sent_data_size, request.reply.?.result_size);
 
             const sent_data = request.sent_data[0..request.sent_data_size];
-            const reply = request.reply.?.result.?[0..request.reply.?.result_len];
+            const reply = request.reply.?.result.?[0..request.reply.?.result_size];
             try testing.expectEqualSlices(u8, sent_data, reply);
         }
     }

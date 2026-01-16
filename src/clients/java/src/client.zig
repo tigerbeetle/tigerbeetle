@@ -132,8 +132,8 @@ const NativeClient = struct {
         context_ptr: usize,
         packet: *tb.Packet,
         timestamp: u64,
-        result_ptr: ?[*]const u8,
-        result_len: u32,
+        result: ?[*]const u8,
+        result_size: u32,
     ) callconv(.c) void {
         const jvm: *jni.JavaVM = @ptrFromInt(context_ptr);
 
@@ -152,18 +152,18 @@ const NativeClient = struct {
 
         if (packet_status != .ok) {
             assert(timestamp == 0);
-            assert(result_ptr == null);
-            assert(result_len == 0);
+            assert(result == null);
+            assert(result_size == 0);
         }
 
-        if (result_len > 0) {
+        if (result_size > 0) {
             switch (packet_status) {
-                .ok => if (result_ptr) |ptr| {
+                .ok => if (result) |ptr| {
                     // Copying the reply before returning from the callback.
                     ReflectionHelper.set_reply_buffer(
                         env,
                         request_obj,
-                        ptr[0..@as(usize, @intCast(result_len))],
+                        ptr[0..result_size],
                     );
                 },
                 else => {},

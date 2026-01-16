@@ -221,6 +221,18 @@ pub fn main() !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.writer().print(
+        \\// Per-client callback invoked every time a `tb_client_submit` completes or is canceled.
+        \\// Use `packet->userdata` to identify the specific submission.
+        \\// `result` is null iff `packet->status != TB_PACKET_OK`
+        \\// `result` is only valid for the duration of the callback itself.
+        \\typedef void (*tb_completion_t)(
+        \\    uintptr_t userdata,
+        \\    tb_packet_t* packet,
+        \\    uint64_t timestamp,
+        \\    const uint8_t *result, // nullable
+        \\    uint32_t result_size
+        \\);
+        \\
         \\// Initialize a new TigerBeetle client which connects to the addresses provided and
         \\// completes submitted packets by invoking the callback with the given context.
         \\TB_INIT_STATUS tb_client_init(
@@ -230,7 +242,7 @@ pub fn main() !void {
         \\    const char *address_ptr,
         \\    uint32_t address_len,
         \\    uintptr_t completion_ctx,
-        \\    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+        \\    tb_completion_t completion_callback
         \\);
         \\
         \\// Initialize a new TigerBeetle client that echoes back any submitted data.
@@ -241,7 +253,7 @@ pub fn main() !void {
         \\    const char *address_ptr,
         \\    uint32_t address_len,
         \\    uintptr_t completion_ctx,
-        \\    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+        \\    tb_completion_t completion_callback
         \\);
         \\
         \\// Retrieve the parameters initially passed to `tb_client_init` or `tb_client_init_echo`.

@@ -1727,15 +1727,15 @@ where
 {
     let (tx, rx) = channel::<CompletionMessage<Event>>();
     let callback: Box<OnCompletion> = Box::new(Box::new(
-        |context, packet, timestamp, result_ptr, result_len| unsafe {
+        |context, packet, timestamp, result, result_size| unsafe {
             let events_len = (*packet).data_size as usize / mem::size_of::<Event>();
             let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
             (*packet).data = ptr::null_mut();
 
             let packet = Packet(Box::from_raw(packet));
 
-            let result = if result_len != 0 {
-                std::slice::from_raw_parts(result_ptr, result_len as usize)
+            let result = if result_size != 0 {
+                std::slice::from_raw_parts(result, result_size as usize)
             } else {
                 &[]
             };

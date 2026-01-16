@@ -108,8 +108,8 @@ pub fn on_complete(
     tb_context: usize,
     tb_packet: [*c]c.tb_packet_t,
     timestamp: u64,
-    result_ptr: [*c]const u8,
-    result_len: u32,
+    result: ?[*]const u8,
+    result_size: u32,
 ) callconv(.c) void {
     _ = tb_context;
     _ = timestamp;
@@ -119,10 +119,10 @@ pub fn on_complete(
     defer context.lock.unlock();
 
     assert(tb_packet.*.status == c.TB_PACKET_OK);
-    assert(result_ptr != null);
+    assert(result != null);
 
-    stdx.copy_disjoint(.exact, u8, context.result[0..result_len], result_ptr[0..result_len]);
-    context.result_size = result_len;
+    stdx.copy_disjoint(.exact, u8, context.result[0..result_size], result.?[0..result_size]);
+    context.result_size = result_size;
     context.completed = true;
     context.condition.signal();
 }
