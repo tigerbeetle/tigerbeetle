@@ -486,9 +486,8 @@ fn run_fuzzers(
         assert(running_count == options.concurrency);
 
         if (iteration_push) {
-            if (options.devhub_token) |token| {
-                try upload_results(shell, gpa, token, seeds.items, seed_logs.items);
-            } else {
+            try upload_results(shell, gpa, options.devhub_token, seeds.items, seed_logs.items);
+            if (options.devhub_token == null) {
                 log.info("skipping upload, no token", .{});
                 for (seeds.items) |seed_record| {
                     const seed_record_json = try std.json.stringifyAlloc(
@@ -999,13 +998,15 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
 fn upload_results(
     shell: *Shell,
     gpa: std.mem.Allocator,
-    token: []const u8,
+    token: ?[]const u8,
     seeds_new: []const SeedRecord,
     seeds_new_logs: []const ?[]const u8,
 ) !void {
     assert(seeds_new.len == seeds_new_logs.len);
 
-    log.info("uploading {} seeds", .{seeds_new.len});
+    if (token) |_| {
+        log.info("uploading {} seeds", .{seeds_new.len});
+    }
 
     _ = try shell.cwd.deleteTree("./devhubdb");
     try shell.exec(
@@ -1013,7 +1014,9 @@ fn upload_results(
         \\  https://oauth2:{token}@github.com/tigerbeetle/devhubdb.git
         \\  devhubdb
     , .{
-        .token = token,
+        // Even when no token is provided, clone and modify the (local) devhubdb so that it is easy
+        // to test CFO changes.
+        .token = token orelse "",
     });
     try shell.pushd("./devhubdb");
     defer shell.popd();
@@ -1036,6 +1039,14 @@ fn upload_results(
         const seeds_old = try SeedRecord.from_json(arena.allocator(), data);
         const seeds_merged = try SeedRecord.merge(arena.allocator(), .{}, seeds_old, seeds_new);
         const seeds_json = try SeedRecord.to_json(arena.allocator(), seeds_merged);
+
+        if (std.mem.eql(u8, std.mem.sliceAsBytes(seeds_old), std.mem.sliceAsBytes(seeds_merged))) {
+            // None of the new seeds were merged in, so there is nothing to commit.
+            // This can happen when CFO is being run from a commit that is not one of CFO's targets.
+            // For example, if you run CFO locally on main, but you are a couple commits behind.
+            log.info("no seeds uploaded", .{});
+            return;
+        }
 
         var seeds_merged_logs = std.StringHashMap(void).init(arena.allocator());
         for (seeds_merged) |*seed| {
@@ -1068,11 +1079,15 @@ fn upload_results(
         try shell.exec("git add ./fuzzing/data.json", .{});
         try shell.git_env_setup(.{ .use_hostname = true });
         try shell.exec("git commit -m 🌱", .{});
-        if (shell.exec("git push", .{})) {
-            log.info("seeds updated", .{});
+        if (token) |_| {
+            if (shell.exec("git push", .{})) {
+                log.info("seeds updated", .{});
+                break;
+            } else |_| {
+                log.info("conflict, retrying", .{});
+            }
+        } else {
             break;
-        } else |_| {
-            log.info("conflict, retrying", .{});
         }
     } else {
         log.err("can't push new data to devhub", .{});
