@@ -106,10 +106,8 @@ pub fn binary_search_values_upsert_index(
             .upper_bound => key_from_value(&values[mid]) <= key,
         });
 
-        if (take_upper_half) {
-            @branchHint(.unpredictable);
-            offset = mid;
-        }
+        const step = @as(usize, @intFromBool(take_upper_half)) * half;
+        offset += step;
 
         length -= half;
     }
