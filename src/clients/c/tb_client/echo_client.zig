@@ -41,11 +41,13 @@ pub fn EchoClientType(comptime MessageBus: type) type {
                     client: *EchoClient,
                     eviction: *const Message.Eviction,
                 ) void = null,
+                aof_recovery: bool,
             },
         ) !EchoClient {
             _ = allocator;
             _ = options.replica_count;
             _ = options.message_bus_options;
+            assert(!options.aof_recovery);
 
             return EchoClient{
                 .id = options.id,

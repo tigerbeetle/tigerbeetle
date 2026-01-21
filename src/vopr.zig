@@ -19,7 +19,6 @@ pub const vsr_options = .{
     .git_commit = @import("vsr_options").git_commit,
     .release = @import("vsr_options").release,
     .release_client_min = @import("vsr_options").release_client_min,
-    .config_aof_recovery = @import("vsr_options").config_aof_recovery,
 };
 const vsr_vopr_options = @import("vsr_vopr_options");
 
@@ -408,6 +407,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
                 .cache_entries_transfers = if (prng.boolean()) 256 else 0,
                 .cache_entries_transfers_pending = if (prng.boolean()) 256 else 0,
                 .log_trace = true,
+                .aof_recovery = false,
             },
         },
         .replicate_options = .{
@@ -535,6 +535,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
                 .cache_entries_transfers = 0,
                 .cache_entries_transfers_pending = 0,
                 .log_trace = true,
+                .aof_recovery = false,
             },
         },
     };

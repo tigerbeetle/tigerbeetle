@@ -114,11 +114,6 @@ pub fn build(b: *std.Build) !void {
         .config_verify = b.option(bool, "config_verify", "Enable extra assertions.") orelse
             // If `config_verify` isn't set, disable it for `release` builds; otherwise, enable it.
             (mode == .Debug),
-        .config_aof_recovery = b.option(
-            bool,
-            "config-aof-recovery",
-            "Enable AOF Recovery mode.",
-        ) orelse false,
         .config_release = b.option([]const u8, "config-release", "Release triple."),
         .config_release_client_min = b.option(
             []const u8,
@@ -164,7 +159,6 @@ pub fn build(b: *std.Build) !void {
         .config_verify = build_options.config_verify,
         .config_release = build_options.config_release,
         .config_release_client_min = build_options.config_release_client_min,
-        .config_aof_recovery = build_options.config_aof_recovery,
     });
 
     const tb_client = build_tb_client(b, .{
@@ -348,7 +342,6 @@ fn build_vsr_module(b: *std.Build, options: struct {
     config_verify: bool,
     config_release: ?[]const u8,
     config_release_client_min: ?[]const u8,
-    config_aof_recovery: bool,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
     // Ideally, we would return _just_ the module here, and keep options an implementation detail.
     // However, currently Zig makes it awkward to provide multiple entry points for a module:
@@ -365,7 +358,6 @@ fn build_vsr_module(b: *std.Build, options: struct {
         "release_client_min",
         options.config_release_client_min,
     );
-    vsr_options.addOption(bool, "config_aof_recovery", options.config_aof_recovery);
 
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
@@ -933,7 +925,6 @@ fn build_test_integration(
         .config_verify = true,
         .config_release = "65535.0.0",
         .config_release_client_min = "0.16.4",
-        .config_aof_recovery = false,
     });
     const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
     const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{

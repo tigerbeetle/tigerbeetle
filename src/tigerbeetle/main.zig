@@ -311,7 +311,7 @@ fn command_start(
             });
             break :blk .single_release(constants.config.process.release);
         }
-        if (constants.aof_recovery) {
+        if (args.aof_recovery) {
             log.info("multiversioning: upgrades disabled due to aof_recovery.", .{});
             break :blk .single_release(constants.config.process.release);
         }
@@ -356,6 +356,7 @@ fn command_start(
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
             .aof = if (aof != null) &aof.? else null,
+            .aof_recovery = args.aof_recovery,
             .nonce = nonce,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
@@ -368,6 +369,7 @@ fn command_start(
                 .cache_entries_transfers = args.cache_transfers,
                 .cache_entries_transfers_pending = args.cache_transfers_pending,
                 .log_trace = args.log_trace,
+                .aof_recovery = args.aof_recovery,
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
@@ -425,10 +427,10 @@ fn command_start(
         replica.message_bus.accept_address.?,
     });
 
-    if (constants.aof_recovery) {
+    if (args.aof_recovery) {
         log.warn(
             "{}: started in AOF recovery mode. This is potentially dangerous - if it's" ++
-                " unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.",
+                " unexpected, please rerun without --aof-recovery flag.",
             .{replica.replica},
         );
     }
@@ -518,6 +520,7 @@ fn command_reformat(
             .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
+            .aof_recovery = false,
 
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),

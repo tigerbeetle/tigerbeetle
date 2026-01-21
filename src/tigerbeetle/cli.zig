@@ -105,6 +105,10 @@ const CLIArgs = union(enum) {
         /// setting aof_file to '<data file path>.aof'.
         aof: bool = false,
 
+        /// AOF recovery mode: accept timestamps passed by the client.
+        /// Only enable this when recovering cluster from AOF.
+        aof_recovery: bool = false,
+
         @"--": void,
         path: []const u8,
     };
@@ -537,6 +541,7 @@ pub const Command = union(enum) {
         experimental: bool,
         replicate_star: bool,
         aof_file: ?Path,
+        aof_recovery: bool,
         path: []const u8,
         log_debug: bool,
         log_trace: bool,
@@ -1063,6 +1068,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .trace = start.trace,
         .replicate_star = start.replicate_star,
         .aof_file = aof_file,
+        .aof_recovery = start.aof_recovery,
         .path = start.path,
         .log_debug = start.log_debug,
         .log_trace = start.log_trace,

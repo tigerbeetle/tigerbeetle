@@ -63,6 +63,8 @@ pub fn ClientType(
         /// The number of replicas in the cluster.
         replica_count: u8,
 
+        aof_recovery: bool,
+
         /// Only tests should ever override the release.
         release: vsr.Release = constants.config.process.release,
 
@@ -133,6 +135,7 @@ pub fn ClientType(
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
+                aof_recovery: bool,
                 message_bus_options: MessageBus.Options,
                 /// When eviction_callback is null, the client will panic on eviction.
                 ///
@@ -162,6 +165,7 @@ pub fn ClientType(
                 .id = options.id,
                 .cluster = options.cluster,
                 .replica_count = options.replica_count,
+                .aof_recovery = options.aof_recovery,
                 .request_completion_timer = .init(time),
                 .request_timeout = .{
                     .name = "request_timeout",
@@ -357,13 +361,13 @@ pub fn ClientType(
             assert(message.header.session == 0);
             assert(message.header.request == 0);
 
-            if (!constants.aof_recovery) {
+            if (!self.aof_recovery) {
                 assert(message.header.operation == .noop or
                     !message.header.operation.vsr_reserved());
             }
 
             // TODO: Re-investigate this state for AOF as it currently traps.
-            // assert(message.header.timestamp == 0 or constants.aof_recovery);
+            // assert(message.header.timestamp == 0 or self.aof_recovery);
 
             message.header.request = self.request_number;
             self.request_number += 1;

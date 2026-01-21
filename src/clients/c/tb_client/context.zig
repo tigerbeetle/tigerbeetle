@@ -305,6 +305,7 @@ pub fn ContextType(
                     .id = context.client_id,
                     .cluster = cluster_id,
                     .replica_count = context.addresses.count_as(u8),
+                    .aof_recovery = false,
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,

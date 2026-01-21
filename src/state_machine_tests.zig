@@ -130,6 +130,7 @@ pub const TestContext = struct {
                 .cache_entries_transfers = 0,
                 .cache_entries_transfers_pending = 0,
                 .log_trace = true,
+                .aof_recovery = false,
             },
         );
         errdefer ctx.state_machine.deinit(allocator);

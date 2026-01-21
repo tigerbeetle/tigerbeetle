@@ -100,6 +100,7 @@ pub fn main(
                 .id = stdx.unique_u128(),
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),
+                .aof_recovery = false,
                 .message_bus_options = .{ .configuration = addresses, .io = io },
             },
         ));

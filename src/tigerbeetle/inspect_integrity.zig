@@ -209,6 +209,7 @@ fn init(
             .cache_entries_transfers_pending = 0,
 
             .log_trace = false,
+            .aof_recovery = false,
         }),
     );
     errdefer integrity.forest.deinit(gpa);

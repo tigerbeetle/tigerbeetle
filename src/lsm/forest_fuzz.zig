@@ -76,6 +76,7 @@ const Environment = struct {
         .cache_entries_transfers = cache_entries_max,
         .cache_entries_transfers_pending = cache_entries_max,
         .log_trace = true,
+        .aof_recovery = false,
     });
 
     const free_set_fragments_max = 2048;

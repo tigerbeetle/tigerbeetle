@@ -23,7 +23,6 @@ const BuildOptions = struct {
     git_commit: ?[40]u8,
     release: ?[]const u8,
     release_client_min: ?[]const u8,
-    config_aof_recovery: bool,
 };
 
 // Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
@@ -140,7 +139,6 @@ const ConfigProcess = struct {
     grid_scrubber_cycle_ms: u64 = std.time.ms_per_day * 180,
     grid_scrubber_interval_ms_min: u64 = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: u64 = std.time.ms_per_s * 10,
-    aof_recovery: bool = false,
     multiversion_binary_platform_size_max: u64 = 64 * MiB,
     multiversion_poll_interval_ms: u64 = 1000,
 };
@@ -303,7 +301,6 @@ pub const configs = struct {
         base.process.release = release;
         base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
-        base.process.aof_recovery = build_options.config_aof_recovery;
         base.process.verify = build_options.config_verify;
 
         assert(base.process.release.value >= base.process.release_client_min.value);
