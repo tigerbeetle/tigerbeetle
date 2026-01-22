@@ -609,7 +609,7 @@ pub const main =
                 opt: bool = false,
                 option: bool = false,
             },
-            pos: struct {
+            positional: struct {
                 flag: bool = false,
 
                 @"--": void,
@@ -669,7 +669,7 @@ pub const main =
                     try out_stream.print("opt: {}\n", .{values.opt});
                     try out_stream.print("option: {}\n", .{values.option});
                 },
-                .pos => |values| {
+                .positional => |values| {
                     try out_stream.print("p1: {s}\n", .{values.p1});
                     try out_stream.print("p2: {s}\n", .{values.p2});
                     try out_stream.print("p3: {?}\n", .{values.p3});
@@ -837,7 +837,7 @@ test "flags" {
     try t.check(&.{}, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: subcommand required, expected 'empty', 'prefix', 'pos', 'extended', 'required', 'values', or 'subcommand'
+        \\error: subcommand required, expected 'empty', 'prefix', 'positional', 'extended', 'required', 'values', or 'subcommand'
         \\
     ));
 
@@ -931,7 +931,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "y" }, snap(@src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -941,7 +941,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "1" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "y", "1" }, snap(@src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -951,7 +951,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "1", "2" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "y", "1", "2" }, snap(@src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -961,56 +961,56 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{"pos"}, snap(@src(),
+    try t.check(&.{"positional"}, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: <p1>: argument is required
         \\
     ));
 
-    try t.check(&.{ "pos", "x" }, snap(@src(),
+    try t.check(&.{ "positional", "x" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: <p2>: argument is required
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "z" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "y", "z" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: <p3>: expected an integer value, but found 'z' (invalid digit)
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "1", "2", "3" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "y", "1", "2", "3" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '3'
         \\
     ));
 
-    try t.check(&.{ "pos", "" }, snap(@src(),
+    try t.check(&.{ "positional", "" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: <p1>: empty argument
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "--flag" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "--flag" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: unexpected trailing option: '--flag'
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "--flag", "y" }, snap(@src(),
+    try t.check(&.{ "positional", "x", "--flag", "y" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: unexpected trailing option: '--flag'
         \\
     ));
 
-    try t.check(&.{ "pos", "--flag", "x", "y" }, snap(@src(),
+    try t.check(&.{ "positional", "--flag", "x", "y" }, snap(@src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -1020,14 +1020,14 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "--", "x", "y" }, snap(@src(),
+    try t.check(&.{ "positional", "--", "x", "y" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--'
         \\
     ));
 
-    try t.check(&.{ "pos", "--flak", "x", "y" }, snap(@src(),
+    try t.check(&.{ "positional", "--flak", "x", "y" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--flak'
