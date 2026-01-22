@@ -60,9 +60,8 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///    start: struct { addresses: []const u8, replica: u32 },
 ///    format: struct {
 ///        verbose: bool = false,
-///        positional: struct {
-///            path: []const u8,
-///        }
+///        @"--": void,
+///        path: []const u8,
 ///    },
 ///
 ///    pub const help =
@@ -73,7 +72,7 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 /// const cli_args = parse_commands(&args, CLIArgs);
 /// ```
 ///
-/// `positional` field is treated specially, it designates positional arguments.
+/// `@"--"` field is treated specially, it delineates positional arguments.
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 ///
@@ -433,7 +432,8 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
 
 fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
     return comptime blk: {
-        assert(!std.mem.eql(u8, field.name, "positional"));
+        assert(!std.mem.eql(u8, field.name, "-"));
+        assert(!std.mem.eql(u8, field.name, "--"));
 
         var result: []const u8 = "--";
         var index = 0;
