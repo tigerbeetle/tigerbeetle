@@ -126,25 +126,28 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     assert(@typeInfo(Flags) == .@"struct");
 
     const fields = std.meta.fields(Flags);
-    comptime var fields_named, const fields_positional = for (fields, 0..) |field, index| {
-        if (std.mem.eql(u8, field.name, "--")) {
-            assert(field.type == void);
-            assert(index != fields.len - 1);
-            break .{
-                fields[0..index].*,
-                fields[index + 1 ..].*,
-            };
-        }
-    } else .{
-        fields[0..fields.len].*,
-        [_]std.builtin.Type.StructField{},
-    };
+    comptime var fields_named, const fields_positional, const fields_extended =
+        for (fields, 0..) |field, index| {
+            if (std.mem.eql(u8, field.name, "--")) {
+                assert(field.type == void);
+                break .{
+                    fields[0..index].*,
+                    fields[index + 1 ..].*,
+                    index == fields.len - 1,
+                };
+            }
+        } else .{
+            fields[0..fields.len].*,
+            [_]std.builtin.Type.StructField{},
+            false,
+        };
 
     comptime {
         if (fields_positional.len == 0) {
-            assert(fields.len == fields_named.len);
+            assert(fields.len == fields_named.len + @intFromBool(fields_extended));
         } else {
             assert(fields.len == fields_named.len + 1 + fields_positional.len);
+            assert(!fields_extended);
         }
 
         // When parsing named arguments, we must consider longer arguments first, such that
@@ -223,6 +226,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
 
         if (fields_positional.len > 0) {
+            assert(!fields_extended);
             counts.@"--" += 1;
             switch (counts.@"--" - 1) {
                 inline 0...fields_positional.len - 1 => |field_index| {
@@ -242,10 +246,19 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 },
                 else => {}, // Fall-through to the unexpected argument error.
             }
+        } else {
+            if (fields_extended) {
+                if (std.mem.eql(u8, arg, "--")) {
+                    break;
+                } else {
+                    fatal("unexpected argument: '{s}'; expected '-- ...'", .{arg});
+                }
+            }
         }
 
         fatal("unexpected argument: '{s}'", .{arg});
     }
+    if (!fields_extended) assert(args.next() == null);
 
     inline for (fields_named) |field| {
         const flag = flag_name(field);
@@ -605,6 +618,10 @@ pub const main =
                 p3: ?u32 = null,
                 p4: ?u32 = null,
             },
+            extended: struct {
+                flag: bool = false,
+                @"--": void,
+            },
             required: struct {
                 foo: u8,
                 bar: u8,
@@ -658,6 +675,10 @@ pub const main =
                     try out_stream.print("p3: {?}\n", .{values.p3});
                     try out_stream.print("p4: {?}\n", .{values.p4});
                     try out_stream.print("flag: {}\n", .{values.flag});
+                },
+                .extended => |values| {
+                    try out_stream.print("flag: {}\n", .{values.flag});
+                    while (args.next()) |arg| try out_stream.print("arg: {s}\n", .{arg});
                 },
                 .required => |required| {
                     try out_stream.print("foo: {}\n", .{required.foo});
@@ -816,7 +837,7 @@ test "flags" {
     try t.check(&.{}, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: subcommand required, expected 'empty', 'prefix', 'pos', 'required', 'values', or 'subcommand'
+        \\error: subcommand required, expected 'empty', 'prefix', 'pos', 'extended', 'required', 'values', or 'subcommand'
         \\
     ));
 
@@ -1310,6 +1331,54 @@ test "flags" {
     try t.check(&.{ "subcommand", "-h" }, snap(@src(),
         \\stdout:
         \\subcommand help
+        \\
+    ));
+
+    try t.check(&.{"extended"}, snap(@src(),
+        \\stdout:
+        \\flag: false
+        \\
+    ));
+    try t.check(&.{ "extended", "--" }, snap(@src(),
+        \\stdout:
+        \\flag: false
+        \\
+    ));
+    try t.check(&.{ "extended", "--flag", "--" }, snap(@src(),
+        \\stdout:
+        \\flag: true
+        \\
+    ));
+    try t.check(&.{ "extended", "a" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: 'a'; expected '-- ...'
+        \\
+    ));
+    try t.check(&.{ "extended", "--", "a" }, snap(@src(),
+        \\stdout:
+        \\flag: false
+        \\arg: a
+        \\
+    ));
+    try t.check(&.{ "extended", "--flag", "--", "a" }, snap(@src(),
+        \\stdout:
+        \\flag: true
+        \\arg: a
+        \\
+    ));
+    try t.check(&.{ "extended", "--", "a", "b" }, snap(@src(),
+        \\stdout:
+        \\flag: false
+        \\arg: a
+        \\arg: b
+        \\
+    ));
+    try t.check(&.{ "extended", "--flag", "--", "a", "b" }, snap(@src(),
+        \\stdout:
+        \\flag: true
+        \\arg: a
+        \\arg: b
         \\
     ));
 }
