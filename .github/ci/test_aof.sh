@@ -67,7 +67,7 @@ cd ..
 
 sleep 1
 
-./zig/zig build aof -- recover --addresses=3001,3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
+./zig/zig build aof -- recover --cluster=0 --addresses=3001,3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
 
 # Give replicas time to settle.
 sleep 10
