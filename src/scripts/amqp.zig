@@ -725,6 +725,7 @@ const VSRContext = struct {
                 .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = 1,
+                .aof_recovery = false,
                 .message_bus_options = .{
                     .configuration = &.{address},
                     .io = &self.io,

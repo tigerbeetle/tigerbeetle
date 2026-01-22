@@ -330,6 +330,7 @@ pub fn AOFType(comptime IO: type) type {
                         .id = stdx.unique_u128(),
                         .cluster = 0,
                         .replica_count = @intCast(addresses.len),
+                        .aof_recovery = true,
                         .message_bus_options = .{
                             .configuration = addresses,
                             .io = io,

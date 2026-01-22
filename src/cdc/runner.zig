@@ -238,6 +238,7 @@ pub const Runner = struct {
                 .id = stdx.unique_u128(),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
+                .aof_recovery = false,
                 .message_bus_options = .{ .configuration = options.addresses, .io = &self.io },
             },
         );
