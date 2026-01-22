@@ -69,10 +69,11 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 /// The minimum number of blocks required for a single beat of a single compaction.
 ///
 /// Compaction needs to carry over the output index block and all input blocks to the next beat:
-/// One index and one value block for the output table, one index block for the two input tables,
-/// and `lsm_compaction_queue_read_max/2` value blocks for the two input tables.
+/// One index and one value block for the output table, one index block for level A, two index
+/// blocks for level B (to allow prefetching), and `lsm_compaction_queue_read_max/2` value blocks
+/// for the two input tables.
 pub const compaction_block_count_beat_min: u32 =
-    (1 + 1) + (1 + 1) + constants.lsm_compaction_queue_read_max;
+    (1 + 1) + (1 + 2) + constants.lsm_compaction_queue_read_max;
 
 const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
 
@@ -441,7 +442,7 @@ pub fn CompactionType(
         }) = .{ .buffer = undefined },
 
         level_b_index_block: RingBufferType(*ResourcePool.Block, .{
-            .array = 1,
+            .array = 2, // Prefetch next table's index block
         }) = .{ .buffer = undefined },
 
         level_b_value_block: RingBufferType(*ResourcePool.Block, .{
