@@ -657,6 +657,7 @@ const fsword_t = i64;
 const fsid_t = u64;
 
 pub const TmpfsMagic = 0x01021994;
+pub const ZfsMagic = 0x2fc12fc1;
 pub const StatFs = extern struct {
     f_type: fsword_t,
     f_bsize: fsword_t,

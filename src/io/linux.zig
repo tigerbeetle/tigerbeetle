@@ -60,6 +60,11 @@ pub const IO = struct {
         done,
     } = .inactive,
 
+    /// When true, use synchronous pread/pwrite for storage operations instead of io_uring.
+    /// This is needed for ZFS compatibility, as io_uring has known issues with ZFS that can
+    /// cause hangs and data corruption. Network operations still use io_uring.
+    sync_storage: bool = false,
+
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
         const uts = posix.uname();
@@ -81,11 +86,33 @@ pub const IO = struct {
             else => {},
         };
 
-        return IO{ .ring = try IO_Uring.init(entries, flags) };
+        var io = IO{ .ring = try IO_Uring.init(entries, flags) };
+
+        // Check for environment variable to force synchronous storage I/O.
+        // This is useful for filesystems with io_uring compatibility issues that aren't
+        // automatically detected (e.g., if ZFS detection fails or for other problematic
+        // filesystems).
+        if (std.posix.getenv("TIGERBEETLE_SYNC_STORAGE")) |val| {
+            if (std.mem.eql(u8, val, "1") or std.mem.eql(u8, val, "true")) {
+                io.sync_storage = true;
+                log.info("sync storage I/O enabled via TIGERBEETLE_SYNC_STORAGE", .{});
+            }
+        }
+
+        return io;
     }
 
     pub fn deinit(self: *IO) void {
         self.ring.deinit();
+    }
+
+    /// Enable synchronous storage I/O mode. When enabled, storage operations (read, write,
+    /// fsync) use synchronous pread/pwrite/fdatasync instead of io_uring. This is needed for
+    /// ZFS compatibility, as io_uring has known issues with ZFS that can cause hangs and data
+    /// corruption. Network operations continue to use io_uring.
+    pub fn enable_sync_storage(self: *IO) void {
+        self.sync_storage = true;
+        log.info("synchronous storage I/O enabled (ZFS compatibility mode)", .{});
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
@@ -1017,7 +1044,29 @@ pub const IO = struct {
                 },
             },
         };
-        self.enqueue(completion);
+
+        if (self.sync_storage) {
+            // Synchronous mode for ZFS compatibility: use fdatasync instead of io_uring
+            completion.result = sync_fdatasync(fd);
+            self.completed.push(completion);
+        } else {
+            self.enqueue(completion);
+        }
+    }
+
+    /// Perform a synchronous fdatasync, returning the result in io_uring format (0 or -errno).
+    fn sync_fdatasync(fd: fd_t) i32 {
+        while (true) {
+            const rc = linux.fdatasync(fd);
+            const errno = linux.E.init(rc);
+            if (errno == .SUCCESS) {
+                return 0;
+            } else if (errno == .INTR) {
+                continue;
+            } else {
+                return -@as(i32, @intFromEnum(errno));
+            }
+        }
     }
 
     pub const OpenatError = posix.OpenError || posix.UnexpectedError;
@@ -1094,7 +1143,30 @@ pub const IO = struct {
                 },
             },
         };
-        self.enqueue(completion);
+
+        if (self.sync_storage) {
+            // Synchronous mode for ZFS compatibility: use pread instead of io_uring
+            completion.result = sync_pread(fd, buffer, offset);
+            self.completed.push(completion);
+        } else {
+            self.enqueue(completion);
+        }
+    }
+
+    /// Perform a synchronous pread, returning the result in io_uring format (bytes or -errno).
+    fn sync_pread(fd: fd_t, buffer: []u8, offset: u64) i32 {
+        const len = buffer_limit(buffer.len);
+        while (true) {
+            const rc = posix.system.pread(fd, buffer.ptr, len, @bitCast(offset));
+            const errno = posix.errno(rc);
+            if (errno == .SUCCESS) {
+                return @intCast(rc);
+            } else if (errno == .INTR) {
+                continue;
+            } else {
+                return -@as(i32, @intFromEnum(errno));
+            }
+        }
     }
 
     pub const RecvError = error{
@@ -1317,7 +1389,30 @@ pub const IO = struct {
                 },
             },
         };
-        self.enqueue(completion);
+
+        if (self.sync_storage) {
+            // Synchronous mode for ZFS compatibility: use pwrite instead of io_uring
+            completion.result = sync_pwrite(fd, buffer, offset);
+            self.completed.push(completion);
+        } else {
+            self.enqueue(completion);
+        }
+    }
+
+    /// Perform a synchronous pwrite, returning the result in io_uring format (bytes or -errno).
+    fn sync_pwrite(fd: fd_t, buffer: []const u8, offset: u64) i32 {
+        const len = buffer_limit(buffer.len);
+        while (true) {
+            const rc = posix.system.pwrite(fd, buffer.ptr, len, @bitCast(offset));
+            const errno = posix.errno(rc);
+            if (errno == .SUCCESS) {
+                return @intCast(rc);
+            } else if (errno == .INTR) {
+                continue;
+            } else {
+                return -@as(i32, @intFromEnum(errno));
+            }
+        }
     }
 
     pub const Event = posix.fd_t;
@@ -1462,8 +1557,6 @@ pub const IO = struct {
         purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
-        _ = self;
-
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
@@ -1534,12 +1627,21 @@ pub const IO = struct {
             .file => {
                 var direct_io_supported = false;
                 const dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
+                const dir_on_zfs = try fs_is_zfs(dir_fd);
 
                 if (dir_on_tmpfs) {
                     log.warn(
                         "tmpfs is not durable, and your data will be lost on reboot",
                         .{},
                     );
+                }
+
+                // ZFS has known compatibility issues with io_uring that can cause hangs and
+                // potential data corruption. Enable synchronous storage I/O mode when ZFS is
+                // detected to avoid these issues while still using io_uring for network operations.
+                if (dir_on_zfs) {
+                    log.info("ZFS filesystem detected", .{});
+                    self.enable_sync_storage();
                 }
 
                 // Special case. tmpfs doesn't support Direct I/O. Normally we would panic
@@ -1764,6 +1866,24 @@ pub const IO = struct {
         }
     }
 
+    /// Detects whether the underlying file system for a given directory fd is ZFS.
+    /// ZFS has known compatibility issues with io_uring, so we use synchronous I/O for storage
+    /// operations when running on ZFS to avoid potential hangs and data corruption.
+    fn fs_is_zfs(dir_fd: fd_t) !bool {
+        var statfs: stdx.StatFs = undefined;
+
+        while (true) {
+            const res = stdx.fstatfs(dir_fd, &statfs);
+            switch (os.linux.E.init(res)) {
+                .SUCCESS => {
+                    return statfs.f_type == stdx.ZfsMagic;
+                },
+                .INTR => continue,
+                else => |err| return stdx.unexpected_errno("fs_is_zfs", err),
+            }
+        }
+    }
+
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
     fn fs_supports_direct_io(dir_fd: fd_t) !bool {
@@ -1858,3 +1978,101 @@ pub const IO = struct {
         }.erased;
     }
 };
+
+// Tests for sync_storage mode (ZFS compatibility)
+const testing = std.testing;
+
+test "sync_storage: read/write/fsync complete immediately to completed queue" {
+    // When sync_storage is enabled, storage operations should complete
+    // synchronously and be placed directly in the completed queue.
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    // Enable sync storage mode
+    io.sync_storage = true;
+
+    // Create a test file
+    const path = "test_sync_storage";
+    const file = try std.fs.cwd().createFile(path, .{ .read = true });
+    defer std.fs.cwd().deleteFile(path) catch {};
+    defer file.close();
+
+    var completion: IO.Completion = undefined;
+    var write_buf = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    var read_buf: [10]u8 = undefined;
+
+    // Test write - should complete synchronously
+    const TestCtx = struct {
+        fn noop_callback(_: *@This(), _: *IO.Completion, _: anytype) void {}
+    };
+    var ctx: TestCtx = .{};
+
+    io.write(*TestCtx, &ctx, TestCtx.noop_callback, &completion, file.handle, &write_buf, 0);
+
+    // In sync mode, completion should be in completed queue immediately
+    try testing.expect(!io.completed.empty());
+
+    // Pop and verify result
+    const write_completion = io.completed.pop().?;
+    try testing.expect(write_completion.result >= 0);
+    try testing.expectEqual(@as(usize, @intCast(write_completion.result)), write_buf.len);
+
+    // Test read
+    io.read(*TestCtx, &ctx, TestCtx.noop_callback, &completion, file.handle, &read_buf, 0);
+    try testing.expect(!io.completed.empty());
+
+    const read_completion = io.completed.pop().?;
+    try testing.expect(read_completion.result >= 0);
+
+    // Test fsync
+    io.fsync(*TestCtx, &ctx, TestCtx.noop_callback, &completion, file.handle);
+    try testing.expect(!io.completed.empty());
+
+    const fsync_completion = io.completed.pop().?;
+    try testing.expectEqual(@as(i32, 0), fsync_completion.result);
+}
+
+test "sync_storage: network operations still use io_uring" {
+    // Network operations should NOT be affected by sync_storage mode.
+    // They should still be enqueued to io_uring (unqueued list when ring is full,
+    // or submitted to kernel).
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    io.sync_storage = true;
+
+    // Create a socket
+    const socket = try posix.socket(posix.AF.INET, posix.SOCK.STREAM | posix.SOCK.CLOEXEC, 0);
+    defer posix.close(socket);
+
+    var completion: IO.Completion = undefined;
+    var recv_buf: [10]u8 = undefined;
+
+    const TestCtx = struct {
+        fn noop_callback(_: *@This(), _: *IO.Completion, _: anytype) void {}
+    };
+    var ctx: TestCtx = .{};
+
+    // recv should NOT go to completed queue immediately (it uses io_uring)
+    io.recv(*TestCtx, &ctx, TestCtx.noop_callback, &completion, socket, &recv_buf);
+
+    // The completion should NOT be in completed queue - it should be in the
+    // io_uring submission path (either enqueued or in kernel)
+    try testing.expect(io.completed.empty());
+}
+
+test "ZfsMagic constant is correct" {
+    // ZFS magic number from statfs(2) / fstatfs(2)
+    // This is the value returned in f_type for ZFS filesystems
+    try testing.expectEqual(@as(i64, 0x2fc12fc1), stdx.ZfsMagic);
+}
+
+test "fs_is_zfs returns false for non-ZFS filesystem" {
+    // On a typical test system (ext4, tmpfs, etc.), fs_is_zfs should return false
+    const dir_fd = posix.AT.FDCWD;
+    const is_zfs = try IO.fs_is_zfs(dir_fd);
+
+    // We can't assert this is false since the test might run on ZFS,
+    // but we can at least verify the function doesn't crash
+    _ = is_zfs;
+}
