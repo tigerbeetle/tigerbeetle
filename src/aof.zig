@@ -1,3 +1,8 @@
+//! Reconstruct a cluster from one or more AOF files.
+//!
+//! Note that a AOF-recovered cluster is *not* physically identical to the original cluster.
+//! It should be logically identical though -- the same data (minus the client table), just in
+//! different places.
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
@@ -333,7 +338,11 @@ pub fn AOFType(comptime IO: type) type {
                     time,
                     message_pool,
                     .{
-                        .id = stdx.unique_u128(),
+                        // Use a deterministic client id, so that replaying the same AOF against
+                        // different new clusters yields physically identical data files.
+                        // (It must be based on release so that clusters which have upgraded at some
+                        // point will need a separate "aof recover" invocation for each release.)
+                        .id = constants.config.process.release.value,
                         .cluster = cluster,
                         .replica_count = @intCast(addresses.len),
                         .aof_recovery = true,
