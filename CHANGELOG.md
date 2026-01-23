@@ -3,6 +3,49 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.69
+
+Released: 2026-01-23
+
+### Features
+
+- [#3464](https://github.com/tigerbeetle/tigerbeetle/pull/3464)
+
+  Document client cancellation policy.
+
+- [#3460](https://github.com/tigerbeetle/tigerbeetle/pull/3460)
+
+  Move [ARCHITECTURE.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/ARCHITECTURE.md)
+  up in the docs hierarchy. It's a part of internal docs, but is well worth reading for anyone
+  curious about TigerBeetle internals!
+
+### Internals
+
+- [#3468](https://github.com/tigerbeetle/tigerbeetle/pull/3468)
+
+  Tighten up CLI parsing to forbid accidentally allowed signs. E.g, `--cluster=+0` is now an error.
+
+- [#3467](https://github.com/tigerbeetle/tigerbeetle/pull/3467)
+
+  Make experimental AOF feature a run-time, rather than compile-time flag.
+
+- [#3465](https://github.com/tigerbeetle/tigerbeetle/pull/3465)
+
+  Simplify debugging devhub by cloning (but not pushing) devhub-db during local development.
+
+- [#3457](https://github.com/tigerbeetle/tigerbeetle/pull/3457)
+
+  Use `--cache-grid` to reduce memory in tests of Rust client.
+
+- [#3440](https://github.com/tigerbeetle/tigerbeetle/pull/3440)
+
+  Simplify state machine by using actual op number instead of symbolic `snapshot_latest` for LSM
+  lookups.
+
+### TigerTracks 🎧
+
+- [Model](https://open.spotify.com/track/2hFeOGfy9HmGs6kS6FuJHd?si=ccdde259e18b41d0)
+
 ## TigerBeetle 0.16.68
 
 Released: 2026-01-09
