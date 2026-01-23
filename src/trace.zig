@@ -111,6 +111,7 @@ pub const EventTracing = @import("trace/event.zig").EventTracing;
 pub const EventTiming = @import("trace/event.zig").EventTiming;
 pub const EventTimingAggregate = @import("trace/event.zig").EventTimingAggregate;
 pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate;
+pub const StallReason = @import("trace/event.zig").StallReason;
 
 const trace_span_size_max = 1 * KiB;
 

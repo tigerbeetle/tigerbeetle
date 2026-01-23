@@ -406,6 +406,9 @@ pub fn CompactionType(
         pool: ?*ResourcePool = null,
         callback: ?*const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void = null,
 
+        // Tracks current stall reason for tracing
+        stall_reason: ?trace.StallReason = null,
+
         // IO queues:
         //
         // Compaction structure is such that the data can be read (and written) concurrently, but
@@ -997,12 +1000,24 @@ pub fn CompactionType(
                 assert(compaction.block_queues_empty_input());
             }
 
+            assert(compaction.pool != null);
+            assert(compaction.callback != null);
             const pool = compaction.pool.?;
             const callback = compaction.callback.?;
 
             compaction.stage = .paused;
             compaction.callback = null;
             compaction.pool = null;
+
+            // Stop any active stall trace since beat is complete.
+            if (compaction.stall_reason) |reason| {
+                compaction.grid.trace.stop(.{ .compact_stall = .{
+                    .tree = @enumFromInt(compaction.tree.config.id),
+                    .level_b = compaction.level_b,
+                    .reason = reason,
+                } });
+                compaction.stall_reason = null;
+            }
 
             assert(compaction.idle());
             assert(pool.idle());
@@ -1048,6 +1063,16 @@ pub fn CompactionType(
                 .inactive,
                 .paused,
                 => unreachable,
+            }
+
+            // If we were stalled, stop the stall trace since a callback fired.
+            if (compaction.stall_reason) |reason| {
+                compaction.grid.trace.stop(.{ .compact_stall = .{
+                    .tree = @enumFromInt(compaction.tree.config.id),
+                    .level_b = compaction.level_b,
+                    .reason = reason,
+                } });
+                compaction.stall_reason = null;
             }
 
             // The loop below runs while (progressed) and, every time progressed is set to true,
@@ -1175,6 +1200,8 @@ pub fn CompactionType(
                         } else {
                             assert(index_block.stage == .read_index_block);
                         }
+                    } else {
+                        // TODO: here we do not have index block a
                     }
                 }
 
@@ -1205,6 +1232,8 @@ pub fn CompactionType(
                     } else {
                         assert(index_block.stage == .read_index_block);
                     }
+                } else {
+                    //TODO: here we do not have index block b.
                 }
 
                 const level_a_ready_immutable = compaction.table_info_a.? == .immutable and
@@ -1273,6 +1302,89 @@ pub fn CompactionType(
             } else unreachable;
             assert(!progressed);
             assert(!compaction.pool.?.idle());
+
+            // Determine stall reason and start trace.
+            compaction.stall_reason = compaction.detect_stall_reason();
+            if (compaction.stall_reason) |reason| {
+                compaction.grid.trace.start(.{ .compact_stall = .{
+                    .tree = @enumFromInt(compaction.tree.config.id),
+                    .level_b = compaction.level_b,
+                    .reason = reason,
+                } });
+            }
+        }
+
+        fn detect_stall_reason(compaction: *const Compaction) ?trace.StallReason {
+            // Check in order of priority (most impactful first).
+
+            // 1. Output queue full - write backpressure
+            if (compaction.output_blocks.spare_capacity() < 2) {
+                return .output_queue_full;
+            }
+
+            // 2. No blocks available
+            if (compaction.pool.?.blocks.count() == 0) {
+                return .no_blocks;
+            }
+
+            // 3. Index block not ready (waiting for IO or queue empty)
+            if (compaction.table_info_a.? == .disk) {
+                if (compaction.level_a_index_block.head()) |index_block| {
+                    if (index_block.stage == .read_index_block) {
+                        return .index_block_not_ready;
+                    }
+                } else {
+                    // Queue empty but we need an index block
+                    if (compaction.level_a_position.index_block < 1) {
+                        return .index_block_not_ready;
+                    }
+                }
+            }
+            if (compaction.level_b_index_block.head()) |index_block| {
+                if (index_block.stage == .read_index_block) {
+                    return .index_block_not_ready;
+                }
+            } else {
+                // Queue empty but we might need more index blocks
+                if (compaction.level_b_position.index_block < compaction.range_b.?.tables.count()) {
+                    return .index_block_not_ready;
+                }
+            }
+
+            // 4. Value block not ready (waiting for IO or queue empty but not exhausted)
+            const level_a_exhausted = (compaction.table_info_a.? == .immutable and
+                compaction.level_a_immutable_stage == .exhausted) or
+                (compaction.table_info_a.? == .disk and
+                    compaction.level_a_index_block.count == 0 and
+                    compaction.level_a_value_block.count == 0);
+
+            const level_b_exhausted =
+                compaction.level_b_index_block.count == 0 and
+                compaction.level_b_value_block.count == 0;
+
+            if (compaction.table_info_a.? == .disk and !level_a_exhausted) {
+                if (compaction.level_a_value_block.head()) |value_block| {
+                    if (value_block.stage == .read_value_block) {
+                        return .value_block_not_ready;
+                    }
+                } else {
+                    // Queue empty but level not exhausted - waiting for value blocks
+                    return .value_block_not_ready;
+                }
+            }
+
+            if (!level_b_exhausted) {
+                if (compaction.level_b_value_block.head()) |value_block| {
+                    if (value_block.stage == .read_value_block) {
+                        return .value_block_not_ready;
+                    }
+                } else {
+                    // Queue empty but level not exhausted - waiting for value blocks
+                    return .value_block_not_ready;
+                }
+            }
+
+            return null;
         }
 
         fn compaction_dispatch_beat_quota_done(compaction: *Compaction) void {
@@ -1407,6 +1519,11 @@ pub fn CompactionType(
             };
             read.block = index_block;
             read.compaction = compaction;
+
+            compaction.grid.trace.start(.{ .compact_read_index_block = .{
+                .iop = compaction.pool.?.reads.index(read),
+            } });
+
             compaction.grid.read_block(
                 .{ .from_local_or_global_storage = read_index_block_callback },
                 &read.grid_read,
@@ -1420,6 +1537,10 @@ pub fn CompactionType(
             const read: *ResourcePool.BlockRead = @fieldParentPtr("grid_read", grid_read);
             const compaction: *Compaction = read.parent(Compaction);
             const block = read.block;
+            const read_iop = compaction.pool.?.reads.index(read);
+
+            compaction.grid.trace.stop(.{ .compact_read_index_block = .{ .iop = read_iop } });
+
             compaction.pool.?.reads.release(read);
 
             assert(block.stage == .read_index_block);
