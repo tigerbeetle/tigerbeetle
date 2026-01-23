@@ -59,6 +59,7 @@ comptime {
     _ = @import("vsr/checksum.zig");
     _ = @import("vsr/checksum_benchmark.zig");
     _ = @import("vsr/clock.zig");
+    _ = @import("vsr/fault_detector.zig");
     _ = @import("vsr/free_set.zig");
     _ = @import("vsr/grid_scrubber.zig");
     _ = @import("vsr/journal.zig");

@@ -538,11 +538,10 @@ pub fn ReplicaType(
         /// (status=normal primary)
         commit_message_timeout: Timeout,
 
-        /// The number of ticks without a heartbeat.
-        /// Reset any time the backup receives a heartbeat from the primary.
-        /// Triggers SVC messages. If an SVC quorum is achieved, we will kick off a view-change.
-        /// (status=normal backup)
-        normal_heartbeat_timeout: Timeout,
+        /// Fault detector that treats fresh prepare and commit messages as liveness signal.
+        /// Backups use it to trigger start_view messages.
+        /// The primary injects extra smoothing commit messages when requests stop abruptly.
+        commit_fault: vsr.FaultDetector,
 
         /// The number of ticks before resetting the SVC quorum.
         /// (status=normal|view-change, SVC quorum contains message from ANY OTHER replica)
@@ -1362,11 +1361,14 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 500 / constants.tick_ms,
                 },
-                .normal_heartbeat_timeout = Timeout{
-                    .name = "normal_heartbeat_timeout",
-                    .id = replica_index,
-                    .after = 5_000 / constants.tick_ms,
-                },
+                .commit_fault = vsr.FaultDetector.init(.{
+                    .now = self.clock.monotonic(),
+                    .interval_min = .ms(100),
+                    // The interval converges to commit_message_timeout regardless of the network
+                    // latency, but the initial interval after view change must encompass the worst
+                    // expected network delay.
+                    .interval_max = .ms(2_000),
+                }),
                 .start_view_change_window_timeout = Timeout{
                     .name = "start_view_change_window_timeout",
                     .id = replica_index,
@@ -1532,6 +1534,10 @@ pub fn ReplicaType(
                     self.syncing == .updating_checkpoint);
             }
 
+            if (self.status == .normal and !self.standby()) {
+                self.tick_normal_heartbeat_fault();
+            }
+
             self.clock.tick();
             self.message_bus.tick();
             self.multiversion.tick();
@@ -1541,7 +1547,6 @@ pub fn ReplicaType(
                 .{ &self.prepare_timeout, on_prepare_timeout },
                 .{ &self.primary_abdicate_timeout, on_primary_abdicate_timeout },
                 .{ &self.commit_message_timeout, on_commit_message_timeout },
-                .{ &self.normal_heartbeat_timeout, on_normal_heartbeat_timeout },
                 .{ &self.start_view_change_window_timeout, on_start_view_change_window_timeout },
                 .{ &self.start_view_change_message_timeout, on_start_view_change_message_timeout },
                 .{ &self.view_change_status_timeout, on_view_change_status_timeout },
@@ -1571,6 +1576,53 @@ pub fn ReplicaType(
 
             // None of the on_timeout() functions above should send a message to this replica.
             assert(self.loopback_queue == null);
+        }
+
+        fn tick_normal_heartbeat_fault(self: *Replica) void {
+            assert(self.status == .normal);
+            assert(self.backup() or self.primary());
+            assert(self.commit_fault.interval_min.to_ms() > 2 * constants.tick_ms);
+            assert(self.commit_fault.interval_ewma.to_ms() > 2 * constants.tick_ms);
+
+            const now = self.clock.monotonic();
+            const tardy = self.commit_fault.tardy(now);
+            if (tardy == .green) return; // Everything is fine!
+
+            if (self.primary()) {
+                if (tardy == .red) {
+                    // Can only happen if there's an abnormal delay between ticks.
+                    log.warn(
+                        "{}: tick_normal_heartbeat_fault: tick delayed (interval={} delay={})",
+                        .{
+                            self.replica,
+                            self.commit_fault.interval_ewma,
+                            now.duration_since(self.commit_fault.signal_last),
+                        },
+                    );
+                }
+                // See FaultDetector smoothing test for why resetting the timeout is critical here.
+                self.commit_message_timeout.reset();
+                self.send_commit();
+            } else {
+                assert(self.backup());
+                if (tardy == .yellow) {
+                    // A slight delay which could be caused by a natural drop in the load,
+                    // so wait some more for a Commit message from the primary.
+                } else {
+                    log.warn(
+                        "{}: tick_normal_heartbeat_fault: heartbeat lost (interval={} delay={})",
+                        .{
+                            self.replica,
+                            self.commit_fault.interval_ewma,
+                            now.duration_since(self.commit_fault.signal_last),
+                        },
+                    );
+                    self.send_start_view_change();
+                    self.commit_fault.signal(now);
+                }
+            }
+            // Avoid busy-looping:
+            assert(self.commit_fault.tardy(self.clock.monotonic()) != .red);
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
@@ -1974,6 +2026,9 @@ pub fn ReplicaType(
             // the prepare, thereby breaking the replication chain.
             if (message.header.op > self.commit_min and !self.journal.has_prepare(message.header)) {
                 self.replicate(message);
+                if (message.header.op > self.op) {
+                    self.commit_fault.signal(self.clock.monotonic());
+                }
             } else {
                 log.warn("{}: on_prepare: not replicating op={} commit_min={} present={}", .{
                     self.log_prefix(),
@@ -2341,7 +2396,7 @@ pub fn ReplicaType(
             // Old/duplicate heartbeats don't count.
             if (self.heartbeat_timestamp < message.header.timestamp_monotonic) {
                 self.heartbeat_timestamp = message.header.timestamp_monotonic;
-                self.normal_heartbeat_timeout.reset();
+                self.commit_fault.signal(self.clock.monotonic());
                 if (!self.standby()) {
                     self.start_view_change_from_all_replicas.unset(self.replica);
                 }
@@ -3621,20 +3676,6 @@ pub fn ReplicaType(
             assert(self.commit_min == self.commit_max);
 
             self.send_commit();
-        }
-
-        fn on_normal_heartbeat_timeout(self: *Replica) void {
-            assert(self.status == .normal);
-            assert(self.backup());
-            self.normal_heartbeat_timeout.reset();
-
-            if (self.solo()) return;
-
-            log.debug("{}: on_normal_heartbeat_timeout: heartbeat lost (view={})", .{
-                self.log_prefix(),
-                self.view,
-            });
-            self.send_start_view_change();
         }
 
         fn on_start_view_change_window_timeout(self: *Replica) void {
@@ -5243,9 +5284,9 @@ pub fn ReplicaType(
         // at the same random backup. This improves logical availability in the case where the
         // the primary → client link is down. If it doesn't work, we have a fallback where a
         // backup directly replies to client requests (see `ignore_request_message`).
-        // Selecting a random backup as opposed to using a determistic function also guards us from
-        // subtle resonance issues wherein the same backup replies to the same client every time.
-        // This could happen if `active client count % replica count == 0`, and these clients'
+        // Selecting a random backup as opposed to using a deterministic function also guards us
+        // from subtle resonance issues wherein the same backup replies to the same client every
+        // time. This could happen if `active client count % replica count == 0`, and these clients'
         // requests arrive at the primary in the same order every time.
         fn execute_op_reply_to_client(self: *Replica, op: u64) bool {
             if (self.replica == self.primary_index(self.view)) return true;
@@ -9815,7 +9856,6 @@ pub fn ReplicaType(
 
             assert(!self.prepare_timeout.ticking);
             assert(!self.primary_abdicate_timeout.ticking);
-            assert(!self.normal_heartbeat_timeout.ticking);
             assert(!self.start_view_change_message_timeout.ticking);
             assert(!self.start_view_change_window_timeout.ticking);
             assert(!self.commit_message_timeout.ticking);
@@ -9854,10 +9894,10 @@ pub fn ReplicaType(
             assert(self.log_view >= self.superblock.working.vsr_state.checkpoint.header.view);
 
             self.status = .normal;
+            self.commit_fault.reset(self.clock.monotonic());
 
             assert(!self.prepare_timeout.ticking);
             assert(!self.primary_abdicate_timeout.ticking);
-            assert(!self.normal_heartbeat_timeout.ticking);
             assert(!self.start_view_change_message_timeout.ticking);
             assert(!self.start_view_change_window_timeout.ticking);
             assert(!self.commit_message_timeout.ticking);
@@ -9904,7 +9944,6 @@ pub fn ReplicaType(
                 );
 
                 self.ping_timeout.start();
-                self.normal_heartbeat_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.journal_repair_timeout.start();
                 self.journal_repair_budget_timeout.start();
@@ -9937,6 +9976,8 @@ pub fn ReplicaType(
             );
 
             self.status = .normal;
+            self.commit_fault.reset(self.clock.monotonic());
+
             if (self.log_view == view_new) {
                 // Recovering to the same view we lost the head in.
                 assert(self.view == view_new);
@@ -9952,7 +9993,6 @@ pub fn ReplicaType(
             assert(self.backup());
             assert(!self.prepare_timeout.ticking);
             assert(!self.primary_abdicate_timeout.ticking);
-            assert(!self.normal_heartbeat_timeout.ticking);
             assert(!self.start_view_change_window_timeout.ticking);
             assert(!self.commit_message_timeout.ticking);
             assert(!self.view_change_status_timeout.ticking);
@@ -9963,7 +10003,6 @@ pub fn ReplicaType(
             assert(!self.upgrade_timeout.ticking);
 
             self.ping_timeout.start();
-            self.normal_heartbeat_timeout.start();
             self.start_view_change_message_timeout.start();
             self.journal_repair_budget_timeout.start();
             self.journal_repair_timeout.start();
@@ -9983,6 +10022,7 @@ pub fn ReplicaType(
             assert(self.view_headers.command == .start_view);
 
             self.status = .normal;
+            self.commit_fault.reset(self.clock.monotonic());
 
             if (self.primary()) {
                 log.info(
@@ -9991,7 +10031,6 @@ pub fn ReplicaType(
                 );
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
                 assert(!self.pulse_timeout.ticking);
@@ -10029,7 +10068,6 @@ pub fn ReplicaType(
                 });
 
                 assert(!self.prepare_timeout.ticking);
-                assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
                 assert(!self.upgrade_timeout.ticking);
@@ -10050,7 +10088,6 @@ pub fn ReplicaType(
 
                 self.ping_timeout.start();
                 self.commit_message_timeout.stop();
-                self.normal_heartbeat_timeout.start();
                 self.start_view_change_window_timeout.stop();
                 self.start_view_change_message_timeout.start();
                 self.view_change_status_timeout.stop();
@@ -10138,7 +10175,6 @@ pub fn ReplicaType(
 
             self.ping_timeout.start();
             self.commit_message_timeout.stop();
-            self.normal_heartbeat_timeout.stop();
             self.start_view_change_window_timeout.stop();
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
@@ -11236,6 +11272,7 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
 
+            self.commit_fault.signal(self.clock.monotonic());
             if (self.primary_abdicating) {
                 assert(self.primary_abdicate_timeout.ticking);
 
