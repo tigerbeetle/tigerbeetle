@@ -375,7 +375,9 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
 fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
-    return std.fmt.parseInt(T, value, 10) catch |err| {
+    // Support only unsigned integers, as a conservative choice.
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
+    return std.fmt.parseUnsigned(T, value, 10) catch |err| {
         switch (err) {
             error.Overflow => fatal(
                 "{s}: value exceeds {d}-bit {s} integer: '{s}'",
@@ -1124,7 +1126,7 @@ test "flags" {
     try t.check(&.{ "values", "--int=-92" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --int: value exceeds 32-bit unsigned integer: '-92'
+        \\error: --int: expected an integer value, but found '-92' (invalid digit)
         \\
     ));
 
@@ -1175,6 +1177,34 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: --int: value exceeds 32-bit unsigned integer: '44444444444444444444'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=-0" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected an integer value, but found '-0' (invalid digit)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=+0" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected an integer value, but found '+0' (invalid digit)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=-0" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found: '-0'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=+0" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found: '+0'
         \\
     ));
 
