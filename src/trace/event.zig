@@ -68,6 +68,13 @@ fn index_from_enum(enum_tag: anytype) u8 {
 // TODO: It should be possible to get rid of all unbounded cardinality (eg, level_b being a u8) and
 // replace them with enums instead. This would allow for calculating the stack limit automatically.
 
+pub const StallReason = enum {
+    no_blocks,
+    index_block_not_ready,
+    value_block_not_ready,
+    output_queue_full,
+};
+
 /// Base {Timing,Tracing} Event. This is further split up into two different Events that share the
 /// same tag: ones for timing and ones for tracing.
 ///
@@ -93,6 +100,8 @@ pub const Event = union(enum) {
 
     compact_beat: struct { tree: TreeEnum, level_b: u8 },
     compact_beat_merge: struct { tree: TreeEnum, level_b: u8 },
+    compact_read_index_block: struct { iop: usize },
+    compact_stall: struct { tree: TreeEnum, level_b: u8, reason: StallReason },
     compact_manifest,
     compact_mutable: struct { tree: TreeEnum },
     compact_mutable_suffix: struct { tree: TreeEnum },
@@ -168,6 +177,8 @@ pub const EventTiming = union(Event.Tag) {
 
     compact_beat: struct { tree: TreeEnum },
     compact_beat_merge: struct { tree: TreeEnum },
+    compact_read_index_block,
+    compact_stall: struct { reason: StallReason },
     compact_manifest,
     compact_mutable: struct { tree: TreeEnum },
     compact_mutable_suffix: struct { tree: TreeEnum },
@@ -197,6 +208,8 @@ pub const EventTiming = union(Event.Tag) {
         .replica_request_local = enum_count(Operation),
         .compact_beat = enum_count(TreeEnum),
         .compact_beat_merge = enum_count(TreeEnum),
+        .compact_read_index_block = 1,
+        .compact_stall = enum_count(StallReason),
         .compact_manifest = 1,
         .compact_mutable = enum_count(TreeEnum),
         .compact_mutable_suffix = enum_count(TreeEnum),
@@ -288,6 +301,12 @@ pub const EventTiming = union(Event.Tag) {
 
                 return slot_bases.get(event.*) + offset;
             },
+            .compact_stall => |data| {
+                const reason_id = index_from_enum(data.reason);
+                assert(reason_id < slot_limits.get(event.*));
+
+                return slot_bases.get(event.*) + reason_id;
+            },
             inline else => |data, event_tag| {
                 comptime assert(@TypeOf(data) == void);
                 comptime assert(slot_limits.get(event_tag) == 1);
@@ -325,6 +344,8 @@ pub const EventTracing = union(Event.Tag) {
 
     compact_beat,
     compact_beat_merge,
+    compact_read_index_block: struct { iop: usize },
+    compact_stall: struct { reason: StallReason },
     compact_manifest,
     compact_mutable,
     compact_mutable_suffix,
@@ -354,6 +375,8 @@ pub const EventTracing = union(Event.Tag) {
         .replica_request_local = 1,
         .compact_beat = 1,
         .compact_beat_merge = 1,
+        .compact_read_index_block = constants.lsm_compaction_iops_read_max,
+        .compact_stall = enum_count(StallReason),
         .compact_manifest = 1,
         .compact_mutable = 1,
         .compact_mutable_suffix = 1,
@@ -415,10 +438,14 @@ pub const EventTracing = union(Event.Tag) {
                 const scan_tree_level_offset = data.level + 1;
                 return stack_base + scan_tree_offset + scan_tree_level_offset;
             },
-            inline .grid_read, .grid_write => |data| {
+            inline .compact_read_index_block, .grid_read, .grid_write => |data| {
                 assert(data.iop < stack_limits.get(event.*));
                 const stack_base = stack_bases.get(event.*);
                 return stack_base + @as(u32, @intCast(data.iop));
+            },
+            .compact_stall => |data| {
+                const stack_base = stack_bases.get(event.*);
+                return stack_base + index_from_enum(data.reason);
             },
             inline else => |data, event_tag| {
                 comptime assert(@TypeOf(data) == void);
@@ -646,6 +673,10 @@ test "EventTiming slot doesn't have collisions" {
             } },
             .compact_beat_merge => .{ .compact_beat_merge = .{
                 .tree = g.enum_value(TreeEnum),
+            } },
+            .compact_read_index_block => .compact_read_index_block,
+            .compact_stall => .{ .compact_stall = .{
+                .reason = g.enum_value(StallReason),
             } },
             .compact_manifest => .compact_manifest,
             .compact_mutable => .{ .compact_mutable = .{
