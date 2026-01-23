@@ -16,6 +16,11 @@ const MiB = stdx.MiB;
 
 const log = std.log.scoped(.aof);
 
+pub const std_options: std.Options = .{
+    .log_level = .info,
+    .logFn = stdx.log_with_timestamp,
+};
+
 const magic_number: u128 = 0xbcd8d3fee406119ed192c4f4c4fc82;
 
 pub const AOFEntry = extern struct {
@@ -284,10 +289,10 @@ pub fn AOFType(comptime IO: type) type {
                 if (last_entry.?.header().checksum != checksum) {
                     return error.ChecksumMismatch;
                 }
-                log.debug("validated all aof entries. last entry checksum {x:0>32} matches " ++
+                log.info("validated all aof entries. last entry checksum {x:0>32} matches " ++
                     " supplied {x:0>32}", .{ last_entry.?.header().checksum, checksum });
             } else {
-                log.debug("validated present aof entries.", .{});
+                log.info("validated present aof entries.", .{});
             }
         }
 
