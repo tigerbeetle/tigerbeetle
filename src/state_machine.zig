@@ -252,6 +252,8 @@ pub fn StateMachineType(comptime Storage: type) type {
         metrics: Metrics,
         log_trace: bool,
 
+        aof_recovery: bool,
+
         const StateMachine = @This();
         const Grid = @import("vsr/grid.zig").GridType(Storage);
 
@@ -267,6 +269,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             cache_entries_transfers: u32,
             cache_entries_transfers_pending: u32,
             log_trace: bool,
+            aof_recovery: bool,
         };
 
         pub const Workload = WorkloadType(StateMachine);
@@ -771,6 +774,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 },
 
                 .log_trace = options.log_trace,
+                .aof_recovery = options.aof_recovery,
             };
 
             try self.forest.init(
@@ -877,6 +881,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 },
 
                 .log_trace = self.log_trace,
+                .aof_recovery = self.aof_recovery,
             };
         }
 
@@ -1044,7 +1049,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         pub fn pulse_needed(self: *const StateMachine, timestamp: u64) bool {
-            assert(!constants.aof_recovery);
+            assert(!self.aof_recovery);
             assert(self.expire_pending_transfers.pulse_next_timestamp >=
                 TimestampRange.timestamp_min);
 
@@ -2452,7 +2457,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op != 0);
-            assert(timestamp > self.commit_timestamp or constants.aof_recovery);
+            assert(timestamp > self.commit_timestamp or self.aof_recovery);
             assert(message_body_used.len <= self.batch_size_limit);
             if (client == 0) assert(operation == .pulse);
 
@@ -3382,7 +3387,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) CreateAccountResult {
             assert(timestamp > self.commit_timestamp or
                 a.flags.imported or
-                constants.aof_recovery);
+                self.aof_recovery);
             if (a.flags.imported) {
                 assert(a.timestamp == timestamp);
             } else {
@@ -3467,7 +3472,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) CreateTransferResult {
             assert(timestamp > self.commit_timestamp or
                 t.flags.imported or
-                constants.aof_recovery);
+                self.aof_recovery);
             if (t.flags.imported) {
                 assert(t.timestamp == timestamp);
             } else {
@@ -4214,7 +4219,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) usize {
             assert(self.scan_lookup_results.items.len == 1); // No multi-batch.
-            assert(timestamp > self.commit_timestamp or constants.aof_recovery);
+            assert(timestamp > self.commit_timestamp or self.aof_recovery);
 
             defer {
                 self.scan_lookup_buffer_index = 0;

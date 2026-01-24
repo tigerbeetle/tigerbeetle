@@ -100,6 +100,7 @@ pub fn main(
                 .id = stdx.unique_u128(),
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),
+                .aof_recovery = false,
                 .message_bus_options = .{ .configuration = addresses, .io = io },
             },
         ));
@@ -181,8 +182,8 @@ pub fn main(
         .transfer_hot_percent = cli_args.transfer_hot_percent,
         .transfer_pending = cli_args.transfer_pending,
         .query_count = cli_args.query_count,
-        .flag_history = cli_args.flag_history,
-        .flag_imported = cli_args.flag_imported,
+        .no_history = cli_args.no_history,
+        .imported = cli_args.imported,
         .validate = cli_args.validate,
         .print_batch_timings = cli_args.print_batch_timings,
     };
@@ -265,8 +266,8 @@ const Benchmark = struct {
     transfer_hot_percent: u32,
     transfer_pending: bool,
     query_count: u32,
-    flag_history: bool,
-    flag_imported: bool,
+    no_history: bool,
+    imported: bool,
     validate: bool,
     print_batch_timings: bool,
 
@@ -844,14 +845,14 @@ const Benchmark = struct {
                 .ledger = 2,
                 .code = 1,
                 .flags = .{
-                    .history = b.flag_history,
-                    .imported = b.flag_imported,
+                    .history = !b.no_history,
+                    .imported = b.imported,
                 },
                 .debits_pending = 0,
                 .debits_posted = 0,
                 .credits_pending = 0,
                 .credits_posted = 0,
-                .timestamp = if (b.flag_imported) b.account_index + 1 else 0,
+                .timestamp = if (b.imported) b.account_index + 1 else 0,
             };
             b.account_index += 1;
         }
@@ -902,7 +903,7 @@ const Benchmark = struct {
                 .code = b.prng.int(u16) +| 1,
                 .flags = .{
                     .pending = pending,
-                    .imported = b.flag_imported,
+                    .imported = b.imported,
                 },
                 .timeout = if (pending)
                     // Timeouts must be short enough to ensure they are likely to expire
@@ -911,7 +912,7 @@ const Benchmark = struct {
                 else
                     0,
                 .amount = random_int_exponential(b.prng, u64, 10_000) +| 1,
-                .timestamp = if (b.flag_imported) b.account_index + b.transfer_index + 1 else 0,
+                .timestamp = if (b.imported) b.account_index + b.transfer_index + 1 else 0,
             };
             b.transfer_index += 1;
         }

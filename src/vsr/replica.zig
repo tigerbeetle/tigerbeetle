@@ -595,7 +595,7 @@ pub fn ReplicaType(
         grid_scrub_timeout: Timeout,
 
         /// The number of ticks on an idle cluster before injecting a `pulse` operation.
-        /// (status=normal and primary and !constants.aof_recovery)
+        /// (status=normal and primary and !self.aof_recovery)
         pulse_timeout: Timeout,
 
         /// The number of ticks before checking whether we are ready to begin an upgrade.
@@ -620,6 +620,7 @@ pub fn ReplicaType(
         trace_emit_timeout: Timeout,
 
         aof: ?*AOF,
+        aof_recovery: bool,
 
         replicate_options: ReplicateOptions,
 
@@ -629,6 +630,7 @@ pub fn ReplicaType(
             storage_size_limit: u64,
             nonce: Nonce,
             aof: ?*AOF,
+            aof_recovery: bool,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
             tracer: *Tracer,
@@ -717,6 +719,7 @@ pub fn ReplicaType(
                     .standby_count = options.node_count - replica_count,
                     .pipeline_requests_limit = options.pipeline_requests_limit,
                     .aof = options.aof,
+                    .aof_recovery = options.aof_recovery,
                     .nonce = options.nonce,
                     .state_machine_options = options.state_machine_options,
                     .message_bus_options = options.message_bus_options,
@@ -1062,6 +1065,7 @@ pub fn ReplicaType(
             pipeline_requests_limit: u32,
             nonce: Nonce,
             aof: ?*AOF,
+            aof_recovery: bool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
             grid_cache_blocks_count: u32,
@@ -1441,6 +1445,7 @@ pub fn ReplicaType(
                 .trace = self.trace,
                 .test_context = self.test_context,
                 .aof = options.aof,
+                .aof_recovery = options.aof_recovery,
                 .replicate_options = options.replicate_options,
             };
             self.routing.view_change(self.view);
@@ -1611,7 +1616,7 @@ pub fn ReplicaType(
                 }
 
                 if (message.header.into(.request)) |request_header| {
-                    assert(request_header.client != 0 or constants.aof_recovery);
+                    assert(request_header.client != 0 or self.aof_recovery);
                 }
 
                 self.trace.count(.{ .replica_messages_in = .{
@@ -1875,6 +1880,13 @@ pub fn ReplicaType(
             assert(message.header.operation != .reserved);
             assert(message.header.operation != .root);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
+
+            if (!self.aof_recovery) {
+                if (message.header.timestamp != 0) {
+                    log.warn("{}: on_request: ignoring (timestamp!=0)", .{self.replica});
+                    return;
+                }
+            }
 
             // Messages with `client == 0` are sent from itself, setting `realtime` to zero
             // so the StateMachine `{prepare,commit}_timestamp` will be used instead.
@@ -3860,7 +3872,7 @@ pub fn ReplicaType(
         }
 
         fn on_pulse_timeout(self: *Replica) void {
-            assert(!constants.aof_recovery);
+            assert(!self.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.pulse_timeout.ticking);
@@ -5307,7 +5319,7 @@ pub fn ReplicaType(
                 prepare.header.timestamp,
             });
             assert(self.state_machine.commit_timestamp < prepare.header.timestamp or
-                constants.aof_recovery);
+                self.aof_recovery);
 
             // Synchronously record this request in our AOF. This can be used for disaster recovery
             // in the case of catastrophic storage failure. Internally, write() will only return
@@ -5354,7 +5366,7 @@ pub fn ReplicaType(
             };
 
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
-                constants.aof_recovery);
+                self.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
 
             if (self.status == .normal and self.primary()) {
@@ -7253,7 +7265,7 @@ pub fn ReplicaType(
                 .timestamp = timestamp: {
                     // When running in AOF recovery mode, we allow clients to set a timestamp
                     // explicitly, but they can still pass in 0.
-                    if (constants.aof_recovery) {
+                    if (self.aof_recovery) {
                         if (request_header.timestamp == 0) {
                             break :timestamp prepare_timestamp;
                         } else {
@@ -7291,7 +7303,7 @@ pub fn ReplicaType(
                 self.primary_abdicate_timeout.start();
             }
 
-            if (!constants.aof_recovery) {
+            if (!self.aof_recovery) {
                 assert(self.pulse_timeout.ticking);
                 self.pulse_timeout.reset();
             }
@@ -9875,7 +9887,7 @@ pub fn ReplicaType(
                 self.journal_repair_timeout.start();
                 self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
-                if (!constants.aof_recovery) self.pulse_timeout.start();
+                if (!self.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
@@ -10001,7 +10013,7 @@ pub fn ReplicaType(
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
                 self.request_start_view_message_timeout.stop();
-                if (!constants.aof_recovery) self.pulse_timeout.start();
+                if (!self.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
@@ -11261,7 +11273,7 @@ pub fn ReplicaType(
             assert(!self.pipeline.queue.full());
 
             // Pulses are replayed during `aof recovery`.
-            if (constants.aof_recovery) return false;
+            if (self.aof_recovery) return false;
             // There's a pulse already in progress.
             if (self.pipeline.queue.contains_operation(.pulse)) return false;
             // Solo replicas only change views immediately when they start up,
@@ -11275,7 +11287,7 @@ pub fn ReplicaType(
         }
 
         fn send_request_pulse_to_self(self: *Replica) void {
-            assert(!constants.aof_recovery);
+            assert(!self.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
             assert(!self.view_durable_updating());

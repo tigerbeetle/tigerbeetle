@@ -6,9 +6,6 @@ if [ ! -f "zig/zig" ]; then
     ./zig/download.sh
 fi
 
-./zig/zig build install -Dconfig-aof-recovery=true -Drelease
-mv zig-out/bin/tigerbeetle tigerbeetle-aof-recovery
-
 ./zig/zig build install -Drelease
 
 rm -f aof.log
@@ -54,23 +51,23 @@ sleep 1
 rm -rf 1 2
 
 mkdir 1 && cd 1
-../tigerbeetle-aof-recovery format --cluster=0 --replica=0 --replica-count=2 aof-test.tigerbeetle >> ../aof.log 2>&1
-../tigerbeetle-aof-recovery start --cache-grid=256MiB --addresses=3001,3002 --aof-file="aof-test.tigerbeetle.aof" --experimental aof-test.tigerbeetle >> ../aof.log 2>&1 &
+../tigerbeetle format --cluster=0 --replica=0 --replica-count=2 aof-test.tigerbeetle >> ../aof.log 2>&1
+../tigerbeetle start --cache-grid=256MiB --addresses=3001,3002 --aof-file="aof-test.tigerbeetle.aof" --experimental --aof-recovery aof-test.tigerbeetle >> ../aof.log 2>&1 &
 cd ..
 
 mkdir 2 && cd 2
-../tigerbeetle-aof-recovery format --cluster=0 --replica=1 --replica-count=2 aof-test.tigerbeetle >> ../aof.log 2>&1
-../tigerbeetle-aof-recovery start --cache-grid=256MiB --addresses=3001,3002 --aof --experimental aof-test.tigerbeetle >> ../aof.log 2>&1 &
+../tigerbeetle format --cluster=0 --replica=1 --replica-count=2 aof-test.tigerbeetle >> ../aof.log 2>&1
+../tigerbeetle start --cache-grid=256MiB --addresses=3001,3002 --aof --experimental --aof-recovery aof-test.tigerbeetle >> ../aof.log 2>&1 &
 cd ..
 
 # mkdir 3 && cd 3
-# ../tigerbeetle-aof-recovery format --cluster=0 --replica=2 --replica-count=3 aof-test.tigerbeetle >> aof.log 2>&1
-# ../tigerbeetle-aof-recovery start --addresses=3001,3002,3003 aof-test.tigerbeetle >> aof.log 2>&1 &
+# ../tigerbeetle format --cluster=0 --replica=2 --replica-count=3 aof-test.tigerbeetle >> aof.log 2>&1
+# ../tigerbeetle start --addresses=3001,3002,3003 aof-test.tigerbeetle >> aof.log 2>&1 &
 # cd ..
 
 sleep 1
 
-./zig/zig build aof -- recover 127.0.0.1:3001,127.0.0.1:3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
+./zig/zig build aof -- recover --cluster=0 --addresses=3001,3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
 
 # Give replicas time to settle.
 sleep 10

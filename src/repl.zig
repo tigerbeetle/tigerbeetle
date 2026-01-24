@@ -677,6 +677,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     .id = client_id,
                     .cluster = options.cluster_id,
                     .replica_count = @intCast(options.addresses.len),
+                    .aof_recovery = false,
                     .message_bus_options = .{
                         .configuration = options.addresses,
                         .io = io,

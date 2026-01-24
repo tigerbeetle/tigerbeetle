@@ -105,6 +105,10 @@ const CLIArgs = union(enum) {
         /// setting aof_file to '<data file path>.aof'.
         aof: bool = false,
 
+        /// AOF recovery mode: accept timestamps passed by the client.
+        /// Only enable this when recovering cluster from AOF.
+        aof_recovery: bool = false,
+
         @"--": void,
         path: []const u8,
     };
@@ -133,8 +137,8 @@ const CLIArgs = union(enum) {
         log_debug_replica: bool = false,
         /// The probability distribution used to select accounts when making transfers or queries.
         account_distribution: Command.Benchmark.Distribution = .uniform,
-        flag_history: bool = false,
-        flag_imported: bool = false,
+        no_history: bool = false,
+        imported: bool = false,
         account_batch_size: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
         ),
@@ -537,6 +541,7 @@ pub const Command = union(enum) {
         experimental: bool,
         replicate_star: bool,
         aof_file: ?Path,
+        aof_recovery: bool,
         path: []const u8,
         log_debug: bool,
         log_trace: bool,
@@ -579,8 +584,8 @@ pub const Command = union(enum) {
         account_count: u32,
         account_count_hot: u32,
         account_distribution: Distribution,
-        flag_history: bool,
-        flag_imported: bool,
+        no_history: bool,
+        imported: bool,
         account_batch_size: u32,
         transfer_count: u64,
         transfer_hot_percent: u32,
@@ -1063,6 +1068,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .trace = start.trace,
         .replicate_star = start.replicate_star,
         .aof_file = aof_file,
+        .aof_recovery = start.aof_recovery,
         .path = start.path,
         .log_debug = start.log_debug,
         .log_trace = start.log_trace,
@@ -1145,8 +1151,8 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
         .account_distribution = benchmark.account_distribution,
-        .flag_history = benchmark.flag_history,
-        .flag_imported = benchmark.flag_imported,
+        .no_history = benchmark.no_history,
+        .imported = benchmark.imported,
         .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
         .transfer_hot_percent = benchmark.transfer_hot_percent,

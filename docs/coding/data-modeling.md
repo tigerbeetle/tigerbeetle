@@ -187,7 +187,7 @@ When selecting an `id` scheme:
 - Sequences of identifiers with long runs of strictly increasing (or strictly decreasing) values are
   amenable to optimization, leading to higher database throughput.
 - Random identifiers are not recommended – they can't take advantage of all of the LSM
-  optimizations. (Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
+  optimizations. (Random identifiers have _significantly_ lower throughput than strictly-increasing ULIDs).
 
 ### TigerBeetle Time-Based Identifiers (Recommended)
 

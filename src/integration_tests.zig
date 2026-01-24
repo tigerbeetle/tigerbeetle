@@ -344,7 +344,7 @@ test "help/version smoke" {
         .{ .command = "{tigerbeetle} --help", .substring = "tigerbeetle repl" },
         .{ .command = "{tigerbeetle} inspect --help", .substring = "tables --tree" },
         .{ .command = "{tigerbeetle} version", .substring = "TigerBeetle version" },
-        .{ .command = "{tigerbeetle} version --verbose", .substring = "process.aof_recovery=" },
+        .{ .command = "{tigerbeetle} version --verbose", .substring = "process.backoff_max_ms=" },
     }) |check| {
         const output = try shell.exec_stdout(check.command, .{ .tigerbeetle = tigerbeetle });
         try std.testing.expect(output.len > 0);

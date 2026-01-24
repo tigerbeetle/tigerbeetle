@@ -13,7 +13,6 @@ pub const vsr_options = .{
     .git_commit = @import("vsr_options").git_commit,
     .release = @import("vsr_options").release,
     .release_client_min = @import("vsr_options").release_client_min,
-    .config_aof_recovery = @import("vsr_options").config_aof_recovery,
 };
 
 // NB: this changes values in `constants.zig`!
