@@ -42,14 +42,52 @@ func (value Uint128) String() string {
 	return s[lastNonZero:]
 }
 
-func (value Uint128) BigInt() big.Int {
+func (value Uint128) BigInt() *big.Int {
 	// big.Int uses bytes in big-endian but Uint128 stores bytes in little endian, so reverse it.
 	bytes := value.Bytes()
 	swapEndian(bytes[:])
 
-	ret := big.Int{}
+	ret := new(big.Int)
 	ret.SetBytes(bytes[:])
 	return ret
+}
+
+// Uint64 converts a Uint128 to uint64, returning an error if the upper 64 bits are non-zero.
+//
+// This method is primarily useful for converting Uint128 values that were originally created
+// from uint64 values using ToUint128()
+//
+// IDs generated with ID() will always fail conversion since they use the full 128-bit space.
+// For ID values, use BigInt() or access the raw bytes directly.
+//
+//	id := ID()
+//	_, err := id.Uint64()  // err != nil (upper bits are set)
+func (value Uint128) Uint64() (uint64, error) {
+	bytes := value.Bytes()
+	upper := binary.LittleEndian.Uint64(bytes[8:])
+	if upper != 0 {
+		return 0, fmt.Errorf("Uint128 value too large to fit in uint64")
+	}
+	return binary.LittleEndian.Uint64(bytes[:8]), nil
+}
+
+// Compare compares two Uint128 values.
+// Returns -1 if value < other, 0 if value == other, 1 if value > other.
+func (value Uint128) Compare(other Uint128) int {
+	a := value.BigInt()
+	b := other.BigInt()
+	return a.Cmp(b)
+}
+
+// IsZero returns true if the Uint128 value is zero.
+func (value Uint128) IsZero() bool {
+	bytes := value.Bytes()
+	for _, b := range bytes {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // BytesToUint128 converts a raw [16]byte value to Uint128.
@@ -124,11 +162,7 @@ func ID() Uint128 {
 		timestamp = idLastTimestamp
 	} else {
 		idLastTimestamp = timestamp
-		_, err := rand.Read(idLastRandom[:])
-		if err != nil {
-			idMutex.Unlock()
-			panic("crypto.rand failed to provide random bytes")
-		}
+		_, _ = rand.Read(idLastRandom[:])
 	}
 
 	// Read out a uint80 from lastRandom as a uint64 and uint16.
