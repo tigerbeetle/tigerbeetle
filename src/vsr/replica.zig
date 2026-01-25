@@ -3176,7 +3176,7 @@ pub fn ReplicaType(
             reply_: ?*Message.Reply,
             destination_replica: ?u8,
         ) void {
-            const self: *Replica = @fieldParentPtr("client_replies", client_replies);
+            const self: *Replica = @alignCast(@fieldParentPtr("client_replies", client_replies));
             const reply = reply_ orelse {
                 log.debug("{}: on_request_reply: reply not found for replica={} " ++
                     "(op={} checksum={x:0>32})", .{
@@ -4801,7 +4801,7 @@ pub fn ReplicaType(
         }
 
         fn commit_reply_setup_callback(client_replies: *ClientReplies) void {
-            const self: *Replica = @fieldParentPtr("client_replies", client_replies);
+            const self: *Replica = @alignCast(@fieldParentPtr("client_replies", client_replies));
             assert(self.commit_stage == .reply_setup);
             assert(self.commit_prepare != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
@@ -5156,7 +5156,7 @@ pub fn ReplicaType(
         }
 
         fn commit_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self: *Replica = @fieldParentPtr("superblock_context", superblock_context);
+            const self: *Replica = @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.commit_stage == .checkpoint_superblock);
@@ -6575,7 +6575,7 @@ pub fn ReplicaType(
             reply_: ?*Message.Reply,
             destination_replica: ?u8,
         ) void {
-            const self: *Replica = @fieldParentPtr("client_replies", client_replies);
+            const self: *Replica = @alignCast(@fieldParentPtr("client_replies", client_replies));
             assert(reply_header.size > @sizeOf(Header));
             assert(destination_replica == null);
 
@@ -9441,7 +9441,7 @@ pub fn ReplicaType(
         }
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
-            const self: *Replica = @fieldParentPtr("superblock_context_view_change", context);
+            const self: *Replica = @alignCast(@fieldParentPtr("superblock_context_view_change", context));
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(!self.view_durable_updating());

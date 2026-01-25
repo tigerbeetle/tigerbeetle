@@ -36,16 +36,25 @@ const Options = struct {
     deduplicate: bool,
 };
 
+// ============================================================================
+// TournamentTree and KWayMergeIterator - New interface
+// ============================================================================
+
 pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) type {
     return struct {
-        winner: Node,
-        losers: [node_count]Node,
+        // SoA layout for better cache efficiency
+        loser_keys: [node_count]Key align(64),
+        loser_ids: [node_count]u32 align(64),
+        win_key: Key,
+        win_id: u32,
         tree_height: u16,
         nodes_count: u16,
         contestants_left: u16,
         direction: Direction,
 
         pub const node_count: u32 = std.math.ceilPowerOfTwoAssert(u32, contestants_max);
+        const tree_height_max = std.math.log2_int(u32, node_count);
+        const SENTINEL_KEY = std.math.maxInt(Key);
 
         const Node = struct {
             key: Key,
@@ -53,27 +62,22 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
             const id_sentinel = std.math.maxInt(u32);
             const sentinel: Node = .{
-                // The key itself is not used to determine whether a Node is a sentinel.
-                // This ensures that valid Keys with the maximum value are not treated as sentinels.
-                .key = std.math.maxInt(Key),
+                .key = SENTINEL_KEY,
                 .id = id_sentinel,
             };
 
-            // Returns true iff `a` wins over `b` under `direction`.
-            // If keys are equal, `stream_precedence` decides.
             inline fn beats(
                 a: *const Node,
                 b: *const Node,
                 direction: Direction,
             ) bool {
-                // A sentinel always loses.
                 if (b.id == id_sentinel) return true;
                 if (a.id == id_sentinel) return false;
 
                 const ordered = if (direction == .ascending) a.key < b.key else a.key > b.key;
                 assert(a.id != b.id);
                 const stabler = (a.key == b.key) and a.id < b.id;
-                return ordered or stabler; // `true` means a wins.
+                return ordered or stabler;
             }
         };
 
@@ -103,8 +107,10 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             }
 
             var tree: TournamentTree = .{
-                .winner = .sentinel,
-                .losers = @splat(.sentinel),
+                .win_key = SENTINEL_KEY,
+                .win_id = Node.id_sentinel,
+                .loser_keys = @splat(SENTINEL_KEY),
+                .loser_ids = @splat(Node.id_sentinel),
                 .direction = direction,
                 .tree_height = 0,
                 .nodes_count = 0,
@@ -113,15 +119,11 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
             if (contestants_left == 0) return tree;
 
-            const leafs_count =
-                std.math.ceilPowerOfTwo(u16, contestant_count) catch unreachable;
-            const tree_height = std.math.log2(leafs_count);
-            const nodes_count: u16 = leafs_count - 1;
-
-            // Construct the binary tree bottom up.
-            for (0..tree_height) |level| {
-                const level_min = (leafs_count >> @as(u4, @intCast(level + 1))) - 1;
-                const level_max = (leafs_count >> @as(u4, @intCast(level))) - 1;
+            // Always build full tree using comptime node_count for consistent structure
+            // This allows pop_winner to use comptime loop unrolling
+            inline for (0..tree_height_max) |level| {
+                const level_min = (node_count >> @as(u5, @intCast(level + 1))) - 1;
+                const level_max = (node_count >> @as(u5, @intCast(level))) - 1;
 
                 for (level_min..level_max, 0..) |loser_index, competitor_index| {
                     const competitor_a = contestants[competitor_index * 2];
@@ -129,50 +131,113 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
                     if (competitor_a.beats(&competitor_b, direction)) {
                         contestants[competitor_index] = competitor_a;
-                        tree.losers[loser_index] = competitor_b;
+                        tree.loser_keys[loser_index] = competitor_b.key;
+                        tree.loser_ids[loser_index] = competitor_b.id;
                     } else {
                         contestants[competitor_index] = competitor_b;
-                        tree.losers[loser_index] = competitor_a;
+                        tree.loser_keys[loser_index] = competitor_a.key;
+                        tree.loser_ids[loser_index] = competitor_a.id;
                     }
                 }
             }
 
-            // The final winner of the first competition is now in `contestants[0]`
-            tree.winner = contestants[0];
-            tree.nodes_count = nodes_count;
-            tree.tree_height = tree_height;
+            tree.win_key = contestants[0].key;
+            tree.win_id = contestants[0].id;
+            tree.nodes_count = node_count - 1;
+            tree.tree_height = tree_height_max;
 
             return tree;
         }
 
         pub fn pop_winner(tree: *TournamentTree, entrant: ?Key) void {
-            const direction = tree.direction;
-            const winner_id = tree.winner.id;
-
-            assert(tree.contestants_left > 0);
-            assert(tree.winner.id != Node.id_sentinel);
-
-            if (entrant == null) tree.contestants_left -= 1;
-            tree.winner = if (entrant) |key|
-                .{ .key = key, .id = tree.winner.id }
-            else
-                .sentinel;
-
-            var opponent_id: usize = tree.nodes_count + winner_id;
-            for (0..tree.tree_height) |_| {
-                opponent_id = (opponent_id - 1) >> 1;
-
-                const opponent = &tree.losers[opponent_id];
-
-                const winner = determine_winner(&tree.winner, opponent, direction);
-
-                swap_nodes(winner, &tree.winner);
+            // Dispatch once to comptime-specialized function
+            if (tree.direction == .ascending) {
+                pop_winner_impl(tree, entrant, .ascending);
+            } else {
+                pop_winner_impl(tree, entrant, .descending);
             }
-
-            if (tree.winner.id == Node.id_sentinel) assert(tree.contestants_left == 0);
         }
 
-        /// Return a pointer to the winner without branching.
+        inline fn pop_winner_impl(tree: *TournamentTree, entrant: ?Key, comptime direction: Direction) void {
+            const winner_id = tree.win_id;
+
+            assert(tree.win_id < node_count);
+            if (entrant == null) tree.contestants_left -= 1;
+
+            // New contender entering the tournament
+            var new_key: Key = if (entrant) |key| key else SENTINEL_KEY;
+            var new_id: u32 = if (entrant != null) winner_id else Node.id_sentinel;
+
+            // Tree is always built to full size, so use comptime constants
+            // nodes_count = node_count - 1, so starting idx = nodes_count + winner_id
+            var idx: usize = (node_count - 1) + winner_id;
+            inline for (0..tree_height_max) |_| {
+                idx = (idx - 1) >> 1;
+
+                // SoA access
+                const opp_key = tree.loser_keys[idx];
+                const opp_id = tree.loser_ids[idx];
+
+                // Key and id comparison - simplified using direct equality
+                const id_lt: u1 = @intFromBool(new_id < opp_id);
+                const keys_eq: u1 = @intFromBool(new_key == opp_key);
+                const eq_and_id_wins: u1 = keys_eq & id_lt;
+
+                // Direction is comptime - this branch is eliminated
+                const new_wins: u1 = if (direction == .ascending) blk: {
+                    // Ascending: SENTINEL_KEY=maxInt naturally loses on key comparison
+                    // When both are sentinels, it doesn't matter who wins (both are sentinels)
+                    const key_lt: u1 = @intFromBool(new_key < opp_key);
+                    break :blk key_lt | eq_and_id_wins;
+                } else blk: {
+                    // Descending: need sentinel checks since maxInt would incorrectly "win"
+                    const key_gt: u1 = @intFromBool(new_key > opp_key);
+                    const opp_is_sentinel: u1 = @intFromBool(opp_id == Node.id_sentinel);
+                    const new_is_sentinel: u1 = @intFromBool(new_id == Node.id_sentinel);
+                    const key_wins: u1 = key_gt | eq_and_id_wins;
+                    break :blk opp_is_sentinel | ((1 - new_is_sentinel) & key_wins);
+                };
+
+                // For small keys: use branchless mask operations
+                if (@bitSizeOf(Key) <= 64) {
+                    const key_mask = @as(Key, 0) -% @as(Key, new_wins);
+                    const id_mask = @as(u32, 0) -% @as(u32, new_wins);
+
+                    tree.loser_keys[idx] = (opp_key & key_mask) | (new_key & ~key_mask);
+                    tree.loser_ids[idx] = (opp_id & id_mask) | (new_id & ~id_mask);
+                    new_key = (new_key & key_mask) | (opp_key & ~key_mask);
+                    new_id = (new_id & id_mask) | (opp_id & ~id_mask);
+                } else {
+                    // Branchless swap using u64 masks on key parts
+                    const mask64 = @as(u64, 0) -% @as(u64, new_wins);
+                    const id_mask = @as(u32, 0) -% @as(u32, new_wins);
+
+                    const key_parts = @bitSizeOf(Key) / 64;
+                    const new_key_parts: [key_parts]u64 = @bitCast(new_key);
+                    const opp_key_parts: [key_parts]u64 = @bitCast(opp_key);
+
+                    var loser_parts: [key_parts]u64 = undefined;
+                    var winner_parts: [key_parts]u64 = undefined;
+
+                    inline for (0..key_parts) |i| {
+                        loser_parts[i] = (opp_key_parts[i] & mask64) | (new_key_parts[i] & ~mask64);
+                        winner_parts[i] = (new_key_parts[i] & mask64) | (opp_key_parts[i] & ~mask64);
+                    }
+
+                    tree.loser_keys[idx] = @bitCast(loser_parts);
+                    tree.loser_ids[idx] = (opp_id & id_mask) | (new_id & ~id_mask);
+                    new_key = @bitCast(winner_parts);
+                    new_id = (new_id & id_mask) | (opp_id & ~id_mask);
+                }
+            }
+
+            tree.win_key = new_key;
+            tree.win_id = new_id;
+
+            if (tree.win_id == Node.id_sentinel) assert(tree.contestants_left == 0);
+        }
+
+        // Keep original functions for init (not hot path)
         inline fn determine_winner(
             contender: *Node,
             challenger: *Node,
@@ -184,17 +249,14 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
         }
 
         inline fn select(choose_a: bool, a: *Node, b: *Node) *Node {
-            // Note: The code layout coaxes the compiler to generate branchless code.
-            //       Best do not change it without verifying the generated code.
             var p = b;
             if (choose_a) {
-                @branchHint(.unpredictable); // attaches to this branch
+                @branchHint(.unpredictable);
                 p = a;
             }
             return p;
         }
 
-        // This custom swap is faster than `std.mem.swap` for our Node struct.
         inline fn swap_nodes(a: *Node, b: *Node) void {
             inline for (std.meta.fields(Node)) |field| {
                 const field_value = @field(a, field.name);
@@ -205,25 +267,22 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
     };
 }
 
+pub const KWayMergeOptions = struct {
+    streams_max: comptime_int,
+    deduplicate: bool = false,
+};
+
 pub fn KWayMergeIteratorType(
     comptime Context: type,
     comptime Key: type,
     comptime Value: type,
-    comptime options: Options,
+    comptime options: KWayMergeOptions,
     comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
-    /// Peek the next key in the stream identified by stream_index.
-    /// For example, peek(stream_index=2) returns user_streams[2][0].
-    /// Returns Pending if the stream was consumed and
-    /// must be refilled before calling peek() again.
-    /// Returns null if the stream was fully consumed and reached the end.
-    comptime stream_peek: fn (
-        context: *Context,
-        stream_index: u32,
-    ) Pending!?Key,
+    comptime stream_peek: fn (context: *Context, stream_index: u32) Pending!?Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
 ) type {
     comptime assert(options.streams_max >= 1);
-    comptime assert(options.streams_max < std.math.maxInt(@TypeOf(options.streams_max)));
+    comptime assert(options.streams_max <= 1024); // Reasonable upper bound
 
     return struct {
         context: *Context,
@@ -241,7 +300,6 @@ pub fn KWayMergeIteratorType(
             direction: Direction,
         ) KWayMergeIterator {
             assert(streams_count <= options.streams_max);
-            // Streams ZERO can be used to represent empty sets.
             maybe(streams_count == 0);
 
             return .{
@@ -267,7 +325,6 @@ pub fn KWayMergeIteratorType(
             assert(self.tree == null);
             errdefer self.reset();
 
-            // Collect the non‑empty batches as initial “contestants”.
             var contestants: [Tree.node_count]Tree.Node = @splat(.sentinel);
             for (0..self.streams_count) |id_usize| {
                 const id: u32 = @intCast(id_usize);
@@ -280,13 +337,13 @@ pub fn KWayMergeIteratorType(
 
         pub fn pop(self: *KWayMergeIterator) Pending!?Value {
             if (self.tree == null) try self.load();
-            assert(self.tree != null);
+            const tree = &self.tree.?;
 
-            while (self.tree.?.contestants_left > 0) {
-                const key = try stream_peek(self.context, self.tree.?.winner.id);
-                self.tree.?.pop_winner(key);
-                if (self.tree.?.contestants_left == 0) return null;
-                const value = stream_pop(self.context, self.tree.?.winner.id);
+            while (tree.contestants_left > 0) {
+                const key = try stream_peek(self.context, tree.win_id);
+                tree.pop_winner(key);
+                if (tree.contestants_left == 0) return null;
+                const value = stream_pop(self.context, tree.win_id);
                 if (options.deduplicate) {
                     const key_next = key_from_value(&value);
                     if (self.key_popped) |key_prev| if (key_next == key_prev) continue;
