@@ -50,20 +50,6 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 .key = sentinel_key,
                 .id = id_sentinel,
             };
-
-            inline fn beats(
-                a: *const Node,
-                b: *const Node,
-                direction: Direction,
-            ) bool {
-                if (b.id == id_sentinel) return true;
-                if (a.id == id_sentinel) return false;
-
-                const ordered = if (direction == .ascending) a.key < b.key else a.key > b.key;
-                assert(a.id != b.id);
-                const stabler = (a.key == b.key) and a.id < b.id;
-                return ordered or stabler;
-            }
         };
 
         const TournamentTree = @This();
@@ -107,18 +93,16 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 const level_max = (node_count >> @as(u5, @intCast(level))) - 1;
 
                 for (level_min..level_max, 0..) |loser_index, competitor_index| {
-                    const competitor_a = contestants[competitor_index * 2];
-                    const competitor_b = contestants[competitor_index * 2 + 1];
+                    const a = contestants[competitor_index * 2];
+                    const b = contestants[competitor_index * 2 + 1];
+                    const a_wins = beats(a.key, a.id, b.key, b.id, direction);
 
-                    if (competitor_a.beats(&competitor_b, direction)) {
-                        contestants[competitor_index] = competitor_a;
-                        tree.loser_keys[loser_index] = competitor_b.key;
-                        tree.loser_ids[loser_index] = competitor_b.id;
-                    } else {
-                        contestants[competitor_index] = competitor_b;
-                        tree.loser_keys[loser_index] = competitor_a.key;
-                        tree.loser_ids[loser_index] = competitor_a.id;
-                    }
+                    contestants[competitor_index] = .{
+                        .key = branchless_select(Key, a_wins, a.key, b.key),
+                        .id = branchless_select(u32, a_wins, a.id, b.id),
+                    };
+                    tree.loser_keys[loser_index] = branchless_select(Key, a_wins, b.key, a.key);
+                    tree.loser_ids[loser_index] = branchless_select(u32, a_wins, b.id, a.id);
                 }
             }
 
@@ -151,28 +135,8 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
                 const opp_key = tree.loser_keys[idx];
                 const opp_id = tree.loser_ids[idx];
+                const new_wins = beats(new_key, new_id, opp_key, opp_id, direction);
 
-                const id_lt: u1 = @intFromBool(new_id < opp_id);
-                const keys_eq: u1 = @intFromBool(new_key == opp_key);
-                const eq_and_id_wins: u1 = keys_eq & id_lt;
-
-                // Branchless version of Node.beats(). In ascending mode, sentinel_key (maxInt)
-                // naturally loses on `<` comparison so no sentinel checks needed. In descending
-                // mode, maxInt would incorrectly "win" on `>`, so explicit sentinel checks are
-                // required.
-                const new_wins: u1 = if (direction == .ascending) blk: {
-                    const key_lt: u1 = @intFromBool(new_key < opp_key);
-                    break :blk key_lt | eq_and_id_wins;
-                } else blk: {
-                    const key_gt: u1 = @intFromBool(new_key > opp_key);
-                    const opp_is_sentinel: u1 = @intFromBool(opp_id == Node.id_sentinel);
-                    const new_is_sentinel: u1 = @intFromBool(new_id == Node.id_sentinel);
-                    const key_wins: u1 = key_gt | eq_and_id_wins;
-                    break :blk opp_is_sentinel | ((1 - new_is_sentinel) & key_wins);
-                };
-
-                // Branchless conditional swap: if new_wins, the new node continues
-                // up the tree and the opponent stays as loser; otherwise vice versa.
                 tree.loser_keys[idx] = branchless_select(Key, new_wins, opp_key, new_key);
                 tree.loser_ids[idx] = branchless_select(u32, new_wins, opp_id, new_id);
                 new_key = branchless_select(Key, new_wins, new_key, opp_key);
@@ -183,6 +147,28 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             tree.win_id = new_id;
 
             if (tree.win_id == Node.id_sentinel) assert(tree.contestants_left == 0);
+        }
+
+        /// Returns 1 if (a_key, a_id) wins over (b_key, b_id), 0 otherwise.
+        /// Sentinels (id_sentinel) always lose. Equal keys broken by id for stability.
+        /// In ascending mode, sentinel_key (maxInt) naturally loses on `<` so no
+        /// explicit sentinel checks are needed. In descending mode, maxInt would
+        /// incorrectly "win" on `>`, so explicit sentinel checks are required.
+        inline fn beats(a_key: Key, a_id: u32, b_key: Key, b_id: u32, direction: Direction) u1 {
+            const id_lt: u1 = @intFromBool(a_id < b_id);
+            const keys_eq: u1 = @intFromBool(a_key == b_key);
+            const eq_and_id_wins: u1 = keys_eq & id_lt;
+
+            if (direction == .ascending) {
+                const key_lt: u1 = @intFromBool(a_key < b_key);
+                return key_lt | eq_and_id_wins;
+            } else {
+                const key_gt: u1 = @intFromBool(a_key > b_key);
+                const b_is_sentinel: u1 = @intFromBool(b_id == Node.id_sentinel);
+                const a_is_sentinel: u1 = @intFromBool(a_id == Node.id_sentinel);
+                const key_wins: u1 = key_gt | eq_and_id_wins;
+                return b_is_sentinel | ((1 - a_is_sentinel) & key_wins);
+            }
         }
 
         /// Returns `a` if `flag == 1`, `b` if `flag == 0`, without branching.
