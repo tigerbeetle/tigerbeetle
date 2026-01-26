@@ -179,7 +179,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 const mask = @as(T, 0) -% @as(T, flag);
                 return (a & mask) | (b & ~mask);
             } else {
-                const parts = @bitSizeOf(T) / 64;
+                const parts = @divExact(@bitSizeOf(T), 64);
                 const a_parts: [parts]u64 = @bitCast(a);
                 const b_parts: [parts]u64 = @bitCast(b);
                 const mask = @as(u64, 0) -% @as(u64, flag);
