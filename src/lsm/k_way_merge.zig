@@ -30,15 +30,16 @@ const Pending = error{Pending};
 
 pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) type {
     return struct {
-        loser_keys: [node_count]Key align(64),
-        loser_ids: [node_count]u32 align(64),
+        loser_keys: [node_count_max]Key align(64),
+        loser_ids: [node_count_max]u32 align(64),
         win_key: Key,
         win_id: u32,
         contestants_left: u16,
+        height: u8,
         direction: Direction,
 
-        pub const node_count: u32 = std.math.ceilPowerOfTwoAssert(u32, contestants_max);
-        const tree_height = std.math.log2_int(u32, node_count);
+        pub const node_count_max: u32 = std.math.ceilPowerOfTwoAssert(u32, contestants_max);
+        const height_max = std.math.log2_int(u32, node_count_max);
         const sentinel_key = std.math.maxInt(Key);
 
         const Node = struct {
@@ -56,7 +57,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
         pub fn init(
             direction: Direction,
-            contestants: *[node_count]Node,
+            contestants: *[node_count_max]Node,
             contestant_count: u16,
         ) TournamentTree {
             assert(contestant_count <= contestants_max);
@@ -84,13 +85,20 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 .loser_ids = @splat(Node.id_sentinel),
                 .direction = direction,
                 .contestants_left = contestants_left,
+                .height = 0,
             };
 
             if (contestants_left == 0) return tree;
 
-            inline for (0..tree_height) |level| {
-                const level_min = (node_count >> @as(u5, @intCast(level + 1))) - 1;
-                const level_max = (node_count >> @as(u5, @intCast(level))) - 1;
+            // Compute effective tree size: only as large as needed for contestant_count.
+            const node_count: u32 = std.math.ceilPowerOfTwoAssert(u32, contestant_count);
+            tree.height = @intCast(std.math.log2_int(u32, node_count));
+
+            for (0..tree.height) |level| {
+                const shift_min: u5 = @intCast(level + 1);
+                const shift_max: u5 = @intCast(level);
+                const level_min: usize = (node_count >> shift_min) - 1;
+                const level_max: usize = (node_count >> shift_max) - 1;
 
                 for (level_min..level_max, 0..) |loser_index, competitor_index| {
                     const a = contestants[competitor_index * 2];
@@ -114,7 +122,17 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
         pub fn pop_winner(tree: *TournamentTree, entrant: ?Key) void {
             switch (tree.direction) {
-                inline else => |direction| pop_winner_impl(tree, entrant, direction),
+                inline else => |direction| {
+                    switch (tree.height) {
+                        inline 0...height_max => |height| pop_winner_impl(
+                            tree,
+                            entrant,
+                            direction,
+                            height,
+                        ),
+                        else => unreachable,
+                    }
+                },
             }
         }
 
@@ -122,7 +140,9 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             tree: *TournamentTree,
             entrant: ?Key,
             comptime direction: Direction,
+            comptime height: u32,
         ) void {
+            const node_count = @as(u32, 1) << @as(u5, @intCast(height));
             const winner_id = tree.win_id;
 
             assert(tree.win_id < node_count);
@@ -132,7 +152,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             var new_id: u32 = if (entrant != null) winner_id else Node.id_sentinel;
 
             var idx: usize = (node_count - 1) + winner_id;
-            inline for (0..tree_height) |_| {
+            inline for (0..height) |_| {
                 idx = (idx - 1) >> 1;
 
                 const opp_key = tree.loser_keys[idx];
@@ -173,22 +193,9 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             }
         }
 
-        /// Returns `a` if `flag == 1`, `b` if `flag == 0`, without branching.
         inline fn branchless_select(comptime T: type, flag: u1, a: T, b: T) T {
-            if (@bitSizeOf(T) <= 64) {
-                const mask = @as(T, 0) -% @as(T, flag);
-                return (a & mask) | (b & ~mask);
-            } else {
-                const parts = @divExact(@bitSizeOf(T), 64);
-                const a_parts: [parts]u64 = @bitCast(a);
-                const b_parts: [parts]u64 = @bitCast(b);
-                const mask = @as(u64, 0) -% @as(u64, flag);
-                var result: [parts]u64 = undefined;
-                inline for (0..parts) |i| {
-                    result[i] = (a_parts[i] & mask) | (b_parts[i] & ~mask);
-                }
-                return @bitCast(result);
-            }
+            @branchHint(.unpredictable);
+            return if (flag == 1) a else b;
         }
     };
 }
@@ -251,7 +258,7 @@ pub fn KWayMergeIteratorType(
             assert(self.tree == null);
             errdefer self.reset();
 
-            var contestants: [Tree.node_count]Tree.Node = @splat(.sentinel);
+            var contestants: [Tree.node_count_max]Tree.Node = @splat(.sentinel);
             for (0..self.streams_count) |id_usize| {
                 const id: u32 = @intCast(id_usize);
                 const key = try stream_peek(self.context, id) orelse continue;
