@@ -113,10 +113,8 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
         }
 
         pub fn pop_winner(tree: *TournamentTree, entrant: ?Key) void {
-            if (tree.direction == .ascending) {
-                pop_winner_impl(tree, entrant, .ascending);
-            } else {
-                pop_winner_impl(tree, entrant, .descending);
+            switch (tree.direction) {
+                inline else => |direction| pop_winner_impl(tree, entrant, direction),
             }
         }
 
