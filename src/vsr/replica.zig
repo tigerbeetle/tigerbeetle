@@ -5156,7 +5156,8 @@ pub fn ReplicaType(
         }
 
         fn commit_checkpoint_superblock_callback(superblock_context: *SuperBlock.Context) void {
-            const self: *Replica = @alignCast(@fieldParentPtr("superblock_context", superblock_context));
+            const self: *Replica =
+                @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.commit_stage == .checkpoint_superblock);
@@ -9441,7 +9442,8 @@ pub fn ReplicaType(
         }
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
-            const self: *Replica = @alignCast(@fieldParentPtr("superblock_context_view_change", context));
+            const self: *Replica =
+                @alignCast(@fieldParentPtr("superblock_context_view_change", context));
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(!self.view_durable_updating());

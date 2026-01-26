@@ -576,7 +576,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             ) *StateMachine {
                 comptime assert(field != .null);
 
-                const context: *PrefetchContext = @alignCast(@fieldParentPtr(@tagName(field), completion));
+                const context: *PrefetchContext =
+                    @alignCast(@fieldParentPtr(@tagName(field), completion));
                 return @alignCast(@fieldParentPtr("prefetch_context", context));
             }
 
@@ -612,7 +613,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             ) *StateMachine {
                 comptime assert(field != .null);
 
-                const context: *ScanLookup = @alignCast(@fieldParentPtr(@tagName(field), completion));
+                const context: *ScanLookup =
+                    @alignCast(@fieldParentPtr(@tagName(field), completion));
                 return @alignCast(@fieldParentPtr("scan_lookup", context));
             }
 

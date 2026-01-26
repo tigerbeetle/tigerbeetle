@@ -120,7 +120,11 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             }
         }
 
-        inline fn pop_winner_impl(tree: *TournamentTree, entrant: ?Key, comptime direction: Direction) void {
+        inline fn pop_winner_impl(
+            tree: *TournamentTree,
+            entrant: ?Key,
+            comptime direction: Direction,
+        ) void {
             const winner_id = tree.win_id;
 
             assert(tree.win_id < node_count);
@@ -188,7 +192,6 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 return @bitCast(result);
             }
         }
-
     };
 }
 
