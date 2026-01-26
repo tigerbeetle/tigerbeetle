@@ -273,7 +273,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
-            const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
+            const env: *Environment = @alignCast(@fieldParentPtr("manifest_log", manifest_log));
             env.change_state(.manifest_log_open, .fuzzing);
         }
 
@@ -384,12 +384,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn compact_callback(pool: *ResourcePool, _: u16, _: u64) void {
-            const env: *Environment = @fieldParentPtr("pool", pool);
+            const env: *Environment = @alignCast(@fieldParentPtr("pool", pool));
             env.change_state(.tree_compact, .fuzzing);
         }
 
         fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
-            const env: *Environment = @fieldParentPtr("manifest_log", manifest_log);
+            const env: *Environment = @alignCast(@fieldParentPtr("manifest_log", manifest_log));
             env.change_state(.manifest_log_compact, .fuzzing);
         }
 
@@ -440,12 +440,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn grid_checkpoint_callback(grid: *Grid) void {
-            const env: *Environment = @fieldParentPtr("grid", grid);
+            const env: *Environment = @alignCast(@fieldParentPtr("grid", grid));
             env.change_state(.grid_checkpoint, .superblock_checkpoint);
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
+            const env: *Environment =
+                @alignCast(@fieldParentPtr("superblock_context", superblock_context));
             env.change_state(.superblock_checkpoint, .fuzzing);
         }
 
@@ -470,7 +471,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Value) void {
-            const env: *Environment = @fieldParentPtr("lookup_context", lookup_context);
+            const env: *Environment = @alignCast(@fieldParentPtr("lookup_context", lookup_context));
             assert(env.lookup_value == null);
             env.lookup_value = if (value) |val| val.* else null;
             env.change_state(.tree_lookup, .fuzzing);
