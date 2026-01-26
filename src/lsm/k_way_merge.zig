@@ -36,19 +36,12 @@ const Options = struct {
     deduplicate: bool,
 };
 
-// ============================================================================
-// TournamentTree and KWayMergeIterator - New interface
-// ============================================================================
-
 pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) type {
     return struct {
-        // SoA layout for better cache efficiency
         loser_keys: [node_count]Key align(64),
         loser_ids: [node_count]u32 align(64),
         win_key: Key,
         win_id: u32,
-        tree_height: u16,
-        nodes_count: u16,
         contestants_left: u16,
         direction: Direction,
 
@@ -112,15 +105,11 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 .loser_keys = @splat(SENTINEL_KEY),
                 .loser_ids = @splat(Node.id_sentinel),
                 .direction = direction,
-                .tree_height = 0,
-                .nodes_count = 0,
                 .contestants_left = contestants_left,
             };
 
             if (contestants_left == 0) return tree;
 
-            // Always build full tree using comptime node_count for consistent structure
-            // This allows pop_winner to use comptime loop unrolling
             inline for (0..tree_height_max) |level| {
                 const level_min = (node_count >> @as(u5, @intCast(level + 1))) - 1;
                 const level_max = (node_count >> @as(u5, @intCast(level))) - 1;
@@ -143,14 +132,11 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
             tree.win_key = contestants[0].key;
             tree.win_id = contestants[0].id;
-            tree.nodes_count = node_count - 1;
-            tree.tree_height = tree_height_max;
 
             return tree;
         }
 
         pub fn pop_winner(tree: *TournamentTree, entrant: ?Key) void {
-            // Dispatch once to comptime-specialized function
             if (tree.direction == .ascending) {
                 pop_winner_impl(tree, entrant, .ascending);
             } else {
@@ -164,33 +150,28 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             assert(tree.win_id < node_count);
             if (entrant == null) tree.contestants_left -= 1;
 
-            // New contender entering the tournament
             var new_key: Key = if (entrant) |key| key else SENTINEL_KEY;
             var new_id: u32 = if (entrant != null) winner_id else Node.id_sentinel;
 
-            // Tree is always built to full size, so use comptime constants
-            // nodes_count = node_count - 1, so starting idx = nodes_count + winner_id
             var idx: usize = (node_count - 1) + winner_id;
             inline for (0..tree_height_max) |_| {
                 idx = (idx - 1) >> 1;
 
-                // SoA access
                 const opp_key = tree.loser_keys[idx];
                 const opp_id = tree.loser_ids[idx];
 
-                // Key and id comparison - simplified using direct equality
                 const id_lt: u1 = @intFromBool(new_id < opp_id);
                 const keys_eq: u1 = @intFromBool(new_key == opp_key);
                 const eq_and_id_wins: u1 = keys_eq & id_lt;
 
-                // Direction is comptime - this branch is eliminated
+                // Branchless version of Node.beats(). In ascending mode, SENTINEL_KEY (maxInt)
+                // naturally loses on `<` comparison so no sentinel checks needed. In descending
+                // mode, maxInt would incorrectly "win" on `>`, so explicit sentinel checks are
+                // required.
                 const new_wins: u1 = if (direction == .ascending) blk: {
-                    // Ascending: SENTINEL_KEY=maxInt naturally loses on key comparison
-                    // When both are sentinels, it doesn't matter who wins (both are sentinels)
                     const key_lt: u1 = @intFromBool(new_key < opp_key);
                     break :blk key_lt | eq_and_id_wins;
                 } else blk: {
-                    // Descending: need sentinel checks since maxInt would incorrectly "win"
                     const key_gt: u1 = @intFromBool(new_key > opp_key);
                     const opp_is_sentinel: u1 = @intFromBool(opp_id == Node.id_sentinel);
                     const new_is_sentinel: u1 = @intFromBool(new_id == Node.id_sentinel);
@@ -198,7 +179,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                     break :blk opp_is_sentinel | ((1 - new_is_sentinel) & key_wins);
                 };
 
-                // For small keys: use branchless mask operations
+                // Branchless conditional swap using masks.
                 if (@bitSizeOf(Key) <= 64) {
                     const key_mask = @as(Key, 0) -% @as(Key, new_wins);
                     const id_mask = @as(u32, 0) -% @as(u32, new_wins);
@@ -208,7 +189,6 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                     new_key = (new_key & key_mask) | (opp_key & ~key_mask);
                     new_id = (new_id & id_mask) | (opp_id & ~id_mask);
                 } else {
-                    // Branchless swap using u64 masks on key parts
                     const mask64 = @as(u64, 0) -% @as(u64, new_wins);
                     const id_mask = @as(u32, 0) -% @as(u32, new_wins);
 
@@ -237,33 +217,6 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             if (tree.win_id == Node.id_sentinel) assert(tree.contestants_left == 0);
         }
 
-        // Keep original functions for init (not hot path)
-        inline fn determine_winner(
-            contender: *Node,
-            challenger: *Node,
-            direction: Direction,
-        ) *Node {
-            const challenger_wins: bool = challenger.beats(contender, direction);
-            const winner: *Node = select(challenger_wins, challenger, contender);
-            return winner;
-        }
-
-        inline fn select(choose_a: bool, a: *Node, b: *Node) *Node {
-            var p = b;
-            if (choose_a) {
-                @branchHint(.unpredictable);
-                p = a;
-            }
-            return p;
-        }
-
-        inline fn swap_nodes(a: *Node, b: *Node) void {
-            inline for (std.meta.fields(Node)) |field| {
-                const field_value = @field(a, field.name);
-                @field(a, field.name) = @field(b, field.name);
-                @field(b, field.name) = field_value;
-            }
-        }
     };
 }
 
