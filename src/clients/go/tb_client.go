@@ -22,8 +22,8 @@ extern __declspec(dllexport) void onGoPacketCompletion(
 	uintptr_t ctx,
 	tb_packet_t* packet,
 	uint64_t timestamp,
-	tb_result_bytes_t result_ptr,
-	uint32_t result_len
+	tb_result_bytes_t result,
+	uint32_t result_size
 );
 */
 import "C"
@@ -239,8 +239,8 @@ func onGoPacketCompletion(
 	_context C.uintptr_t,
 	packet *C.tb_packet_t,
 	timestamp C.uint64_t,
-	result_ptr C.tb_result_bytes_t,
-	result_len C.uint32_t,
+	result C.tb_result_bytes_t,
+	result_size C.uint32_t,
 ) {
 	_ = _context
 	_ = timestamp
@@ -248,13 +248,13 @@ func onGoPacketCompletion(
 	// Get the request from the packet user data.
 	req := (*request)(unsafe.Pointer(packet.user_data))
 	var reply []uint8 = nil
-	if result_len > 0 && result_ptr != nil {
+	if result_size > 0 && result != nil {
 		op := C.TB_OPERATION(packet.operation)
 
 		// Make sure the completion handler is giving us valid data.
 		resultSize := C.uint32_t(getResultSize(op))
-		if result_len%resultSize != 0 {
-			panic("invalid result_len:  misaligned for the event")
+		if result_size%resultSize != 0 {
+			panic("invalid result_size:  misaligned for the event")
 		}
 
 		//TODO(batiati): Refine the way we handle events with asymmetric results.
@@ -265,14 +265,14 @@ func onGoPacketCompletion(
 			op != C.TB_OPERATION_GET_CHANGE_EVENTS {
 			// Make sure the amount of results at least matches the amount of requests.
 			count := packet.data_size / C.uint32_t(getEventSize(op))
-			if count*resultSize < result_len {
-				panic("invalid result_len: implied multiple results per event")
+			if count*resultSize < result_size {
+				panic("invalid result_size: implied multiple results per event")
 			}
 		}
 
 		// Copy the result data into a new buffer.
-		reply = make([]uint8, result_len)
-		C.memcpy(unsafe.Pointer(&reply[0]), unsafe.Pointer(result_ptr), C.size_t(result_len))
+		reply = make([]uint8, result_size)
+		C.memcpy(unsafe.Pointer(&reply[0]), unsafe.Pointer(result), C.size_t(result_size))
 	}
 
 	// Signal to the goroutine which owns this request that it's ready.
