@@ -210,7 +210,7 @@ pub fn KWayMergeIteratorType(
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
 ) type {
     comptime assert(options.streams_max >= 1);
-    comptime assert(options.streams_max <= 1024); // Reasonable upper bound
+    comptime assert(options.streams_max <= 1024); // Reasonable upper bound.
 
     return struct {
         context: *Context,
