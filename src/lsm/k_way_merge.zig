@@ -1,8 +1,10 @@
 //! K-way merge via a loser tree algorithm (Knuth Volume 3 p. 253).
 //! Merges k sorted streams using a tournament (loser) tree.
-//! The current global winner lives in `contender`. Internal nodes in `losers`
-//! store the losers of the last comparisons along the root-to-leaf paths.
-//!     0 (winner, contender)
+//! The current global winner lives in `win_key`/`win_id`. Internal nodes store
+//! the losers of the last comparisons along the root-to-leaf paths in a
+//! struct-of-arrays layout (`loser_keys`/`loser_ids`).
+//!
+//!     0 (winner)
 //!
 //!     1
 //!    / \
@@ -16,11 +18,6 @@
 //! That is the tree above is stored as [1][2][3][4][5][6][7].
 //! Empty streams are represented with a sentinel node that always loses against real nodes.
 //!
-//! There are also a few optimizations that seem to be helpful, but did not work, such as:
-//! - Only store stream_id in the inner nodes, and have a heads array for the first keys
-//!   of the streams. This reduces space (densely packed) and the bytes in swap.
-//!   Unfortunately, it made the code much slower.
-//!
 const std = @import("std");
 const stdx = @import("stdx");
 const assert = std.debug.assert;
@@ -30,11 +27,6 @@ const mem = std.mem;
 
 const Direction = @import("../direction.zig").Direction;
 const Pending = error{Pending};
-
-const Options = struct {
-    streams_max: u32,
-    deduplicate: bool,
-};
 
 pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) type {
     return struct {
