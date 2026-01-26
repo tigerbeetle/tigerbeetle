@@ -565,13 +565,13 @@ pub const Command = union(enum) {
         /// sequential is expected to be the best (since it can take advantage of various
         /// optimizations such as avoiding negative prefetch) while random/reversed can't.
         pub const IdOrder = enum {
-            sequential,
-            random,
-            reversed,
             // Use TBIDs (time-based IDs) for transfers and a random start for account IDs.
             // Avoids ID collisions between benchmark runs against the same cluster.
             // Incompatible with --validate (IDs are not deterministically replayable).
             tbid,
+            sequential,
+            random,
+            reversed,
         };
 
         pub const Distribution = enum {
