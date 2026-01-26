@@ -179,42 +179,36 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                     break :blk opp_is_sentinel | ((1 - new_is_sentinel) & key_wins);
                 };
 
-                // Branchless conditional swap using masks.
-                if (@bitSizeOf(Key) <= 64) {
-                    const key_mask = @as(Key, 0) -% @as(Key, new_wins);
-                    const id_mask = @as(u32, 0) -% @as(u32, new_wins);
-
-                    tree.loser_keys[idx] = (opp_key & key_mask) | (new_key & ~key_mask);
-                    tree.loser_ids[idx] = (opp_id & id_mask) | (new_id & ~id_mask);
-                    new_key = (new_key & key_mask) | (opp_key & ~key_mask);
-                    new_id = (new_id & id_mask) | (opp_id & ~id_mask);
-                } else {
-                    const mask64 = @as(u64, 0) -% @as(u64, new_wins);
-                    const id_mask = @as(u32, 0) -% @as(u32, new_wins);
-
-                    const key_parts = @bitSizeOf(Key) / 64;
-                    const new_key_parts: [key_parts]u64 = @bitCast(new_key);
-                    const opp_key_parts: [key_parts]u64 = @bitCast(opp_key);
-
-                    var loser_parts: [key_parts]u64 = undefined;
-                    var winner_parts: [key_parts]u64 = undefined;
-
-                    inline for (0..key_parts) |i| {
-                        loser_parts[i] = (opp_key_parts[i] & mask64) | (new_key_parts[i] & ~mask64);
-                        winner_parts[i] = (new_key_parts[i] & mask64) | (opp_key_parts[i] & ~mask64);
-                    }
-
-                    tree.loser_keys[idx] = @bitCast(loser_parts);
-                    tree.loser_ids[idx] = (opp_id & id_mask) | (new_id & ~id_mask);
-                    new_key = @bitCast(winner_parts);
-                    new_id = (new_id & id_mask) | (opp_id & ~id_mask);
-                }
+                // Branchless conditional swap: if new_wins, the new node continues
+                // up the tree and the opponent stays as loser; otherwise vice versa.
+                tree.loser_keys[idx] = branchless_select(Key, new_wins, opp_key, new_key);
+                tree.loser_ids[idx] = branchless_select(u32, new_wins, opp_id, new_id);
+                new_key = branchless_select(Key, new_wins, new_key, opp_key);
+                new_id = branchless_select(u32, new_wins, new_id, opp_id);
             }
 
             tree.win_key = new_key;
             tree.win_id = new_id;
 
             if (tree.win_id == Node.id_sentinel) assert(tree.contestants_left == 0);
+        }
+
+        /// Returns `a` if `flag == 1`, `b` if `flag == 0`, without branching.
+        inline fn branchless_select(comptime T: type, flag: u1, a: T, b: T) T {
+            if (@bitSizeOf(T) <= 64) {
+                const mask = @as(T, 0) -% @as(T, flag);
+                return (a & mask) | (b & ~mask);
+            } else {
+                const parts = @bitSizeOf(T) / 64;
+                const a_parts: [parts]u64 = @bitCast(a);
+                const b_parts: [parts]u64 = @bitCast(b);
+                const mask = @as(u64, 0) -% @as(u64, flag);
+                var result: [parts]u64 = undefined;
+                inline for (0..parts) |i| {
+                    result[i] = (a_parts[i] & mask) | (b_parts[i] & ~mask);
+                }
+                return @bitCast(result);
+            }
         }
 
     };
