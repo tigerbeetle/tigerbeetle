@@ -138,7 +138,7 @@ pub fn main(
 
     var prng = stdx.PRNG.from_seed(seed);
     const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
-        .sequential => .{ .identity = {} },
+        .sequential, .tbid => .{ .identity = {} },
         .random => .{ .random = prng.int(u64) },
         .reversed => .{ .inversion = {} },
     };
@@ -159,6 +159,24 @@ pub fn main(
         @tagName(cli_args.account_distribution),
     });
 
+    const use_tbid = cli_args.id_order == .tbid;
+
+    const validate = validate: {
+        if (cli_args.validate and use_tbid) {
+            log.warn(
+                "--validate is incompatible with --id-order=tbid, disabling.",
+                .{},
+            );
+            break :validate false;
+        }
+        break :validate cli_args.validate;
+    };
+
+    const account_id_start: ?u128 = if (use_tbid)
+        stdx.unique_u128()
+    else
+        null;
+
     var benchmark = Benchmark{
         .io = io,
         .prng = &prng,
@@ -170,12 +188,14 @@ pub fn main(
         .client_replies = client_replies,
         .request_latency_histogram = request_latency_histogram,
         .account_id_permutation = account_id_permutation,
+        .account_id_start = account_id_start,
         .account_batch_size = cli_args.account_batch_size,
         .account_count = cli_args.account_count,
         .account_count_hot = cli_args.account_count_hot,
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
+        .tbid_generator = if (use_tbid) TbidGenerator.init(&prng) else null,
         .transfer_batch_size = cli_args.transfer_batch_size,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
@@ -184,7 +204,7 @@ pub fn main(
         .query_count = cli_args.query_count,
         .no_history = cli_args.no_history,
         .imported = cli_args.imported,
-        .validate = cli_args.validate,
+        .validate = validate,
         .print_batch_timings = cli_args.print_batch_timings,
     };
 
@@ -245,6 +265,50 @@ const Generator = union(enum) {
     }
 };
 
+/// Generates TigerBeetle time-based identifiers (TBIDs) using real wall-clock timestamps.
+/// Modeled after the Rust client implementation in src/clients/rust/src/time_based_id.rs.
+///
+/// Layout: 48-bit millisecond timestamp | 80-bit random
+///
+/// Monotonicity is maintained by:
+/// - Advancing time: new random value
+/// - Same/backward time: incrementing random
+/// - Random overflow: carry to timestamp, new random
+const TbidGenerator = struct {
+    prng: *stdx.PRNG,
+    epoch_ms: u128,
+    random: u80,
+
+    fn init(prng: *stdx.PRNG) TbidGenerator {
+        const epoch_ms: u128 = @intCast(std.time.milliTimestamp());
+        return .{
+            .prng = prng,
+            .epoch_ms = epoch_ms,
+            .random = prng.int(u80),
+        };
+    }
+
+    fn next(generator: *TbidGenerator) u128 {
+        const now: u128 = @intCast(std.time.milliTimestamp());
+
+        if (now > generator.epoch_ms) {
+            // Time advanced: use new time and new random.
+            generator.epoch_ms = now;
+            generator.random = generator.prng.int(u80);
+        } else {
+            // Time same or behind: keep old time, increment random.
+            generator.random = std.math.add(u80, generator.random, 1) catch blk: {
+                // Carry the overflow to the time part and reseed random (as the rust client).
+                generator.epoch_ms = std.math.add(u128, generator.epoch_ms, 1) catch
+                    @panic("tbid timestamp overflow");
+                break :blk generator.prng.int(u80);
+            };
+        }
+
+        return (@as(u128, generator.epoch_ms) << 80) | @as(u128, generator.random);
+    }
+};
+
 const Benchmark = struct {
     io: *IO,
     prng: *stdx.PRNG,
@@ -254,12 +318,14 @@ const Benchmark = struct {
 
     // Configuration:
     account_id_permutation: IdPermutation,
+    account_id_start: ?u128,
     account_batch_size: u32,
     account_count: u32,
     account_count_hot: u32,
     account_generator: Generator,
     account_generator_hot: Generator,
     transfer_id_permutation: IdPermutation,
+    tbid_generator: ?TbidGenerator,
     transfer_batch_size: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
@@ -532,7 +598,7 @@ const Benchmark = struct {
             request_body,
         ));
         filter.* = .{
-            .account_id = b.account_id_permutation.encode(account_index + 1),
+            .account_id = b.account_id_from_index(account_index),
             .user_data_128 = 0,
             .user_data_64 = 0,
             .user_data_32 = 0,
@@ -834,10 +900,26 @@ const Benchmark = struct {
         }
     }
 
+    fn account_id_from_index(b: *const Benchmark, index: u64) u128 {
+        if (b.account_id_start) |start| {
+            return start + index;
+        } else {
+            return b.account_id_permutation.encode(index + 1);
+        }
+    }
+
+    fn next_transfer_id(b: *Benchmark) u128 {
+        if (b.tbid_generator) |*gen| {
+            return gen.next();
+        } else {
+            return b.transfer_id_permutation.encode(b.transfer_index + 1);
+        }
+    }
+
     fn build_accounts(b: *Benchmark, accounts: []tb.Account) void {
         for (accounts) |*account| {
             account.* = .{
-                .id = b.account_id_permutation.encode(b.account_index + 1),
+                .id = b.account_id_from_index(b.account_index),
                 .user_data_128 = b.prng.int(u128),
                 .user_data_64 = b.prng.int(u64),
                 .user_data_32 = b.prng.int(u32),
@@ -883,15 +965,15 @@ const Benchmark = struct {
             assert(credit_account_index < b.account_count);
             assert(debit_account_index != credit_account_index);
 
-            const debit_account_id = b.transfer_id_permutation.encode(debit_account_index + 1);
-            const credit_account_id = b.transfer_id_permutation.encode(credit_account_index + 1);
+            const debit_account_id = b.account_id_from_index(debit_account_index);
+            const credit_account_id = b.account_id_from_index(credit_account_index);
             assert(debit_account_id != credit_account_id);
 
             // 30% of pending transfers.
             const pending = b.transfer_pending and b.prng.chance(ratio(3, 10));
 
             transfer.* = .{
-                .id = b.transfer_id_permutation.encode(b.transfer_index + 1),
+                .id = b.next_transfer_id(),
                 .debit_account_id = debit_account_id,
                 .credit_account_id = credit_account_id,
                 .user_data_128 = b.prng.int(u128),
