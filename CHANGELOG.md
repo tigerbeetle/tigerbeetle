@@ -19,6 +19,14 @@ Released: 2026-01-23
   up in the docs hierarchy. It's a part of internal docs, but is well worth reading for anyone
   curious about TigerBeetle internals!
 
+### Safety And Performance
+
+- [#3426](https://github.com/tigerbeetle/tigerbeetle/pull/3426)
+
+  Enable history by default for `tigerbeetle benchmark`. Argument-less `benchmark` captures our
+  current understanding of a representative workload, so the results are not guaranteed to be
+  comparable across `tigerbeetle` versions.
+
 ### Internals
 
 - [#3468](https://github.com/tigerbeetle/tigerbeetle/pull/3468)
