@@ -77,6 +77,12 @@ pub fn main(
         .{ constants.clients_max, cli_args.clients },
     );
 
+    if (cli_args.validate and cli_args.id_order == .tbid) vsr.fatal(
+        .cli,
+        "--validate is incompatible with --id-order=tbid",
+        .{},
+    );
+
     const cluster_id: u128 = 0;
 
     var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
@@ -160,18 +166,6 @@ pub fn main(
     });
 
     const use_tbid = cli_args.id_order == .tbid;
-
-    const validate = validate: {
-        if (cli_args.validate and use_tbid) {
-            log.warn(
-                "--validate is incompatible with --id-order=tbid, disabling.",
-                .{},
-            );
-            break :validate false;
-        }
-        break :validate cli_args.validate;
-    };
-
     const account_id_start: ?u128 = if (use_tbid)
         stdx.unique_u128()
     else
@@ -204,7 +198,7 @@ pub fn main(
         .query_count = cli_args.query_count,
         .no_history = cli_args.no_history,
         .imported = cli_args.imported,
-        .validate = validate,
+        .validate = cli_args.validate,
         .print_batch_timings = cli_args.print_batch_timings,
     };
 
