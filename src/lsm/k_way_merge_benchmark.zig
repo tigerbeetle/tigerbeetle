@@ -123,10 +123,6 @@ fn KWayMergeContextType(comptime Value: type) type {
         fn stream_pop(context: *Context, stream_index: u32) Value {
             const stream = context.streams[stream_index];
             context.streams[stream_index] = stream[1..];
-            const ptr: [*]const u8 = @ptrCast(context.streams[stream_index]);
-            @prefetch(ptr, .{ .locality = 3, .cache = .data });
-            // TODO: make data type dependent.
-            @prefetch(ptr + 64, .{ .locality = 3, .cache = .data });
             return stream[0];
         }
 
