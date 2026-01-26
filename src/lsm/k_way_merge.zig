@@ -66,7 +66,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             var contestants_left: u16 = 0;
             for (contestants[0..contestant_count]) |*contestant| {
                 if (contestant.id == Node.id_sentinel) {
-                    // Stream is empty to start with
+                    // Stream is empty to begin with.
                 } else {
                     contestants_left += 1;
                     if (contestant_previous) |previous| assert(previous.id < contestant.id);
