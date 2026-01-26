@@ -38,8 +38,8 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
         direction: Direction,
 
         pub const node_count: u32 = std.math.ceilPowerOfTwoAssert(u32, contestants_max);
-        const tree_height_max = std.math.log2_int(u32, node_count);
-        const SENTINEL_KEY = std.math.maxInt(Key);
+        const tree_height = std.math.log2_int(u32, node_count);
+        const sentinel_key = std.math.maxInt(Key);
 
         const Node = struct {
             key: Key,
@@ -47,7 +47,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
             const id_sentinel = std.math.maxInt(u32);
             const sentinel: Node = .{
-                .key = SENTINEL_KEY,
+                .key = sentinel_key,
                 .id = id_sentinel,
             };
 
@@ -92,9 +92,9 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             }
 
             var tree: TournamentTree = .{
-                .win_key = SENTINEL_KEY,
+                .win_key = sentinel_key,
                 .win_id = Node.id_sentinel,
-                .loser_keys = @splat(SENTINEL_KEY),
+                .loser_keys = @splat(sentinel_key),
                 .loser_ids = @splat(Node.id_sentinel),
                 .direction = direction,
                 .contestants_left = contestants_left,
@@ -102,7 +102,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
 
             if (contestants_left == 0) return tree;
 
-            inline for (0..tree_height_max) |level| {
+            inline for (0..tree_height) |level| {
                 const level_min = (node_count >> @as(u5, @intCast(level + 1))) - 1;
                 const level_max = (node_count >> @as(u5, @intCast(level))) - 1;
 
@@ -142,11 +142,11 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             assert(tree.win_id < node_count);
             if (entrant == null) tree.contestants_left -= 1;
 
-            var new_key: Key = if (entrant) |key| key else SENTINEL_KEY;
+            var new_key: Key = if (entrant) |key| key else sentinel_key;
             var new_id: u32 = if (entrant != null) winner_id else Node.id_sentinel;
 
             var idx: usize = (node_count - 1) + winner_id;
-            inline for (0..tree_height_max) |_| {
+            inline for (0..tree_height) |_| {
                 idx = (idx - 1) >> 1;
 
                 const opp_key = tree.loser_keys[idx];
@@ -156,7 +156,7 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 const keys_eq: u1 = @intFromBool(new_key == opp_key);
                 const eq_and_id_wins: u1 = keys_eq & id_lt;
 
-                // Branchless version of Node.beats(). In ascending mode, SENTINEL_KEY (maxInt)
+                // Branchless version of Node.beats(). In ascending mode, sentinel_key (maxInt)
                 // naturally loses on `<` comparison so no sentinel checks needed. In descending
                 // mode, maxInt would incorrectly "win" on `>`, so explicit sentinel checks are
                 // required.
