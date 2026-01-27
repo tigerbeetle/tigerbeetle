@@ -176,19 +176,8 @@ pub const IO = struct {
         // that become ready without going through another syscall from flush_submissions() and
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
         while (self.completed.pop()) |completion| {
-            if (completion.operation == .timeout and
-                completion.operation.timeout.timespec.sec == 0 and
-                completion.operation.timeout.timespec.nsec == 0)
-            {
-                // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
-                maybe(self.awaiting.empty());
-                assert(completion.result == -@as(i32, @intFromEnum(posix.E.TIME)));
-                assert(completion.awaiting_back == null);
-                assert(completion.awaiting_next == null);
-            } else {
-                assert(!self.awaiting.empty());
-                self.awaiting.remove(completion);
-            }
+            assert(!self.awaiting.empty());
+            self.awaiting.remove(completion);
 
             switch (self.cancel_all_status) {
                 .inactive => completion.complete(),
@@ -460,6 +449,9 @@ pub const IO = struct {
                         op.mask,
                         op.statxbuf,
                     );
+                },
+                .nop => {
+                    sqe.prep_nop();
                 },
                 .timeout => |*op| {
                     sqe.prep_timeout(&op.timespec, 0, 0);
@@ -763,6 +755,18 @@ pub const IO = struct {
                     };
                     completion.callback(completion.context, completion, &result);
                 },
+                .nop => {
+                    const result: NopError!void = blk: {
+                        if (completion.result < 0) {
+                            break :blk switch (@as(posix.E, @enumFromInt(-completion.result))) {
+                                else => |errno| stdx.unexpected_errno("nop", errno),
+                            };
+                        } else {
+                            assert(completion.result == 0);
+                        }
+                    };
+                    completion.callback(completion.context, completion, &result);
+                },
                 .timeout => {
                     assert(completion.result < 0);
                     const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
@@ -859,6 +863,7 @@ pub const IO = struct {
             mask: u32,
             statxbuf: *std.os.linux.Statx,
         },
+        nop: void,
         timeout: struct {
             timespec: os.linux.kernel_timespec,
         },
@@ -1242,6 +1247,29 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const NopError = posix.UnexpectedError;
+
+    pub fn nop(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: NopError!void,
+        ) void,
+        completion: *Completion,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = erase_types(Context, NopError!void, callback),
+            .operation = .nop,
+        };
+
+        self.enqueue(completion);
+    }
+
     pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
 
     pub fn timeout(
@@ -1266,13 +1294,6 @@ pub const IO = struct {
                 },
             },
         };
-
-        // Special case a zero timeout as a yield.
-        if (nanoseconds == 0) {
-            completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
-            self.completed.push(completion);
-            return;
-        }
 
         self.enqueue(completion);
     }

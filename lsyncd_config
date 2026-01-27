@@ -1,0 +1,35 @@
+settings {
+   nodaemon = true,
+}
+
+hosts = {
+    { ip='tbdev', port=22 },
+}
+
+
+for _, host in ipairs(hosts)
+do
+  sync {
+    default.rsyncssh,
+    source = "../tigerbeetle/",
+    targetdir = "./tb_eventloop",
+    host = host.ip,
+    delete = false,
+    delay = 0,
+    ssh = {
+      port = host.port
+    },
+    rsync = {
+      perms = true,
+    },
+    filter = {
+      '- zig-out',
+      '- .zig-cache',
+      '- *.benchmark',
+      '- .jj',
+      '- zig/zig',
+      '- zig/lib',
+      '- zig/docs',
+    },
+  }
+end

@@ -405,6 +405,7 @@ const IO = struct {
     pub const ConnectError = RealIO.ConnectError;
     pub const RecvError = RealIO.RecvError;
     pub const SendError = RealIO.SendError;
+    pub const NopError = RealIO.NopError;
     pub const TimeoutError = RealIO.TimeoutError;
     pub const socket_t = i32;
     pub const fd_t = i32;
@@ -458,6 +459,7 @@ const IO = struct {
         accept: struct { socket: socket_t },
         close: struct { fd: fd_t },
         connect: struct { socket: socket_t, address: std.net.Address },
+        nop,
         recv: struct { socket: socket_t, buffer: []u8 },
         send: struct { socket: socket_t, buffer: []const u8 },
         timeout,
@@ -469,6 +471,7 @@ const IO = struct {
             accept: *const fn (*MessageBus, *Completion, AcceptError!socket_t) void,
             close: *const fn (*MessageBus, *Completion, CloseError!void) void,
             connect: *const fn (*MessageBus, *Completion, ConnectError!void) void,
+            nop: *const fn (*MessageBus, *Completion, NopError!void) void,
             recv: *const fn (*MessageBus, *Completion, RecvError!usize) void,
             send: *const fn (*MessageBus, *Completion, SendError!usize) void,
             timeout: *const fn (*MessageBus, *Completion, TimeoutError!void) void,
@@ -712,6 +715,10 @@ const IO = struct {
                     completion.callback.recv(completion.context, completion, result);
                 }
             },
+            .nop => {
+                const result: NopError!void = {};
+                completion.callback.nop(completion.context, completion, result);
+            },
             .timeout => {
                 const result: TimeoutError!void = {};
                 completion.callback.timeout(completion.context, completion, result);
@@ -792,7 +799,7 @@ const IO = struct {
             switch (event.completion.operation) {
                 inline .accept, .connect, .recv, .send => |data| assert(data.socket != fd),
                 .close => |data| assert(data.fd != fd),
-                .timeout => {},
+                .nop, .timeout => {},
             }
         }
 
@@ -887,6 +894,25 @@ const IO = struct {
 
         sender.sending.appendSlice(io.gpa, buffer[0..send_size]) catch @panic("OOM");
         return send_size;
+    }
+
+    pub fn nop(
+        io: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (Context, *Completion, NopError!void) void,
+        completion: *Completion,
+    ) void {
+        completion.* = .{
+            .context = context,
+            .callback = .{ .nop = callback },
+            .operation = .nop,
+        };
+
+        io.events.add(.{
+            .completion = completion,
+            .ready_at = io.tick_instant(),
+        }) catch @panic("OOM");
     }
 
     pub fn timeout(

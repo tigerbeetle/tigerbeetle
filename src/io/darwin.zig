@@ -646,6 +646,35 @@ pub const IO = struct {
         return null; // No support for best-effort non-blocking synchronous send.
     }
 
+    pub const NopError = posix.UnexpectedError;
+
+    pub fn nop(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: NopError!void,
+        ) void,
+        completion: *Completion,
+    ) void {
+        completion.* = .{
+            .link = .{},
+            .context = context,
+            .operation = undefined,
+            .callback = struct {
+                fn on_complete(_io: *IO, _completion: *Completion) void {
+                    _ = _io;
+                    const _context: Context = @ptrCast(@alignCast(_completion.context));
+                    callback(_context, _completion, {});
+                }
+            }.on_complete,
+        };
+
+        self.completed.push(completion);
+    }
+
     pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
 
     pub fn timeout(
