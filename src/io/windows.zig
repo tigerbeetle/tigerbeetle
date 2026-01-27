@@ -1004,6 +1004,34 @@ pub const IO = struct {
         );
     }
 
+    pub const NopError = posix.UnexpectedError;
+
+    pub fn nop(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: NopError!void,
+        ) void,
+        completion: *Completion,
+    ) void {
+        completion.* = .{
+            .link = .{},
+            .context = @ptrCast(context),
+            .operation = undefined,
+            .callback = struct {
+                fn on_complete(ctx: Completion.Context) void {
+                    const _context: Context = @ptrCast(@alignCast(ctx.completion.context));
+                    callback(_context, ctx.completion, {});
+                }
+            }.on_complete,
+        };
+
+        self.completed.push(completion);
+    }
+
     pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
 
     pub fn timeout(

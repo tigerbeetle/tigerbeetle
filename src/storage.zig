@@ -170,12 +170,11 @@ pub fn StorageType(comptime IO: type) type {
 
             if (!storage.next_tick_completion_scheduled) {
                 storage.next_tick_completion_scheduled = true;
-                storage.io.timeout(
+                storage.io.nop(
                     *Storage,
                     storage,
-                    timeout_callback,
+                    nop_callback,
                     &storage.next_tick_completion,
-                    0, // 0ns timeout means to resolve as soon as possible - like a yield
                 );
             }
         }
@@ -189,14 +188,13 @@ pub fn StorageType(comptime IO: type) type {
             }
         }
 
-        fn timeout_callback(
+        fn nop_callback(
             storage: *Storage,
             completion: *IO.Completion,
-            result: IO.TimeoutError!void,
+            result: IO.NopError!void,
         ) void {
             assert(completion == &storage.next_tick_completion);
             _ = result catch |e| switch (e) {
-                error.Canceled => unreachable,
                 error.Unexpected => unreachable,
             };
 

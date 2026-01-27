@@ -1103,23 +1103,21 @@ pub fn MessageBusType(comptime IO: type) type {
             if (!bus.resume_needed()) return;
 
             bus.resume_receive_submitted = true;
-            bus.io.timeout(
+            bus.io.nop(
                 *MessageBus,
                 bus,
                 ready_to_receive_callback,
                 &bus.resume_receive_completion,
-                0, // Zero timeout means next tick.
             );
         }
 
         fn ready_to_receive_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
-            result: IO.TimeoutError!void,
+            result: IO.NopError!void,
         ) void {
             assert(completion == &bus.resume_receive_completion);
             _ = result catch |e| switch (e) {
-                error.Canceled => unreachable,
                 error.Unexpected => unreachable,
             };
             assert(bus.resume_receive_submitted);
