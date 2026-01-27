@@ -131,6 +131,15 @@ pub const IO = struct {
         var timeouts: usize = 0;
         var etime = false;
         while (!etime) {
+            // If completions are already queued (e.g. from a previous run's cleanup
+            // phase), process them without blocking on io_uring_enter(). Otherwise
+            // flush_submissions(1) blocks for up to tick_ms waiting for a kernel CQE
+            // while ready completions sit idle in self.completed.
+            if (!self.completed.empty()) {
+                try self.flush(0, &timeouts, &etime);
+                continue;
+            }
+
             const timeout_sqe = self.ring.get_sqe() catch blk: {
                 // The submission queue is full, so flush submissions to make space:
                 try self.flush_submissions(0, &timeouts, &etime);
