@@ -431,13 +431,22 @@ fn run_fuzzers(
 
                             if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
                                 try seed_logs.append(gpa, null);
-                            } else {
+                            } else done: {
+                                const log_file =
+                                    shell.cwd.openFile(fuzzer.log_path.?, .{}) catch |err| {
+                                        switch (err) {
+                                            error.FileNotFound => {
+                                                try seed_logs.append(gpa, null);
+                                                break :done;
+                                            },
+                                            else => return err,
+                                        }
+                                    };
+                                defer log_file.close();
+
                                 // Copy the tail of the (failing seed's) logs into a buffer.
                                 const log_data = try gpa.alloc(u8, log_size_max);
                                 errdefer gpa.free(log_data);
-
-                                const log_file = try shell.cwd.openFile(fuzzer.log_path.?, .{});
-                                defer log_file.close();
 
                                 const log_size_total = (try log_file.metadata()).size();
                                 try log_file.seekTo(log_size_total -| log_size_max);
