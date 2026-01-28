@@ -405,17 +405,8 @@ pub fn ContextType(
                 };
             }
 
-            // Cancel the inflight request if any, so the callback is called.
-            // Only do this during normal shutdown (when eviction_reason is null).
-            // If eviction happened, cancel_request_inflight was already called.
             if (self.eviction_reason == null) {
-                if (self.client.request_inflight) |*inflight| {
-                    if (inflight.message.header.operation != .register) {
-                        const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                        packet.assert_phase(.sent);
-                        self.packet_cancel(packet);
-                    }
-                }
+                self.cancel_request_inflight();
             }
 
             while (self.pending.pop()) |packet| {
@@ -444,15 +435,12 @@ pub fn ContextType(
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
-            // NB. This is called from `client_eviction_callback` after `eviction_reason` is set
-            // but before the client is deinited. `packet_cancel` needs `eviction_reason` set
-            // in order to return the correct error status to the user.
-            assert(self.eviction_reason != null);
             if (self.client.request_inflight) |*inflight| {
-                assert(inflight.message.header.operation != .register);
-                const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                packet.assert_phase(.sent);
-                self.packet_cancel(packet);
+                if (inflight.message.header.operation != .register) {
+                    const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                    packet.assert_phase(.sent);
+                    self.packet_cancel(packet);
+                }
             }
         }
 
