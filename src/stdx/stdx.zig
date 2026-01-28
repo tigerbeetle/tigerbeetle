@@ -1098,6 +1098,12 @@ pub inline fn fastrange(word: u64, p: u64) u64 {
     return @truncate(ln >> 64);
 }
 
+// For Zig 14.1 the compiler generates branchless code as is: https://godbolt.org/z/hc563WPKP
+pub inline fn branchless_select(comptime T: type, flag: bool, a: T, b: T) T {
+    @branchHint(.unpredictable);
+    return if (flag) a else b;
+}
+
 const snap = Snap.snap_fn("src/stdx");
 
 test fastrange {

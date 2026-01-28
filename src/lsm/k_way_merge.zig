@@ -106,11 +106,17 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                     const a_wins = beats(a.key, a.id, b.key, b.id, direction);
 
                     contestants[competitor_index] = .{
-                        .key = branchless_select(Key, a_wins, a.key, b.key),
-                        .id = branchless_select(u32, a_wins, a.id, b.id),
+                        .key = stdx.branchless_select(Key, a_wins, a.key, b.key),
+                        .id = stdx.branchless_select(u32, a_wins, a.id, b.id),
                     };
-                    tree.loser_keys[loser_index] = branchless_select(Key, a_wins, b.key, a.key);
-                    tree.loser_ids[loser_index] = branchless_select(u32, a_wins, b.id, a.id);
+                    // We select the loser here thus a, b are swapped.
+                    tree.loser_keys[loser_index] = stdx.branchless_select(
+                        Key,
+                        a_wins,
+                        b.key,
+                        a.key,
+                    );
+                    tree.loser_ids[loser_index] = stdx.branchless_select(u32, a_wins, b.id, a.id);
                 }
             }
 
@@ -159,10 +165,10 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 const opp_id = tree.loser_ids[idx];
                 const new_wins = beats(new_key, new_id, opp_key, opp_id, direction);
 
-                tree.loser_keys[idx] = branchless_select(Key, new_wins, opp_key, new_key);
-                tree.loser_ids[idx] = branchless_select(u32, new_wins, opp_id, new_id);
-                new_key = branchless_select(Key, new_wins, new_key, opp_key);
-                new_id = branchless_select(u32, new_wins, new_id, opp_id);
+                tree.loser_keys[idx] = stdx.branchless_select(Key, new_wins, opp_key, new_key);
+                tree.loser_ids[idx] = stdx.branchless_select(u32, new_wins, opp_id, new_id);
+                new_key = stdx.branchless_select(Key, new_wins, new_key, opp_key);
+                new_id = stdx.branchless_select(u32, new_wins, new_id, opp_id);
             }
 
             tree.win_key = new_key;
@@ -191,11 +197,6 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
                 const key_wins: u1 = key_gt | eq_and_id_wins;
                 return (b_is_sentinel | ((1 - a_is_sentinel) & key_wins)) == 1;
             }
-        }
-
-        inline fn branchless_select(comptime T: type, flag: bool, a: T, b: T) T {
-            @branchHint(.unpredictable);
-            return if (flag) a else b;
         }
     };
 }
