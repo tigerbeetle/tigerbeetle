@@ -405,6 +405,19 @@ pub fn ContextType(
                 };
             }
 
+            // Cancel the inflight request if any, so the callback is called.
+            // Only do this during normal shutdown (when eviction_reason is null).
+            // If eviction happened, cancel_request_inflight was already called.
+            if (self.eviction_reason == null) {
+                if (self.client.request_inflight) |*inflight| {
+                    if (inflight.message.header.operation != .register) {
+                        const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                        packet.assert_phase(.sent);
+                        self.packet_cancel(packet);
+                    }
+                }
+            }
+
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
                 self.packet_cancel(packet);
