@@ -576,8 +576,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             ) *StateMachine {
                 comptime assert(field != .null);
 
-                const context: *PrefetchContext = @fieldParentPtr(@tagName(field), completion);
-                return @fieldParentPtr("prefetch_context", context);
+                const context: *PrefetchContext =
+                    @alignCast(@fieldParentPtr(@tagName(field), completion));
+                return @alignCast(@fieldParentPtr("prefetch_context", context));
             }
 
             pub fn get(self: *PrefetchContext, comptime field: Field) *FieldType(field) {
@@ -612,8 +613,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             ) *StateMachine {
                 comptime assert(field != .null);
 
-                const context: *ScanLookup = @fieldParentPtr(@tagName(field), completion);
-                return @fieldParentPtr("scan_lookup", context);
+                const context: *ScanLookup =
+                    @alignCast(@fieldParentPtr(@tagName(field), completion));
+                return @alignCast(@fieldParentPtr("scan_lookup", context));
             }
 
             pub fn get(self: *ScanLookup, comptime field: Field) *FieldType(field) {
@@ -893,7 +895,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn forest_open_callback(forest: *Forest) void {
-            const self: *StateMachine = @fieldParentPtr("forest", forest);
+            const self: *StateMachine = @alignCast(@fieldParentPtr("forest", forest));
             assert(self.open_callback != null);
 
             const callback = self.open_callback.?;
@@ -2804,7 +2806,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn compact_finish(forest: *Forest) void {
-            const self: *StateMachine = @fieldParentPtr("forest", forest);
+            const self: *StateMachine = @alignCast(@fieldParentPtr("forest", forest));
             const callback = self.compact_callback.?;
             self.compact_callback = null;
 
@@ -2825,7 +2827,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn checkpoint_finish(forest: *Forest) void {
-            const self: *StateMachine = @fieldParentPtr("forest", forest);
+            const self: *StateMachine = @alignCast(@fieldParentPtr("forest", forest));
             const callback = self.checkpoint_callback.?;
             self.checkpoint_callback = null;
 
