@@ -25,8 +25,8 @@ const packet_size_max = 1400;
 /// logic.
 const statsd_line_size_max = line_size_max: {
     // For each type of event, build a payload containing the maximum possible values for that
-    // event. This is essentially maxInt for integer payloads, and the longest enum tag name for
-    // enum payloads.
+    // event. This is essentially maxInt for unsigned integer payloads, minInt for signed integer
+    // payloads, and the longest enum tag name for enum payloads.
     var events_metric: [std.meta.fieldNames(EventMetric).len]EventMetricAggregate = undefined;
     for (&events_metric, std.meta.fields(EventMetric)) |*event_metric, EventMetricInner| {
         event_metric.* = .{
@@ -35,7 +35,10 @@ const statsd_line_size_max = line_size_max: {
                 EventMetricInner.name,
                 struct_size_max(EventMetricInner.type),
             ),
-            .value = std.math.maxInt(EventMetricAggregate.ValueType),
+            .value = if (@typeInfo(EventMetricAggregate.ValueType).int.signedness == .signed)
+                std.math.minInt(EventMetricAggregate.ValueType)
+            else
+                std.math.maxInt(EventMetricAggregate.ValueType),
         };
     }
 

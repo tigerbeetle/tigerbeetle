@@ -242,7 +242,9 @@ pub fn set_replica(tracer: *Tracer, options: struct { cluster: u128, replica: u8
 
 /// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will / result in
 /// only the last value being submitted.
-pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
+// Takes an i65 to keep calling code simple: lots of places want to call this with a u64, and
+// requiring an @intCast and checks at every call site is cumbersome.
+pub fn gauge(tracer: *Tracer, event: EventMetric, value: i65) void {
     const timing_slot = event.slot();
     tracer.events_metric[timing_slot] = .{
         .event = event,

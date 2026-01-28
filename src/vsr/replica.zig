@@ -731,6 +731,7 @@ pub fn ReplicaType(
                     .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
                     .commit_stall_probability = options.commit_stall_probability,
                     .replicate_options = options.replicate_options,
+                    .tracer = options.tracer,
                 },
             );
 
@@ -1076,6 +1077,7 @@ pub fn ReplicaType(
             timeout_grid_repair_message_ticks: ?u64,
             commit_stall_probability: ?Ratio,
             replicate_options: ReplicateOptions,
+            tracer: *Tracer,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -1201,6 +1203,7 @@ pub fn ReplicaType(
             self.clock = try Clock.init(
                 allocator,
                 time,
+                options.tracer,
                 if (replica_index < replica_count) .{
                     .replica_count = replica_count,
                     .replica = replica_index,

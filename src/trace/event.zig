@@ -496,6 +496,7 @@ pub const EventMetric = union(enum) {
     lsm_manifest_block_count,
     metrics_statsd_packets,
     release,
+    clock_delta_ns,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_count(TreeEnum),
@@ -523,6 +524,7 @@ pub const EventMetric = union(enum) {
         .lsm_manifest_block_count = 1,
         .metrics_statsd_packets = 1,
         .release = 1,
+        .clock_delta_ns = 1,
     });
 
     pub const slot_bases = array: {
@@ -610,7 +612,7 @@ pub const EventTimingAggregate = struct {
 };
 
 pub const EventMetricAggregate = struct {
-    pub const ValueType = u64;
+    pub const ValueType = i65;
 
     event: EventMetric,
     value: ValueType,
