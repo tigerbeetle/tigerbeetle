@@ -273,6 +273,10 @@ pub fn start(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] == null);
     tracer.events_started[stack] = time_now;
 
+    if (event_tracing.aggregate_only()) {
+        return;
+    }
+
     if (tracer.log_trace) {
         log.debug(
             "{}: {s}({}): start: {}",
@@ -333,6 +337,12 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
 
+    tracer.timing(event_timing, event_duration);
+
+    if (event_tracing.aggregate_only()) {
+        return;
+    }
+
     if (tracer.log_trace) {
         // Double leading space to align with 'start: '.
         log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
@@ -347,8 +357,6 @@ pub fn stop(tracer: *Tracer, event: Event) void {
             if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
         });
     }
-
-    tracer.timing(event_timing, event_duration);
 
     tracer.write_stop(stack, event_end.duration_since(tracer.time_start));
 }

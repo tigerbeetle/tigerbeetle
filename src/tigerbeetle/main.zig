@@ -497,8 +497,19 @@ fn command_start(
     }
 
     while (true) {
-        replica.tick();
-        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        {
+            tracer.start(.loop_tick);
+            defer tracer.stop(.loop_tick);
+
+            replica.tick();
+        }
+
+        {
+            tracer.start(.loop_run_for_ns);
+            defer tracer.stop(.loop_run_for_ns);
+
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        }
     }
 }
 
