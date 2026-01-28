@@ -50,7 +50,7 @@ Storage:
 
 ### Recovery
 
-Unlike [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf), TigerBeetle does not implement Recovery Protocol (see §4.3).
+Unlike [VRR](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf), TigerBeetle does not implement Recovery Protocol (see §4.3).
 Instead, replicas persist their VSR state to the superblock.
 This ensures that a recovering replica never backtracks to an older view (from the point of view of the cluster).
 
@@ -99,7 +99,7 @@ sequenceDiagram
 
 See also:
 
-- [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) §4.1
+- [VRR](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf) §4.1
 
 ### Protocol: Start-View-Change
 
@@ -292,5 +292,5 @@ See also:
 - [Flexible Paxos](https://fpaxos.github.io/)
 
 ## Further reading
-- [Viewstamped Replication Revisited](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)
+- [Viewstamped Replication Revisited](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf)
 - [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)
