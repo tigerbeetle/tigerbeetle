@@ -171,31 +171,31 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
             if (tree.win_id == Node.id_sentinel) assert(tree.contestants_left == 0);
         }
 
-        /// Returns 1 if (a_key, a_id) wins over (b_key, b_id), 0 otherwise.
+        /// Returns true if (a_key, a_id) wins over (b_key, b_id).
         /// Sentinels (id_sentinel) always lose. Equal keys broken by id for stability.
         /// In ascending mode, sentinel_key (maxInt) naturally loses on `<` so no
         /// explicit sentinel checks are needed. In descending mode, maxInt would
         /// incorrectly "win" on `>`, so explicit sentinel checks are required.
-        inline fn beats(a_key: Key, a_id: u32, b_key: Key, b_id: u32, direction: Direction) u1 {
+        inline fn beats(a_key: Key, a_id: u32, b_key: Key, b_id: u32, direction: Direction) bool {
             const id_lt: u1 = @intFromBool(a_id < b_id);
             const keys_eq: u1 = @intFromBool(a_key == b_key);
             const eq_and_id_wins: u1 = keys_eq & id_lt;
 
             if (direction == .ascending) {
                 const key_lt: u1 = @intFromBool(a_key < b_key);
-                return key_lt | eq_and_id_wins;
+                return (key_lt | eq_and_id_wins) == 1;
             } else {
                 const key_gt: u1 = @intFromBool(a_key > b_key);
                 const b_is_sentinel: u1 = @intFromBool(b_id == Node.id_sentinel);
                 const a_is_sentinel: u1 = @intFromBool(a_id == Node.id_sentinel);
                 const key_wins: u1 = key_gt | eq_and_id_wins;
-                return b_is_sentinel | ((1 - a_is_sentinel) & key_wins);
+                return (b_is_sentinel | ((1 - a_is_sentinel) & key_wins)) == 1;
             }
         }
 
-        inline fn branchless_select(comptime T: type, flag: u1, a: T, b: T) T {
+        inline fn branchless_select(comptime T: type, flag: bool, a: T, b: T) T {
             @branchHint(.unpredictable);
-            return if (flag == 1) a else b;
+            return if (flag) a else b;
         }
     };
 }
