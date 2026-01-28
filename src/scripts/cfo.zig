@@ -431,13 +431,22 @@ fn run_fuzzers(
 
                             if (seed_record.ok or !fuzzer.fuzzer.capture_logs()) {
                                 try seed_logs.append(gpa, null);
-                            } else {
+                            } else done: {
+                                const log_file =
+                                    shell.cwd.openFile(fuzzer.log_path.?, .{}) catch |err| {
+                                        switch (err) {
+                                            error.FileNotFound => {
+                                                try seed_logs.append(gpa, null);
+                                                break :done;
+                                            },
+                                            else => return err,
+                                        }
+                                    };
+                                defer log_file.close();
+
                                 // Copy the tail of the (failing seed's) logs into a buffer.
                                 const log_data = try gpa.alloc(u8, log_size_max);
                                 errdefer gpa.free(log_data);
-
-                                const log_file = try shell.cwd.openFile(fuzzer.log_path.?, .{});
-                                defer log_file.close();
 
                                 const log_size_total = (try log_file.metadata()).size();
                                 try log_file.seekTo(log_size_total -| log_size_max);
@@ -679,15 +688,14 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
     defer tasks.verify();
 
     for ([2]SeedRecord.Template.Branch{ .main, .release }) |branch| {
-        if (branch == .release and gh_token == null) continue;
-
-        const working_directory = if (gh_token == null)
+        // Fuzz in-place when no token is specified, for testing coordinated fuzzer changes.
+        // But also fuzz on the release branch, to make sure CFO doesn't break on older branches.
+        const local_branch = branch == .main and gh_token == null;
+        const working_directory = if (local_branch)
             "."
         else
             try shell.fmt("./working/{s}", .{@tagName(branch)});
-        const commit = if (gh_token == null)
-            // Fuzz in-place when no token is specified, as a convenient shortcut for local
-            // debugging.
+        const commit = if (local_branch)
             try run_fuzzers_commit_info(shell)
         else commit: {
             try shell.cwd.makePath(working_directory);
@@ -940,7 +948,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     };
     assert(exe.len > 0);
 
-    log.debug("will start '{s}'", .{command});
+    log.debug("will start '{s}' ({s})", .{ command, options.working_directory });
 
     const log_path = if (options.fuzzer.capture_logs())
         try shell.fmt("{s}_{d}.log", .{ @tagName(options.fuzzer), options.seed })
