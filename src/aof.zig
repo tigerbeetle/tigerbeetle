@@ -232,6 +232,29 @@ pub fn AOFType(comptime IO: type) type {
                 },
             };
 
+            // AOF change detection relies on detecting the file being removed, and *it* will
+            // recreate it. It is an error for the operator to try and create file externally
+            // (eg, touch tigerbeetle.aof).
+            //
+            // Warn the operator strongly if this happens.
+            const stat_fd = self.io.aof_blocking_fstat(self.fd.?) catch |err| blk: {
+                log.warn("failed to fstat aof ({s}): {}", .{ self.path, err });
+                break :blk null;
+            };
+            const stat_file = self.io.aof_blocking_stat(self.path) catch |err| blk: {
+                log.warn("failed to stat aof ({s}): {}", .{ self.path, err });
+                break :blk null;
+            };
+
+            if (stat_fd != null and stat_file != null and stat_fd.?.inode != stat_file.?.inode) {
+                log.err("AOF inode mismatch detected - the AOF file path is not the same as " ++
+                    "the open file descriptor being written to.", .{});
+                log.err(
+                    "Move {s} out the way, and let tigerbeetle recreate the AOF.",
+                    .{self.path},
+                );
+            }
+
             replica_callback(replica);
         }
 

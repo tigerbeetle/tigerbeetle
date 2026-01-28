@@ -1075,6 +1075,10 @@ pub const IO = struct {
         return common.aof_blocking_stat(path);
     }
 
+    pub fn aof_blocking_fstat(_: *IO, fd: fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
+        return common.aof_blocking_fstat(fd);
+    }
+
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
         stdx.maybe(std.fs.path.isAbsolute(path));
 

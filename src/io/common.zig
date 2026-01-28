@@ -123,6 +123,11 @@ pub fn aof_blocking_stat(path: []const u8) std.fs.Dir.StatFileError!std.fs.File.
     return std.fs.cwd().statFile(path);
 }
 
+pub fn aof_blocking_fstat(fd: posix.fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
+    const file = std.fs.File{ .handle = fd };
+    return file.stat();
+}
+
 pub fn aof_blocking_open(dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
     assert(!std.fs.path.isAbsolute(path));
 
