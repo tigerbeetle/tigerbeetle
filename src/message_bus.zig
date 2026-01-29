@@ -14,6 +14,7 @@ const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
+const Tracer = vsr.trace.Tracer;
 
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
@@ -77,6 +78,8 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Seeded with the process' replica index or client ID.
         prng: stdx.PRNG,
 
+        trace: ?*Tracer,
+
         comptime {
             // Assert it is correct to use u32 to track sizes.
             assert(constants.message_size_max < std.math.maxInt(u32));
@@ -85,6 +88,7 @@ pub fn MessageBusType(comptime IO: type) type {
         pub const Options = struct {
             configuration: []const Address,
             io: *IO,
+            trace: ?*Tracer,
             clients_limit: ?u32 = null,
         };
         const Address = std.net.Address;
@@ -164,6 +168,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replicas_addresses = replicas_addresses,
                 .replicas_connect_attempts = replicas_connect_attempts,
                 .prng = stdx.PRNG.from_seed(prng_seed),
+                .trace = options.trace,
             };
 
             switch (process_id) {
@@ -259,6 +264,25 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.process == .replica);
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
+
+            if (bus.trace) |trace| {
+                var counts = std.enums.EnumArray(std.meta.Tag(vsr.Peer), u32).initFill(0);
+                for (bus.connections) |*connection| {
+                    if (connection.state == .connected) {
+                        counts.getPtr(connection.peer).* += 1;
+                    }
+                }
+
+                var counts_iterator = counts.iterator();
+                while (counts_iterator.next()) |entry| {
+                    trace.gauge(
+                        .{ .message_bus_connections = .{ .peer = entry.key } },
+                        entry.value.*,
+                    );
+                }
+
+                trace.gauge(.message_bus_connections_max, bus.connections.len);
+            }
         }
 
         // The same as tick, but asserts a client and avoids accept, allowing Zig's lazy semantics
@@ -1146,10 +1170,10 @@ pub fn MessageBusType(comptime IO: type) type {
             peer: vsr.Peer = .unknown,
 
             state: enum {
-                /// The connection is not in use, with peer set to `.none`.
+                /// The connection is not in use, with peer set to `.unknown`.
                 free,
                 /// The connection has been reserved for an in progress accept operation,
-                /// with peer set to `.none`.
+                /// with peer set to `.unknown`.
                 accepting,
                 /// The peer is a replica and a connect operation has been started
                 /// but not yet completed.
@@ -1161,7 +1185,7 @@ pub fn MessageBusType(comptime IO: type) type {
             } = .free,
             /// This is guaranteed to be valid only while state is connected.
             /// It will be reset to null during the shutdown process and is always null if the
-            /// connection is unused (i.e. peer == .none).
+            /// connection is unused (i.e. peer == .unknown).
             fd: ?IO.socket_t = null,
 
             /// This completion is used for all recv operations.

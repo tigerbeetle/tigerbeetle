@@ -107,7 +107,7 @@ pub fn main(
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),
                 .aof_recovery = false,
-                .message_bus_options = .{ .configuration = addresses, .io = io },
+                .message_bus_options = .{ .configuration = addresses, .io = io, .trace = null },
             },
         ));
     }

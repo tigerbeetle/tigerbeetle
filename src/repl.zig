@@ -681,6 +681,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     .message_bus_options = .{
                         .configuration = options.addresses,
                         .io = io,
+                        .trace = null,
                     },
                 },
             );

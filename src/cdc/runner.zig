@@ -239,7 +239,11 @@ pub const Runner = struct {
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
                 .aof_recovery = false,
-                .message_bus_options = .{ .configuration = options.addresses, .io = &self.io },
+                .message_bus_options = .{
+                    .configuration = options.addresses,
+                    .io = &self.io,
+                    .trace = null,
+                },
             },
         );
         errdefer self.vsr_client.deinit(allocator);
