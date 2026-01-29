@@ -56,6 +56,13 @@ pub const Duration = struct {
         return .{ .ns = @max(lhs.ns, rhs.ns) };
     }
 
+    pub fn clamp(duration: Duration, clamp_min: Duration, clamp_max: Duration) Duration {
+        assert(clamp_min.ns <= clamp_max.ns);
+        if (duration.ns < clamp_min.ns) return clamp_min;
+        if (duration.ns > clamp_max.ns) return clamp_max;
+        return duration;
+    }
+
     pub const sort = struct {
         pub fn asc(ctx: void, lhs: Duration, rhs: Duration) bool {
             return std.sort.asc(u64)(ctx, lhs.ns, rhs.ns);
