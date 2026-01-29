@@ -125,6 +125,8 @@ pub const StatsD = struct {
     send_completions: [packet_count_max]IO.Completion = undefined,
     send_in_flight_count: u32 = 0,
 
+    log_buffer: ?std.ArrayListUnmanaged(u8) = null,
+
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init_udp(
         allocator: std.mem.Allocator,
@@ -164,10 +166,17 @@ pub const StatsD = struct {
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
         errdefer allocator.destroy(send_buffer);
 
+        const log_buffer = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            packet_count_max * packet_size_max,
+        );
+        errdefer log_buffer.deinit(allocator);
+
         return .{
             .process_id = process_id,
             .implementation = .log,
             .send_buffer = send_buffer,
+            .log_buffer = log_buffer,
         };
     }
 
@@ -175,6 +184,11 @@ pub const StatsD = struct {
         if (self.implementation == .udp) {
             self.implementation.udp.io.close_socket(self.implementation.udp.socket);
         }
+
+        if (self.log_buffer) |*log_buffer| {
+            log_buffer.deinit(allocator);
+        }
+
         allocator.destroy(self.send_buffer);
 
         self.* = undefined;
@@ -208,6 +222,11 @@ pub const StatsD = struct {
                 packet_count_max,
             });
             return error.Busy;
+        }
+
+        // If there's a log buffer, clear it out before starting to emit.
+        if (self.log_buffer) |*log_buffer| {
+            log_buffer.clearRetainingCapacity();
         }
 
         if (self.implementation == .udp and self.implementation.udp.send_callback_error_count > 0) {
@@ -306,6 +325,7 @@ pub const StatsD = struct {
             },
             .log => {
                 log.debug("{}: statsd packet: {s}", .{ self.process_id, send_buffer });
+                self.log_buffer.?.appendSliceAssumeCapacity(send_buffer);
                 StatsD.send_callback(self, send_completion, send_buffer.len);
             },
         }
