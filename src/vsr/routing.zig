@@ -589,6 +589,15 @@ pub fn op_prepare_ok(routing: *Routing, op: u64, replica: u8, now: Instant) void
     }
 }
 
+/// Returns the latency from when a prepare was sent to now for a given op.
+/// Returns null if the op is not in the history (e.g., already evicted or never prepared).
+pub fn prepare_latency(routing: *const Routing, op: u64, now: Instant) ?Duration {
+    if (op == 0) return null;
+    const slot = op % history_max;
+    if (routing.history[slot].op != op) return null;
+    return now.duration_since(routing.history[slot].prepare);
+}
+
 fn op_finalize(
     routing: *Routing,
     op: u64,

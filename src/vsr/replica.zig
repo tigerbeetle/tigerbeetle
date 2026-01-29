@@ -2206,6 +2206,17 @@ pub fn ReplicaType(
             assert(prepare.message.header.checkpoint_id ==
                 self.checkpoint_id_for_op(prepare.message.header.op).?);
 
+            // Log prepare_ok latency per client/request/replica
+            if (self.routing.prepare_latency(message.header.op, self.clock.monotonic())) |latency| {
+                std.debug.print("prepare_ok: client={} request={} op={} replica={} latency_us={}\n", .{
+                    prepare.message.header.client,
+                    prepare.message.header.request,
+                    message.header.op,
+                    message.header.replica,
+                    latency.ns / std.time.ns_per_us,
+                });
+            }
+
             // Wait until we have a quorum of prepare_ok messages (including ourself).
             const threshold = self.quorum_replication;
 
