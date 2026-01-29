@@ -14,10 +14,10 @@ pub const Marzullo = struct {
         /// The upper bound on the maximum clock offset.
         upper_bound: i64,
 
-        /// The number of "true chimers" consistent with the largest number of sources.
+        /// The number of "truechimers" consistent with the largest number of sources.
         sources_true: u8,
 
-        /// The number of "false chimers" falling outside this interval.
+        /// The number of "falsetickers" falling outside this interval.
         /// Where `sources_false` plus `sources_true` always equals the total number of sources.
         sources_false: u8,
     };

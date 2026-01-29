@@ -242,7 +242,9 @@ pub fn set_replica(tracer: *Tracer, options: struct { cluster: u128, replica: u8
 
 /// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will / result in
 /// only the last value being submitted.
-pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
+// Takes an i65 to keep calling code simple: lots of places want to call this with a u64, and
+// requiring an @intCast and checks at every call site is cumbersome.
+pub fn gauge(tracer: *Tracer, event: EventMetric, value: i65) void {
     const timing_slot = event.slot();
     tracer.events_metric[timing_slot] = .{
         .event = event,
@@ -272,6 +274,10 @@ pub fn start(tracer: *Tracer, event: Event) void {
 
     assert(tracer.events_started[stack] == null);
     tracer.events_started[stack] = time_now;
+
+    if (event_tracing.aggregate_only()) {
+        return;
+    }
 
     if (tracer.log_trace) {
         log.debug(
@@ -333,6 +339,12 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
 
+    tracer.timing(event_timing, event_duration);
+
+    if (event_tracing.aggregate_only()) {
+        return;
+    }
+
     if (tracer.log_trace) {
         // Double leading space to align with 'start: '.
         log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
@@ -347,8 +359,6 @@ pub fn stop(tracer: *Tracer, event: Event) void {
             if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
         });
     }
-
-    tracer.timing(event_timing, event_duration);
 
     tracer.write_stop(stack, event_end.duration_since(tracer.time_start));
 }
@@ -432,7 +442,7 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
         const timing_existing = event_timing_existing.values;
         event_timing_existing.values = .{
             .duration_min = timing_existing.duration_min.min(duration),
-            .duration_max = timing_existing.duration_min.max(duration),
+            .duration_max = timing_existing.duration_max.max(duration),
             .duration_sum = .{ .ns = timing_existing.duration_sum.ns +| duration.ns },
             .count = timing_existing.count +| 1,
         };
@@ -451,7 +461,7 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
 
 const fixtures = @import("testing/fixtures.zig");
 
-test "trace json" {
+test "trace json and statsd" {
     const Snap = stdx.Snap;
     const snap = Snap.snap_fn("src");
     const gpa = std.testing.allocator;
@@ -469,7 +479,7 @@ test "trace json" {
 
     // Check that JSON is valid even while process id not known.
     trace.start(.metrics_emit);
-    time_sim.ticks += 1;
+    time_sim.ticks += 10;
     trace.stop(.metrics_emit);
 
     trace.set_replica(.{ .cluster = 1, .replica = 1 });
@@ -485,13 +495,42 @@ test "trace json" {
     try snap(@src(),
         \\[
         \\{"pid":0,"tid":208,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
-        \\{"pid":0,"tid":208,"ph":"E","ts":10000},
-        \\{"pid":1,"tid":0,"ph":"B","ts":10000,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":1,"tid":8,"ph":"B","ts":20000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":1,"tid":8,"ph":"E","ts":40000},
-        \\{"pid":1,"tid":0,"ph":"E","ts":70000},
+        \\{"pid":0,"tid":208,"ph":"E","ts":100000},
+        \\{"pid":1,"tid":0,"ph":"B","ts":100000,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":1,"tid":8,"ph":"B","ts":110000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":1,"tid":8,"ph":"E","ts":130000},
+        \\{"pid":1,"tid":0,"ph":"E","ts":160000},
         \\
     ).diff(trace_buffer.items);
+
+    trace.start(.metrics_emit);
+    time_sim.ticks += 1;
+    trace.stop(.metrics_emit);
+
+    trace.start(.metrics_emit);
+    time_sim.ticks += 5;
+    trace.stop(.metrics_emit);
+
+    trace.emit_metrics();
+
+    try snap(@src(),
+        \\tb.replica_commit_us.min:60000|g|#cluster:00000000000000000000000000000001,replica:1,stage:idle
+        \\tb.replica_commit_us.max:60000|g|#cluster:00000000000000000000000000000001,replica:1,stage:idle
+        \\tb.replica_commit_us.avg:60000|g|#cluster:00000000000000000000000000000001,replica:1,stage:idle
+        \\tb.replica_commit_us.sum:60000|c|#cluster:00000000000000000000000000000001,replica:1,stage:idle
+        \\tb.replica_commit_us.count:1|c|#cluster:00000000000000000000000000000001,replica:1,stage:idle
+        \\tb.compact_beat_us.min:20000|g|#cluster:00000000000000000000000000000001,replica:1,tree:Account.id
+        \\tb.compact_beat_us.max:20000|g|#cluster:00000000000000000000000000000001,replica:1,tree:Account.id
+        \\tb.compact_beat_us.avg:20000|g|#cluster:00000000000000000000000000000001,replica:1,tree:Account.id
+        \\tb.compact_beat_us.sum:20000|c|#cluster:00000000000000000000000000000001,replica:1,tree:Account.id
+        \\tb.compact_beat_us.count:1|c|#cluster:00000000000000000000000000000001,replica:1,tree:Account.id
+        \\tb.metrics_emit_us.min:10000|g|#cluster:00000000000000000000000000000001,replica:1
+        \\tb.metrics_emit_us.max:100000|g|#cluster:00000000000000000000000000000001,replica:1
+        \\tb.metrics_emit_us.avg:53333|g|#cluster:00000000000000000000000000000001,replica:1
+        \\tb.metrics_emit_us.sum:160000|c|#cluster:00000000000000000000000000000001,replica:1
+        \\tb.metrics_emit_us.count:3|c|#cluster:00000000000000000000000000000001,replica:1
+        \\
+    ).diff(trace.statsd.log_buffer.?.items);
 }
 
 test "timing overflow" {

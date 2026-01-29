@@ -90,6 +90,7 @@ const ratio = stdx.PRNG.ratio;
 const Instant = stdx.Instant;
 const Time = @import("../time.zig").Time;
 const TimeSim = @import("../testing/time.zig").TimeSim;
+const Tracer = @import("../trace.zig").Tracer;
 
 const clock_offset_tolerance_max: u64 =
     constants.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
@@ -184,9 +185,12 @@ marzullo_tuples: []Marzullo.Tuple,
 /// A kill switch to revert to unsynchronized realtime.
 synchronization_disabled: bool,
 
+trace: ?*Tracer,
+
 pub fn init(
     allocator: std.mem.Allocator,
     time: Time,
+    tracer: ?*Tracer,
     options: struct {
         /// The size of the cluster, i.e. the number of clock sources (including this
         /// replica).
@@ -222,6 +226,8 @@ pub fn init(
         .marzullo_tuples = marzullo_tuples,
         // A cluster of one cannot synchronize.
         .synchronization_disabled = options.replica_count == 1,
+
+        .trace = tracer,
     };
 
     // Reset the current epoch to be unsynchronized,
@@ -529,6 +535,8 @@ fn after_synchronization(self: *Clock) void {
 
     if (system == cluster) {} else if (system < lower) {
         const delta = lower - system;
+        if (self.trace) |trace| trace.gauge(.clock_delta_ns, delta);
+
         if (delta < std.time.ns_per_ms) {
             log.debug("{}: system time is {} behind", .{
                 self.replica,
@@ -545,6 +553,8 @@ fn after_synchronization(self: *Clock) void {
         }
     } else {
         const delta = system - upper;
+        if (self.trace) |trace| trace.gauge(.clock_delta_ns, delta);
+
         if (delta < std.time.ns_per_ms) {
             log.debug("{}: system time is {} ahead", .{
                 self.replica,
@@ -616,7 +626,7 @@ const ClockUnitTestContainer = struct {
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
             },
-            .clock = try Clock.init(allocator, self.time.time(), .{
+            .clock = try Clock.init(allocator, self.time.time(), null, .{
                 .replica_count = 3,
                 .replica = 0,
                 .quorum = 2,
@@ -828,7 +838,7 @@ const ClockSimulator = struct {
                 .offset_coefficient_C = 10,
             };
 
-            clock.* = try Clock.init(allocator, times[replica].time(), .{
+            clock.* = try Clock.init(allocator, times[replica].time(), null, .{
                 .replica_count = options.clock_count,
                 .replica = @intCast(replica),
                 .quorum = @divFloor(options.clock_count, 2) + 1,

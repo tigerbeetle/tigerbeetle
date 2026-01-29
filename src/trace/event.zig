@@ -108,9 +108,12 @@ pub const Event = union(enum) {
     storage_read: struct { zone: Zone },
     storage_write: struct { zone: Zone },
 
-    metrics_emit: void,
+    metrics_emit,
 
     client_request_round_trip: struct { operation: Operation },
+
+    loop_run_for_ns,
+    loop_tick,
 
     pub const Tag = std.meta.Tag(Event);
 
@@ -187,6 +190,9 @@ pub const EventTiming = union(Event.Tag) {
 
     client_request_round_trip: struct { operation: Operation },
 
+    loop_run_for_ns,
+    loop_tick,
+
     pub const slot_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = enum_count(CommitStage.Tag),
         .replica_aof_write = 1,
@@ -210,6 +216,8 @@ pub const EventTiming = union(Event.Tag) {
         .storage_read = enum_count(Zone),
         .storage_write = enum_count(Zone),
         .client_request_round_trip = enum_count(Operation),
+        .loop_run_for_ns = 1,
+        .loop_tick = 1,
     });
 
     pub const slot_bases = array: {
@@ -344,6 +352,9 @@ pub const EventTracing = union(Event.Tag) {
 
     client_request_round_trip,
 
+    loop_run_for_ns,
+    loop_tick,
+
     pub const stack_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = 1,
         .replica_aof_write = 1,
@@ -367,6 +378,8 @@ pub const EventTracing = union(Event.Tag) {
         .storage_write = 1,
         .metrics_emit = 1,
         .client_request_round_trip = 1,
+        .loop_run_for_ns = 1,
+        .loop_tick = 1,
     });
 
     pub const stack_bases = array: {
@@ -443,6 +456,16 @@ pub const EventTracing = union(Event.Tag) {
             },
         }
     }
+
+    // Some traces are very frequent, and would otherwise drown out useful information. These can be
+    // captured in aggregate only, meaning that the aggregate timing statistics will still be
+    // captured, but no per trace logs or JSON will be emitted.
+    pub fn aggregate_only(event: *const EventTracing) bool {
+        return switch (event.*) {
+            .loop_run_for_ns, .loop_tick => true,
+            else => false,
+        };
+    }
 };
 
 pub const EventMetric = union(enum) {
@@ -473,6 +496,7 @@ pub const EventMetric = union(enum) {
     lsm_manifest_block_count,
     metrics_statsd_packets,
     release,
+    clock_delta_ns,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_count(TreeEnum),
@@ -500,6 +524,7 @@ pub const EventMetric = union(enum) {
         .lsm_manifest_block_count = 1,
         .metrics_statsd_packets = 1,
         .release = 1,
+        .clock_delta_ns = 1,
     });
 
     pub const slot_bases = array: {
@@ -587,7 +612,7 @@ pub const EventTimingAggregate = struct {
 };
 
 pub const EventMetricAggregate = struct {
-    pub const ValueType = u64;
+    pub const ValueType = i65;
 
     event: EventMetric,
     value: ValueType,
@@ -676,6 +701,8 @@ test "EventTiming slot doesn't have collisions" {
             .client_request_round_trip => .{ .client_request_round_trip = .{
                 .operation = g.enum_value(Operation),
             } },
+            .loop_run_for_ns => .loop_run_for_ns,
+            .loop_tick => .loop_tick,
         };
         try stacks.append(allocator, event.slot());
     }
