@@ -497,12 +497,7 @@ fn command_start(
     }
 
     while (true) {
-        {
-            tracer.start(.loop_tick);
-            defer tracer.stop(.loop_tick);
-
-            replica.tick();
-        }
+        replica.tick();
 
         {
             tracer.start(.loop_run_for_ns);
