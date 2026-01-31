@@ -3,6 +3,51 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.70
+
+Released: 2026-01-31
+
+### Safety And Performance
+
+- [#3482](https://github.com/tigerbeetle/tigerbeetle/pull/3482)
+
+  Add basic tracing/metrics to event loop times. Also fix a bug in "max" timing metrics.
+
+- [#3475](https://github.com/tigerbeetle/tigerbeetle/pull/3475)
+
+  Rewrite and improve performance of tree-of-losers k-way-merge implementation.
+
+- [#3479](https://github.com/tigerbeetle/tigerbeetle/pull/3479)
+
+  Use `callconv(.@"inline")` for radix sort `key_from_value` function.
+
+- [#3478](https://github.com/tigerbeetle/tigerbeetle/pull/3478)
+
+  Add `--id-order=tbid` to benchmark. This makes the benchmark more accurately resemble a
+  real-world workload. Additionally, with this setting multiple runs of the benchmark will not
+  encounter id collisions.
+
+- [#3476](https://github.com/tigerbeetle/tigerbeetle/pull/3476)
+
+  Prefetch index blocks during compaction, so that we don't need to block waiting for the read.
+
+### Features
+
+- [#3453](https://github.com/tigerbeetle/tigerbeetle/pull/3453)
+
+  Ensure public contract is stated in the `tb_client` header file.
+
+### Internals
+
+- [#3480](https://github.com/tigerbeetle/tigerbeetle/pull/3480)
+
+  Make CFO crash less easily if fuzzer behaves unexpectedly.
+  Also make local testing of CFO more similar to real CFO execution.
+
+### TigerTracks 🎧
+
+- [DreamFlux](https://www.youtube.com/watch?v=4IOf4D6SAO0)
+
 ## TigerBeetle 0.16.69
 
 Released: 2026-01-23
