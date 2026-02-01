@@ -729,6 +729,7 @@ const VSRContext = struct {
                 .message_bus_options = .{
                     .configuration = &.{address},
                     .io = &self.io,
+                    .trace = null,
                 },
             },
         );

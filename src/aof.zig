@@ -335,6 +335,7 @@ pub fn AOFType(comptime IO: type) type {
                         .message_bus_options = .{
                             .configuration = addresses,
                             .io = io,
+                            .trace = null,
                         },
                     },
                 );

@@ -107,7 +107,6 @@ pub fn SetAssociativeCacheType(
         name: []const u8,
         sets: u64,
 
-        // TODO Expose these as metrics.
         metrics: *Metrics,
 
         /// A short, partial hash of a Key, corresponding to a Value.

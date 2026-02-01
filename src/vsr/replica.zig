@@ -5376,6 +5376,8 @@ pub fn ReplicaType(
                 self.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
 
+            self.trace.gauge(.replica_commit_timestamp, self.state_machine.commit_timestamp);
+
             if (self.status == .normal and self.primary()) {
                 const pipeline_prepare = self.pipeline.queue.pop_prepare().?;
                 defer self.message_bus.unref(pipeline_prepare.message);

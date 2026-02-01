@@ -113,7 +113,12 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 .{ .replica = @intCast(i) },
                 &message_pool,
                 Node.on_messages_callback,
-                .{ .configuration = configuration, .io = &io, .clients_limit = clients_limit },
+                .{
+                    .configuration = configuration,
+                    .io = &io,
+                    .clients_limit = clients_limit,
+                    .trace = null,
+                },
             ),
             .id = @intCast(i),
         };
@@ -133,7 +138,12 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 .{ .client = replica_count + i },
                 &message_pool,
                 Node.on_messages_callback,
-                .{ .configuration = configuration, .io = &io, .clients_limit = null },
+                .{
+                    .configuration = configuration,
+                    .io = &io,
+                    .clients_limit = null,
+                    .trace = null,
+                },
             ),
             .id = @intCast(replica_count + i),
         };
