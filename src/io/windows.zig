@@ -1434,6 +1434,26 @@ pub const IO = struct {
     pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
         return common.aof_blocking_close(fd);
     }
+
+    pub fn aof_blocking_stat(_: *IO, path: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
+        return common.aof_blocking_stat(path);
+    }
+
+    pub fn aof_blocking_fstat(_: *IO, fd: fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
+        return common.aof_blocking_fstat(fd);
+    }
+
+    pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
+        stdx.maybe(std.fs.path.isAbsolute(path));
+
+        const dir_path = std.fs.path.dirname(path) orelse ".";
+        const dir_fd = try IO.open_dir(dir_path);
+        defer io.aof_blocking_close(dir_fd);
+
+        const file_path = std.fs.path.basename(path);
+
+        return common.aof_blocking_open(dir_fd, file_path);
+    }
 };
 
 // TODO: use posix.getsockoptError when fixed for windows in stdlib.
