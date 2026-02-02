@@ -309,6 +309,7 @@ pub fn ContextType(
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,
+                        .trace = null,
                     },
                     .eviction_callback = client_eviction_callback,
                 },

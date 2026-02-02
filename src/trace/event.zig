@@ -9,6 +9,7 @@ const Zone = @import("../vsr.zig").Zone;
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
 const Operation = @import("../tigerbeetle.zig").Operation;
 const Duration = stdx.Duration;
+const Peer = @import("../vsr.zig").Peer;
 
 const TreeEnum = tree_enum: {
     const tree_ids = @import("../state_machine.zig").tree_ids;
@@ -40,7 +41,7 @@ fn enum_count(EnumOrUnion: type) u8 {
     const Enum = if (type_info == .@"enum")
         type_info.@"enum"
     else
-        @typeInfo(type_info.Union.tag_type.?).@"enum";
+        @typeInfo(type_info.@"union".tag_type.?).@"enum";
     assert(Enum.is_exhaustive);
 
     return Enum.fields.len;
@@ -55,7 +56,7 @@ fn index_from_enum(enum_tag: anytype) u8 {
     const Enum = if (type_info == .@"enum")
         type_info.@"enum"
     else
-        @typeInfo(type_info.Union.tag_type.?).@"enum";
+        @typeInfo(type_info.@"union".tag_type.?).@"enum";
     assert(Enum.is_exhaustive);
 
     inline for (Enum.fields, 0..) |enum_field, i| {
@@ -480,6 +481,7 @@ pub const EventMetric = union(enum) {
     replica_op_checkpoint,
     replica_commit_min,
     replica_commit_max,
+    replica_commit_timestamp,
     replica_pipeline_queue_length,
     replica_sync_stage,
     replica_sync_op_min,
@@ -497,6 +499,8 @@ pub const EventMetric = union(enum) {
     metrics_statsd_packets,
     release,
     clock_delta_ns,
+    message_bus_connections: struct { peer: std.meta.Tag(Peer) },
+    message_bus_connections_max,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_count(TreeEnum),
@@ -508,6 +512,7 @@ pub const EventMetric = union(enum) {
         .replica_op_checkpoint = 1,
         .replica_commit_min = 1,
         .replica_commit_max = 1,
+        .replica_commit_timestamp = 1,
         .replica_pipeline_queue_length = 1,
         .replica_sync_stage = 1,
         .replica_sync_op_min = 1,
@@ -525,6 +530,8 @@ pub const EventMetric = union(enum) {
         .metrics_statsd_packets = 1,
         .release = 1,
         .clock_delta_ns = 1,
+        .message_bus_connections = enum_count(Peer),
+        .message_bus_connections_max = 1,
     });
 
     pub const slot_bases = array: {
@@ -557,6 +564,13 @@ pub const EventMetric = union(enum) {
             inline .replica_messages_in, .replica_messages_out => |data| {
                 const command = index_from_enum(data.command);
                 const offset = command;
+                assert(offset < slot_limits.get(event.*));
+
+                return slot_bases.get(event.*) + offset;
+            },
+            inline .message_bus_connections => |data| {
+                const peer = index_from_enum(data.peer);
+                const offset = peer;
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + offset;
@@ -637,6 +651,9 @@ test "EventMetric slot doesn't have collisions" {
             } },
             .replica_messages_out => .{ .replica_messages_out = .{
                 .command = g.enum_value(Command),
+            } },
+            .message_bus_connections => .{ .message_bus_connections = .{
+                .peer = g.enum_value(std.meta.Tag(Peer)),
             } },
             inline else => |tag| tag,
         };
