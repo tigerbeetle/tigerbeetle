@@ -4,7 +4,7 @@ TigerBeetle is a reliable, fast, and highly available database for financial acc
 financial transactions or anything else that can be expressed as double-entry bookkeeping, providing
 three orders of magnitude more performance and guaranteeing durability even in the face of network,
 machine, and storage faults. You will learn more about why this is an important and hard problem to
-solve in the [Concepts](./concepts/) section, but let's make some real transactions first!
+solve in the [Concepts](./concepts/) section, but first—let's make some real transactions!
 
 ## Install
 
@@ -44,8 +44,8 @@ See [Installing](./operating/installing.md) for other options.
 ## Run a Cluster
 
 Typically, TigerBeetle is deployed as a cluster of 6 replicas, which is described in the
-[Operating](./operating/) section. But it is also possible to run a single-replica cluster, which of
-course doesn't provide high-availability, but is convenient for experimentation. That's what we'll
+[Operating](./operating/) section. It is also possible to run a single-replica cluster, which of
+course doesn't provide high-availability, but is convenient for experimentation; that's what we'll
 do here.
 
 First, format a data file:
@@ -71,10 +71,10 @@ the storage misbehaves.
 
 ## Connecting to a Cluster
 
-Now that the cluster is running, we can connect to it using a client. TigerBeetle already has
-clients for several popular programming languages, including Go, Node.js, Java, and Python, and more
+Now that the cluster is running, we can connect to it using a client. TigerBeetle has
+clients for several popular programming languages, including [Python](https://docs.tigerbeetle.com/coding/clients/python/), [Java](https://docs.tigerbeetle.com/coding/clients/java/), [Node.js](https://docs.tigerbeetle.com/coding/clients/node/), [.Net](https://docs.tigerbeetle.com/coding/clients/dotnet/), and [Go](https://docs.tigerbeetle.com/coding/clients/go/), and more
 are coming; see the [Coding](./coding) section for details. For this tutorial, we'll keep it simple
-and connect to the cluster using the built-in CLI client. In a separate terminal, start a REPL with
+and connect to the cluster using the built-in CLI client. In a separate terminal, start a REPL with:
 
 ```console
 ./tigerbeetle repl --cluster=0 --addresses=3000
@@ -88,7 +88,7 @@ necessary, it helps prevent operator errors.
 
 TigerBeetle comes with a pre-defined database schema --- double-entry bookkeeping. The [Concept](./concepts)
 section explains why this particular schema, and the [Reference](./reference) documents all the bells and
-whistles, but, for the purposes of this tutorial, it is enough to understand that there are accounts
+whistles. For the purposes of this tutorial, it is enough to understand that there are accounts
 holding `credits` and `debits` balances, and that each transfer moves value between two accounts by
 incrementing `credits` on one side and `debits` on the other.
 
@@ -156,8 +156,8 @@ Now, create our first transfer and inspect the state of accounts afterwards:
 }
 ```
 
-Note how the transfer amount is added both to the credits and to the debits. That the sum of debits
-and credits stays equal no matter what is a powerful invariant of the double-entry bookkeeping
+Note how the transfer amount is added to both the credits and debits. That the sum of debits
+and credits stays equal, no matter what, is a powerful invariant of a double-entry bookkeeping 
 system.
 
 ## Conclusion
@@ -165,21 +165,20 @@ system.
 This is the end of the quick start! You now know how to format a data file, run a single-replica
 TigerBeetle cluster, and run transactions through it. Here's where to go from here:
 
-* [Concepts](./concepts/) explains the "why?" of TigerBeetle, read this to decide if you need to use
-  TigerBeetle.
-* [Coding](./coding/) gives guidance on developing applications which store accounting data in a
+* [Concepts](./concepts/) explains the "why?" of TigerBeetle; read this to decide if TigerBeetle
+  matches the shape of your problem.
+* [Coding](./coding/) gives guidance on developing applications which store transactions in a
   TigerBeetle cluster.
 * [Operating](./operating/) explains how to deploy a TigerBeetle cluster in a highly-available
   manner, with replication enabled.
-* [Reference](./reference/) meticulously documents every single available feature and flag of the
+* [Reference](./reference/) documents every available feature and flag of the
   underlying data model.
 
 ## Community
 
-If you want to keep up to speed with recent TigerBeetle developments, here are some things to
-follow:
+If you want to keep up to speed with recent TigerBeetle developments:
 
-- [Monthly Newsletter](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle) covers everything
+- [Monthly Newsletter](https://tigerbeetle.com/newsletter) covers everything
   of importance that happened with TigerBeetle. It is a changelog director's cut!
 - [Slack](https://slack.tigerbeetle.com/join) is the place to hang out with users and developers
   of TigerBeetle. We try to answer every question.
@@ -187,5 +186,6 @@ follow:
   as well as talks from the Systems Distributed conference. We also stream on
   [Twitch](https://www.twitch.tv/tigerbeetle), with recordings duplicated to YouTube.
 - [𝕏](https://twitter.com/TigerBeetleDB) is good for smaller updates, and word-of-mouth historical
-  trivia you won't learn elsewhere!
-- [GitHub](https://github.com/tigerbeetle/tigerbeetle) --- if you want to keep closer to the source!
+  trivia you won't learn elsewhere! Or [Bluesky](https://bsky.app/profile/tigerbeetle.com), if that's 
+  your preference.
+- [GitHub](https://github.com/tigerbeetle/tigerbeetle) to stay close to the source!
