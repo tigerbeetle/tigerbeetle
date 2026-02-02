@@ -24,7 +24,7 @@ sports car gives you the best latency, but when the load and contention increase
 [Little's law](https://en.wikipedia.org/wiki/Little%27s_law), both latency and throughput become abysmal.
 
 TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
-transactions, up to 8,190 transactions per query. Although TigerBeetle is a replicated database using a 
+transfers, up to 8,190 transfers per query. Although TigerBeetle is a replicated database using a 
 consensus algorithm, the cost of replication is paid only once per batch, which means that TigerBeetle runs 
 almost as fast as an in-memory hash map, all the while providing extreme durability and availability.
 
