@@ -47,7 +47,7 @@ For the highest availability, TigerBeetle should be deployed as a cluster of six
 different cloud providers (two replicas per provider). Because TigerBeetle uses
 [Heidi Howard's flexible quorums](https://arxiv.org/pdf/1608.06696v1), this deployment is guaranteed
 to tolerate a complete outage of any cloud provider and will likely survive even if one extra
-replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protectsavailability 
+replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protects availability 
 -- even through provider slowdowns and disruptions.
 
 TigerBeetle detects and overcomes
