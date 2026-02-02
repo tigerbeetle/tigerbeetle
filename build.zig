@@ -153,7 +153,7 @@ pub fn build(b: *std.Build) !void {
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
 
     assert(build_options.git_commit.len == 40);
-    const vsr_options, const vsr_module = build_vsr_module(b, .{
+    const real_vsr_options, const real_vsr_module = build_vsr_module(b, .{
         .stdx_module = stdx_module,
         .git_commit = build_options.git_commit[0..40].*,
         .config_verify = build_options.config_verify,
@@ -161,16 +161,36 @@ pub fn build(b: *std.Build) !void {
         .config_release_client_min = build_options.config_release_client_min,
     });
 
+    // For integration tests and vortex, we build an independent copy of TigerBeetle with "real"
+    // config and multiversioning.
+    const test_vsr_options, const test_vsr_module = build_vsr_module(b, .{
+        .stdx_module = stdx_module,
+        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
+        .config_verify = true,
+        .config_release = "65535.0.0",
+        .config_release_client_min = "0.16.4",
+    });
+    const test_tigerbeetle_previous = download_release(b, "latest", target, mode);
+    const test_tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
+        .stdx_module = stdx_module,
+        .vsr_module = test_vsr_module,
+        .vsr_options = test_vsr_options,
+        .llvm_objcopy = build_options.llvm_objcopy,
+        .tigerbeetle_previous = test_tigerbeetle_previous,
+        .target = target,
+        .mode = mode,
+    });
+
     const tb_client = build_tb_client(b, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .mode = mode,
     });
 
     // zig build check
     build_check(b, build_steps.check, .{
         .stdx_module = stdx_module,
-        .vsr_module = vsr_module,
+        .vsr_module = real_vsr_module,
         .target = target,
         .mode = mode,
     });
@@ -181,8 +201,8 @@ pub fn build(b: *std.Build) !void {
         .install = b.getInstallStep(),
     }, .{
         .stdx_module = stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .llvm_objcopy = build_options.llvm_objcopy,
         .target = target,
         .mode = mode,
@@ -194,7 +214,7 @@ pub fn build(b: *std.Build) !void {
     // zig build aof
     build_aof(b, build_steps.aof, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
+        .vsr_options = real_vsr_options,
         .target = target,
         .mode = mode,
     });
@@ -209,11 +229,14 @@ pub fn build(b: *std.Build) !void {
         .@"test" = build_steps.@"test",
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
         .llvm_objcopy = build_options.llvm_objcopy,
         .tb_client_header = tb_client.header,
         .target = target,
         .mode = mode,
+        .vsr_module = test_vsr_module,
+        .vsr_options = test_vsr_options,
+        .tigerbeetle = test_tigerbeetle,
+        .tigerbeetle_previous = test_tigerbeetle_previous,
     });
 
     // zig build test:jni
@@ -228,7 +251,7 @@ pub fn build(b: *std.Build) !void {
         .vopr_run = build_steps.vopr,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
+        .vsr_options = test_vsr_options,
         .target = target,
         .mode = mode,
         .print_exe = build_options.print_exe,
@@ -242,7 +265,7 @@ pub fn build(b: *std.Build) !void {
         .fuzz_build = build_steps.fuzz_build,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
+        .vsr_options = test_vsr_options,
         .target = target,
         .mode = mode,
         .print_exe = build_options.print_exe,
@@ -254,70 +277,72 @@ pub fn build(b: *std.Build) !void {
         .scripts_build = build_steps.scripts_build,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
+        .vsr_options = real_vsr_options,
         .target = target,
     });
 
-    // zig build vortex
+    // zig build vortex -- supervisor --replica-count=3 --test-duration=1m
     build_vortex(b, .{
         .vortex_build = build_steps.vortex_build,
         .vortex_run = build_steps.vortex,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = test_vsr_module,
+        .vsr_options = test_vsr_options,
         .target = target,
         .mode = mode,
         .tb_client_header = tb_client.header,
         .print_exe = build_options.print_exe,
+        .tigerbeetle = test_tigerbeetle,
+        .tigerbeetle_previous = test_tigerbeetle_previous,
     });
 
     // zig build clients:$lang
     build_rust_client(b, build_steps.clients_rust, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .tb_client_header = tb_client.header,
         .mode = mode,
     });
     build_go_client(b, build_steps.clients_go, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .tb_client_header = tb_client.header,
         .mode = mode,
     });
     build_java_client(b, build_steps.clients_java, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .mode = mode,
     });
     build_dotnet_client(b, build_steps.clients_dotnet, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .tb_client = tb_client,
         .mode = mode,
     });
     build_node_client(b, build_steps.clients_node, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .mode = mode,
     });
     build_python_client(b, build_steps.clients_python, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .tb_client = tb_client,
         .mode = mode,
     });
     build_c_client(b, build_steps.clients_c, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .tb_client_header = tb_client.header,
         .mode = mode,
     });
 
     // zig build clients:c:sample
     build_clients_c_sample(b, build_steps.clients_c_sample, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
         .target = target,
         .mode = mode,
     });
@@ -827,10 +852,13 @@ fn build_test(
     options: struct {
         llvm_objcopy: ?[]const u8,
         stdx_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
         tb_client_header: std.Build.LazyPath,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tigerbeetle: std.Build.LazyPath,
+        tigerbeetle_previous: std.Build.LazyPath,
     },
 ) !void {
     const test_options = b.addOptions();
@@ -890,6 +918,10 @@ fn build_test(
         .stdx_module = options.stdx_module,
         .target = options.target,
         .mode = options.mode,
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+        .tigerbeetle = options.tigerbeetle,
+        .tigerbeetle_previous = options.tigerbeetle_previous,
     });
 
     const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
@@ -915,41 +947,27 @@ fn build_test_integration(
         stdx_module: *std.Build.Module,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tigerbeetle: std.Build.LazyPath,
+        tigerbeetle_previous: std.Build.LazyPath,
     },
 ) void {
-    // For integration tests, we build an independent copy of TigerBeetle with "real" config and
-    // multiversioning.
-    const vsr_options, const vsr_module = build_vsr_module(b, .{
-        .stdx_module = options.stdx_module,
-        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
-        .config_verify = true,
-        .config_release = "65535.0.0",
-        .config_release_client_min = "0.16.4",
-    });
-    const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
-    const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
-        .stdx_module = options.stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
-        .llvm_objcopy = options.llvm_objcopy,
-        .tigerbeetle_previous = tigerbeetle_previous,
-        .target = options.target,
-        .mode = options.mode,
-    });
-
     const vortex = build_vortex_executable(b, .{
         .tb_client_header = options.tb_client_header,
         .stdx_module = options.stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
         .target = options.target,
         .mode = options.mode,
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+        .tigerbeetle = options.tigerbeetle,
+        .tigerbeetle_previous = options.tigerbeetle_previous,
     });
     const vortex_artifact = b.addInstallArtifact(vortex, .{});
 
     const integration_tests_options = b.addOptions();
-    integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
-    integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
+    integration_tests_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle);
+    integration_tests_options.addOptionPath("tigerbeetle_exe_past", options.tigerbeetle_previous);
     integration_tests_options.addOptionPath("vortex_exe", vortex_artifact.emitted_bin.?);
     const integration_tests = b.addTest(.{
         .name = "test-integration",
@@ -961,7 +979,7 @@ fn build_test_integration(
         .filters = b.args orelse &.{},
     });
     integration_tests.root_module.addImport("stdx", options.stdx_module);
-    integration_tests.root_module.addOptions("vsr_options", vsr_options);
+    integration_tests.root_module.addOptions("vsr_options", options.vsr_options);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
     integration_tests.addIncludePath(options.tb_client_header.dirname());
     steps.test_integration_build.dependOn(&b.addInstallArtifact(integration_tests, .{}).step);
@@ -1170,6 +1188,8 @@ fn build_vortex(
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        tigerbeetle: std.Build.LazyPath,
+        tigerbeetle_previous: std.Build.LazyPath,
         print_exe: bool,
     },
 ) void {
@@ -1180,6 +1200,8 @@ fn build_vortex(
         .vsr_options = options.vsr_options,
         .target = options.target,
         .mode = options.mode,
+        .tigerbeetle = options.tigerbeetle,
+        .tigerbeetle_previous = options.tigerbeetle_previous,
     });
 
     const install_step = print_or_install(b, vortex, options.print_exe);
@@ -1199,6 +1221,8 @@ fn build_vortex_executable(
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        tigerbeetle: std.Build.LazyPath,
+        tigerbeetle_previous: std.Build.LazyPath,
     },
 ) *std.Build.Step.Compile {
     const tb_client = b.addLibrary(.{
@@ -1220,15 +1244,8 @@ fn build_vortex_executable(
         tb_client.linkSystemLibrary("advapi32");
     }
 
-    const tigerbeetle = build_tigerbeetle_executable(b, .{
-        .vsr_module = options.vsr_module,
-        .vsr_options = options.vsr_options,
-        .target = options.target,
-        .mode = options.mode,
-    });
-
     const vortex_options = b.addOptions();
-    vortex_options.addOptionPath("tigerbeetle_exe", tigerbeetle.getEmittedBin());
+    vortex_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle);
 
     const vortex = b.addExecutable(.{
         .name = "vortex",
