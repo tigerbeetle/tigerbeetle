@@ -1,10 +1,10 @@
-# Debit / Credit: The Schema for OLTP
+# Debit/Credit: The Schema for OLTP
 
 As discussed in the previous section, OLTP is all about processing business transactions. We saw
 that the nuances of OLTP workloads make them tricky to handle at scale.
 
 Now, we'll turn to the data model and see how the specifics of business transactions actually lend
-themselves to an incredibly simple schema -- and one that's been in use for centuries!
+themselves to an incredibly simple schema that's been in use for centuries.
 
 ## The "Who, What, When, Where, Why, and How Much" of OLTP
 
@@ -19,20 +19,22 @@ OLTP and business transactions tend to record the same types of information:
 
 ## The Language of Business for Centuries
 
-Debit / credit, or double-entry bookkeeping, has been the lingua franca of business and accounting
-since at least the 13th century.
+Debit/Credit, or double-entry bookkeeping, has been the lingua franca of business and accounting
+[since at least the 13th century](https://en.wikipedia.org/wiki/History_of_accounting).
 
-The key insight underpinning debit / credit systems is that every transfer records a movement of
+The key insight underpinning Debit/Credit systems is that every transfer records a movement of
 value from one or more accounts to one or more accounts. Money never appears from nowhere or
 disappears. This simple principle helps ensure that all of a business's money is accounted for.
 
-Debit / credit perfectly captures the who, what, when, where, why, and how much of OLTP while
-ensuring financial consistency.
+Debit/Credit perfectly captures the who, what, when, where, why, and how much of OLTP while
+ensuring financial consistency. It is minimal and complete: two entities (accounts, transfers) 
+and one invariant (every debit has an equal and opposite credit) model any exchange of value, 
+in any domain. 
 
 (For a deeper dive on debits and credits, see our primer on
 [Financial Accounting](../coding/financial-accounting.md).)
 
-## SQL vs Debit / Credit
+## SQL vs Debit/Credit
 
 While SQL is a great query language for getting data out of a database, OLTP is primarily about
 getting data into the database and this is where SQL falls short.
@@ -43,7 +45,7 @@ per transaction)** and potentially even multiple round-trips from the applicatio
 By designing a database specifically for the schema and needs of OLTP, we can ensure our accounting
 logic is enforced correctly while massively increasing performance.
 
-## TigerBeetle Enforces Debit / Credit in the Database
+## TigerBeetle Enforces Debit/Credit in the Database
 
 The schema of OLTP is built into TigerBeetle's data model, and is ready for you to use:
 
@@ -74,22 +76,24 @@ round-trips between your database and application logic.
 
 ## Immutability is Essential
 
-Another critical element of debit / credit systems is immutability: once transfers are recorded,
+Another critical element of Debit/Credit systems is immutability: once transfers are recorded,
 they cannot be erased. Reversals are implemented with separate transfers to provide a full and
 auditable log of business events.
+
+Even the strongest durability doesn't prevent logical data loss. Where SQL allows destructive UPDATE 
+and DELETE, TigerBeetle enforces append-only immutability — ensuring effortless reconciliation and 
+audit success. Transfers in TigerBeetle are always immutable, out of the box. There is no possibility 
+of a malformed query unintentionally deleting data.
 
 Accidentally dropping rows or tables is bad in any database, but it is unacceptable when it comes to
 accounting. Legal compliance and good business practices require that all funds be fully accounted
 for, and all history be maintained.
 
-Transfers in TigerBeetle are always immutable, providing you with peace of mind out of the box.
-There is no possibility of a malformed query unintentionally deleting data.
-
 ## Don't Roll Your Own Ledger
 
 Many companies start out building their own system for recording business transactions. Then, once
-their business scales, they realize they need a proper ledger and end up coming back to debits and
-credits.
+their business scales, they [realize they need a proper ledger](https://tigerbeetle.com/stories/super) 
+and end up coming back to debits and credits.
 
 A number of prime examples of this are:
 
@@ -121,7 +125,7 @@ A number of prime examples of this are:
 
 ## Standardized, Simple, and Scalable
 
-From one perspective, debit / credit may seem like a limited data model. However, it is incredibly
+From one perspective, Debit/Credit may seem like a limited data model. However, it is incredibly
 flexible and scalable. Any business event can be recorded as debits and credits -- indeed,
 accountants have been doing precisely this for centuries!
 
@@ -130,11 +134,11 @@ credits provide a simple and standardized schema that can be used across all pro
 in the future. This avoids the need to add columns, tables, and complex relations between them as
 new features are added -- and avoids complex schema migrations.
 
-Debit / credit has been the foundation of business for hundreds of years, and now you can leverage
-TigerBeetle's high-performance implementation of it built for OLTP in the 21st century.
+Debit/Credit is a universal schema, the foundation of business for hundreds of years, and you can 
+leverage TigerBeetle's high-performance implementation of it, built for OLTP in the 21st century.
 
 ## Next: Performance
 
-So far, we've seen why we need a new database designed for OLTP and how debit / credit provides the
-perfect data model for it. Next, we can look at the [performance](./performance.md) of a database,
+So far, we've seen why we need a new database designed for OLTP and how Debit/Credit provides the
+perfect data model for it. Next, we look at the [performance](./performance.md) of a database
 designed for OLTP.
