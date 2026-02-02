@@ -201,6 +201,14 @@ pub const Release = extern struct {
         return std.mem.bytesAsValue(ReleaseTriple, std.mem.asBytes(release)).*;
     }
 
+    /// Test-only release binary will only start when cluster=0.
+    /// This ensures that test/development multiversion binaries can be tested by upgrading from
+    /// actual production binaries, without risking accidentally upgrading a production cluster to a
+    /// test/development binary.
+    pub fn testing(release: *const Release) bool {
+        return release.triple().major == std.math.maxInt(u16);
+    }
+
     pub fn format(
         release: Release,
         comptime fmt: []const u8,

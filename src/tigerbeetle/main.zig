@@ -490,6 +490,13 @@ fn command_start(
         }
     }
 
+    if (config.process.release.testing()) {
+        if (replica.cluster != 0) {
+            // Guard against running test/dev binaries against production clusters.
+            @panic("This is a test binary, but the cluster id is non-zero.");
+        }
+    }
+
     while (true) {
         replica.tick();
 
