@@ -7,7 +7,7 @@ data is there, but, under certain edge case conditions, it can get lost!
 As the purpose of TigerBeetle is to be the system of record for business transaction, associated
 with real-world value transfers, it is paramount that the data stored in TigerBeetle is safe.
 
-TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability —- 
+TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability -- 
 even under the most extreme failure scenarios.
 
 ## Strict Serializability
@@ -48,7 +48,7 @@ different cloud providers (two replicas per provider). Because TigerBeetle uses
 [Heidi Howard's flexible quorums](https://arxiv.org/pdf/1608.06696v1), this deployment is guaranteed
 to tolerate a complete outage of any cloud provider and will likely survive even if one extra
 replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protectsavailability 
--— even through provider slowdowns and disruptions.
+-- even through provider slowdowns and disruptions.
 
 TigerBeetle detects and overcomes
 [Gray Failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
