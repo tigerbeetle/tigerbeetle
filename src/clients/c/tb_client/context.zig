@@ -107,11 +107,10 @@ pub const ClientInterface = extern struct {
             client.locker.lock();
             defer client.locker.unlock();
 
-            if (client.context.ptr == null) return Error.ClientInvalid;
+            const context = client.context.ptr orelse return Error.ClientInvalid;
+            client.context = .{ .ptr = null };
 
-            defer client.context.ptr = null;
-
-            break :context client.context.ptr.?;
+            break :context context;
         };
         client.vtable.ptr.deinit_fn(context);
     }
@@ -389,6 +388,27 @@ pub fn ContextType(
             client_out.magic_number = ClientInterface.beetle;
         }
 
+        fn deinit(self: *Context) void {
+            assert(thread_caller == .io);
+            assert(self.signal.status() == .stopped);
+            assert(self.submitted.pop() == null);
+            assert(self.pending.pop() == null);
+            maybe(self.eviction_reason != null);
+
+            self.io.cancel_all();
+            self.signal.deinit();
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
+            self.io.deinit();
+
+            self.gpa.allocator().free(self.addresses_copy);
+
+            // NB: Copy the allocator back out before trying to destroy `self` with it!
+            var gpa: GPA = self.gpa;
+            gpa.allocator().destroy(self);
+            assert(gpa.deinit() == .ok);
+        }
+
         fn tick(self: *Context) void {
             if (self.eviction_reason == null) {
                 self.client.tick();
@@ -426,11 +446,7 @@ pub fn ContextType(
                 self.packet_cancel(packet);
             }
 
-            self.io.cancel_all();
-            self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
-            self.io.deinit();
+            self.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
@@ -787,10 +803,14 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
-            // The client was evicted, locking the interface so no more requests
-            // can be submitted until we deinitialize it.
+            // The client was evicted, clearing the interface context so no more
+            // requests can be submitted.
+            // In-flight requests fail with the eviction reason; subsequent ones fail
+            // with "shutdown".
             self.interface.locker.lock();
             defer self.interface.locker.unlock();
+
+            self.interface.context = .{ .ptr = null };
 
             // Stops the IO thread, which then deinitializes the client before
             // it exits (see `io_thread`).
@@ -961,19 +981,8 @@ pub fn ContextType(
             assert(thread_caller == .user);
 
             const self: *Context = @ptrCast(@alignCast(context));
-
             self.signal.stop();
             self.thread.join();
-
-            assert(self.submitted.pop() == null);
-            assert(self.pending.pop() == null);
-
-            self.gpa.allocator().free(self.addresses_copy);
-
-            // NB: Copy the allocator back out before trying to destroy `self` with it!
-            var gpa: GPA = self.gpa;
-            gpa.allocator().destroy(self);
-            assert(gpa.deinit() == .ok);
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
