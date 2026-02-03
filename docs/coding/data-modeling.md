@@ -27,7 +27,7 @@ currencies, each of your customers would have multiple ledgers.
 ## Debits vs Credits
 
 TigerBeetle tracks each account's cumulative posted debits and cumulative posted credits. In
-double-entry accounting, an account balance is the difference between the two — computed as either
+double-entry accounting, an account balance is the difference between the two -- computed as either
 `debits - credits` or `credits - debits`, depending on the type of account. It is up to the
 application to compute the balance from the cumulative debits/credits.
 
@@ -142,7 +142,7 @@ is:
 - `user_data_64` - this might store a second timestamp for "when" the transaction originated in the
   real world, rather than when the transfer was
   [timestamped by TigerBeetle](./time.md#why-tigerbeetle-manages-timestamps). This can be used if
-  you need to model [bitemporality](https://en.wikipedia.org/wiki/Bitemporal_modeling).
+  you need to model [bitemporality](https://tigerbeetle.com/blog/2026-01-14-bitemporality/).
   Alternatively, if you do not need this to be used for a timestamp, you could use this field in
   place of the `user_data_128` to store the "who"/"what".
 - `user_data_32` - this might store the "where" of a transfer. For example, it could store the
@@ -199,8 +199,8 @@ TigerBeetle clients include an `id()` function to generate IDs using the recomme
 
 TigerBeetle ID is a 128-bit number where:
 
-- the high 48 bits are a millisecond timestamp
-- the low 80 bits are random
+- the high 48 bits are a millisecond timestamp.
+- the low 80 bits are random.
 
 ```
 id = (timestamp << 80) | random
@@ -220,7 +220,7 @@ Similar to ULIDs and UUIDv7s, these IDs have the following benefits:
 This technique is most appropriate when integrating TigerBeetle with an existing application where
 TigerBeetle accounts or transfers map one-to-one with an entity in the foreign database.
 
-Set `id` to a "foreign key" — that is, reuse an identifier of a corresponding object from another
+Set `id` to a "foreign key" -- that is, reuse an identifier of a corresponding object from another
 database. For example, if every user (within the application's database) has a single account, then
 the identifier within the foreign database can be used as the `Account.id` within TigerBeetle.
 
