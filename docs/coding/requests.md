@@ -51,8 +51,9 @@ the `exists` result.
 
 ## Batching Events
 
-To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by batching many
-events in each request.
+To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by 
+[batching](https://docs.tigerbeetle.com/concepts/performance/#batching-batching-batching) 
+many events in each request.
 
 In the default configuration, the maximum batch sizes for each request type are:
 
@@ -105,8 +106,8 @@ of their results will fit in a single reply.
 - Events within a request do not interleave with events from other requests.
 - All events within a request batch are committed, or none are. Note that this does not mean that
   all of the events in a batch will succeed, or that all will fail. Events succeed or fail
-  independently unless they are explicitly [linked](./linked-events.md)
-- Once committed, an event will always be committed — the cluster's state never backtracks.
+  independently unless they are explicitly [linked](./linked-events.md).
+- Once committed, an event will always be committed -- the cluster's state never backtracks.
 - Within a cluster, object
   [timestamps are unique and strictly increasing](./time.md#timestamps-are-totally-ordered).
   No two objects within the same cluster will have the same timestamp. Furthermore, the order of the
