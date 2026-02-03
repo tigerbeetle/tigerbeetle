@@ -190,6 +190,15 @@ pub fn ContextType(
             InvalidDataSize,
         };
 
+        /// Thread-local variable to track whether the current thread is
+        /// the IO thread or a user thread.
+        /// Used to assert that certain functions are only called from the
+        /// correct thread.
+        threadlocal var thread_caller: union(enum) {
+            user,
+            io: std.Thread.Id,
+        } = .user;
+
         gpa: GPA,
         time_os: TimeOS,
         client_id: u128,
@@ -379,6 +388,11 @@ pub fn ContextType(
         }
 
         fn io_thread(self: *Context) void {
+            // Initializing the flag as the IO thread.
+            assert(thread_caller == .user);
+            thread_caller = .{ .io = std.Thread.getCurrentId() };
+            defer thread_caller = .user;
+
             while (self.signal.status() != .stopped) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
@@ -414,6 +428,7 @@ pub fn ContextType(
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
+            assert(thread_caller == .io);
             if (self.client.request_inflight) |*inflight| {
                 if (inflight.message.header.operation != .register) {
                     const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
@@ -426,6 +441,7 @@ pub fn ContextType(
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
         fn packet_cancel(self: *Context, packet_list: *Packet) void {
+            assert(thread_caller == .io);
             assert(packet_list.link.next == null);
             assert(packet_list.phase != .complete);
             packet_list.assert_phase(packet_list.phase);
@@ -449,12 +465,9 @@ pub fn ContextType(
         }
 
         fn packet_enqueue(self: *Context, packet: *Packet) void {
+            assert(thread_caller == .io);
             assert(self.batch_size_limit != null);
             packet.assert_phase(.submitted);
-
-            if (self.eviction_reason != null) {
-                return self.packet_cancel(packet);
-            }
 
             const operation: Operation = operation_from_int(packet.operation) orelse {
                 return self.notify_completion(packet, error.InvalidOperation);
@@ -505,6 +518,7 @@ pub fn ContextType(
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.signal.status() != .running) {
+                maybe(self.eviction_reason != null);
                 self.packet_cancel(packet);
                 return;
             }
@@ -581,6 +595,7 @@ pub fn ContextType(
         /// Sends the packet (the entire batched linked list of packets) through the vsr client.
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
+            assert(thread_caller == .io);
             assert(self.batch_size_limit != null);
             assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
@@ -589,6 +604,7 @@ pub fn ContextType(
             if (self.signal.status() != .running) {
                 return self.packet_cancel(packet_list);
             }
+            assert(self.eviction_reason == null);
 
             const message = self.client.get_message().build(.request);
             defer {
@@ -689,6 +705,8 @@ pub fn ContextType(
         }
 
         fn signal_notify_callback(signal: *Signal) void {
+            assert(thread_caller == .io);
+
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
             assert(self.signal.status() != .stopped);
 
@@ -734,6 +752,8 @@ pub fn ContextType(
         }
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
+            assert(thread_caller == .io);
+
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
@@ -748,6 +768,8 @@ pub fn ContextType(
         }
 
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
+            assert(thread_caller == .io);
+
             const self: *Context = @fieldParentPtr("client", client);
             assert(self.eviction_reason == null);
 
@@ -757,9 +779,13 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
-            // Now that the client is evicted, no more requests can be submitted to it and we can
-            // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
-            // client before it exits (see `io_thread`).
+            // The client was evicted, locking the interface so no more requests
+            // can be submitted until we deinitialize it.
+            self.interface.locker.lock();
+            defer self.interface.locker.unlock();
+
+            // Stops the IO thread, which then deinitializes the client before
+            // it exits (see `io_thread`).
             self.eviction_reason = eviction.header.reason;
             self.signal.stop();
         }
@@ -770,10 +796,13 @@ pub fn ContextType(
             timestamp: u64,
             reply: []const u8,
         ) void {
+            assert(thread_caller == .io);
+
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
+            assert(self.eviction_reason == null);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
@@ -843,6 +872,8 @@ pub fn ContextType(
                 reply: []const u8,
             },
         ) void {
+            assert(thread_caller == .io);
+
             const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
@@ -882,6 +913,8 @@ pub fn ContextType(
         // VTable functions called by `ClientInterface`, which are thread-safe.
 
         fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
+            assert(thread_caller == .user);
+
             const self: *Context = @ptrCast(@alignCast(context));
 
             // Packet is caller-allocated to enable elastic intrusive-link-list-based
@@ -905,16 +938,10 @@ pub fn ContextType(
                 .phase = .submitted,
             };
 
-            if (self.eviction_reason == null) {
-                // Enqueue the packet and notify the IO thread to process it asynchronously.
-                assert(self.signal.status() == .running);
-                self.submitted.push(packet);
-                self.signal.notify();
-            } else {
-                // Cancel the packet since we stop the IO thread during eviction.
-                assert(self.signal.status() != .running);
-                self.packet_cancel(packet);
-            }
+            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            assert(self.signal.status() == .running);
+            self.submitted.push(packet);
+            self.signal.notify();
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
@@ -923,6 +950,8 @@ pub fn ContextType(
         }
 
         fn vtable_deinit_fn(context: *anyopaque) void {
+            assert(thread_caller == .user);
+
             const self: *Context = @ptrCast(@alignCast(context));
 
             self.signal.stop();
@@ -940,6 +969,8 @@ pub fn ContextType(
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
+            assert(thread_caller == .user);
+
             const self: *Context = @ptrCast(@alignCast(context));
             assert(self.signal.status() == .running);
 
