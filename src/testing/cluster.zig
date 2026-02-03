@@ -410,7 +410,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
                 aof.* = AOF{
                     .io = aof_io,
-                    .file_descriptor = 0,
+                    .path = "test.aof",
+                    .fd = 0,
                 };
                 errdefer for (cluster.aofs[0..i]) |*aof_| aof_.deinit(allocator);
             }

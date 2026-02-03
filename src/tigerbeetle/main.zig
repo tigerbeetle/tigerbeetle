@@ -257,14 +257,7 @@ fn command_start(
     defer message_pool.deinit(gpa);
 
     var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
-        const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
-        const aof_dir_fd = try IO.open_dir(aof_dir);
-        defer std.posix.close(aof_dir_fd);
-
-        break :blk try AOF.init(io, .{
-            .dir_fd = aof_dir_fd,
-            .relative_path = std.fs.path.basename(aof_file.const_slice()),
-        });
+        break :blk try AOF.init(io, aof_file.const_slice());
     } else null;
     defer if (aof != null) aof.?.close();
 

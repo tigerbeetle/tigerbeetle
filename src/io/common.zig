@@ -118,3 +118,37 @@ pub fn aof_blocking_close(fd: posix.fd_t) void {
     const file = std.fs.File{ .handle = fd };
     file.close();
 }
+
+pub fn aof_blocking_stat(path: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
+    return std.fs.cwd().statFile(path);
+}
+
+pub fn aof_blocking_fstat(fd: posix.fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
+    const file = std.fs.File{ .handle = fd };
+    return file.stat();
+}
+
+pub fn aof_blocking_open(dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
+    assert(!std.fs.path.isAbsolute(path));
+
+    const dir = std.fs.Dir{ .fd = dir_fd };
+
+    const file = try dir.createFile(path, .{
+        .read = true,
+        .truncate = false,
+        .exclusive = false,
+        .lock = .exclusive,
+    });
+
+    try file.sync();
+
+    // We cannot fsync the directory handle on Windows.
+    // We have no way to open a directory with write access.
+    if (builtin.os.tag != .windows) {
+        try std.posix.fsync(dir_fd);
+    }
+
+    try file.seekFromEnd(0);
+
+    return file.handle;
+}
