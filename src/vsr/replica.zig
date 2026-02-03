@@ -10,6 +10,7 @@ const stdx = @import("stdx");
 const RingBufferType = stdx.RingBufferType;
 const Ratio = stdx.PRNG.Ratio;
 const Duration = stdx.Duration;
+const Instant = stdx.Instant;
 
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("grid.zig").allocate_block;
@@ -1602,7 +1603,7 @@ pub fn ReplicaType(
                 }
                 // See FaultDetector smoothing test for why resetting the timeout is critical here.
                 self.commit_message_timeout.reset();
-                self.send_commit();
+                self.send_commit(now);
             } else {
                 assert(self.backup());
                 if (tardy == .yellow) {
@@ -1621,8 +1622,7 @@ pub fn ReplicaType(
                     self.commit_fault.signal(now);
                 }
             }
-            // Avoid busy-looping:
-            assert(self.commit_fault.tardy(self.clock.monotonic()) != .red);
+            assert(self.commit_fault.tardy(now) != .red);
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
@@ -3675,7 +3675,7 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
 
-            self.send_commit();
+            self.send_commit(self.clock.monotonic());
         }
 
         fn on_start_view_change_window_timeout(self: *Replica) void {
@@ -4987,7 +4987,7 @@ pub fn ReplicaType(
                 // This is useful when this checkpoint is an upgrade, since we will need to
                 // restart into the new version. We want all the replicas to restart in
                 // parallel (as much possible) rather than in sequence.
-                self.send_commit();
+                self.send_commit(self.clock.monotonic());
             }
             if (self.aof) |aof| {
                 self.trace.start(.replica_aof_checkpoint);
@@ -11267,12 +11267,16 @@ pub fn ReplicaType(
             self.send_message_to_replica(self.choose_any_other_replica(), message);
         }
 
-        fn send_commit(self: *Replica) void {
+        fn send_commit(self: *Replica, now: Instant) void {
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
 
-            self.commit_fault.signal(self.clock.monotonic());
+            // Signal even during abdication, to maintain the invariant that
+            // a replica doesn't let commit_fault to be red without an action.
+            // It wouldn't be wrong to _not_ signal, but keeping the two code
+            // paths orthogonal is cleaner.
+            self.commit_fault.signal(now);
             if (self.primary_abdicating) {
                 assert(self.primary_abdicate_timeout.ticking);
 
