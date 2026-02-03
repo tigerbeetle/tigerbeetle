@@ -67,8 +67,8 @@ pub const ClientInterface = extern struct {
     reserved: u32,
     magic_number: u64,
 
-    pub fn init(self: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
-        self.* = .{
+    pub fn init(interface: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
+        interface.* = .{
             .context = .{ .ptr = context },
             .vtable = .{ .ptr = vtable },
             .locker = .{},
@@ -77,53 +77,56 @@ pub const ClientInterface = extern struct {
         };
     }
 
-    pub fn submit(client: *ClientInterface, packet: *Packet.Extern) Error!void {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn submit(interface: *ClientInterface, packet: *Packet.Extern) Error!void {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
-        client.locker.lock();
-        defer client.locker.unlock();
+        interface.locker.lock();
+        defer interface.locker.unlock();
 
-        const context = client.context.ptr orelse return Error.ClientInvalid;
-        client.vtable.ptr.submit_fn(context, packet);
+        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        interface.vtable.ptr.submit_fn(context, packet);
     }
 
-    pub fn completion_context(client: *ClientInterface) Error!usize {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn completion_context(interface: *ClientInterface) Error!usize {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
-        client.locker.lock();
-        defer client.locker.unlock();
+        interface.locker.lock();
+        defer interface.locker.unlock();
 
-        const context = client.context.ptr orelse return Error.ClientInvalid;
-        return client.vtable.ptr.completion_context_fn(context);
+        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        return interface.vtable.ptr.completion_context_fn(context);
     }
 
-    pub fn deinit(client: *ClientInterface) Error!void {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn deinit(interface: *ClientInterface) Error!void {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
         const context: *anyopaque = context: {
-            client.locker.lock();
-            defer client.locker.unlock();
+            interface.locker.lock();
+            defer interface.locker.unlock();
 
-            const context = client.context.ptr orelse return Error.ClientInvalid;
-            client.context = .{ .ptr = null };
+            const context = interface.context.ptr orelse return Error.ClientInvalid;
+            interface.context = .{ .ptr = null };
 
             break :context context;
         };
-        client.vtable.ptr.deinit_fn(context);
+        interface.vtable.ptr.deinit_fn(context);
     }
 
-    pub fn init_parameters(client: *ClientInterface, out_parameters: *InitParameters) Error!void {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn init_parameters(
+        interface: *ClientInterface,
+        out_parameters: *InitParameters,
+    ) Error!void {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
-        client.locker.lock();
-        defer client.locker.unlock();
+        interface.locker.lock();
+        defer interface.locker.unlock();
 
-        const context = client.context.ptr orelse return Error.ClientInvalid;
-        return client.vtable.ptr.init_parameters_fn(context, out_parameters);
+        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        return interface.vtable.ptr.init_parameters_fn(context, out_parameters);
     }
 
     comptime {
@@ -206,7 +209,7 @@ pub fn ContextType(
         time_os: TimeOS,
         client_id: u128,
         cluster_id: u128,
-        addresses_copy: []const u8,
+        addresses_owned: []const u8,
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
@@ -262,8 +265,8 @@ pub fn ContextType(
             const allocator = context.gpa.allocator();
             context.client_id = stdx.unique_u128();
             context.cluster_id = cluster_id;
-            context.addresses_copy = try allocator.dupe(u8, addresses);
-            errdefer allocator.free(context.addresses_copy);
+            context.addresses_owned = try allocator.dupe(u8, addresses);
+            errdefer allocator.free(context.addresses_owned);
 
             context.time_os = .{};
             const time = context.time_os.time();
@@ -401,7 +404,7 @@ pub fn ContextType(
             self.message_pool.deinit(self.gpa.allocator());
             self.io.deinit();
 
-            self.gpa.allocator().free(self.addresses_copy);
+            self.gpa.allocator().free(self.addresses_owned);
 
             // NB: Copy the allocator back out before trying to destroy `self` with it!
             var gpa: GPA = self.gpa;
@@ -993,8 +996,8 @@ pub fn ContextType(
 
             out_parameters.cluster_id = self.cluster_id;
             out_parameters.client_id = self.client_id;
-            out_parameters.addresses_ptr = self.addresses_copy.ptr;
-            out_parameters.addresses_len = self.addresses_copy.len;
+            out_parameters.addresses_ptr = self.addresses_owned.ptr;
+            out_parameters.addresses_len = self.addresses_owned.len;
         }
 
         fn operation_from_int(op: u8) ?Operation {
