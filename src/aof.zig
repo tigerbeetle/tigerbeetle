@@ -267,7 +267,7 @@ pub fn AOFType(comptime IO: type) type {
             defer validation_checksums.deinit();
 
             var it = Iterator{
-                .file_descriptor = self.file_descriptor,
+                .file_descriptor = self.fd.?,
                 .io = self.io,
                 .size = self.size,
             };
