@@ -71,7 +71,7 @@ pub fn signal(detector: *FaultDetector, now: Instant) void {
 /// * red    --- signaler is likely dead
 ///
 /// On yellow, the primary injects a Commit.
-/// On red, a backup send SV.
+/// On red, a backup sends SV.
 ///
 /// Rough model:
 /// - Random delays, but 2X delay is suspicious.
@@ -233,7 +233,7 @@ test "FaultDetector: smoothing" {
                 // gradually converges to 500 ms, right?
                 //
                 // Wrong! Implementing this test to double-check "obviously correct" logic showed
-                // that the interval does expands from 100ms to 250ms, but then gets stuck!
+                // that the interval expands from 100ms to 250ms, but then gets stuck!
                 // Here's the picture. Originally we start with an idle cluster where only commits
                 // are pulsed periodically:
                 //

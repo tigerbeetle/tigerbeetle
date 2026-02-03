@@ -539,8 +539,8 @@ pub fn ReplicaType(
         commit_message_timeout: Timeout,
 
         /// Fault detector that treats fresh prepare and commit messages as liveness signal.
-        /// Backups use it to trigger start_view messages.
-        /// The primary injects extra smoothing commit messages when requests stop abruptly.
+        /// - Backups use it to trigger start_view_change messages.
+        /// - Primary uses it to inject extra smoothing commit messages when requests stop abruptly.
         commit_fault: vsr.FaultDetector,
 
         /// The number of ticks before resetting the SVC quorum.
