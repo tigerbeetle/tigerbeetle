@@ -218,18 +218,29 @@ pub fn AOFType(comptime IO: type) type {
             const replica_callback = self.state.checkpoint.replica_callback;
             self.state = .{ .writing = .{ .unflushed = 0 } };
 
-            _ = self.io.aof_blocking_stat(self.path) catch |err| switch (err) {
-                error.FileNotFound => {
-                    log.info("{s} removed - reopening", .{self.path});
+            const stat_file = self.io.aof_blocking_stat(self.path) catch |err| switch (err) {
+                error.FileNotFound => blk: {
+                    log.info("{s} not found; creating", .{self.path});
                     self.close();
                     assert(self.fd == null);
                     self.fd = self.io.aof_blocking_open(self.path) catch |e| {
                         std.debug.panic("failed to reopen {s} after rotate: {}", .{ self.path, e });
                     };
+
+                    break :blk self.io.aof_blocking_stat(self.path) catch |e| {
+                        log.warn("failed to stat aof ({s}): {}", .{ self.path, e });
+                        break :blk null;
+                    };
                 },
-                else => {
+                else => blk: {
                     log.warn("failed to stat aof ({s}): {}", .{ self.path, err });
+                    break :blk null;
                 },
+            };
+
+            const stat_fd = self.io.aof_blocking_fstat(self.fd.?) catch |err| blk: {
+                log.warn("failed to fstat aof ({s}): {}", .{ self.path, err });
+                break :blk null;
             };
 
             // AOF change detection relies on detecting the file being removed, and *it* will
@@ -237,15 +248,6 @@ pub fn AOFType(comptime IO: type) type {
             // (eg, touch tigerbeetle.aof).
             //
             // Warn the operator strongly if this happens.
-            const stat_fd = self.io.aof_blocking_fstat(self.fd.?) catch |err| blk: {
-                log.warn("failed to fstat aof ({s}): {}", .{ self.path, err });
-                break :blk null;
-            };
-            const stat_file = self.io.aof_blocking_stat(self.path) catch |err| blk: {
-                log.warn("failed to stat aof ({s}): {}", .{ self.path, err });
-                break :blk null;
-            };
-
             if (stat_fd != null and stat_file != null and stat_fd.?.inode != stat_file.?.inode) {
                 log.err("AOF inode mismatch detected - the AOF file path is not the same as " ++
                     "the open file descriptor being written to.", .{});
