@@ -199,7 +199,7 @@ TigerBeetle clients include an `id()` function to generate IDs using the recomme
 
 TigerBeetle ID is a 128-bit number where:
 
-- the high 48 bits are a millisecond timestamp.
+- the high 48 bits are a millisecond timestamp
 - the low 80 bits are random.
 
 ```
