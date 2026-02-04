@@ -40,19 +40,19 @@ its destination.
 <summary>Client &lt; 0.16.0</summary>
 
 - If the posted [`amount`](../reference/transfer.md#amount) is 0, the full pending transfer's
-  amount is posted.
+  amount is posted
 - If the posted [`amount`](../reference/transfer.md#amount) is nonzero, then only this amount
   is posted, and the remainder is restored to its original accounts. It must be less than or equal
-  to the pending transfer's amount.
+  to the pending transfer's amount
 
 </details>
 
 Additionally, when `flags.post_pending_transfer` is set:
 
 - [`pending_id`](../reference/transfer.md#pending_id) must reference a
-  [pending transfer](#reserve-funds-pending-transfer).
+  [pending transfer](#reserve-funds-pending-transfer)
 - [`flags.void_pending_transfer`](../reference/transfer.md#flagsvoid_pending_transfer) must not
-  be set.
+  be set
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
@@ -69,9 +69,9 @@ A void-pending transfer, denoted by
 the pending amount its original accounts. Additionally, when this field is set:
 
 - [`pending_id`](../reference/transfer.md#pending_id) must reference a
-  [pending transfer](#reserve-funds-pending-transfer).
+  [pending transfer](#reserve-funds-pending-transfer)
 - [`flags.post_pending_transfer`](../reference/transfer.md#flagspost_pending_transfer) must not
-  be set.
+  be set
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
