@@ -314,7 +314,7 @@ const Benchmark = struct {
     account_id_permutation: IdPermutation,
     account_id_start: ?u128,
     account_batch_size: u32,
-    account_count: u32,
+    account_count: u64,
     account_count_hot: u32,
     account_generator: Generator,
     account_generator_hot: Generator,
