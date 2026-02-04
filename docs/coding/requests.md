@@ -52,7 +52,7 @@ the `exists` result.
 ## Batching Events
 
 To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by 
-[batching](https://docs.tigerbeetle.com/concepts/performance/#batching-batching-batching) 
+[batching](../concepts/performance.md#batching-batching-batching) 
 many events in each request.
 
 In the default configuration, the maximum batch sizes for each request type are:
