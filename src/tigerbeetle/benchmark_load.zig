@@ -19,6 +19,7 @@ const vsr = @import("vsr");
 const tb = vsr.tigerbeetle;
 const constants = vsr.constants;
 const stdx = vsr.stdx;
+const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
@@ -193,7 +194,7 @@ pub fn main(
         .transfer_batch_size = cli_args.transfer_batch_size,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
-        .transfer_hot_percent = cli_args.transfer_hot_percent,
+        .transfer_hot_ratio = ratio(cli_args.transfer_hot_percent, 100),
         .transfer_pending = cli_args.transfer_pending,
         .query_count = cli_args.query_count,
         .no_history = cli_args.no_history,
@@ -323,7 +324,7 @@ const Benchmark = struct {
     transfer_batch_size: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
-    transfer_hot_percent: u32,
+    transfer_hot_ratio: Ratio,
     transfer_pending: bool,
     query_count: u32,
     no_history: bool,
@@ -942,10 +943,7 @@ const Benchmark = struct {
             // debit and credit will be selected from an account >= `account_count_hot`.
 
             const debit_account_index = b.choose_account_index(
-                if (b.prng.range_inclusive(u64, 1, 100) <= b.transfer_hot_percent)
-                    .hot
-                else
-                    .cold,
+                if (b.prng.chance(b.transfer_hot_ratio)) .hot else .cold,
             );
 
             const credit_account_index = index: {
