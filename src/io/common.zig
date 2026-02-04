@@ -139,6 +139,7 @@ pub fn aof_blocking_open(dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
         .exclusive = false,
         .lock = .exclusive,
     });
+    errdefer file.close();
 
     try file.sync();
 
