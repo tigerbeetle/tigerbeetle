@@ -2,7 +2,7 @@
 
 For developers with non-financial backgrounds, TigerBeetle's use of accounting concepts like debits
 and credits may be one of the trickier parts to understand. However, these concepts have been the
-language of business for hundreds of years, so we promise it's worth it!
+language of business for hundreds of years, and it will be worth it!
 
 This page goes a bit deeper into debits and credits, double-entry bookkeeping, and how to think
 about your accounts as part of a type system.
@@ -23,10 +23,8 @@ types of these accounts look different depending on whether you are considering 
 perspective of you or the bank.
 
 Now, back to our original questions: is the loan balance `100` or `-100` and is the bank account
-balance `200` or `-200`? On some level, this feels a bit arbitrary.
-
-Wouldn't it be nice if there were some **commonly agreed-upon standards** so we wouldn't have to
-make such an arbitrary decision? Yes! This is exactly what debits and credits and the financial
+balance `200` or `-200`? On some level, this feels a bit arbitrary, because it is. Fortunately, there are some 
+**commonly agreed-upon standards**! This is exactly what debits and credits and the financial 
 accounting type system provide.
 
 ## Types of Accounts
@@ -191,14 +189,12 @@ determines whether the given type of account is increased with a debit or a cred
 ### Ask the Community
 
 Have questions about debits and credits, TigerBeetle's data model, how to design your application on
-top of it, or anything else?
+top of it, or anything else? Join our [Community Slack](https://slack.tigerbeetle.com/join) to ask 
+any and all of the questions you might have!
 
-Come join our [Community Slack](https://slack.tigerbeetle.com/join) and ask any and all questions
-you might have!
+### Solutions
 
-### Dedicated Consultation
-
-Would you like the TigerBeetle team to help you design your chart of accounts and leverage the power
-of TigerBeetle in your architecture?
-
-Let us help you get it right. Contact us at <sales@tigerbeetle.com> to set up a call.
+Would you like the TigerBeetle team to support you to design your chart of accounts and to leverage 
+the power of fully managed TigerBeetle in your architecture? Let us help you get it right. Contact us 
+at <sales@tigerbeetle.com> to set up a call. There is also a 
+[Startup Program](https://tigerbeetle.com/startup) for early-stage businesses.
