@@ -19,6 +19,7 @@ const vsr = @import("vsr");
 const tb = vsr.tigerbeetle;
 const constants = vsr.constants;
 const stdx = vsr.stdx;
+const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
@@ -193,7 +194,7 @@ pub fn main(
         .transfer_batch_count = cli_args.transfer_batch_count,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
-        .transfer_hot_percent = cli_args.transfer_hot_percent,
+        .transfer_hot_ratio = ratio(cli_args.transfer_hot_percent, 100),
         .transfer_pending = cli_args.transfer_pending,
         .query_count = cli_args.query_count,
         .no_history = cli_args.no_history,
@@ -323,7 +324,7 @@ const Benchmark = struct {
     transfer_batch_count: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
-    transfer_hot_percent: u32,
+    transfer_hot_ratio: Ratio,
     transfer_pending: bool,
     query_count: u32,
     no_history: bool,
@@ -338,11 +339,11 @@ const Benchmark = struct {
     client_replies: []align(constants.sector_size) [constants.message_body_size_max]u8,
     client_timeouts: []Timeout,
     request_latency_histogram: []u64,
-    request_index: usize = 0,
-    account_index: usize = 0,
-    transfer_index: usize = 0,
-    transfers_created: usize = 0,
-    query_index: usize = 0,
+    request_index: u64 = 0,
+    account_index: u64 = 0,
+    transfer_index: u64 = 0,
+    transfers_created: u64 = 0,
+    query_index: u64 = 0,
     stage: Stage = .idle,
 
     const Timeout = struct {
@@ -376,7 +377,7 @@ const Benchmark = struct {
         b.timer.reset();
 
         for (0..b.clients.len) |client_usize| {
-            const client = @as(u32, @intCast(client_usize));
+            const client: u32 = @intCast(client_usize);
             switch (b.stage) {
                 .register => b.register(client),
                 .create_accounts => b.create_accounts(client),
@@ -406,7 +407,7 @@ const Benchmark = struct {
         @memset(b.request_latency_histogram, 0);
     }
 
-    fn register(b: *Benchmark, client_index: usize) void {
+    fn register(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .register);
         assert(!b.clients_busy.is_set(client_index));
 
@@ -820,7 +821,7 @@ const Benchmark = struct {
 
     fn request(
         b: *Benchmark,
-        client_index: usize,
+        client_index: u32,
         operation: tb.Operation,
         options: struct {
             batch_count: u32,
@@ -942,10 +943,7 @@ const Benchmark = struct {
             // debit and credit will be selected from an account >= `account_count_hot`.
 
             const debit_account_index = b.choose_account_index(
-                if (b.prng.range_inclusive(usize, 1, 100) <= b.transfer_hot_percent)
-                    .hot
-                else
-                    .cold,
+                if (b.prng.chance(b.transfer_hot_ratio)) .hot else .cold,
             );
 
             const credit_account_index = index: {
@@ -1052,10 +1050,10 @@ fn print_percentiles_histogram(
 
     const percentiles = [_]u64{ 1, 50, 99, 100 };
     for (percentiles) |percentile| {
-        const histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
+        const histogram_percentile: u64 = @divTrunc(histogram_total * percentile, 100);
 
         // Since each bucket in our histogram represents 1ms, the bucket we're in is the ms value.
-        var sum: usize = 0;
+        var sum: u64 = 0;
         const latency = for (histogram_buckets, 0..) |bucket, bucket_index| {
             sum += bucket;
             if (sum >= histogram_percentile) break bucket_index;
