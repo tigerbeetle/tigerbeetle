@@ -1881,7 +1881,15 @@ pub fn ReplicaType(
             assert(message.header.operation != .root);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
-            if (!self.aof_recovery) {
+            if (self.aof_recovery) {
+                if (message.header.timestamp == 0) {
+                    log.warn("{}: on_request: ignoring (timestamp=2; non-aof-recovery message):" ++
+                        "{}", .{ self.replica, message.header });
+                    log.warn("{}: on_request: if recovery is complete, " ++
+                        "restart replica without --aof-recovery", .{self.replica});
+                    return;
+                }
+            } else {
                 if (message.header.timestamp != 0) {
                     log.warn("{}: on_request: ignoring (timestamp!=0)", .{self.replica});
                     return;
@@ -7263,14 +7271,10 @@ pub fn ReplicaType(
                 .op = self.op + 1,
                 .commit = self.commit_max,
                 .timestamp = timestamp: {
-                    // When running in AOF recovery mode, we allow clients to set a timestamp
-                    // explicitly, but they can still pass in 0.
+                    // When running in AOF recovery mode, the client must pass explicit timestamps.
                     if (self.aof_recovery) {
-                        if (request_header.timestamp == 0) {
-                            break :timestamp prepare_timestamp;
-                        } else {
-                            break :timestamp request_header.timestamp;
-                        }
+                        assert(request_header.timestamp != 0);
+                        break :timestamp request_header.timestamp;
                     } else {
                         break :timestamp prepare_timestamp;
                     }
