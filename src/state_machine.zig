@@ -42,49 +42,24 @@ const ChangeEvent = tb.ChangeEvent;
 const ChangeEventType = tb.ChangeEventType;
 
 pub const tree_ids = struct {
+    // Secondary indexes disabled for benchmarking - IDs renumbered to be contiguous.
+    // Only primary indexes (id, timestamp) are active.
     pub const Account = .{
         .id = 1,
-        .user_data_128 = 2,
-        .user_data_64 = 3,
-        .user_data_32 = 4,
-        .ledger = 5,
-        .code = 6,
-        .timestamp = 7,
-        .imported = 23,
-        .closed = 25,
+        .timestamp = 2,
     };
 
     pub const Transfer = .{
-        .id = 8,
-        .debit_account_id = 9,
-        .credit_account_id = 10,
-        .amount = 11,
-        .pending_id = 12,
-        .user_data_128 = 13,
-        .user_data_64 = 14,
-        .user_data_32 = 15,
-        .ledger = 16,
-        .code = 17,
-        .timestamp = 18,
-        .expires_at = 19,
-        .imported = 24,
-        .closing = 26,
+        .id = 3,
+        .timestamp = 4,
     };
 
     pub const TransferPending = .{
-        .timestamp = 20,
-        .status = 21,
+        .timestamp = 5,
     };
 
     pub const AccountEvents = .{
-        .timestamp = 22,
-        .account_timestamp = 27,
-        .transfer_pending_status = 28,
-        .dr_account_id_expired = 29,
-        .cr_account_id_expired = 30,
-        .transfer_pending_id_expired = 31,
-        .ledger_expired = 32,
-        .prunable = 33,
+        .timestamp = 6,
     };
 };
 
@@ -338,24 +313,15 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "credits_pending",
                     "flags",
                     "reserved",
-                },
-                .optional = &[_][]const u8{
+                    // Secondary indexes disabled for benchmarking:
                     "user_data_128",
                     "user_data_64",
                     "user_data_32",
+                    "ledger",
+                    "code",
                 },
-                .derived = .{
-                    .imported = struct {
-                        fn imported(object: *const Account) ?void {
-                            return if (object.flags.imported) {} else null;
-                        }
-                    }.imported,
-                    .closed = struct {
-                        fn closed(object: *const Account) ?void {
-                            return if (object.flags.closed) {} else null;
-                        }
-                    }.closed,
-                },
+                .optional = &[_][]const u8{},
+                .derived = .{},
                 .orphaned_ids = false,
                 .objects_cache = true,
             },
@@ -367,37 +333,22 @@ pub fn StateMachineType(comptime Storage: type) type {
             .{
                 .ids = tree_ids.Transfer,
                 .batch_value_count_max = tree_values_count_max.transfers,
-                .ignored = &[_][]const u8{ "timeout", "flags" },
-                .optional = &[_][]const u8{
+                .ignored = &[_][]const u8{
+                    "timeout",
+                    "flags",
+                    // Secondary indexes disabled for benchmarking:
+                    "debit_account_id",
+                    "credit_account_id",
+                    "amount",
                     "pending_id",
                     "user_data_128",
                     "user_data_64",
                     "user_data_32",
+                    "ledger",
+                    "code",
                 },
-                .derived = .{
-                    .expires_at = struct {
-                        fn expires_at(object: *const Transfer) ?u64 {
-                            if (object.flags.pending and object.timeout > 0) {
-                                return object.timestamp + object.timeout_ns();
-                            }
-                            return null;
-                        }
-                    }.expires_at,
-                    .imported = struct {
-                        fn imported(object: *const Transfer) ?void {
-                            return if (object.flags.imported) {} else null;
-                        }
-                    }.imported,
-                    .closing = struct {
-                        fn closing(object: *const Transfer) ?void {
-                            if (object.flags.closing_debit or object.flags.closing_credit) {
-                                return {};
-                            } else {
-                                return null;
-                            }
-                        }
-                    }.closing,
-                },
+                .optional = &[_][]const u8{},
+                .derived = .{},
                 .orphaned_ids = true,
                 .objects_cache = true,
             },
@@ -409,14 +360,12 @@ pub fn StateMachineType(comptime Storage: type) type {
             .{
                 .ids = tree_ids.TransferPending,
                 .batch_value_count_max = tree_values_count_max.transfers_pending,
-                .ignored = &[_][]const u8{"padding"},
-                .optional = &[_][]const u8{
-                    // Index the current status of a pending transfer.
-                    // Examples:
-                    //   "Pending transfers that are still pending."
-                    //   "Pending transfers that were voided or expired."
+                .ignored = &[_][]const u8{
+                    "padding",
+                    // Secondary indexes disabled for benchmarking:
                     "status",
                 },
+                .optional = &[_][]const u8{},
                 .derived = .{},
                 .orphaned_ids = false,
                 .objects_cache = true,
@@ -451,111 +400,22 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "amount",
                     "ledger",
                     "reserved",
+                    // Secondary indexes disabled for benchmarking:
+                    "transfer_pending_status",
                 },
                 .optional = &[_][]const u8{},
-                .derived = .{
-                    // Placeholder derived index (will be inserted during `account_event`).
-                    //
-                    // This index stores two values per object (the credit and debit accounts).
-                    // It is used for balance as-of queries and to search events related to a
-                    // particular account.
-                    // Examples:
-                    //   "Balance where account=X and timestamp=Y".
-                    //   "Last time account=X was updated".
-                    .account_timestamp = struct {
-                        fn account_timestamp(_: *const AccountEvent) ?u64 {
-                            return null;
-                        }
-                    }.account_timestamp,
-
-                    // Events related to transfers can be searched using `Transfers.dr_account_id`
-                    // and `Transfers.cr_account_id`.
-                    // However, expired events require a specific index to be searchable by both
-                    // debit and credit accounts.
-                    // Example: "All expired debits where account=X".
-                    .dr_account_id_expired = struct {
-                        fn dr_account_id_expired(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.dr_account_id
-                            else
-                                null;
-                        }
-                    }.dr_account_id_expired,
-                    .cr_account_id_expired = struct {
-                        fn cr_account_id_expired(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.cr_account_id
-                            else
-                                null;
-                        }
-                    }.cr_account_id_expired,
-
-                    // Events related to voiding or posting pending transfers can be searched using
-                    // `Transfers.pending_id`.
-                    // However, expired events require a specific index to be searchable by the
-                    // transfer.
-                    // Example: "When transfer=X has expired".
-                    .transfer_pending_id_expired = struct {
-                        fn transfer_pending_id_expired(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.transfer_pending_id
-                            else
-                                null;
-                        }
-                    }.transfer_pending_id_expired,
-
-                    // Events related to transfers can be searched using `Transfers.ledger`.
-                    // However, expired events require a specific index to be searchable
-                    // by ledger.
-                    // Example: "All expiry events where ledger=X".
-                    .ledger_expired = struct {
-                        fn transfer_expired_ledger(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.ledger
-                            else
-                                null;
-                        }
-                    }.transfer_expired_ledger,
-
-                    // Tracks events for accounts without the history flag,
-                    // enabling a cleanup job to delete them after CDC.
-                    .prunable = struct {
-                        fn prunable(object: *const AccountEvent) ?void {
-                            if (object.dr_account_flags.history or
-                                object.cr_account_flags.history)
-                            {
-                                return null;
-                            } else {
-                                return {};
-                            }
-                        }
-                    }.prunable,
-                },
+                .derived = .{},
                 .orphaned_ids = false,
                 .objects_cache = false,
             },
         );
 
-        const AccountsScanLookup = ScanLookupType(
-            AccountsGroove,
-            AccountsGroove.ScanBuilder.Scan,
-            Storage,
-        );
-
-        const TransfersScanLookup = ScanLookupType(
-            TransfersGroove,
-            TransfersGroove.ScanBuilder.Scan,
-            Storage,
-        );
-
-        const AccountBalancesScanLookup = ScanLookupType(
-            AccountEventsGroove,
-            // Both Objects use the same timestamp, so we can use the TransfersGroove's indexes.
-            TransfersGroove.ScanBuilder.Scan,
-            Storage,
-        );
-
-        const ChangeEventsScanLookup = ChangeEventsScanLookupType(AccountEventsGroove, Storage);
+        // Secondary indexes disabled - ScanLookup types are void stubs
+        const has_secondary_indexes = TransfersGroove.ScanBuilder != void;
+        const AccountsScanLookup = void;
+        const TransfersScanLookup = void;
+        const AccountBalancesScanLookup = void;
+        const ChangeEventsScanLookup = void;
 
         /// Since prefetch contexts are used one at a time, it's safe to access
         /// the union's fields and reuse the same memory for all context instances.
@@ -590,17 +450,17 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
         };
 
-        const ExpirePendingTransfers = ExpirePendingTransfersType(TransfersGroove, Storage);
+        // Secondary indexes disabled - ExpirePendingTransfers and ScanLookup are stubs
+        const ExpirePendingTransfers = struct {
+            pulse_next_timestamp: u64 = TimestampRange.timestamp_max,
 
-        /// Since scan lookups are used one at a time, it's safe to access
-        /// the union's fields and reuse the same memory for all ScanLookup instances.
+            fn reset(self: *@This()) void {
+                self.* = .{};
+            }
+        };
+
         const ScanLookup = union(enum) {
             null,
-            transfers: TransfersScanLookup,
-            accounts: AccountsScanLookup,
-            account_balances: AccountBalancesScanLookup,
-            expire_pending_transfers: ExpirePendingTransfers.ScanLookup,
-            change_events: ChangeEventsScanLookup,
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -1413,39 +1273,44 @@ pub fn StateMachineType(comptime Storage: type) type {
                 filter,
             });
 
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_account_filter(filter)) |scan| {
-                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+            // Secondary indexes disabled - skip directly to returning empty results.
+            if (comptime !has_secondary_indexes) {
+                log.info("get_account_transfers: secondary indexes disabled", .{});
+            } else {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+                if (self.get_scan_from_account_filter(filter)) |scan| {
+                    assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                const scan_buffer = stdx.bytes_as_slice(
-                    .inexact,
-                    Transfer,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
-                );
+                    const scan_buffer = stdx.bytes_as_slice(
+                        .inexact,
+                        Transfer,
+                        self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    );
 
-                const scan_lookup = self.scan_lookup.get(.transfers);
-                scan_lookup.* = TransfersScanLookup.init(
-                    &self.forest.grooves.transfers,
-                    scan,
-                );
+                    const scan_lookup = self.scan_lookup.get(.transfers);
+                    scan_lookup.* = TransfersScanLookup.init(
+                        &self.forest.grooves.transfers,
+                        scan,
+                    );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
-                const limit = @min(
-                    filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
-                );
-                assert(limit > 0);
-                assert(scan_buffer.len >= limit);
-                scan_lookup.read(
-                    scan_buffer[0..limit],
-                    &prefetch_get_account_transfers_scan_callback,
-                );
-                return;
+                    // Limiting the buffer size according to the query limit.
+                    // TODO: Prevent clients from setting the limit larger than the buffer size.
+                    const limit = @min(
+                        filter.limit,
+                        self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    );
+                    assert(limit > 0);
+                    assert(scan_buffer.len >= limit);
+                    scan_lookup.read(
+                        scan_buffer[0..limit],
+                        &prefetch_get_account_transfers_scan_callback,
+                    );
+                    return;
+                }
+
+                // TODO(batiati): Improve the way we do validations on the state machine.
+                log.info("invalid filter for get_account_transfers: {any}", .{filter});
             }
-
-            // TODO(batiati): Improve the way we do validations on the state machine.
-            log.info("invalid filter for get_account_transfers: {any}", .{filter});
             self.forest.grid.on_next_tick(
                 &prefetch_scan_next_tick_callback,
                 &self.scan_lookup_next_tick,
@@ -1528,52 +1393,57 @@ pub fn StateMachineType(comptime Storage: type) type {
                 filter,
             });
 
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_account(filter.account_id)) |account| {
-                if (account.flags.history) {
-                    if (self.get_scan_from_account_filter(filter)) |scan| {
-                        assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+            // Secondary indexes disabled - skip scan logic.
+            if (comptime !has_secondary_indexes) {
+                log.info("get_account_balances: secondary indexes disabled", .{});
+            } else {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+                if (self.get_account(filter.account_id)) |account| {
+                    if (account.flags.history) {
+                        if (self.get_scan_from_account_filter(filter)) |scan| {
+                            assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                        const scan_buffer = stdx.bytes_as_slice(
-                            .inexact,
-                            AccountEvent,
-                            self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
-                        );
+                            const scan_buffer = stdx.bytes_as_slice(
+                                .inexact,
+                                AccountEvent,
+                                self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                            );
 
-                        const scan_lookup = self.scan_lookup.get(.account_balances);
-                        scan_lookup.* = AccountBalancesScanLookup.init(
-                            &self.forest.grooves.account_events,
-                            scan,
-                        );
+                            const scan_lookup = self.scan_lookup.get(.account_balances);
+                            scan_lookup.* = AccountBalancesScanLookup.init(
+                                &self.forest.grooves.account_events,
+                                scan,
+                            );
 
-                        // Limiting the buffer size according to the query limit.
-                        // TODO: Prevent clients from setting the limit larger than the buffer size.
-                        const limit = @min(
-                            filter.limit,
-                            self.prefetch_operation.?.result_max(self.batch_size_limit),
-                        );
-                        assert(limit > 0);
-                        assert(scan_buffer.len >= limit);
-                        scan_lookup.read(
-                            scan_buffer[0..limit],
-                            &prefetch_get_account_balances_scan_callback,
-                        );
-                        return;
+                            // Limiting the buffer size according to the query limit.
+                            // TODO: Prevent clients from setting the limit larger than the buffer size.
+                            const limit = @min(
+                                filter.limit,
+                                self.prefetch_operation.?.result_max(self.batch_size_limit),
+                            );
+                            assert(limit > 0);
+                            assert(scan_buffer.len >= limit);
+                            scan_lookup.read(
+                                scan_buffer[0..limit],
+                                &prefetch_get_account_balances_scan_callback,
+                            );
+                            return;
+                        } else {
+                            // TODO(batiati): Improve the way we do validations on the state machine.
+                            log.info("get_account_balances: invalid filter: {any}", .{filter});
+                        }
                     } else {
-                        // TODO(batiati): Improve the way we do validations on the state machine.
-                        log.info("get_account_balances: invalid filter: {any}", .{filter});
+                        log.info(
+                            "get_account_balances: cannot query account.id={}; flags.history=false",
+                            .{filter.account_id},
+                        );
                     }
                 } else {
                     log.info(
-                        "get_account_balances: cannot query account.id={}; flags.history=false",
+                        "get_account_balances: cannot query account.id={}; account does not exist",
                         .{filter.account_id},
                     );
                 }
-            } else {
-                log.info(
-                    "get_account_balances: cannot query account.id={}; account does not exist",
-                    .{filter.account_id},
-                );
             }
 
             // Returning an empty array on the next tick.
@@ -1646,7 +1516,10 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn get_scan_from_account_filter(
             self: *StateMachine,
             filter: *const AccountFilter,
-        ) ?*TransfersGroove.ScanBuilder.Scan {
+        ) ?*anyopaque {
+            // Secondary indexes disabled - scans not supported.
+            if (comptime !has_secondary_indexes) return null;
+
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -1773,44 +1646,49 @@ pub fn StateMachineType(comptime Storage: type) type {
                 filter,
             });
 
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_query_filter(
-                AccountsGroove,
-                &self.forest.grooves.accounts,
-                filter,
-            )) |scan| {
-                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
-
-                const scan_buffer = stdx.bytes_as_slice(
-                    .inexact,
-                    Account,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
-                );
-
-                const scan_lookup = self.scan_lookup.get(.accounts);
-                scan_lookup.* = AccountsScanLookup.init(
+            // Secondary indexes disabled - skip scan logic.
+            if (comptime !has_secondary_indexes) {
+                log.info("query_accounts: secondary indexes disabled", .{});
+            } else {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+                if (self.get_scan_from_query_filter(
+                    AccountsGroove,
                     &self.forest.grooves.accounts,
-                    scan,
-                );
+                    filter,
+                )) |scan| {
+                    assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the reply size by
-                // failing with `TooMuchData`.
-                const limit = @min(
-                    filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
-                );
-                assert(limit > 0);
-                assert(scan_buffer.len >= limit);
-                scan_lookup.read(
-                    scan_buffer[0..limit],
-                    &prefetch_query_accounts_scan_callback,
-                );
-                return;
+                    const scan_buffer = stdx.bytes_as_slice(
+                        .inexact,
+                        Account,
+                        self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    );
+
+                    const scan_lookup = self.scan_lookup.get(.accounts);
+                    scan_lookup.* = AccountsScanLookup.init(
+                        &self.forest.grooves.accounts,
+                        scan,
+                    );
+
+                    // Limiting the buffer size according to the query limit.
+                    // TODO: Prevent clients from setting the limit larger than the reply size by
+                    // failing with `TooMuchData`.
+                    const limit = @min(
+                        filter.limit,
+                        self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    );
+                    assert(limit > 0);
+                    assert(scan_buffer.len >= limit);
+                    scan_lookup.read(
+                        scan_buffer[0..limit],
+                        &prefetch_query_accounts_scan_callback,
+                    );
+                    return;
+                }
+
+                // TODO(batiati): Improve the way we do validations on the state machine.
+                log.info("invalid filter for query_accounts: {any}", .{filter});
             }
-
-            // TODO(batiati): Improve the way we do validations on the state machine.
-            log.info("invalid filter for query_accounts: {any}", .{filter});
             self.forest.grid.on_next_tick(
                 &prefetch_scan_next_tick_callback,
                 &self.scan_lookup_next_tick,
@@ -1862,43 +1740,48 @@ pub fn StateMachineType(comptime Storage: type) type {
                 filter,
             });
 
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_query_filter(
-                TransfersGroove,
-                &self.forest.grooves.transfers,
-                filter,
-            )) |scan| {
-                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
-
-                const scan_buffer = stdx.bytes_as_slice(
-                    .inexact,
-                    Transfer,
-                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
-                );
-
-                const scan_lookup = self.scan_lookup.get(.transfers);
-                scan_lookup.* = TransfersScanLookup.init(
+            // Secondary indexes disabled - skip scan logic.
+            if (comptime !has_secondary_indexes) {
+                log.info("query_transfers: secondary indexes disabled", .{});
+            } else {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+                if (self.get_scan_from_query_filter(
+                    TransfersGroove,
                     &self.forest.grooves.transfers,
-                    scan,
-                );
+                    filter,
+                )) |scan| {
+                    assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
-                const limit = @min(
-                    filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
-                );
-                assert(limit > 0);
-                assert(scan_buffer.len >= limit);
-                scan_lookup.read(
-                    scan_buffer[0..limit],
-                    &prefetch_query_transfers_scan_callback,
-                );
-                return;
+                    const scan_buffer = stdx.bytes_as_slice(
+                        .inexact,
+                        Transfer,
+                        self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                    );
+
+                    const scan_lookup = self.scan_lookup.get(.transfers);
+                    scan_lookup.* = TransfersScanLookup.init(
+                        &self.forest.grooves.transfers,
+                        scan,
+                    );
+
+                    // Limiting the buffer size according to the query limit.
+                    // TODO: Prevent clients from setting the limit larger than the buffer size.
+                    const limit = @min(
+                        filter.limit,
+                        self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    );
+                    assert(limit > 0);
+                    assert(scan_buffer.len >= limit);
+                    scan_lookup.read(
+                        scan_buffer[0..limit],
+                        &prefetch_query_transfers_scan_callback,
+                    );
+                    return;
+                }
+
+                // TODO(batiati): Improve the way we do validations on the state machine.
+                log.info("invalid filter for query_transfers: {any}", .{filter});
             }
-
-            // TODO(batiati): Improve the way we do validations on the state machine.
-            log.info("invalid filter for query_transfers: {any}", .{filter});
             self.forest.grid.on_next_tick(
                 &prefetch_scan_next_tick_callback,
                 &self.scan_lookup_next_tick,
@@ -1968,7 +1851,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             comptime Groove: type,
             groove: *Groove,
             filter: *const QueryFilter,
-        ) ?*Groove.ScanBuilder.Scan {
+        ) ?*anyopaque {
+            // Secondary indexes disabled - scans not supported.
+            if (comptime Groove.ScanBuilder == void) return null;
+
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -2117,8 +2003,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 filter,
             });
 
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_change_events_filter(filter)) |scan_lookup| {
+            // Secondary indexes disabled - skip scan logic.
+            if (comptime !has_secondary_indexes) {
+                log.info("get_change_events: secondary indexes disabled", .{});
+            } else if (self.get_scan_from_change_events_filter(filter)) |scan_lookup| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
                 const scan_buffer = stdx.bytes_as_slice(
@@ -2326,8 +2214,16 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .pulse);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(TimestampRange.valid(self.prefetch_timestamp));
+
+            // Secondary indexes disabled - skip expire logic and complete immediately.
+            if (comptime !has_secondary_indexes) {
+                self.scan_lookup_results.appendAssumeCapacity(0);
+                self.prefetch_finish();
+                return;
+            }
+
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
@@ -3925,11 +3821,13 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             if (expires_at) |expiry| {
                 assert(expiry > timestamp);
-                // Removing the pending `expires_at` index.
-                self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .field = expiry,
-                    .timestamp = p.timestamp,
-                });
+                // Removing the pending `expires_at` index (if secondary indexes enabled).
+                if (comptime @hasField(TransfersGroove.IndexTrees, "expires_at")) {
+                    self.forest.grooves.transfers.indexes.expires_at.remove(&.{
+                        .field = expiry,
+                        .timestamp = p.timestamp,
+                    });
+                }
 
                 // In case the pending transfer's timeout is exactly the one we are using
                 // as flag, we need to zero the value to run the next `pulse`.
@@ -4157,19 +4055,22 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .transfer_pending_flags = if (args.transfer_pending) |p| p.flags else .{},
             });
 
-            if (args.dr_account.flags.history) {
-                // Indexing the debit account.
-                self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
-                    .timestamp = args.event_timestamp,
-                    .field = args.dr_account.timestamp,
-                });
-            }
-            if (args.cr_account.flags.history) {
-                // Indexing the credit account.
-                self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
-                    .timestamp = args.event_timestamp,
-                    .field = args.cr_account.timestamp,
-                });
+            // Indexing account events (if secondary indexes enabled).
+            if (comptime @hasField(AccountEventsGroove.IndexTrees, "account_timestamp")) {
+                if (args.dr_account.flags.history) {
+                    // Indexing the debit account.
+                    self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
+                        .timestamp = args.event_timestamp,
+                        .field = args.dr_account.timestamp,
+                    });
+                }
+                if (args.cr_account.flags.history) {
+                    // Indexing the credit account.
+                    self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
+                        .timestamp = args.event_timestamp,
+                        .field = args.cr_account.timestamp,
+                    });
+                }
             }
         }
 
@@ -4311,11 +4212,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(transfer_pending.status == .pending);
                 self.transfer_update_pending_status(&transfer_pending, .expired);
 
-                // Removing the `expires_at` index.
-                self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .timestamp = p.timestamp,
-                    .field = expires_at,
-                });
+                // Removing the `expires_at` index (if secondary indexes enabled).
+                if (comptime @hasField(TransfersGroove.IndexTrees, "expires_at")) {
+                    self.forest.grooves.transfers.indexes.expires_at.remove(&.{
+                        .timestamp = p.timestamp,
+                        .field = expires_at,
+                    });
+                }
 
                 self.account_event(.{
                     .event_timestamp = event_timestamp,
