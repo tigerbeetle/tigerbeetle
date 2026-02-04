@@ -183,14 +183,14 @@ pub fn main(
         .request_latency_histogram = request_latency_histogram,
         .account_id_permutation = account_id_permutation,
         .account_id_start = account_id_start,
-        .account_batch_size = cli_args.account_batch_size,
+        .account_batch_count = cli_args.account_batch_count,
         .account_count = cli_args.account_count,
         .account_count_hot = cli_args.account_count_hot,
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
         .tbid_generator = if (use_tbid) TbidGenerator.init(&prng) else null,
-        .transfer_batch_size = cli_args.transfer_batch_size,
+        .transfer_batch_count = cli_args.transfer_batch_count,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
         .transfer_hot_percent = cli_args.transfer_hot_percent,
@@ -313,14 +313,14 @@ const Benchmark = struct {
     // Configuration:
     account_id_permutation: IdPermutation,
     account_id_start: ?u128,
-    account_batch_size: u32,
+    account_batch_count: u32,
     account_count: u64,
     account_count_hot: u32,
     account_generator: Generator,
     account_generator_hot: Generator,
     transfer_id_permutation: IdPermutation,
     tbid_generator: ?TbidGenerator,
-    transfer_batch_size: u32,
+    transfer_batch_count: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
     transfer_hot_percent: u32,
@@ -432,7 +432,7 @@ const Benchmark = struct {
     fn create_accounts(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .create_accounts);
         assert(!b.clients_busy.is_set(client_index));
-        assert(b.account_batch_size > 0);
+        assert(b.account_batch_count > 0);
         assert(b.account_index <= b.account_count);
         if (b.account_index == b.account_count) {
             if (b.clients_busy.empty()) b.run_finish();
@@ -441,7 +441,7 @@ const Benchmark = struct {
 
         const account_count: u32 = @intCast(@min(
             b.account_count - b.account_index,
-            b.account_batch_size,
+            b.account_batch_count,
         ));
         const accounts = stdx.bytes_as_slice(
             .exact,
@@ -472,7 +472,7 @@ const Benchmark = struct {
     fn create_transfers(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .create_transfers);
         assert(!b.clients_busy.is_set(client_index));
-        assert(b.transfer_batch_size > 0);
+        assert(b.transfer_batch_count > 0);
         assert(b.transfer_index <= b.transfer_count);
         if (b.transfer_index == b.transfer_count) {
             if (b.clients_busy.empty()) b.create_transfers_finish();
@@ -481,7 +481,7 @@ const Benchmark = struct {
 
         const transfer_count: u32 = @intCast(@min(
             b.transfer_count - b.transfer_index,
-            b.transfer_batch_size,
+            b.transfer_batch_count,
         ));
         const transfers = stdx.bytes_as_slice(
             .exact,
@@ -509,13 +509,13 @@ const Benchmark = struct {
         const requests_complete = b.request_index - b.clients_busy.count();
         const request_duration_ns = b.timer.read() - b.clients_request_ns[client_index];
         const request_duration_ms = @divTrunc(request_duration_ns, std.time.ns_per_ms);
-        const transfers_created = @min(b.transfer_count, b.transfer_batch_size);
+        const transfers_created = @min(b.transfer_count, b.transfer_batch_count);
         b.transfers_created += transfers_created;
 
         if (b.print_batch_timings) {
             log.info("batch {}: {} tx in {} ms", .{
                 requests_complete,
-                b.transfer_batch_size,
+                b.transfer_batch_count,
                 request_duration_ms,
             });
         }
@@ -561,7 +561,7 @@ const Benchmark = struct {
         , .{
             .batch_count = b.request_index,
             .batch_duration_s = @as(f64, @floatFromInt(b.timer.read())) / std.time.ns_per_s,
-            .batch_size = b.transfer_batch_size,
+            .batch_size = b.transfer_batch_count,
             .batch_delay = b.transfer_batch_delay,
             .transfer_rate = @divTrunc(
                 @as(u64, b.transfer_count) * std.time.ns_per_s,
@@ -653,7 +653,7 @@ const Benchmark = struct {
 
         const account_count: u32 = @intCast(@min(
             b.account_count - b.account_index,
-            b.account_batch_size,
+            b.account_batch_count,
         ));
         const account_ids = stdx.bytes_as_slice(
             .exact,
@@ -683,11 +683,11 @@ const Benchmark = struct {
         const accounts_count = accounts_count: {
             if (b.account_index == b.account_count) {
                 // The last batch might not be full.
-                const remaining = @rem(b.account_count, b.account_batch_size);
+                const remaining = @rem(b.account_count, b.account_batch_count);
                 if (remaining > 0) break :accounts_count remaining;
             }
 
-            break :accounts_count b.account_batch_size;
+            break :accounts_count b.account_batch_count;
         };
         const accounts_expected_body = &b.client_replies[client_index];
         const accounts_expected = stdx.bytes_as_slice(
@@ -733,7 +733,7 @@ const Benchmark = struct {
 
         const transfer_count: u32 = @intCast(@min(
             b.transfer_count - b.transfer_index,
-            b.transfer_batch_size,
+            b.transfer_batch_count,
         ));
         const transfer_ids = stdx.bytes_as_slice(
             .exact,
@@ -763,11 +763,11 @@ const Benchmark = struct {
         const transfers_count = transfers_count: {
             if (b.transfer_index == b.transfer_count) {
                 // The last batch might not be full.
-                const remaining = @rem(b.transfer_count, b.transfer_batch_size);
+                const remaining = @rem(b.transfer_count, b.transfer_batch_count);
                 if (remaining > 0) break :transfers_count remaining;
             }
 
-            break :transfers_count b.transfer_batch_size;
+            break :transfers_count b.transfer_batch_count;
         };
         const transfers_expected = stdx.bytes_as_slice(
             .exact,

@@ -139,13 +139,13 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         no_history: bool = false,
         imported: bool = false,
-        account_batch_size: u32 = Operation.create_accounts.event_max(
+        account_batch_count: u32 = Operation.create_accounts.event_max(
             constants.message_body_size_max,
         ),
         transfer_count: u64 = 10_000_000,
         transfer_hot_percent: u32 = 100,
         transfer_pending: bool = false,
-        transfer_batch_size: u32 = Operation.create_transfers.event_max(
+        transfer_batch_count: u32 = Operation.create_transfers.event_max(
             constants.message_body_size_max,
         ),
         transfer_batch_delay: Duration = .ms(0),
@@ -594,11 +594,11 @@ pub const Command = union(enum) {
         account_distribution: Distribution,
         no_history: bool,
         imported: bool,
-        account_batch_size: u32,
+        account_batch_count: u32,
         transfer_count: u64,
         transfer_hot_percent: u32,
         transfer_pending: bool,
-        transfer_batch_size: u32,
+        transfer_batch_count: u32,
         transfer_batch_delay: Duration,
         validate: bool,
         checksum_performance: bool,
@@ -1105,12 +1105,12 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     };
 }
 
-const account_batch_size_max = @divExact(
+const account_batch_count_max = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tigerbeetle.Account),
 );
 
-const transfer_batch_size_max = @divExact(
+const transfer_batch_count_max = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
     @sizeOf(tigerbeetle.Transfer),
 );
@@ -1125,27 +1125,27 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         vsr.fatal(.cli, "--file: --addresses and --file are mutually exclusive", .{});
     }
 
-    if (benchmark.account_batch_size == 0) {
-        vsr.fatal(.cli, "--account-batch-size must be greater than 0", .{});
+    if (benchmark.account_batch_count == 0) {
+        vsr.fatal(.cli, "--account-batch-count must be greater than 0", .{});
     }
 
-    if (benchmark.account_batch_size > account_batch_size_max) {
+    if (benchmark.account_batch_count > account_batch_count_max) {
         vsr.fatal(
             .cli,
-            "--account-batch-size must be less than or equal to {}",
-            .{account_batch_size_max},
+            "--account-batch-count must be less than or equal to {}",
+            .{account_batch_count_max},
         );
     }
 
-    if (benchmark.transfer_batch_size == 0) {
-        vsr.fatal(.cli, "--transfer-batch-size must be greater than 0", .{});
+    if (benchmark.transfer_batch_count == 0) {
+        vsr.fatal(.cli, "--transfer-batch-count must be greater than 0", .{});
     }
 
-    if (benchmark.transfer_batch_size > transfer_batch_size_max) {
+    if (benchmark.transfer_batch_count > transfer_batch_count_max) {
         vsr.fatal(
             .cli,
-            "--transfer-batch-size must be less than or equal to {}",
-            .{transfer_batch_size_max},
+            "--transfer-batch-count must be less than or equal to {}",
+            .{transfer_batch_count_max},
         );
     }
 
@@ -1161,11 +1161,11 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .account_distribution = benchmark.account_distribution,
         .no_history = benchmark.no_history,
         .imported = benchmark.imported,
-        .account_batch_size = benchmark.account_batch_size,
+        .account_batch_count = benchmark.account_batch_count,
         .transfer_count = benchmark.transfer_count,
         .transfer_hot_percent = benchmark.transfer_hot_percent,
         .transfer_pending = benchmark.transfer_pending,
-        .transfer_batch_size = benchmark.transfer_batch_size,
+        .transfer_batch_count = benchmark.transfer_batch_count,
         .transfer_batch_delay = benchmark.transfer_batch_delay,
         .validate = benchmark.validate,
         .checksum_performance = benchmark.checksum_performance,
