@@ -1,6 +1,12 @@
-# Managed Service
+# Fully Managed
 
-Want to use TigerBeetle in production, along with automated disaster recovery, monitoring, and
-dedicated support from the TigerBeetle team?
+For enterprises committed to excellence, TigerBeetle's world-class team provides: 
 
-Let us help you get up and running faster! Contact us at <sales@tigerbeetle.com> to set up a call.
+- fully managed cross-cloud deployments with automated disaster recovery;
+- 24/7 responsiveness with proactive monitoring.
+   
+Dedicated expertise from senior engineers ensures success (and sleep at night) at every step -- 
+from chart of accounts design and proof-of-concept, through production to monster scale. Contact 
+us at <sales@tigerbeetle.com> to set up a call. 
+
+Are you a startup? Check out the [Startup Program](https://tigerbeetle.com/startup).
