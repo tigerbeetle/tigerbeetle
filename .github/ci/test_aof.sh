@@ -29,7 +29,8 @@ function onerror {
         cat aof.log
     fi
 
-    kill $(jobs -p) 2> /dev/null
+    kill $(jobs -p) 2> /dev/null || true
+    wait
 }
 trap onerror EXIT
 
