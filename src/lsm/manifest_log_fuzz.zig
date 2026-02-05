@@ -399,6 +399,7 @@ const Environment = struct {
         const op = vsr.Checkpoint.checkpoint_after(
             env.manifest_log.superblock.working.vsr_state.checkpoint.header.op,
         );
+        env.manifest_log.compact_reserve_blocks();
         env.manifest_log.compact(
             manifest_log_compact_callback,
             op,
