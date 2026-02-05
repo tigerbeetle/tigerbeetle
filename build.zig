@@ -460,7 +460,7 @@ fn build_ci(
 
     if (all or mode == .aof) {
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
-        hide_stderr(aof);
+        //hide_stderr(aof);
         step_ci.dependOn(&aof.step);
     }
     inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
