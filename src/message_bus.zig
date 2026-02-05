@@ -292,11 +292,17 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.tick_connect();
         }
 
+        /// Returns true when all IO operations have completed and it is
+        /// safe to free the message bus's resources.
+        pub fn io_settled(bus: *const MessageBus) bool {
+            return bus.connections_used == 0 and !bus.resume_receive_submitted;
+        }
+
         /// Initiates graceful termination of all active connections.
         ///
         /// Each connection's state machine drives itself to .free through
         /// IO callbacks. Callers must continue running the IO loop until
-        /// `connections_used == 0`.
+        /// `io_settled()` returns true.
         pub fn terminate_all(bus: *MessageBus) void {
             for (bus.connections) |*connection| {
                 if (connection.state != .free and connection.state != .terminating) {

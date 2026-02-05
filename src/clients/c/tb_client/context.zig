@@ -385,50 +385,57 @@ pub fn ContextType(
         const has_message_bus = @hasField(Client, "message_bus");
 
         fn io_thread(self: *Context) void {
-            var disconnecting = false;
-            var client_deinited = false;
+            const Phase = enum { running, disconnecting, settled };
+            var phase: Phase = .running;
 
-            while (true) {
+            main: while (true) {
                 const should_stop = self.signal.status() == .stopped;
-                const should_disconnect = (self.eviction_reason != null or should_stop) and
-                    !disconnecting;
 
-                // Initiate graceful disconnection on eviction or shutdown.
-                // This terminates all message_bus connections through the
-                // connection state machine, which closes sockets (releasing
-                // server resources) while keeping Connection memory valid
-                // for pending IO completions to land on.
-                if (should_disconnect) {
-                    self.cancel_request_inflight();
+                phase = phase: switch (phase) {
+                    // Normal operation. Initiate graceful disconnection on
+                    // eviction or shutdown: terminate all message_bus connections,
+                    // which closes sockets (releasing server resources) while
+                    // keeping message_bus's Connection memory valid for pending IO
+                    // completions to land on.
+                    .running => {
+                        if (self.eviction_reason != null or should_stop) {
+                            self.cancel_request_inflight();
 
-                    while (self.pending.pop()) |packet| {
-                        packet.assert_phase(.pending);
-                        self.packet_cancel(packet);
-                    }
+                            while (self.pending.pop()) |packet| {
+                                packet.assert_phase(.pending);
+                                self.packet_cancel(packet);
+                            }
 
-                    if (has_message_bus) {
-                        self.client.message_bus.terminate_all();
-                    }
+                            if (has_message_bus) {
+                                self.client.message_bus.terminate_all();
+                            }
 
-                    disconnecting = true;
-                }
+                            continue :phase .disconnecting;
+                        }
 
-                // Once all connections have fully terminated (no pending IO
-                // on any Connection memory), it is safe to deinit the client
-                // which frees the connections array.
-                if (disconnecting and !client_deinited and self.client_io_settled()) {
-                    self.client.deinit(self.gpa.allocator());
-                    self.message_pool.deinit(self.gpa.allocator());
-                    client_deinited = true;
-                }
+                        self.tick();
+                        break :phase .running;
+                    },
 
-                // Exit only after the signal has stopped (no pending signal
-                // IO) and the client has been deinitialized.
-                if (should_stop and client_deinited) break;
+                    // Once all connections have fully terminated (no pending
+                    // IO on any Connection memory), it is safe to deinit the
+                    // client which frees the message_bus's connections array.
+                    .disconnecting => {
+                        if (self.client_io_settled()) {
+                            self.client.deinit(self.gpa.allocator());
+                            self.message_pool.deinit(self.gpa.allocator());
+                            continue :phase .settled;
+                        }
+                        break :phase .disconnecting;
+                    },
 
-                // Don't tick the client once we're disconnecting, to prevent
-                // reconnection attempts via message_bus.tick_client().
-                if (!disconnecting) self.tick();
+                    // Exit only after the vsr client has been deinited
+                    // and we have received the stop signal from the client threads.
+                    .settled => {
+                        if (should_stop) break :main;
+                        break :phase .settled;
+                    },
+                };
 
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -439,8 +446,8 @@ pub fn ContextType(
                 };
             }
 
-            // Drain any remaining submitted packets under the lock to
-            // ensure visibility of user-thread writes.
+            // Drain any remaining submitted packets, still under the lock
+            // as this thread may not have been the last to take it.
             while (true) {
                 const packet: *Packet = packet: {
                     self.interface.locker.lock();
@@ -460,8 +467,7 @@ pub fn ContextType(
         /// it is safe to free the client's resources.
         fn client_io_settled(self: *const Context) bool {
             if (has_message_bus) {
-                return self.client.message_bus.connections_used == 0 and
-                    !self.client.message_bus.resume_receive_submitted;
+                return self.client.message_bus.io_settled();
             }
             return true;
         }
