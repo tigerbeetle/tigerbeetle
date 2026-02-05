@@ -6,7 +6,7 @@ if [ ! -f "zig/zig" ]; then
     ./zig/download.sh
 fi
 
-./zig/zig build install -Drelease
+./zig/zig build install 
 
 # Be careful to use a benchmark-specific filenames so that we don't erase a real data file:
 cleanup() {
