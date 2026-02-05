@@ -50,9 +50,9 @@ mkdir a1 a2 b1 b2
 echo ''
 echo 'Testing recovery...'
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=2 a1/aof-test.tigerbeetle >> ./aof.log 2>&1
-./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --aof-file=a1/aof-test.tigerbeetle.aof --experimental a1/aof-test.tigerbeetle >> ./aof.log 2>&1 &
+./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --aof-file=a1/aof-test.tigerbeetle.aof --experimental a1/aof-test.tigerbeetle >> ./aof.log 2>&1
 ./tigerbeetle format --cluster=0 --replica=1 --replica-count=2 a2/aof-test.tigerbeetle >> ./aof.log 2>&1
-./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --aof --experimental a2/aof-test.tigerbeetle >> ./aof.log 2>&1 &
+./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --aof --experimental a2/aof-test.tigerbeetle >> ./aof.log 2>&1
 
 sleep 1
 ./zig/zig build aof -- recover --cluster=0 --addresses=3001,3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
