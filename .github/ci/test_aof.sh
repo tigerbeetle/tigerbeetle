@@ -51,25 +51,29 @@ echo ''
 echo 'Testing recovery...'
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=2 a1/aof-test.tigerbeetle >> ./aof.log 2>&1
 ./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --aof-file=a1/aof-test.tigerbeetle.aof --experimental a1/aof-test.tigerbeetle >> ./aof.log 2>&1 &
+r1=$!
 ./tigerbeetle format --cluster=0 --replica=1 --replica-count=2 a2/aof-test.tigerbeetle >> ./aof.log 2>&1
 ./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --aof --experimental a2/aof-test.tigerbeetle >> ./aof.log 2>&1 &
+r2=$!
 
 sleep 1
 ./zig/zig build aof -- recover --cluster=0 --addresses=3001,3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
 sleep 10 # Give replicas time to settle.
-kill %2 %3
+kill $r1 $r2
 
 echo ""
 echo "Recovering a second time, to test determinism."
 
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=2 b1/aof-test.tigerbeetle >> ./aof.log 2>&1
 ./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --experimental b1/aof-test.tigerbeetle >> ./aof.log 2>&1 &
+r1=$!
 ./tigerbeetle format --cluster=0 --replica=1 --replica-count=2 b2/aof-test.tigerbeetle >> ./aof.log 2>&1
 ./tigerbeetle start --aof-recovery --cache-grid=256MiB --addresses=3001,3002 --experimental b2/aof-test.tigerbeetle >> ./aof.log 2>&1 &
+r2=$!
 
 ./zig/zig build aof -- recover --cluster=0 --addresses=3001,3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
 sleep 10 # Give replicas time to settle.
-kill %4 %5
+kill $r1 $r2
 
 echo ""
 echo "Running 'zig build aof -- debug a{1,2}/aof-test.tigerbeetle.aof' to check recovered AOF..."
