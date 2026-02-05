@@ -46,46 +46,78 @@ struct TestDb {
     _server: Child,
 }
 
+fn tigerbeetle_bin() -> String {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}")
+}
+
+fn work_dir() -> &'static str {
+    env!("CARGO_TARGET_TMPDIR")
+}
+
 impl TestDb {
     fn new() -> anyhow::Result<TestDb> {
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-
         // NB: There is one test database shared between all tests, and reused
         // between test runs. If the tests choose their IDs correctly there
         // should never be any collisions, and that one database should work
         // forever, just taking up a lot of space.
-        let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
-        let work_dir = env!("CARGO_TARGET_TMPDIR");
         let database_name = "0_0.testdb.tigerbeetle";
 
-        if !Path::new(&format!("{work_dir}/{database_name}")).try_exists()? {
-            let mut cmd = Command::new(&tigerbeetle_bin);
-            cmd.current_dir(&work_dir);
-            cmd.args([
+        if !Path::new(&format!("{}/{database_name}", work_dir())).try_exists()? {
+            let status = Command::new(tigerbeetle_bin())
+                .current_dir(work_dir())
+                .args([
+                    "format",
+                    "--replica-count=1",
+                    "--replica=0",
+                    "--cluster=0",
+                    database_name,
+                ])
+                .status()?;
+            assert!(status.success());
+        }
+
+        let server = Self::start(&["--addresses=0", "--cache-grid=128MiB", database_name])?;
+
+        Ok(server)
+    }
+
+    /// Create a unique development-mode server for a specific test.
+    fn new_development(label: &str) -> anyhow::Result<TestDb> {
+        let database_name = format!("0_0.{label}.tigerbeetle");
+
+        // Always start fresh for development instances.
+        let _ = std::fs::remove_file(format!("{}/{database_name}", work_dir()));
+
+        let status = Command::new(tigerbeetle_bin())
+            .current_dir(work_dir())
+            .args([
                 "format",
                 "--replica-count=1",
                 "--replica=0",
                 "--cluster=0",
+                "--development",
                 &database_name,
-            ]);
-            let status = cmd.status()?;
-            assert!(status.success());
-        }
+            ])
+            .status()?;
+        assert!(status.success());
 
-        let mut cmd = Command::new(&tigerbeetle_bin);
-        cmd.current_dir(&work_dir);
-        cmd.args([
-            "start",
+        let server = Self::start(&["--addresses=0", "--development", &database_name])?;
+
+        Ok(server)
+    }
+
+    fn start(args: &[&str]) -> anyhow::Result<TestDb> {
+        let mut server = Command::new(tigerbeetle_bin())
+            .current_dir(work_dir())
             // magic address 0: tell us the port to use,
             // shutdown when stdin closes
-            "--addresses=0",
-            "--cache-grid=128MiB",
-            &database_name,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
+            .args(["start"])
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
 
-        let mut server = cmd.spawn()?;
         let server_stdout = mem::take(&mut server.stdout).unwrap();
         let mut server_stdout = BufReader::new(server_stdout);
         let mut first_line = String::new();
@@ -97,12 +129,14 @@ impl TestDb {
             _server: server,
         })
     }
+
+    fn address(&self) -> String {
+        format!("127.0.0.1:{}", self.port)
+    }
 }
 
 fn test_client() -> anyhow::Result<tb::Client> {
-    let address = &format!("127.0.0.1:{}", get_test_db().port);
-    let client = tb::Client::new(0, address)?;
-
+    let client = tb::Client::new(0, &get_test_db().address())?;
     Ok(client)
 }
 
@@ -1359,4 +1393,39 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
 
         Ok(())
     })
+}
+
+// This is a copy of the Java testClientEvicted case.
+#[test]
+fn client_evicted() -> anyhow::Result<()> {
+    const CLIENTS_MAX: usize = 64;
+
+    // Use a separate server to avoid evicting the shared test client.
+    let server = TestDb::new_development("client_evicted")?;
+    let address = server.address();
+
+    let client_evict = tb::Client::new(0, &address)?;
+
+    let accounts = block_on(client_evict.lookup_accounts(&[tb::id()]))?;
+    assert_eq!(accounts.len(), 0);
+
+    let mut handles = Vec::new();
+    for _ in 0..CLIENTS_MAX {
+        let address = address.clone();
+        handles.push(std::thread::spawn(move || {
+            let client = tb::Client::new(0, &address).unwrap();
+            let accounts = block_on(client.lookup_accounts(&[tb::id()])).unwrap();
+            assert_eq!(accounts.len(), 0);
+        }));
+    }
+
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    // The original client should now be evicted.
+    let result = block_on(client_evict.lookup_accounts(&[tb::id()]));
+    assert_eq!(result, Err(tb::PacketStatus::ClientEvicted));
+
+    Ok(())
 }
