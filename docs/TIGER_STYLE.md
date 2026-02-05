@@ -354,7 +354,8 @@ Beyond these rules:
   be threaded through constructors positionally, from the most general to the most specific.
 
 - **Write descriptive commit messages** that inform and delight the reader, because your commit
-  messages are being read.
+  messages are being read. Note that a pull request description is not stored in the git repository
+  and is invisible in `git blame`, and therefore is not a replacement for a commit message.
 
 - Don't forget to say why. Code alone is not documentation. Use comments to explain why you wrote
   the code the way you did. Show your workings.
