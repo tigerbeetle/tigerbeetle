@@ -14,7 +14,6 @@ const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
-const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 const parse_dirty_semver = stdx.parse_dirty_semver;
 const maybe = stdx.maybe;
 
@@ -22,7 +21,6 @@ pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     pub const Stats = common.Stats;
-    const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
 
@@ -36,30 +34,6 @@ pub const IO = struct {
     // TODO Track these as metrics:
     ios_queued: u32 = 0,
     ios_in_kernel: u32 = 0,
-
-    /// The head of a doubly-linked list of all operations that are:
-    /// - in the submission queue, or
-    /// - in the kernel, or
-    /// - in the completion queue, or
-    /// - in the `completed` list (excluding zero-duration timeouts).
-    awaiting: CompletionList = .{},
-
-    // This is the completion that performs the cancellation.
-    // This is *not* the completion that is being canceled.
-    cancel_completion: Completion = undefined,
-
-    cancel_all_status: union(enum) {
-        // Not canceling.
-        inactive,
-        // Waiting to start canceling the next awaiting operation.
-        next,
-        // The target's cancellation SQE is queued; waiting for the cancellation's completion.
-        queued: struct { target: *Completion },
-        // Currently canceling the target operation.
-        wait: struct { target: *Completion },
-        // All operations have been canceled.
-        done,
-    } = .inactive,
 
     stats: common.Stats = .{},
 
@@ -93,8 +67,6 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
-        assert(self.cancel_all_status != .done);
-
         // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
         // and that `tick()` and `run_for_ns()` cannot be run concurrently.
         // Therefore `timeouts` here will never be decremented and `etime` will always be false.
@@ -120,7 +92,6 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        assert(self.cancel_all_status != .done);
         defer self.stats.trace();
 
         var timer = try std.time.Timer.start();
@@ -185,29 +156,7 @@ pub const IO = struct {
         // that become ready without going through another syscall from flush_submissions() and
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
         while (self.completed.pop()) |completion| {
-            if (completion.operation == .timeout and
-                completion.operation.timeout.timespec.sec == 0 and
-                completion.operation.timeout.timespec.nsec == 0)
-            {
-                // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
-                maybe(self.awaiting.empty());
-                assert(completion.result == -@as(i32, @intFromEnum(posix.E.TIME)));
-                assert(completion.awaiting_back == null);
-                assert(completion.awaiting_next == null);
-            } else {
-                assert(!self.awaiting.empty());
-                self.awaiting.remove(completion);
-            }
-
-            switch (self.cancel_all_status) {
-                .inactive => completion.complete(),
-                .next => {},
-                .queued => if (completion.operation == .cancel) completion.complete(),
-                .wait => |wait| if (wait.target == completion) {
-                    self.cancel_all_status = .next;
-                },
-                .done => unreachable,
-            }
+            completion.complete();
         }
 
         self.stats.now.time_callbacks.ns += timer.read();
@@ -276,12 +225,6 @@ pub const IO = struct {
     }
 
     fn enqueue(self: *IO, completion: *Completion) void {
-        switch (self.cancel_all_status) {
-            .inactive => {},
-            .queued => assert(completion.operation == .cancel),
-            else => unreachable,
-        }
-
         const sqe = self.ring.get_sqe() catch |err| switch (err) {
             error.SubmissionQueueFull => {
                 self.unqueued.push(completion);
@@ -290,84 +233,7 @@ pub const IO = struct {
         };
         completion.prep(sqe);
 
-        self.awaiting.push(completion);
         self.ios_queued += 1;
-    }
-
-    /// Cancel should be invoked at most once, before any of the memory owned by read/recv buffers
-    /// is freed (so that lingering async operations do not write to them).
-    ///
-    /// After this function is invoked:
-    /// - No more completion callbacks will be called.
-    /// - No more IO may be submitted.
-    ///
-    /// This function doesn't return until either:
-    /// - All events submitted to io_uring have completed.
-    ///   (They may complete with `error.Canceled`).
-    /// - Or, an io_uring error occurs.
-    ///
-    /// TODO(Linux):
-    /// - Linux kernel ≥5.19 supports the IORING_ASYNC_CANCEL_ALL and IORING_ASYNC_CANCEL_ANY flags,
-    ///   which would allow all events to be cancelled simultaneously with a single "cancel"
-    ///   operation, without IO needing to maintain the `awaiting` doubly-linked list and the `next`
-    ///   cancellation stage.
-    /// - Linux kernel ≥6.0 supports `io_uring_register_sync_cancel` which would remove the `queued`
-    ///   cancellation stage.
-    pub fn cancel_all(self: *IO) void {
-        assert(self.cancel_all_status == .inactive);
-
-        // Even if we return early due to an io_uring error, IO won't allow more operations.
-        defer self.cancel_all_status = .done;
-
-        self.cancel_all_status = .next;
-
-        // Discard any operations that haven't started yet.
-        while (self.unqueued.pop()) |_| {}
-
-        while (self.awaiting.tail) |target| {
-            assert(!self.awaiting.empty());
-            assert(self.cancel_all_status == .next);
-            assert(target.operation != .cancel);
-
-            self.cancel_all_status = .{ .queued = .{ .target = target } };
-
-            self.cancel(
-                *IO,
-                self,
-                cancel_all_callback,
-                .{
-                    .completion = &self.cancel_completion,
-                    .target = target,
-                },
-            );
-
-            while (self.cancel_all_status == .queued or self.cancel_all_status == .wait) {
-                self.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
-                    std.debug.panic("IO.cancel_all: run_for_ns error: {}", .{err});
-                };
-            }
-            assert(self.cancel_all_status == .next);
-        }
-        assert(self.awaiting.empty());
-        assert(self.ios_queued == 0);
-        assert(self.ios_in_kernel == 0);
-    }
-
-    fn cancel_all_callback(self: *IO, completion: *Completion, result: CancelError!void) void {
-        assert(self.cancel_all_status == .queued);
-        assert(completion == &self.cancel_completion);
-        assert(completion.operation == .cancel);
-        assert(completion.operation.cancel.target == self.cancel_all_status.queued.target);
-
-        self.cancel_all_status = status: {
-            result catch |err| switch (err) {
-                error.NotRunning => break :status .next,
-                error.NotInterruptable => {},
-                error.Unexpected => unreachable,
-            };
-            // Wait for the target operation to complete or abort.
-            break :status .{ .wait = .{ .target = self.cancel_all_status.queued.target } };
-        };
     }
 
     pub const CancelError = error{
@@ -411,10 +277,6 @@ pub const IO = struct {
             completion: *Completion,
             result: *const anyopaque,
         ) void,
-
-        /// Used by the `IO.awaiting` doubly-linked list.
-        awaiting_back: ?*Completion = null,
-        awaiting_next: ?*Completion = null,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
