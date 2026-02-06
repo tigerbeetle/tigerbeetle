@@ -52,7 +52,7 @@ Additionally, when `flags.post_pending_transfer` is set:
 - [`pending_id`](../reference/transfer.md#pending_id) must reference a
   [pending transfer](#reserve-funds-pending-transfer)
 - [`flags.void_pending_transfer`](../reference/transfer.md#flagsvoid_pending_transfer) must not
-  be set
+  be set.
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
