@@ -377,11 +377,6 @@ pub fn ContextType(
             client_out.magic_number = ClientInterface.beetle;
         }
 
-        fn tick(self: *Context) void {
-            if (self.eviction_reason != null) return;
-            self.client.tick();
-        }
-
         const has_message_bus = @hasField(Client, "message_bus");
 
         fn io_thread(self: *Context) void {
@@ -413,7 +408,8 @@ pub fn ContextType(
                             continue :phase .disconnecting;
                         }
 
-                        self.tick();
+                        assert(self.eviction_reason == null);
+                        self.client.tick();
                         break :phase .running;
                     },
 
@@ -421,6 +417,10 @@ pub fn ContextType(
                     // IO on any Connection memory), it is safe to deinit the
                     // client which frees the message_bus's connections array.
                     .disconnecting => {
+                        // NB: packet_enqueue prevents submit->pending transitions
+                        // during disconnection.
+                        assert(self.pending.count() == 0);
+
                         if (self.client_io_settled()) {
                             self.client.deinit(self.gpa.allocator());
                             self.message_pool.deinit(self.gpa.allocator());
@@ -432,7 +432,10 @@ pub fn ContextType(
                     // Exit only after the vsr client has been deinited
                     // and we have received the stop signal from the client threads.
                     .settled => {
-                        if (should_stop) break :main;
+                        if (should_stop) {
+                            phase = .settled;
+                            break :main;
+                        }
                         break :phase .settled;
                     },
                 };
@@ -445,6 +448,8 @@ pub fn ContextType(
                     @panic("IO.run() failed");
                 };
             }
+
+            assert(phase == .settled);
 
             // Drain any remaining submitted packets, still under the lock
             // as this thread may not have been the last to take it.
