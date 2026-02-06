@@ -3,6 +3,58 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.71
+
+Released: 2026-02-06
+
+### Safety And Performance
+
+- [#3471](https://github.com/tigerbeetle/tigerbeetle/pull/3471)
+
+  Dramatically improve View Change time with a new `FaultDetector` that estimates
+  the probability of a primary crash.
+
+### Features
+
+- [#3484](https://github.com/tigerbeetle/tigerbeetle/pull/3484)
+
+  Track `commit_timestamp` and `message_bus` connections.
+
+- [#3497](https://github.com/tigerbeetle/tigerbeetle/pull/3497)
+  [#3421](https://github.com/tigerbeetle/tigerbeetle/pull/3421)
+
+  Add support for rotating AOF files without signals.
+
+### Internals
+
+- [#3491](https://github.com/tigerbeetle/tigerbeetle/pull/3491)
+  [#3496](https://github.com/tigerbeetle/tigerbeetle/pull/3496)
+  [#3494](https://github.com/tigerbeetle/tigerbeetle/pull/3494)
+  [#3490](https://github.com/tigerbeetle/tigerbeetle/pull/3490)
+  [#3495](https://github.com/tigerbeetle/tigerbeetle/pull/3495)
+  [#3489](https://github.com/tigerbeetle/tigerbeetle/pull/3489)
+  [#3488](https://github.com/tigerbeetle/tigerbeetle/pull/3488)
+
+  Various documentation improvements and clarifications.
+
+- [#3503](https://github.com/tigerbeetle/tigerbeetle/pull/3503)
+
+  Clarify that PR descriptions are ephemeral and do not replace well-written commit messages.
+
+- [#3504](https://github.com/tigerbeetle/tigerbeetle/pull/3504)
+
+  Capture additional Vortex logs during end-to-end testing.
+
+- [#3499](https://github.com/tigerbeetle/tigerbeetle/pull/3499)
+  [#3501](https://github.com/tigerbeetle/tigerbeetle/pull/3501)
+  [#3498](https://github.com/tigerbeetle/tigerbeetle/pull/3498)
+
+  Code cleanup and an increase in the maximum number of accounts supported by the benchmark.
+
+### TigerTracks 🎧
+
+- [Sonderling · Zonderling](https://www.youtube.com/watch?v=UxLEKVMpN48)
+
 ## TigerBeetle 0.16.70
 
 Released: 2026-01-31
