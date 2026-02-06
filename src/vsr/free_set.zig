@@ -577,8 +577,12 @@ pub const FreeSet = struct {
         assert(set.blocks_released.isSet(block));
         assert(!set.blocks_released_prior_checkpoint_durability.contains(block));
 
-        assert(set.reservation_count == 0);
-        assert(set.reservation_blocks == 0);
+        // Forest/ManifestLog compactions may hold some reservations in the free set while we're
+        // marking released blocks as free. This means that some released blocks in the reservation
+        // may be marked as free. However, this is safe to do, as it's done deterministically
+        // across the replicas.
+        maybe(set.reservation_count == 0);
+        maybe(set.reservation_blocks == 0);
 
         set.index.unset(@divFloor(block, shard_bits));
         set.blocks_acquired.unset(block);
