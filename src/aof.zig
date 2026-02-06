@@ -1,3 +1,8 @@
+//! Reconstruct a cluster from one or more AOF files.
+//!
+//! Note that a AOF-recovered cluster is *not* physically identical to the original cluster.
+//! It should be logically identical though -- the same data (minus the client table), just in
+//! different places.
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -14,6 +19,11 @@ const Header = vsr.Header;
 const MiB = stdx.MiB;
 
 const log = std.log.scoped(.aof);
+
+pub const std_options: std.Options = .{
+    .log_level = .info,
+    .logFn = stdx.log_with_timestamp,
+};
 
 const magic_number: u128 = 0xbcd8d3fee406119ed192c4f4c4fc82;
 
@@ -304,10 +314,10 @@ pub fn AOFType(comptime IO: type) type {
                 if (last_entry.?.header().checksum != checksum) {
                     return error.ChecksumMismatch;
                 }
-                log.debug("validated all aof entries. last entry checksum {x:0>32} matches " ++
+                log.info("validated all aof entries. last entry checksum {x:0>32} matches " ++
                     " supplied {x:0>32}", .{ last_entry.?.header().checksum, checksum });
             } else {
-                log.debug("validated present aof entries.", .{});
+                log.info("validated present aof entries.", .{});
             }
         }
 
@@ -347,7 +357,11 @@ pub fn AOFType(comptime IO: type) type {
                     time,
                     message_pool,
                     .{
-                        .id = stdx.unique_u128(),
+                        // Use a deterministic client id, so that replaying the same AOF against
+                        // different new clusters yields physically identical data files.
+                        // (It must be based on release so that clusters which have upgraded at some
+                        // point will need a separate "aof recover" invocation for each release.)
+                        .id = constants.config.process.release.value,
                         .cluster = cluster,
                         .replica_count = @intCast(addresses.len),
                         .aof_recovery = true,

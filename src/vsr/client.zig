@@ -277,6 +277,10 @@ pub fn ClientType(
                 .operation = .register,
                 .release = self.release,
                 .previous_request_latency = 0,
+                // During AOF recovery, if we were to pass timestamp=0, the primary would assign the
+                // timestamp. Instead, we send a fixed bogus timestamp (1), to ensure that AOF
+                // recovery is deterministic.
+                .timestamp = @intFromBool(self.aof_recovery),
             };
 
             std.mem.bytesAsValue(
@@ -360,14 +364,12 @@ pub fn ClientType(
             assert(message.header.parent == 0);
             assert(message.header.session == 0);
             assert(message.header.request == 0);
+            assert((message.header.timestamp == 0) != self.aof_recovery);
 
             if (!self.aof_recovery) {
                 assert(message.header.operation == .noop or
                     !message.header.operation.vsr_reserved());
             }
-
-            // TODO: Re-investigate this state for AOF as it currently traps.
-            // assert(message.header.timestamp == 0 or self.aof_recovery);
 
             message.header.request = self.request_number;
             self.request_number += 1;
