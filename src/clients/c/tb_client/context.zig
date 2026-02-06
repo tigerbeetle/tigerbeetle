@@ -396,32 +396,6 @@ pub fn ContextType(
             client_out.magic_number = ClientInterface.beetle;
         }
 
-        fn deinit(self: *Context) void {
-            assert(thread_caller == .io);
-            assert(self.signal.status() == .shutdown_completed);
-            assert(self.submitted.pop() == null);
-            assert(self.pending.pop() == null);
-            maybe(self.eviction_reason != null);
-
-            self.io.cancel_all();
-            self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
-            self.io.deinit();
-
-            self.gpa.allocator().free(self.addresses_owned);
-
-            // NB: Copy the allocator back out before trying to destroy `self` with it!
-            var gpa: GPA = self.gpa;
-            gpa.allocator().destroy(self);
-            assert(gpa.deinit() == .ok);
-        }
-
-        fn tick(self: *Context) void {
-            if (self.eviction_reason != null) return;
-            self.client.tick();
-        }
-
         const has_message_bus = @hasField(Client, "message_bus");
 
         fn io_thread(self: *Context) void {
@@ -458,7 +432,8 @@ pub fn ContextType(
                             continue :phase .disconnecting;
                         }
 
-                        self.tick();
+                        assert(self.eviction_reason == null);
+                        self.client.tick();
                         break :phase .running;
                     },
 
@@ -466,6 +441,10 @@ pub fn ContextType(
                     // IO on any Connection memory), it is safe to deinit the
                     // client which frees the message_bus's connections array.
                     .disconnecting => {
+                        // NB: packet_enqueue prevents submit->pending transitions
+                        // during disconnection.
+                        assert(self.pending.count() == 0);
+
                         if (self.client_io_settled()) {
                             self.client.deinit(self.gpa.allocator());
                             self.message_pool.deinit(self.gpa.allocator());
@@ -477,7 +456,10 @@ pub fn ContextType(
                     // Exit only after the vsr client has been deinited
                     // and we have received the stop signal from the client threads.
                     .settled => {
-                        if (should_stop) break :main;
+                        if (should_stop) {
+                            phase = .settled;
+                            break :main;
+                        }
                         break :phase .settled;
                     },
                 };
@@ -490,6 +472,8 @@ pub fn ContextType(
                     @panic("IO.run() failed");
                 };
             }
+
+            assert(phase == .settled);
 
             // Drain any remaining submitted packets, still under the lock
             // as this thread may not have been the last to take it.
