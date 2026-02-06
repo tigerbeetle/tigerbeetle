@@ -50,7 +50,7 @@ its destination.
 Additionally, when `flags.post_pending_transfer` is set:
 
 - [`pending_id`](../reference/transfer.md#pending_id) must reference a
-  [pending transfer](#reserve-funds-pending-transfer).
+  [pending transfer](#reserve-funds-pending-transfer)
 - [`flags.void_pending_transfer`](../reference/transfer.md#flagsvoid_pending_transfer) must not
   be set.
 
@@ -69,7 +69,7 @@ A void-pending transfer, denoted by
 the pending amount its original accounts. Additionally, when this field is set:
 
 - [`pending_id`](../reference/transfer.md#pending_id) must reference a
-  [pending transfer](#reserve-funds-pending-transfer).
+  [pending transfer](#reserve-funds-pending-transfer)
 - [`flags.post_pending_transfer`](../reference/transfer.md#flagspost_pending_transfer) must not
   be set.
 
