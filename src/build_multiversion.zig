@@ -180,7 +180,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
     );
 
     var header: MultiversionHeader = .{
-        .current_release = (try multiversion.Release.parse(vsr_options.release.?)).value,
+        .current_release = (try multiversion.Release.parse(vsr_options.release)).value,
         .current_checksum = current_checksum,
         .current_flags = .{
             .debug = options.debug,
@@ -189,7 +189,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         .past = past_versions.past_releases,
         .checksum_binary_without_header = checksum_binary_without_header,
         .current_release_client_min = (try multiversion.Release.parse(
-            vsr_options.release_client_min.?,
+            vsr_options.release_client_min,
         )).value,
         .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
     };
@@ -335,7 +335,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
         );
 
         var header = multiversion.MultiversionHeader{
-            .current_release = (try multiversion.Release.parse(vsr_options.release.?)).value,
+            .current_release = (try multiversion.Release.parse(vsr_options.release)).value,
             .current_checksum = current_checksum,
             .current_flags = .{
                 .debug = options.debug,
@@ -344,7 +344,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
             .past = past_versions.past_releases,
             .checksum_binary_without_header = checksum_binary_without_header,
             .current_release_client_min = (try multiversion.Release.parse(
-                vsr_options.release_client_min.?,
+                vsr_options.release_client_min,
             )).value,
             .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
         };

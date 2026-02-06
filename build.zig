@@ -149,6 +149,13 @@ pub fn build(b: *std.Build) !void {
         ) orelse false,
     };
 
+    if (build_options.config_release == null and build_options.config_release_client_min != null) {
+        @panic("must set config-release if setting config-release-client-min");
+    }
+    if (build_options.config_release_client_min == null and build_options.config_release != null) {
+        @panic("must set config-release-client-min if setting config-release");
+    }
+
     const target = try resolve_target(b, build_options.target);
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
 
@@ -157,8 +164,8 @@ pub fn build(b: *std.Build) !void {
         .stdx_module = stdx_module,
         .git_commit = build_options.git_commit[0..40].*,
         .config_verify = build_options.config_verify,
-        .config_release = build_options.config_release,
-        .config_release_client_min = build_options.config_release_client_min,
+        .config_release = build_options.config_release orelse "65535.0.0",
+        .config_release_client_min = build_options.config_release_client_min orelse "0.16.4",
     });
 
     // For integration tests and vortex, we build an independent copy of TigerBeetle with "real"
@@ -365,8 +372,8 @@ fn build_vsr_module(b: *std.Build, options: struct {
     stdx_module: *std.Build.Module,
     git_commit: [40]u8,
     config_verify: bool,
-    config_release: ?[]const u8,
-    config_release_client_min: ?[]const u8,
+    config_release: []const u8,
+    config_release_client_min: []const u8,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
     // Ideally, we would return _just_ the module here, and keep options an implementation detail.
     // However, currently Zig makes it awkward to provide multiple entry points for a module:
@@ -377,12 +384,8 @@ fn build_vsr_module(b: *std.Build, options: struct {
     const vsr_options = b.addOptions();
     vsr_options.addOption(?[40]u8, "git_commit", options.git_commit[0..40].*);
     vsr_options.addOption(bool, "config_verify", options.config_verify);
-    vsr_options.addOption(?[]const u8, "release", options.config_release);
-    vsr_options.addOption(
-        ?[]const u8,
-        "release_client_min",
-        options.config_release_client_min,
-    );
+    vsr_options.addOption([]const u8, "release", options.config_release);
+    vsr_options.addOption([]const u8, "release_client_min", options.config_release_client_min);
 
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
