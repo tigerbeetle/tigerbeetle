@@ -43,7 +43,7 @@ its destination.
   amount is posted.
 - If the posted [`amount`](../reference/transfer.md#amount) is nonzero, then only this amount
   is posted, and the remainder is restored to its original accounts. It must be less than or equal
-  to the pending transfer's amount
+  to the pending transfer's amount.
 
 </details>
 
