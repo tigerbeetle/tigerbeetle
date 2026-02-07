@@ -149,7 +149,7 @@ Released: 2026-01-23
 
 ### TigerTracks 🎧
 
-- [Model](https://open.spotify.com/track/2hFeOGfy9HmGs6kS6FuJHd?si=ccdde259e18b41d0)
+- [Model](https://open.spotify.com/track/2hFeOGfy9HmGs6kS6FuJHd)
 
 ## TigerBeetle 0.16.68
 
@@ -301,7 +301,7 @@ Released: 2025-12-12
 
 ### TigerTracks 🎧
 
-- [The Ominous Blue](https://open.spotify.com/track/32ivi8KXX5qNqntYKfLMQT?si=b9295603d04741e7)
+- [The Ominous Blue](https://open.spotify.com/track/32ivi8KXX5qNqntYKfLMQT)
 
 ## TigerBeetle 0.16.66
 
@@ -370,7 +370,7 @@ Released: 2025-11-14
 
 ### TigerTracks 🎧
 
-- [Elegia](https://open.spotify.com/track/5wZtbH2PjVZ5W1Akn5z2uA?si=6d0b2a9c09494e9b)
+- [Elegia](https://open.spotify.com/track/5wZtbH2PjVZ5W1Akn5z2uA)
 
 ## TigerBeetle 0.16.64
 
@@ -621,7 +621,7 @@ Released: 2025-10-03
 
 ### TigerTracks 🎧
 
-- [Сколько тебя](https://open.spotify.com/track/480AuAqeCkgwY46HocIbXk?si=510095bd23c74336)
+- [Сколько тебя](https://open.spotify.com/track/480AuAqeCkgwY46HocIbXk)
 
 ## TigerBeetle 0.16.60
 
@@ -661,7 +661,7 @@ Released: 2025-09-26
 
 ### TigerTracks 🎧
 
-- [Undefeated](https://open.spotify.com/track/5fwKEMTyS0FqLk7KVdGQwl?si=9d23f68ec7a542fe)
+- [Undefeated](https://open.spotify.com/track/5fwKEMTyS0FqLk7KVdGQwl)
 
 ## TigerBeetle 0.16.59
 
@@ -701,7 +701,7 @@ Released: 2025-09-19
 
 ### TigerTracks 🎧
 
-- [Autobahn](https://open.spotify.com/track/31uidLEHAcF8Cw1cX1VCS8?si=3cefba6d35124ed9)
+- [Autobahn](https://open.spotify.com/track/31uidLEHAcF8Cw1cX1VCS8)
 
 ## TigerBeetle 0.16.58
 
@@ -1163,7 +1163,7 @@ Released: 2025-07-18
 
 ### TigerTracks 🎧
 
-- [LOVE.](https://open.spotify.com/track/6PGoSes0D9eUDeeAafB2As?si=18f44aa580644f66)
+- [LOVE.](https://open.spotify.com/track/6PGoSes0D9eUDeeAafB2As)
 
 ## TigerBeetle 0.16.50
 
@@ -1219,7 +1219,7 @@ Released: 2025-07-04
 
 ### TigerTracks 🎧
 
-- [Dance of Maria](https://open.spotify.com/track/0f7iz1qAWSz61BdHTXbzvC?si=d1znWf4XR1Gev1RZsgtPpQ)
+- [Dance of Maria](https://open.spotify.com/track/0f7iz1qAWSz61BdHTXbzvC)
 
 ## TigerBeetle 0.16.48
 
@@ -1309,7 +1309,7 @@ Released: 2025-06-19
 
 ### TigerTracks 🎧
 
-- [Geef Mij Maar Amsterdam](https://open.spotify.com/track/2eiYJEuVh8axfumgEGvyPz?si=9821ae99edf24415)
+- [Geef Mij Maar Amsterdam](https://open.spotify.com/track/2eiYJEuVh8axfumgEGvyPz)
 
 ## TigerBeetle 0.16.45
 
@@ -1351,7 +1351,7 @@ might be necessary if the consumer explicitly relies on the unsigned data type.
 
 ### TigerTracks 🎧
 
-- [The Grid](https://open.spotify.com/track/64VYy2f9QBx26P1YjNQrEc?si=d09a228548b14989)
+- [The Grid](https://open.spotify.com/track/64VYy2f9QBx26P1YjNQrEc)
 
 ## TigerBeetle 0.16.44
 
@@ -1465,7 +1465,7 @@ CDC and `tigerbeetle recover`!
 
 ### TigerTracks 🎧
 
-- [16 CARRIAGES](https://open.spotify.com/track/6XXxKsu3RJeN3ZvbMYrgQW?si=aa3fcce771d542ac)
+- [16 CARRIAGES](https://open.spotify.com/track/6XXxKsu3RJeN3ZvbMYrgQW)
 
 ## TigerBeetle 0.16.42
 
@@ -1630,7 +1630,7 @@ in the specific commit we are trying to release.
 
 ### TigerTracks 🎧
 
-- [Тёплые Коты](https://open.spotify.com/track/4UWBuck7q0VeKYiHrwoqnU?si=0fb7145bc0094ba7)
+- [Тёплые Коты](https://open.spotify.com/track/4UWBuck7q0VeKYiHrwoqnU)
 
 ## TigerBeetle 0.16.38
 
@@ -1804,7 +1804,7 @@ accounts/transfers per batch.
 
 ### TigerTracks 🎧
 
-- [All Things Must Pass](https://open.spotify.com/track/1AGridgU0QAWZykQReGWk5?si=5be31abf23d24ef3)
+- [All Things Must Pass](https://open.spotify.com/track/1AGridgU0QAWZykQReGWk5)
 
 ## TigerBeetle 0.16.34
 
@@ -1943,7 +1943,7 @@ make sure that all of your clients are running on at least 0.16.4 before upgradi
 
 ### TigerTracks 🎧
 
-- [On The Way Home](https://open.spotify.com/track/4Fz1WWr5o0OrlIcZxcyZtK?si=4e48d9e99383409a)
+- [On The Way Home](https://open.spotify.com/track/4Fz1WWr5o0OrlIcZxcyZtK)
 
 ## TigerBeetle 0.16.32
 
@@ -1986,7 +1986,7 @@ Released: 2025-03-17
 
 ### TigerTracks 🎧
 
-- [Get Ready](https://open.spotify.com/track/4tvOVmc2jorV20Z2hFDtDg?si=15eb0ed7536b4ab3)
+- [Get Ready](https://open.spotify.com/track/4tvOVmc2jorV20Z2hFDtDg)
 
 ## TigerBeetle 0.16.31
 
@@ -2110,7 +2110,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 ### TigerTracks 🎧
 
-- [For Crying Out Loud](https://open.spotify.com/track/4nsd2DbMYqRwkvIQ51r4cp?si=411872dc9c444535)
+- [For Crying Out Loud](https://open.spotify.com/track/4nsd2DbMYqRwkvIQ51r4cp)
 
 ## TigerBeetle 0.16.29
 
@@ -2184,7 +2184,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 ### TigerTracks 🎧
 
-- [Зов Крови](https://open.spotify.com/track/6YS6ZOCL6KX9kDRQRzD9s0?si=46730a9a7a7842ab)
+- [Зов Крови](https://open.spotify.com/track/6YS6ZOCL6KX9kDRQRzD9s0)
 
 ## TigerBeetle 0.16.28
 
@@ -2325,7 +2325,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 ### TigerTracks 🎧
 
-- [Neon](https://open.spotify.com/track/7Kohy4v3KLWfUXlv9N3feB?si=a1bb8f16679a44d3)
+- [Neon](https://open.spotify.com/track/7Kohy4v3KLWfUXlv9N3feB)
 
 ## TigerBeetle 0.16.26
 
@@ -2614,7 +2614,7 @@ Happy 2025!
 
 ### TigerTracks 🎧
 
-- [Blush Response](https://open.spotify.com/track/0cSnUM2fNEx4pAkNfWpdkU?si=9d6eaaacfc5e467b)
+- [Blush Response](https://open.spotify.com/track/0cSnUM2fNEx4pAkNfWpdkU)
 
 ## TigerBeetle 0.16.20
 
@@ -2644,7 +2644,7 @@ Released: 2024-12-27
 
 ### TigerTracks 🎧
 
-- [Street Spirit](https://open.spotify.com/track/2QwObYJWyJTiozvs0RI7CF?si=d0c0c7d6f9e946a4)
+- [Street Spirit](https://open.spotify.com/track/2QwObYJWyJTiozvs0RI7CF)
 
 ## TigerBeetle 0.16.19
 
@@ -3218,7 +3218,7 @@ Released: 2024-10-21
 
 ### TigerTracks 🎧
 
-- [Last Train Home](https://open.spotify.com/track/0tgBtQ0ISnMQOKorrN9HLX?si=8a05ab879730455b)
+- [Last Train Home](https://open.spotify.com/track/0tgBtQ0ISnMQOKorrN9HLX)
 
 ## TigerBeetle 0.16.9
 
@@ -3502,7 +3502,7 @@ Released: 2024-09-23
 
 ### TigerTracks 🎧
 
-- [Prelude in G Major](https://open.spotify.com/track/70FROKEHubzMxSstCgaZZl?si=5bb7f8c6decc46aa)
+- [Prelude in G Major](https://open.spotify.com/track/70FROKEHubzMxSstCgaZZl)
 
 ## TigerBeetle 0.16.2
 
@@ -3692,7 +3692,7 @@ Released: 2024-09-09
 
 ### TigerTracks 🎧
 
-- [Fire on the Mountain](https://open.spotify.com/track/4DpBfWl3q8e0gGB76lAaox?si=dc8e84acf3de464a)
+- [Fire on the Mountain](https://open.spotify.com/track/4DpBfWl3q8e0gGB76lAaox)
 
 ## TigerBeetle 0.16.0
 
@@ -3843,7 +3843,7 @@ See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2
 
 ### TigerTracks 🎧
 
-- [I Want To Break Free](https://open.spotify.com/track/7iAqvWLgZzXvH38lA06QZg?si=a5ad69b31f3a45dd)
+- [I Want To Break Free](https://open.spotify.com/track/7iAqvWLgZzXvH38lA06QZg)
 - [Used To Love Her](https://www.youtube.com/watch?v=FDIvIb06abI)
 
 ## TigerBeetle 0.15.6
@@ -3971,7 +3971,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 ### TigerTracks 🎧
 
-- [High Hopes](https://open.spotify.com/track/236mI0lz8JdQjlmijARSwY?si=38f80fc31cfc4876)
+- [High Hopes](https://open.spotify.com/track/236mI0lz8JdQjlmijARSwY)
 
 ## 2024-08-05 (No release: Queued up to improve multiversion upgrade flow)
 
@@ -4256,7 +4256,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 ### TigerTracks 🎧
 
-- [Линия жизни](https://open.spotify.com/track/2dpGc40PtSLEeNAGrTnJGI?si=9c3d6e45632147c4)
+- [Линия жизни](https://open.spotify.com/track/2dpGc40PtSLEeNAGrTnJGI)
 
 ## 2024-07-01 (No release: Queued up for upcoming multi-version binary release)
 
@@ -4293,7 +4293,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 ### TigerTracks 🎧
 
-- [Wish You Were Here](https://open.spotify.com/track/7aE5WXu5sFeNRh3Z05wwu4?si=317f6e0302cc4040)
+- [Wish You Were Here](https://open.spotify.com/track/7aE5WXu5sFeNRh3Z05wwu4)
 
 ## 2024-06-24 (No release: Queued up for upcoming multi-version binary release)
 
@@ -4337,7 +4337,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 ### TigerTracks 🎧
 
-- [On The Riverbank](https://open.spotify.com/track/0zfluauTutYrU13nEV2zyc?si=5278f387bfdd4dbc)
+- [On The Riverbank](https://open.spotify.com/track/0zfluauTutYrU13nEV2zyc)
 
 ## 2024-06-17 (No release: Queued up for upcoming multi-version binary release)
 
@@ -4712,7 +4712,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 ### TigerTracks 🎧
 
-- [The Core](https://open.spotify.com/track/62DOxN9FeTsR0J0ccnBhMu?si=5b0a7b8974d54e4d)
+- [The Core](https://open.spotify.com/track/62DOxN9FeTsR0J0ccnBhMu)
 
 ## 2024-04-22 (No release: Queued up for upcoming multi-version binary release)
 
@@ -4739,7 +4739,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
-- [TigerBeetle](https://open.spotify.com/track/66pxevn7ImjMDozcs1TE3Q?si=dfbbf7b80179481e)
+- [TigerBeetle](https://open.spotify.com/track/66pxevn7ImjMDozcs1TE3Q)
 
 ## 2024-04-15 (No release: Queued up for upcoming multi-version binary release)
 
@@ -4943,7 +4943,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 ### TigerTracks 🎧
 
-- [Immigrant Song - Live 1972](https://open.spotify.com/track/2aH2dcPnwoQwhLsXFezU2r?si=eead2c0cd17c429e)
+- [Immigrant Song - Live 1972](https://open.spotify.com/track/2aH2dcPnwoQwhLsXFezU2r)
 
 ## 2024-03-18
 
@@ -5028,7 +5028,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 ### TigerTracks 🎧
 
-- [Are You Gonna Go My Way](https://open.spotify.com/track/4LQOa4kXu0QAD88nMpr4fA?si=f7faf501919942b5)
+- [Are You Gonna Go My Way](https://open.spotify.com/track/4LQOa4kXu0QAD88nMpr4fA)
 
 ## 2024-03-11
 
@@ -5308,7 +5308,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 ### TigerTracks 🎧
 
-- [Musique à Grande Vitesse](https://open.spotify.com/album/0pmrBIfqDn65p4FX9ubqXn?si=aLliiV5dSOeeId57jtaHhw)
+- [Musique à Grande Vitesse](https://open.spotify.com/album/0pmrBIfqDn65p4FX9ubqXn)
 
 ## 2024-02-05
 
@@ -5483,7 +5483,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 ### TigerTracks 🎧
 
-- [Don't Take No For An Answer](https://youtu.be/BUDe0bJAHjY?si=_rdqeGRgRoA9HQnV)
+- [Don't Take No For An Answer](https://youtu.be/BUDe0bJAHjY)
 
 ## 2024-01-15
 
@@ -5702,7 +5702,7 @@ Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
 
 ### TigerTracks 🎧
 
-- [Concrete Reservation](https://open.spotify.com/track/1Li9HBLXG2LJSeD4fEhtcd?si=64611215922a4436)
+- [Concrete Reservation](https://open.spotify.com/track/1Li9HBLXG2LJSeD4fEhtcd)
 
 ## 2023-12-04
 
