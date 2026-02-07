@@ -37,11 +37,7 @@ test "tidy" {
 
     const paths = try list_file_paths(shell);
     for (paths) |file_path| {
-        const bytes_read = (try std.fs.cwd().readFile(file_path, file_buffer)).len;
-        if (bytes_read >= file_buffer.len - 1) return error.FileTooLong;
-        file_buffer[bytes_read] = 0;
-
-        const source_file = SourceFile{ .path = file_path, .text = file_buffer[0..bytes_read :0] };
+        const source_file = try SourceFile.read(file_path, file_buffer);
         try tidy_file(gpa, &counter, source_file, &errors);
 
         if (source_file.has_extension(".zig")) {
@@ -52,7 +48,6 @@ test "tidy" {
     dead_files_detector.finish(&errors);
 
     if (errors.count > 0) return error.Untidy;
-
     assert(errors.count == 0);
 }
 
@@ -102,6 +97,13 @@ const Errors = struct {
         errors.emit(
             "{s}:{d}: error: line exceeds 100 columns\n",
             .{ file.path, line_number },
+        );
+    }
+
+    pub fn add_trailing_whitespace(errors: *Errors, file: SourceFile, line_index: usize) void {
+        errors.emit(
+            "{s}:{d}: error: trailing whitespace\n",
+            .{ file.path, line_index + 1 },
         );
     }
 
@@ -181,6 +183,17 @@ const Errors = struct {
 const SourceFile = struct {
     path: []const u8,
     text: [:0]const u8,
+
+    // NB: The return value borrows both path and buffer.
+    fn read(path: []const u8, buffer: []u8) !SourceFile {
+        const bytes_read = (try std.fs.cwd().readFile(path, buffer)).len;
+        if (bytes_read >= buffer.len - 1) return error.FileTooLong;
+        buffer[bytes_read] = 0;
+        return .{
+            .path = path,
+            .text = buffer[0..bytes_read :0],
+        };
+    }
 
     fn has_extension(file: SourceFile, extension: []const u8) bool {
         assert(extension.len > 0);
@@ -1230,25 +1243,28 @@ const DeadFilesDetector = struct {
 };
 
 test "tidy changelog" {
-    const allocator = std.testing.allocator;
+    const gpa = std.testing.allocator;
 
-    const changelog_size_max = 1 * MiB;
-    const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
-    defer allocator.free(changelog);
+    var errors: Errors = .{};
 
-    var line_iterator = mem.splitScalar(u8, changelog, '\n');
+    const changelog_buffer = try gpa.alloc(u8, 1 * MiB);
+    defer gpa.free(changelog_buffer);
+
+    const changelog = try SourceFile.read("CHANGELOG.md", changelog_buffer);
+
+    var line_iterator = mem.splitScalar(u8, changelog.text, '\n');
     var line_index: usize = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
         if (std.mem.endsWith(u8, line, " ")) {
-            std.debug.print("CHANGELOG.md:{d} trailing whitespace", .{line_index + 1});
-            return error.TrailingWhitespace;
+            errors.add_trailing_whitespace(changelog, line_index);
         }
         const line_length = tidy_line_length(line);
         if (line_length > 100 and !tidy_line_link(line)) {
-            std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
-            return error.LineTooLong;
+            errors.add_long_line(changelog, line_index);
         }
     }
+    if (errors.count > 0) return error.Untidy;
+    assert(errors.count == 0);
 }
 
 test "tidy no large blobs" {
