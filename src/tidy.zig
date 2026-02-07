@@ -169,6 +169,13 @@ const Errors = struct {
         );
     }
 
+    pub fn add_tracking(errors: *Errors, file: SourceFile, line_index: usize) void {
+        errors.emit(
+            "{s}:{d}: error: remove '?si=...' tracking parameter from URL\n",
+            .{ file.path, line_index },
+        );
+    }
+
     fn emit(errors: *Errors, comptime fmt: []const u8, args: anytype) void {
         comptime assert(fmt[fmt.len - 1] == '\n');
         errors.count += 1;
@@ -1261,6 +1268,10 @@ test "tidy changelog" {
         const line_length = tidy_line_length(line);
         if (line_length > 100 and !tidy_line_link(line)) {
             errors.add_long_line(changelog, line_index);
+        }
+
+        if (std.mem.indexOf(u8, line, "?si=") != null) {
+            errors.add_tracking(changelog, line_index);
         }
     }
     if (errors.count > 0) return error.Untidy;
