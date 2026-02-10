@@ -1395,7 +1395,6 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
     })
 }
 
-// This is a copy of the Java testClientEvicted case.
 #[test]
 fn client_evicted() -> anyhow::Result<()> {
     const CLIENTS_MAX: usize = 64;
