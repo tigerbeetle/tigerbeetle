@@ -208,7 +208,7 @@ const SourceFile = struct {
         return std.mem.endsWith(u8, file.path, extension);
     }
 
-    // O(1), but only invoked on the cold path (when there are errors).
+    // O(N), but only invoked on the cold path (when there are errors).
     fn line_number(file: SourceFile, offset: usize) usize {
         assert(offset <= file.text.len);
         // +1: Line _index_ is zero-based, line _number_ is one-based.
