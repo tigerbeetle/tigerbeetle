@@ -5,7 +5,7 @@ use std::io::{BufRead as _, BufReader};
 use std::mem;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier, Once};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard, Once};
 
 use futures::executor::block_on;
 use futures::pin_mut;
@@ -83,7 +83,12 @@ impl TestDb {
     }
 
     /// Create a unique development-mode server for a specific test.
-    fn new_development(label: &str) -> anyhow::Result<TestDb> {
+    ///
+    /// Returns a `DevelopmentDb` that holds a mutex guard, ensuring only one
+    /// development-mode server runs at a time.
+    fn new_development(label: &str) -> anyhow::Result<DevelopmentDb> {
+        let guard = DEVELOPMENT_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
         let database_name = format!("0_0.{label}.tigerbeetle");
 
         // Always start fresh for development instances.
@@ -102,9 +107,9 @@ impl TestDb {
             .status()?;
         assert!(status.success());
 
-        let server = Self::start(&["--addresses=0", "--development", &database_name])?;
+        let db = Self::start(&["--addresses=0", "--development", &database_name])?;
 
-        Ok(server)
+        Ok(DevelopmentDb { db, _guard: guard })
     }
 
     fn start(args: &[&str]) -> anyhow::Result<TestDb> {
@@ -132,6 +137,20 @@ impl TestDb {
 
     fn address(&self) -> String {
         format!("127.0.0.1:{}", self.port)
+    }
+}
+
+/// Only one development-mode server can run at a time to avoid overloading the machine.
+static DEVELOPMENT_MUTEX: Mutex<()> = Mutex::new(());
+
+struct DevelopmentDb {
+    db: TestDb,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl DevelopmentDb {
+    fn address(&self) -> String {
+        self.db.address()
     }
 }
 
@@ -1426,6 +1445,218 @@ fn client_evicted() -> anyhow::Result<()> {
     // The original client should now be evicted.
     let result = block_on(client_evict.lookup_accounts(&[tb::id()]));
     assert_eq!(result, Err(tb::PacketStatus::ClientEvicted));
+
+    Ok(())
+}
+
+#[test]
+fn many_clients_no_deadlock() -> anyhow::Result<()> {
+    const CLIENTS_MAX: usize = 65;
+
+    block_on(async {
+        // Use a separate server to avoid evicting the shared test client.
+        let server = TestDb::new_development("many_clients_no_deadlock")?;
+        let address = server.address();
+
+        let mut clients = Vec::new();
+
+        for _ in 0..CLIENTS_MAX {
+            let client = tb::Client::new(0, &address)?;
+            clients.push(client);
+        }
+
+        use futures::stream::FuturesUnordered;
+        use futures::StreamExt;
+
+        let mut lookup_futures: FuturesUnordered<_> = clients
+            .iter()
+            .map(|client| client.lookup_accounts(&[tb::id()]))
+            .collect();
+
+        let mut i = 0;
+        while let Some(lookup) = lookup_futures.next().await {
+            eprintln!("awaiting {i}");
+            i += 1;
+            match lookup {
+                Ok(accounts) => assert_eq!(accounts.len(), 0),
+                Err(tb::PacketStatus::ClientEvicted) => {
+                    eprintln!("evicted");
+                }
+                Err(e) => panic!("unexpected error {e}"),
+            }
+        }
+
+        for client in clients {
+            let _ = client;
+        }
+
+        Ok(())
+    })
+}
+
+#[test]
+fn eviction_stress_1() -> anyhow::Result<()> {
+    const CLIENTS: usize = 65;
+    const THREADS_PER_CLIENT: usize = 4;
+    const REQUESTS_PER_THREAD: usize = 4;
+    // Many threads, lets try to minimize ram.
+    const STACK_SIZE: usize = 1024 * 64;
+
+    let server = TestDb::new_development("eviction_stress_1")?;
+    let address = server.address();
+
+    let barrier = Arc::new(Barrier::new(CLIENTS * THREADS_PER_CLIENT));
+
+    let clients: Vec<Arc<tb::Client>> = (0..CLIENTS)
+        .map(|_| Ok(Arc::new(tb::Client::new(0, &address)?)))
+        .collect::<anyhow::Result<_>>()?;
+
+    let thread_clients = clients
+        .iter()
+        .flat_map(|c| std::iter::repeat(c.clone()).take(THREADS_PER_CLIENT));
+
+    struct ThreadInput(Arc<tb::Client>, Arc<Barrier>);
+    struct ThreadResult(Vec<Result<Vec<tb::Account>, tb::PacketStatus>>);
+
+    #[derive(Default)]
+    struct Results {
+        successes: usize,
+        evictions: usize,
+        failures: usize,
+    }
+
+    let threads: Vec<std::thread::JoinHandle<ThreadResult>> = thread_clients
+        .into_iter()
+        .map(|client| {
+            let barrier = barrier.clone();
+            Ok(std::thread::Builder::new()
+                .stack_size(STACK_SIZE)
+                .spawn(|| run_thread(ThreadInput(client, barrier)))?)
+        })
+        .collect::<anyhow::Result<_>>()?;
+
+    fn run_thread(ThreadInput(client, barrier): ThreadInput) -> ThreadResult {
+        block_on(async {
+            barrier.wait();
+
+            let mut results = Vec::new();
+
+            for _ in 0..REQUESTS_PER_THREAD {
+                results.push(client.lookup_accounts(&[tb::id()]).await);
+                std::thread::yield_now();
+            }
+
+            ThreadResult(results)
+        })
+    }
+
+    let thread_results: Vec<ThreadResult> = threads
+        .into_iter()
+        .map(|handle| {
+            handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("thread panicked"))
+        })
+        .collect::<anyhow::Result<_>>()?;
+
+    assert_eq!(thread_results.len(), CLIENTS * THREADS_PER_CLIENT);
+
+    let results = thread_results
+        .iter()
+        .flat_map(|ThreadResult(results)| results)
+        .fold(Results::default(), |mut acc, result| {
+            match result {
+                Ok(accounts) => {
+                    assert_eq!(accounts.len(), 0);
+                    acc.successes += 1;
+                }
+                Err(tb::PacketStatus::ClientEvicted) => acc.evictions += 1,
+                Err(_) => acc.failures += 1,
+            }
+            acc
+        });
+
+    block_on(async {
+        for client in clients {
+            let client = Arc::try_unwrap(client).expect("arc unwrap");
+            client.close().await;
+        }
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    eprintln!(
+        "successes={} evictions={} failures={}",
+        results.successes, results.evictions, results.failures,
+    );
+
+    assert_eq!(
+        results.successes + results.evictions + results.failures,
+        CLIENTS * THREADS_PER_CLIENT * REQUESTS_PER_THREAD,
+    );
+    // This may not actually trigger eviction.
+    assert!(results.successes > 0);
+    assert_eq!(results.failures, 0);
+
+    Ok(())
+}
+
+#[test]
+fn eviction_stress_2() -> anyhow::Result<()> {
+    use futures::executor::LocalPool;
+    use futures::task::LocalSpawnExt;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    const CLIENTS: usize = 128;
+    const EVICTIONS_NEEDED: usize = 64;
+    const REQUEST_LIMIT: usize = 100;
+
+    let server = TestDb::new_development("eviction_stress_2")?;
+    let address = server.address();
+
+    let clients: Vec<Rc<tb::Client>> = (0..CLIENTS)
+        .map(|_| Ok(Rc::new(tb::Client::new(0, &address)?)))
+        .collect::<anyhow::Result<_>>()?;
+
+    let evictions = Rc::new(Cell::new(0usize));
+    let successes = Rc::new(Cell::new(0usize));
+
+    let mut pool = LocalPool::new();
+    let spawner = pool.spawner();
+
+    for client in &clients {
+        let client = client.clone();
+        let evictions = evictions.clone();
+        let successes = successes.clone();
+        spawner
+            .spawn_local(async move {
+                for _ in 0..REQUEST_LIMIT {
+                    if evictions.get() >= EVICTIONS_NEEDED {
+                        break;
+                    }
+                    match client.lookup_accounts(&[tb::id()]).await {
+                        Ok(_) => successes.set(successes.get() + 1),
+                        Err(tb::PacketStatus::ClientEvicted) => evictions.set(evictions.get() + 1),
+                        Err(e) => panic!("{e}"),
+                    }
+                }
+            })
+            .unwrap();
+    }
+
+    pool.run();
+
+    let evictions = evictions.get();
+    let successes = successes.get();
+    eprintln!("successes={successes} evictions={evictions}");
+
+    assert!(evictions >= EVICTIONS_NEEDED);
+    assert!(successes > 0);
+
+    for client in clients {
+        let client = Rc::try_unwrap(client).expect("rc unwrap");
+        block_on(client.close());
+    }
 
     Ok(())
 }
