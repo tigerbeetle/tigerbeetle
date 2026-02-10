@@ -3,7 +3,7 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## TigerBeetle 0.16.71
+## TigerBeetle 0.16.72
 
 Released: 2026-02-06
 
