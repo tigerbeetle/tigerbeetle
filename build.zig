@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) !void {
         .scripts_build = b.step("scripts:build", "Build automation scripts"),
         .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
         .vortex_build = b.step("vortex:build", "Build the Vortex"),
+        .vortex_driver_zig_build = b.step("vortex:driver:zig", "Build the Vortex Zig driver"),
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
         .test_integration = b.step("test:integration", "Run integration tests"),
@@ -226,6 +227,19 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
+    // zig build vortex:drivers:zig
+    const vortex_driver_zig = build_vortex_driver_zig(b, .{
+        .vortex_driver_zig_build = build_steps.vortex_driver_zig_build,
+    }, .{
+        .stdx_module = stdx_module,
+        .tb_client_header = tb_client.header,
+        .vsr_module = real_vsr_module,
+        .vsr_options = real_vsr_options,
+        .target = target,
+        .mode = mode,
+        .print_exe = build_options.print_exe,
+    });
+
     // zig build test -- "test filter"
     try build_test(b, .{
         .test_unit = build_steps.test_unit,
@@ -244,6 +258,7 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = test_vsr_options,
         .tigerbeetle = test_tigerbeetle,
         .tigerbeetle_previous = test_tigerbeetle_previous,
+        .vortex_driver_zig = vortex_driver_zig,
     });
 
     // zig build test:jni
@@ -298,10 +313,10 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = test_vsr_options,
         .target = target,
         .mode = mode,
-        .tb_client_header = tb_client.header,
         .print_exe = build_options.print_exe,
         .tigerbeetle = test_tigerbeetle,
         .tigerbeetle_previous = test_tigerbeetle_previous,
+        .vortex_driver_zig = vortex_driver_zig,
     });
 
     // zig build clients:$lang
@@ -862,6 +877,7 @@ fn build_test(
         vsr_options: *std.Build.Step.Options,
         tigerbeetle: std.Build.LazyPath,
         tigerbeetle_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
     },
 ) !void {
     const test_options = b.addOptions();
@@ -925,6 +941,7 @@ fn build_test(
         .vsr_options = options.vsr_options,
         .tigerbeetle = options.tigerbeetle,
         .tigerbeetle_previous = options.tigerbeetle_previous,
+        .vortex_driver_zig = options.vortex_driver_zig,
     });
 
     const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
@@ -954,10 +971,10 @@ fn build_test_integration(
         vsr_options: *std.Build.Step.Options,
         tigerbeetle: std.Build.LazyPath,
         tigerbeetle_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
     },
 ) void {
     const vortex = build_vortex_executable(b, .{
-        .tb_client_header = options.tb_client_header,
         .stdx_module = options.stdx_module,
         .target = options.target,
         .mode = options.mode,
@@ -965,6 +982,7 @@ fn build_test_integration(
         .vsr_options = options.vsr_options,
         .tigerbeetle = options.tigerbeetle,
         .tigerbeetle_previous = options.tigerbeetle_previous,
+        .vortex_driver_zig = options.vortex_driver_zig,
     });
     const vortex_artifact = b.addInstallArtifact(vortex, .{});
 
@@ -1185,7 +1203,6 @@ fn build_vortex(
         vortex_run: *std.Build.Step,
     },
     options: struct {
-        tb_client_header: std.Build.LazyPath,
         stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
@@ -1193,11 +1210,11 @@ fn build_vortex(
         mode: std.builtin.OptimizeMode,
         tigerbeetle: std.Build.LazyPath,
         tigerbeetle_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
         print_exe: bool,
     },
 ) void {
     const vortex = build_vortex_executable(b, .{
-        .tb_client_header = options.tb_client_header,
         .stdx_module = options.stdx_module,
         .vsr_module = options.vsr_module,
         .vsr_options = options.vsr_options,
@@ -1205,6 +1222,7 @@ fn build_vortex(
         .mode = options.mode,
         .tigerbeetle = options.tigerbeetle,
         .tigerbeetle_previous = options.tigerbeetle_previous,
+        .vortex_driver_zig = options.vortex_driver_zig,
     });
 
     const install_step = print_or_install(b, vortex, options.print_exe);
@@ -1218,7 +1236,6 @@ fn build_vortex(
 fn build_vortex_executable(
     b: *std.Build,
     options: struct {
-        tb_client_header: std.Build.LazyPath,
         stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
@@ -1226,8 +1243,43 @@ fn build_vortex_executable(
         mode: std.builtin.OptimizeMode,
         tigerbeetle: std.Build.LazyPath,
         tigerbeetle_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
     },
 ) *std.Build.Step.Compile {
+    const vortex_options = b.addOptions();
+    vortex_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle);
+    vortex_options.addOptionPath("driver_exe", options.vortex_driver_zig);
+
+    const vortex = b.addExecutable(.{
+        .name = "vortex",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/vortex.zig"),
+            .omit_frame_pointer = false,
+            .target = options.target,
+            .optimize = options.mode,
+        }),
+    });
+    vortex.root_module.addImport("stdx", options.stdx_module);
+    vortex.root_module.addOptions("vsr_options", options.vsr_options);
+    vortex.root_module.addOptions("vortex_options", vortex_options);
+    return vortex;
+}
+
+fn build_vortex_driver_zig(
+    b: *std.Build,
+    steps: struct {
+        vortex_driver_zig_build: *std.Build.Step,
+    },
+    options: struct {
+        tb_client_header: std.Build.LazyPath,
+        stdx_module: *std.Build.Module,
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+        print_exe: bool,
+    },
+) std.Build.LazyPath {
     const tb_client = b.addLibrary(.{
         .name = "tb_client",
         .linkage = .static,
@@ -1247,25 +1299,24 @@ fn build_vortex_executable(
         tb_client.linkSystemLibrary("advapi32");
     }
 
-    const vortex_options = b.addOptions();
-    vortex_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle);
-
-    const vortex = b.addExecutable(.{
-        .name = "vortex",
+    const vortex_driver = b.addExecutable(.{
+        .name = "vortex-driver-zig",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/vortex.zig"),
+            .root_source_file = b.path("src/testing/vortex/zig_driver.zig"),
             .omit_frame_pointer = false,
             .target = options.target,
             .optimize = options.mode,
         }),
     });
-    vortex.root_module.addImport("stdx", options.stdx_module);
-    vortex.linkLibC();
-    vortex.linkLibrary(tb_client);
-    vortex.addIncludePath(options.tb_client_header.dirname());
-    vortex.root_module.addOptions("vsr_options", options.vsr_options);
-    vortex.root_module.addOptions("vortex_options", vortex_options);
-    return vortex;
+    vortex_driver.linkLibC();
+    vortex_driver.linkLibrary(tb_client);
+    vortex_driver.addIncludePath(options.tb_client_header.dirname());
+    vortex_driver.root_module.addImport("stdx", options.stdx_module);
+    vortex_driver.root_module.addImport("vsr", options.vsr_module);
+
+    const install_step = print_or_install(b, vortex_driver, options.print_exe);
+    steps.vortex_driver_zig_build.dependOn(install_step);
+    return vortex_driver.getEmittedBin();
 }
 
 // TigerBeetle clients ship as precompiled binaries and support this closed set of targets:

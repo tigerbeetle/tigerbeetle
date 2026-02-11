@@ -50,6 +50,7 @@ const Shell = @import("../../shell.zig");
 
 const log = std.log.scoped(.supervisor);
 const tigerbeetle_exe_default: []const u8 = @import("vortex_options").tigerbeetle_exe;
+const vortex_driver_exe_default: []const u8 = @import("vortex_options").driver_exe;
 
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -651,14 +652,7 @@ const Workload = struct {
         var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
 
-        var driver_command_default_buffer: [std.fs.max_path_bytes]u8 = undefined;
-        const driver_command_default = try std.fmt.bufPrint(
-            &driver_command_default_buffer,
-            "{s} driver",
-            .{vortex_path},
-        );
-
-        const driver_command_selected = args.driver_command orelse driver_command_default;
+        const driver_command_selected = args.driver_command orelse vortex_driver_exe_default;
         log.info("launching workload with driver: {s}", .{driver_command_selected});
 
         var driver_command_arg_buffer: [std.fs.max_path_bytes]u8 = undefined;
