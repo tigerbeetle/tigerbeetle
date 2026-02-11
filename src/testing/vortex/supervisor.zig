@@ -724,8 +724,7 @@ const Workload = struct {
         if (workload.process.state != .running) return;
 
         const count = result catch |err| {
-            log.err("couldn't read from workload stdout: {}", .{err});
-            return;
+            std.debug.panic("couldn't read from workload stdout: {}", .{err});
         };
 
         workload.read_progress += count;
