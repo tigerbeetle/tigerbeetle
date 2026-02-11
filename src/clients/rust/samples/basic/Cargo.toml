@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-futures = "0.3.31"
+futures = { version = "0.3.31", default-features = false, features = ["executor"] }
 tigerbeetle.path = "../.."

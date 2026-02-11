@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 tigerbeetle.path = "../../../clients/rust"
-futures = "0.3.31"
+futures = { version = "0.3.31", default-features = false, features = ["executor"] }
 anyhow = "1.0.93"
