@@ -411,6 +411,6 @@ test "format" {
     // counts are lower.
     try std.testing.expectEqual(
         vsr.checksum(storage.memory),
-        234838825150141811691318382366967529672,
+        339529914272821912685300045374558551362,
     );
 }
