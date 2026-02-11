@@ -45,8 +45,15 @@ async fn assert_account_balances(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(main_async())
+}
+
+async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let port = std::env::var("TB_ADDRESS").unwrap_or_else(|_| "3000".to_string());
     let client = tb::Client::new(0, &port)?;
 

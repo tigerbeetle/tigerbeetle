@@ -28,4 +28,4 @@ anyhow = "1.0.93"
 
 [dev-dependencies]
 anyhow = "1.0.93"
-futures = "0.3.31"
+futures = { version = "0.3.31", default-features = false, features = ["executor"] }
