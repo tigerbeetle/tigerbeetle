@@ -798,6 +798,23 @@ pub fn CompactionType(
                 compaction.counters.dropped,
             });
 
+            compaction.grid.trace.count(
+                .{ .compaction_values_physical = .{
+                    .tree = @enumFromInt(compaction.tree.config.id),
+                } },
+                compaction.counters.out,
+            );
+            if (compaction.level_b == 0) {
+                if (compaction.table_info_a.? == .immutable) {
+                    compaction.grid.trace.count(
+                        .{ .compaction_values_logical = .{
+                            .tree = @enumFromInt(compaction.tree.config.id),
+                        } },
+                        compaction.table_info_a.?.immutable.len,
+                    );
+                }
+            }
+
             // Mark the immutable table as flushed, if we were compacting into level 0.
             if (compaction.level_b == 0) {
                 assert(!compaction.tree.table_immutable.mutability.immutable.flushed);
