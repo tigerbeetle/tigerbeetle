@@ -9,8 +9,8 @@ const binary_search = @import("lsm/binary_search.zig");
 /// Tree LSM is a sorted array with a monocle and a top hat.
 ///
 /// We want to iterate it in both directions:
-/// - For CDC, you want to learn about all new objects with timestamp>thershold.
-/// - For paginated timelines, you want to learn about past objects with timestamp<thersold.
+/// - For CDC, you want to learn about all new objects with timestamp>threshold.
+/// - For paginated timelines, you want to learn about past objects with timestamp<threshold.
 ///
 /// Sadly, this can't be implemented via just a single branch near the end of the system, we need to
 /// change a whole bunch of `<` to `>` throughout the stack.
