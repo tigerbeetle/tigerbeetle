@@ -100,10 +100,12 @@ Actions job.
 More likely, the release was partially successful: e.g., the Node.js package was uploaded, but
 uploading the Java package failed. This is not a problem --- the replica release on GitHub will remain a draft in
 this case. To retry the release, increment the version number of the latest changelog entry alongside
-any changes to fix the release process, and push the new commit to the release branch. The _old_
-version number will be irrevocably burned. There will be an intentional gap in the changelog
-sequence. When a release with the new version number is fully released, delete the draft release on
-GitHub.
+any changes to fix the release process, push the new commit to the `release` branch, and trigger a new release
+workflow (step 2). The _old_ version number will be irrevocably burned. There will be an intentional
+gap in the changelog sequence. The newly added changes in the `release` branch must be added to the
+`main` branch as well in order for CI to work correctly. From the time the release is published
+until the `main` branch is updated, all CI runs will fail. When a release with the new version number
+is fully released, delete the draft release on GitHub.
 
 It could also be the case that a release was successful, but some issue with the code is discovered
 and a quick fix is necessary. The preferred approach is to do a normal fix-forward release. While
