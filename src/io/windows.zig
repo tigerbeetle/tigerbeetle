@@ -4,6 +4,7 @@ const os = std.os;
 const posix = std.posix;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
+const ws2_32 = std.os.windows.ws2_32;
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 
@@ -39,6 +40,7 @@ pub const IO = struct {
     }
 
     pub fn deinit(self: *IO) void {
+        assert(self.io_pending == 0);
         assert(self.iocp != os.windows.INVALID_HANDLE_VALUE);
         os.windows.CloseHandle(self.iocp);
         self.iocp = os.windows.INVALID_HANDLE_VALUE;
@@ -1163,7 +1165,7 @@ pub const IO = struct {
     /// Closes a socket opened by the IO instance.
     pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
-        posix.close(socket);
+        _ = ws2_32.closesocket(socket);
     }
 
     /// Listen on the given TCP socket.
