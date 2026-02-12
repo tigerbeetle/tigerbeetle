@@ -3898,6 +3898,7 @@ pub fn ReplicaType(
             self.trace.gauge(.replica_sync_stage, @intFromEnum(self.syncing));
             self.trace.gauge(.replica_sync_op_min, self.superblock.working.vsr_state.sync_op_min);
             self.trace.gauge(.replica_sync_op_max, self.superblock.working.vsr_state.sync_op_max);
+            self.trace.gauge(.replica_commit_timestamp, self.state_machine.commit_timestamp);
             self.trace.gauge(.journal_dirty, self.journal.dirty.count);
             self.trace.gauge(.journal_faulty, self.journal.faulty.count);
             self.trace.gauge(.grid_blocks_missing, self.grid.blocks_missing.faulty_blocks.count());
@@ -5424,8 +5425,6 @@ pub fn ReplicaType(
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or
                 self.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
-
-            self.trace.gauge(.replica_commit_timestamp, self.state_machine.commit_timestamp);
 
             if (self.status == .normal and self.primary()) {
                 const pipeline_prepare = self.pipeline.queue.pop_prepare().?;
