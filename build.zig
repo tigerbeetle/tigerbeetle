@@ -156,6 +156,8 @@ pub fn build(b: *std.Build) !void {
     if (build_options.config_release_client_min == null and build_options.config_release != null) {
         @panic("must set config-release-client-min if setting config-release");
     }
+    assert((build_options.config_release == null) ==
+        (build_options.config_release_client_min == null));
 
     const target = try resolve_target(b, build_options.target);
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });

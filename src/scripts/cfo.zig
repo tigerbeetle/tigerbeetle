@@ -881,13 +881,7 @@ fn run_fuzzers_commit_info(shell: *Shell) !Commit {
         assert(commit_str.len == 40);
         break :commit_sha commit_str[0..40].*;
     };
-    const commit_timestamp = commit_timestamp: {
-        const timestamp = try shell.exec_stdout(
-            "git show -s --format=%ct {sha}",
-            .{ .sha = @as([]const u8, &commit_sha) },
-        );
-        break :commit_timestamp try std.fmt.parseInt(u64, timestamp, 10);
-    };
+    const commit_timestamp = try shell.git_commit_timestamp(&commit_sha);
     return .{ .sha = commit_sha, .timestamp = commit_timestamp };
 }
 

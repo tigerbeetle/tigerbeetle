@@ -36,10 +36,10 @@ pub fn main() !void {
     };
 
     const allocator = gpa_allocator.allocator();
-    var args_list = try std.process.argsWithAllocator(allocator);
-    defer args_list.deinit();
+    var args_iterator = try std.process.argsWithAllocator(allocator);
+    defer args_iterator.deinit();
 
-    const args = stdx.flags(&args_list, CLIArgs);
+    const args = stdx.flags(&args_iterator, CLIArgs);
 
     const cluster_id = args.@"cluster-id";
     log.info("addresses: {s}", .{args.addresses});
