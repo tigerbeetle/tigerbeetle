@@ -150,9 +150,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             release_multiversion.triple(),
         ),
         .commit_sha = cli_args.sha,
-        .commit_timestamp = stdx.InstantUnix.from_timestamp_s(
-            try shell.git_commit_timestamp(cli_args.sha),
-        ),
+        .commit_timestamp = try shell.git_commit_timestamp(cli_args.sha),
     };
 
     // Typically GitHub tag matches the release triple in the binary exactly. For exceptional

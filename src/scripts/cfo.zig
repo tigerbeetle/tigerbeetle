@@ -882,7 +882,7 @@ fn run_fuzzers_commit_info(shell: *Shell) !Commit {
         break :commit_sha commit_str[0..40].*;
     };
     const commit_timestamp = try shell.git_commit_timestamp(&commit_sha);
-    return .{ .sha = commit_sha, .timestamp = commit_timestamp };
+    return .{ .sha = commit_sha, .timestamp = commit_timestamp.to_seconds() };
 }
 
 fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {

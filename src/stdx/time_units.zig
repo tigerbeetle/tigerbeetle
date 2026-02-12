@@ -254,6 +254,10 @@ pub const InstantUnix = struct {
             datetime.millisecond,
         });
     }
+
+    pub fn to_seconds(instant: InstantUnix) u64 {
+        return @divFloor(instant.ns, std.time.ns_per_s);
+    }
 };
 
 test "InstantUnix format" {
