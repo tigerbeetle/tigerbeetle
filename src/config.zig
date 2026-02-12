@@ -21,8 +21,8 @@ const TiB = stdx.TiB;
 const BuildOptions = struct {
     config_verify: bool,
     git_commit: ?[40]u8,
-    release: ?[]const u8,
-    release_client_min: ?[]const u8,
+    release: []const u8,
+    release_client_min: []const u8,
 };
 
 // Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
@@ -276,30 +276,16 @@ pub const configs = struct {
         else
             default_production;
 
-        if (build_options.release == null and build_options.release_client_min != null) {
-            @compileError("must set release if setting release_client_min");
-        }
+        const release = vsr.ReleaseTriple.parse(build_options.release) catch {
+            @compileError("invalid release version");
+        };
 
-        if (build_options.release_client_min == null and build_options.release != null) {
-            @compileError("must set release_client_min if setting release");
-        }
+        const release_client_min = vsr.ReleaseTriple.parse(build_options.release_client_min) catch {
+            @compileError("invalid release_client_min version");
+        };
 
-        const release = if (build_options.release) |release|
-            vsr.Release.from(vsr.ReleaseTriple.parse(release) catch {
-                @compileError("invalid release version");
-            })
-        else
-            vsr.Release.minimum;
-
-        const release_client_min = if (build_options.release_client_min) |release_client_min|
-            vsr.Release.from(vsr.ReleaseTriple.parse(release_client_min) catch {
-                @compileError("invalid release_client_min version");
-            })
-        else
-            vsr.Release.minimum;
-
-        base.process.release = release;
-        base.process.release_client_min = release_client_min;
+        base.process.release = vsr.Release.from(release);
+        base.process.release_client_min = vsr.Release.from(release_client_min);
         base.process.git_commit = build_options.git_commit;
         base.process.verify = build_options.config_verify;
 

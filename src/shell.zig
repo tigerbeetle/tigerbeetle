@@ -668,6 +668,15 @@ pub fn git_env_setup(shell: *Shell, options: struct { use_hostname: bool }) !voi
     try shell.env.put("GIT_COMMITTER_EMAIL", "bot@tigerbeetle.com");
 }
 
+pub fn git_commit_timestamp(shell: *Shell, sha: []const u8) !stdx.InstantUnix {
+    assert(sha.len == 40);
+
+    const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
+    return stdx.InstantUnix.from_timestamp_s(
+        try std.fmt.parseInt(u64, timestamp_s, 10),
+    );
+}
+
 const Argv = struct {
     args: std.ArrayList([]const u8),
 

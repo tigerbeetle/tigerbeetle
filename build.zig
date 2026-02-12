@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) !void {
         .scripts_build = b.step("scripts:build", "Build automation scripts"),
         .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
         .vortex_build = b.step("vortex:build", "Build the Vortex"),
+        .vortex_driver_zig_build = b.step("vortex:driver:zig", "Build the Vortex Zig driver"),
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
         .test_integration = b.step("test:integration", "Run integration tests"),
@@ -149,6 +150,15 @@ pub fn build(b: *std.Build) !void {
         ) orelse false,
     };
 
+    if (build_options.config_release == null and build_options.config_release_client_min != null) {
+        @panic("must set config-release if setting config-release-client-min");
+    }
+    if (build_options.config_release_client_min == null and build_options.config_release != null) {
+        @panic("must set config-release-client-min if setting config-release");
+    }
+    assert((build_options.config_release == null) ==
+        (build_options.config_release_client_min == null));
+
     const target = try resolve_target(b, build_options.target);
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
 
@@ -157,8 +167,28 @@ pub fn build(b: *std.Build) !void {
         .stdx_module = stdx_module,
         .git_commit = build_options.git_commit[0..40].*,
         .config_verify = build_options.config_verify,
-        .config_release = build_options.config_release,
-        .config_release_client_min = build_options.config_release_client_min,
+        .config_release = build_options.config_release orelse "65535.0.0",
+        .config_release_client_min = build_options.config_release_client_min orelse "0.16.4",
+    });
+
+    // For integration tests and vortex, we build an independent copy of TigerBeetle with "real"
+    // config and multiversioning.
+    const vsr_options_test, const vsr_module_test = build_vsr_module(b, .{
+        .stdx_module = stdx_module,
+        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
+        .config_verify = true,
+        .config_release = "65535.0.0",
+        .config_release_client_min = "0.16.4",
+    });
+    const tigerbeetle_test_previous = download_release(b, "latest", target, mode);
+    const tigerbeetle_test = build_tigerbeetle_executable_multiversion(b, .{
+        .stdx_module = stdx_module,
+        .vsr_module = vsr_module_test,
+        .vsr_options = vsr_options_test,
+        .llvm_objcopy = build_options.llvm_objcopy,
+        .tigerbeetle_previous = tigerbeetle_test_previous,
+        .target = target,
+        .mode = mode,
     });
 
     const tb_client = build_tb_client(b, .{
@@ -199,6 +229,19 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
+    // zig build vortex:drivers:zig
+    const vortex_driver_zig = build_vortex_driver_zig(b, .{
+        .vortex_driver_zig_build = build_steps.vortex_driver_zig_build,
+    }, .{
+        .stdx_module = stdx_module,
+        .tb_client_header = tb_client.header,
+        .vsr_module_test = vsr_module_test,
+        .vsr_options_test = vsr_options_test,
+        .target = target,
+        .mode = mode,
+        .print_exe = build_options.print_exe,
+    });
+
     // zig build test -- "test filter"
     try build_test(b, .{
         .test_unit = build_steps.test_unit,
@@ -209,11 +252,15 @@ pub fn build(b: *std.Build) !void {
         .@"test" = build_steps.@"test",
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
         .llvm_objcopy = build_options.llvm_objcopy,
         .tb_client_header = tb_client.header,
         .target = target,
         .mode = mode,
+        .vsr_module_test = vsr_module_test,
+        .vsr_options_test = vsr_options_test,
+        .tigerbeetle_test = tigerbeetle_test,
+        .tigerbeetle_test_previous = tigerbeetle_test_previous,
+        .vortex_driver_zig = vortex_driver_zig,
     });
 
     // zig build test:jni
@@ -228,7 +275,7 @@ pub fn build(b: *std.Build) !void {
         .vopr_run = build_steps.vopr,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
+        .vsr_options_test = vsr_options_test,
         .target = target,
         .mode = mode,
         .print_exe = build_options.print_exe,
@@ -242,7 +289,7 @@ pub fn build(b: *std.Build) !void {
         .fuzz_build = build_steps.fuzz_build,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
+        .vsr_options_test = vsr_options_test,
         .target = target,
         .mode = mode,
         .print_exe = build_options.print_exe,
@@ -258,18 +305,20 @@ pub fn build(b: *std.Build) !void {
         .target = target,
     });
 
-    // zig build vortex
+    // zig build vortex -- supervisor --replica-count=3 --test-duration=1m
     build_vortex(b, .{
         .vortex_build = build_steps.vortex_build,
         .vortex_run = build_steps.vortex,
     }, .{
         .stdx_module = stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
+        .vsr_module_test = vsr_module_test,
+        .vsr_options_test = vsr_options_test,
         .target = target,
         .mode = mode,
-        .tb_client_header = tb_client.header,
         .print_exe = build_options.print_exe,
+        .tigerbeetle_test = tigerbeetle_test,
+        .tigerbeetle_test_previous = tigerbeetle_test_previous,
+        .vortex_driver_zig = vortex_driver_zig,
     });
 
     // zig build clients:$lang
@@ -340,8 +389,8 @@ fn build_vsr_module(b: *std.Build, options: struct {
     stdx_module: *std.Build.Module,
     git_commit: [40]u8,
     config_verify: bool,
-    config_release: ?[]const u8,
-    config_release_client_min: ?[]const u8,
+    config_release: []const u8,
+    config_release_client_min: []const u8,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
     // Ideally, we would return _just_ the module here, and keep options an implementation detail.
     // However, currently Zig makes it awkward to provide multiple entry points for a module:
@@ -352,12 +401,8 @@ fn build_vsr_module(b: *std.Build, options: struct {
     const vsr_options = b.addOptions();
     vsr_options.addOption(?[40]u8, "git_commit", options.git_commit[0..40].*);
     vsr_options.addOption(bool, "config_verify", options.config_verify);
-    vsr_options.addOption(?[]const u8, "release", options.config_release);
-    vsr_options.addOption(
-        ?[]const u8,
-        "release_client_min",
-        options.config_release_client_min,
-    );
+    vsr_options.addOption([]const u8, "release", options.config_release);
+    vsr_options.addOption([]const u8, "release_client_min", options.config_release_client_min);
 
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
@@ -827,10 +872,14 @@ fn build_test(
     options: struct {
         llvm_objcopy: ?[]const u8,
         stdx_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
         tb_client_header: std.Build.LazyPath,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        vsr_module_test: *std.Build.Module,
+        vsr_options_test: *std.Build.Step.Options,
+        tigerbeetle_test: std.Build.LazyPath,
+        tigerbeetle_test_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
     },
 ) !void {
     const test_options = b.addOptions();
@@ -862,7 +911,7 @@ fn build_test(
         .filters = b.args orelse &.{},
     });
     unit_tests.root_module.addImport("stdx", options.stdx_module);
-    unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
+    unit_tests.root_module.addOptions("vsr_options", options.vsr_options_test);
     unit_tests.root_module.addOptions("test_options", test_options);
 
     steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
@@ -890,6 +939,11 @@ fn build_test(
         .stdx_module = options.stdx_module,
         .target = options.target,
         .mode = options.mode,
+        .vsr_module_test = options.vsr_module_test,
+        .vsr_options_test = options.vsr_options_test,
+        .tigerbeetle_test = options.tigerbeetle_test,
+        .tigerbeetle_test_previous = options.tigerbeetle_test_previous,
+        .vortex_driver_zig = options.vortex_driver_zig,
     });
 
     const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
@@ -915,41 +969,31 @@ fn build_test_integration(
         stdx_module: *std.Build.Module,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        vsr_module_test: *std.Build.Module,
+        vsr_options_test: *std.Build.Step.Options,
+        tigerbeetle_test: std.Build.LazyPath,
+        tigerbeetle_test_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
     },
 ) void {
-    // For integration tests, we build an independent copy of TigerBeetle with "real" config and
-    // multiversioning.
-    const vsr_options, const vsr_module = build_vsr_module(b, .{
-        .stdx_module = options.stdx_module,
-        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
-        .config_verify = true,
-        .config_release = "65535.0.0",
-        .config_release_client_min = "0.16.4",
-    });
-    const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
-    const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
-        .stdx_module = options.stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
-        .llvm_objcopy = options.llvm_objcopy,
-        .tigerbeetle_previous = tigerbeetle_previous,
-        .target = options.target,
-        .mode = options.mode,
-    });
-
     const vortex = build_vortex_executable(b, .{
-        .tb_client_header = options.tb_client_header,
         .stdx_module = options.stdx_module,
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
         .target = options.target,
         .mode = options.mode,
+        .vsr_module_test = options.vsr_module_test,
+        .vsr_options_test = options.vsr_options_test,
+        .tigerbeetle_test = options.tigerbeetle_test,
+        .tigerbeetle_test_previous = options.tigerbeetle_test_previous,
+        .vortex_driver_zig = options.vortex_driver_zig,
     });
     const vortex_artifact = b.addInstallArtifact(vortex, .{});
 
     const integration_tests_options = b.addOptions();
-    integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
-    integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
+    integration_tests_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle_test);
+    integration_tests_options.addOptionPath(
+        "tigerbeetle_exe_past",
+        options.tigerbeetle_test_previous,
+    );
     integration_tests_options.addOptionPath("vortex_exe", vortex_artifact.emitted_bin.?);
     const integration_tests = b.addTest(.{
         .name = "test-integration",
@@ -961,7 +1005,7 @@ fn build_test_integration(
         .filters = b.args orelse &.{},
     });
     integration_tests.root_module.addImport("stdx", options.stdx_module);
-    integration_tests.root_module.addOptions("vsr_options", vsr_options);
+    integration_tests.root_module.addOptions("vsr_options", options.vsr_options_test);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
     integration_tests.addIncludePath(options.tb_client_header.dirname());
     steps.test_integration_build.dependOn(&b.addInstallArtifact(integration_tests, .{}).step);
@@ -1055,7 +1099,7 @@ fn build_vopr(
     },
     options: struct {
         stdx_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
+        vsr_options_test: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
         print_exe: bool,
@@ -1079,7 +1123,7 @@ fn build_vopr(
     });
     vopr.stack_size = 4 * MiB;
     vopr.root_module.addImport("stdx", options.stdx_module);
-    vopr.root_module.addOptions("vsr_options", options.vsr_options);
+    vopr.root_module.addOptions("vsr_options", options.vsr_options_test);
     vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
     // Ensure that we get stack traces even in release builds.
     vopr.root_module.omit_frame_pointer = false;
@@ -1098,7 +1142,7 @@ fn build_fuzz(
     },
     options: struct {
         stdx_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
+        vsr_options_test: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
         print_exe: bool,
@@ -1114,7 +1158,7 @@ fn build_fuzz(
     });
     fuzz_exe.stack_size = 4 * MiB;
     fuzz_exe.root_module.addImport("stdx", options.stdx_module);
-    fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options);
+    fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options_test);
     fuzz_exe.root_module.omit_frame_pointer = false;
     steps.fuzz_build.dependOn(print_or_install(b, fuzz_exe, options.print_exe));
 
@@ -1164,22 +1208,26 @@ fn build_vortex(
         vortex_run: *std.Build.Step,
     },
     options: struct {
-        tb_client_header: std.Build.LazyPath,
         stdx_module: *std.Build.Module,
-        vsr_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
+        vsr_module_test: *std.Build.Module,
+        vsr_options_test: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        tigerbeetle_test: std.Build.LazyPath,
+        tigerbeetle_test_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
         print_exe: bool,
     },
 ) void {
     const vortex = build_vortex_executable(b, .{
-        .tb_client_header = options.tb_client_header,
         .stdx_module = options.stdx_module,
-        .vsr_module = options.vsr_module,
-        .vsr_options = options.vsr_options,
+        .vsr_module_test = options.vsr_module_test,
+        .vsr_options_test = options.vsr_options_test,
         .target = options.target,
         .mode = options.mode,
+        .tigerbeetle_test = options.tigerbeetle_test,
+        .tigerbeetle_test_previous = options.tigerbeetle_test_previous,
+        .vortex_driver_zig = options.vortex_driver_zig,
     });
 
     const install_step = print_or_install(b, vortex, options.print_exe);
@@ -1193,14 +1241,50 @@ fn build_vortex(
 fn build_vortex_executable(
     b: *std.Build,
     options: struct {
-        tb_client_header: std.Build.LazyPath,
         stdx_module: *std.Build.Module,
-        vsr_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
+        vsr_module_test: *std.Build.Module,
+        vsr_options_test: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
+        tigerbeetle_test: std.Build.LazyPath,
+        tigerbeetle_test_previous: std.Build.LazyPath,
+        vortex_driver_zig: std.Build.LazyPath,
     },
 ) *std.Build.Step.Compile {
+    const vortex_options = b.addOptions();
+    vortex_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle_test);
+    vortex_options.addOptionPath("driver_exe", options.vortex_driver_zig);
+
+    const vortex = b.addExecutable(.{
+        .name = "vortex",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/vortex.zig"),
+            .omit_frame_pointer = false,
+            .target = options.target,
+            .optimize = options.mode,
+        }),
+    });
+    vortex.root_module.addImport("stdx", options.stdx_module);
+    vortex.root_module.addOptions("vsr_options", options.vsr_options_test);
+    vortex.root_module.addOptions("vortex_options", vortex_options);
+    return vortex;
+}
+
+fn build_vortex_driver_zig(
+    b: *std.Build,
+    steps: struct {
+        vortex_driver_zig_build: *std.Build.Step,
+    },
+    options: struct {
+        tb_client_header: std.Build.LazyPath,
+        stdx_module: *std.Build.Module,
+        vsr_module_test: *std.Build.Module,
+        vsr_options_test: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+        print_exe: bool,
+    },
+) std.Build.LazyPath {
     const tb_client = b.addLibrary(.{
         .name = "tb_client",
         .linkage = .static,
@@ -1213,39 +1297,31 @@ fn build_vortex_executable(
     tb_client.linkLibC();
     tb_client.pie = true;
     tb_client.bundle_compiler_rt = true;
-    tb_client.root_module.addImport("vsr", options.vsr_module);
-    tb_client.root_module.addOptions("vsr_options", options.vsr_options);
+    tb_client.root_module.addImport("vsr", options.vsr_module_test);
+    tb_client.root_module.addOptions("vsr_options", options.vsr_options_test);
     if (options.target.result.os.tag == .windows) {
         tb_client.linkSystemLibrary("ws2_32");
         tb_client.linkSystemLibrary("advapi32");
     }
 
-    const tigerbeetle = build_tigerbeetle_executable(b, .{
-        .vsr_module = options.vsr_module,
-        .vsr_options = options.vsr_options,
-        .target = options.target,
-        .mode = options.mode,
-    });
-
-    const vortex_options = b.addOptions();
-    vortex_options.addOptionPath("tigerbeetle_exe", tigerbeetle.getEmittedBin());
-
-    const vortex = b.addExecutable(.{
-        .name = "vortex",
+    const vortex_driver = b.addExecutable(.{
+        .name = "vortex-driver-zig",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/vortex.zig"),
+            .root_source_file = b.path("src/testing/vortex/zig_driver.zig"),
             .omit_frame_pointer = false,
             .target = options.target,
             .optimize = options.mode,
         }),
     });
-    vortex.root_module.addImport("stdx", options.stdx_module);
-    vortex.linkLibC();
-    vortex.linkLibrary(tb_client);
-    vortex.addIncludePath(options.tb_client_header.dirname());
-    vortex.root_module.addOptions("vsr_options", options.vsr_options);
-    vortex.root_module.addOptions("vortex_options", vortex_options);
-    return vortex;
+    vortex_driver.linkLibC();
+    vortex_driver.linkLibrary(tb_client);
+    vortex_driver.addIncludePath(options.tb_client_header.dirname());
+    vortex_driver.root_module.addImport("stdx", options.stdx_module);
+    vortex_driver.root_module.addImport("vsr", options.vsr_module_test);
+
+    const install_step = print_or_install(b, vortex_driver, options.print_exe);
+    steps.vortex_driver_zig_build.dependOn(install_step);
+    return vortex_driver.getEmittedBin();
 }
 
 // TigerBeetle clients ship as precompiled binaries and support this closed set of targets:

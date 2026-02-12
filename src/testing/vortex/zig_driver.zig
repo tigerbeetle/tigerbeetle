@@ -1,6 +1,6 @@
 const std = @import("std");
 const stdx = @import("stdx");
-const vsr = @import("../../vsr.zig");
+const vsr = @import("vsr");
 const constants = vsr.constants;
 const Operation = vsr.tigerbeetle.Operation;
 
@@ -28,10 +28,21 @@ pub const CLIArgs = struct {
     addresses: []const u8,
 };
 
-pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
-    log.info("addresses: {s}", .{args.addresses});
+pub fn main() !void {
+    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    defer switch (gpa_allocator.deinit()) {
+        .ok => {},
+        .leak => @panic("memory leak"),
+    };
+
+    const allocator = gpa_allocator.allocator();
+    var args_iterator = try std.process.argsWithAllocator(allocator);
+    defer args_iterator.deinit();
+
+    const args = stdx.flags(&args_iterator, CLIArgs);
 
     const cluster_id = args.@"cluster-id";
+    log.info("addresses: {s}", .{args.addresses});
 
     var tb_client: c.tb_client_t = undefined;
     const init_status = c.tb_client_init(

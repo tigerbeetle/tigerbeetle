@@ -55,7 +55,8 @@ const VersionInfo = struct {
     tag: []const u8,
     // The git tag/GitHub release to download to include in a multiversion binary.
     tag_multiversion: []const u8,
-    sha: []const u8,
+    commit_sha: []const u8,
+    commit_timestamp: stdx.InstantUnix,
 };
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
@@ -148,7 +149,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             "{[major]}.{[minor]}.{[patch]}",
             release_multiversion.triple(),
         ),
-        .sha = cli_args.sha,
+        .commit_sha = cli_args.sha,
+        .commit_timestamp = try shell.git_commit_timestamp(cli_args.sha),
     };
 
     // Typically GitHub tag matches the release triple in the binary exactly. For exceptional
@@ -156,7 +158,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     // here and remove the assert.
     assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
 
-    log.info("release={s} sha={s}", .{ version_info.release_triple, version_info.sha });
+    log.info("release={s} sha={s}", .{ version_info.release_triple, version_info.commit_sha });
     if (!std.mem.eql(u8, version_info.release_triple, version_info.tag)) {
         log.warn("tag != release, tag={s}", .{version_info.tag});
     }
@@ -192,6 +194,17 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
             try build_tigerbeetle_target(shell, info, dist_dir_tigerbeetle, false, "x86_64-linux");
         } else {
             try build_tigerbeetle(shell, info, dist_dir_tigerbeetle);
+        }
+
+        var dist_dir_vortex = try dist_dir.makeOpenPath("vortex", .{});
+        defer dist_dir_vortex.close();
+
+        const vortex_targets = .{
+            "x86_64-linux",
+            "aarch64-linux",
+        };
+        inline for (vortex_targets) |target| {
+            try build_vortex_driver_target(shell, info, dist_dir_vortex, target);
         }
     }
 
@@ -258,18 +271,9 @@ fn build_tigerbeetle_target(
     comptime target: []const u8,
 ) !void {
     var section = try shell.open_section(
-        "build tigerbeetle - " ++ target ++ " debug: " ++ if (debug) "true" else "false",
+        "build tigerbeetle - " ++ target ++ " debug=" ++ if (debug) "true" else "false",
     );
     defer section.close();
-
-    const commit_date_time = commit_date_time: {
-        const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
-            .sha = info.sha,
-        });
-        break :commit_date_time stdx.InstantUnix.from_timestamp_s(
-            try std.fmt.parseInt(u64, timestamp_s, 10),
-        );
-    };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`.
@@ -284,7 +288,7 @@ fn build_tigerbeetle_target(
     , .{
         .target = target,
         .release = if (debug) "false" else "true",
-        .commit = info.sha,
+        .commit = info.commit_sha,
         .release_triple = info.release_triple,
         .release_triple_client_min = info.release_triple_client_min,
         .tag_multiversion = info.tag_multiversion,
@@ -321,8 +325,45 @@ fn build_tigerbeetle_target(
         zip_file,
         .{
             .executable_name = exe_name,
-            .executable_mtime = commit_date_time,
+            .executable_mtime = info.commit_timestamp,
             .max_size = multiversion.multiversion_binary_size_max,
+        },
+    );
+}
+
+fn build_vortex_driver_target(
+    shell: *Shell,
+    info: VersionInfo,
+    dist_dir: std.fs.Dir,
+    comptime target: []const u8,
+) !void {
+    var section = try shell.open_section("build vortex:driver:zig - " ++ target);
+    defer section.close();
+
+    try shell.exec_zig(
+        \\build vortex:driver:zig
+        \\    -Dtarget={target}
+        \\    -Dconfig-release={release_triple}
+        \\    -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .target = target,
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
+
+    const zip_name = try shell.fmt("vortex-driver-zig-{s}.zip", .{target});
+    const zip_file = try dist_dir.createFile(zip_name, .{ .truncate = false, .exclusive = true });
+    defer zip_file.close();
+
+    try shell.pushd("./zig-out/bin");
+    defer shell.popd();
+
+    try shell.zip_executable(
+        zip_file,
+        .{
+            .executable_name = "vortex-driver-zig",
+            .executable_mtime = info.commit_timestamp,
+            .max_size = 16 * MiB,
         },
     );
 }
@@ -404,7 +445,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         \\Please see
         \\<https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/go>
         \\for documentation and contributions.
-    , .{ .sha = info.sha });
+    , .{ .sha = info.commit_sha });
     try dist_dir.writeFile(.{ .sub_path = "README.md", .data = readme });
 }
 
@@ -665,7 +706,7 @@ fn publish(
             \\  --notes {notes}
             \\  {tag}
         , .{
-            .sha = info.sha,
+            .sha = info.commit_sha,
             .notes = notes,
             .tag = info.tag,
         });
@@ -681,6 +722,8 @@ fn publish(
             "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
             "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows-debug.zip",
             "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-windows.zip",
+            "zig-out/dist/vortex/vortex-driver-zig-aarch64-linux.zip",
+            "zig-out/dist/vortex/vortex-driver-zig-x86_64-linux.zip",
         };
         try shell.exec("gh release upload {tag} {artifacts}", .{
             .tag = info.tag,
@@ -770,15 +813,15 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     try shell.exec("git commit --message {message}", .{
         .message = try shell.fmt(
             "Autogenerated commit from tigerbeetle/tigerbeetle@{s}",
-            .{info.sha},
+            .{info.commit_sha},
         ),
     });
 
-    try shell.exec("git tag tigerbeetle-{sha}", .{ .sha = info.sha });
+    try shell.exec("git tag tigerbeetle-{sha}", .{ .sha = info.commit_sha });
     try shell.exec("git tag v{tag}", .{ .tag = info.tag });
 
     try shell.exec("git push origin main", .{});
-    try shell.exec("git push origin tigerbeetle-{sha}", .{ .sha = info.sha });
+    try shell.exec("git push origin tigerbeetle-{sha}", .{ .sha = info.commit_sha });
     try shell.exec("git push origin v{tag}", .{ .tag = info.tag });
 }
 
@@ -997,7 +1040,7 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
     try shell.exec("git commit --allow-empty --message {message}", .{
         .message = try shell.fmt(
             "Autogenerated commit from tigerbeetle/tigerbeetle@{s}",
-            .{info.sha},
+            .{info.commit_sha},
         ),
     });
 
