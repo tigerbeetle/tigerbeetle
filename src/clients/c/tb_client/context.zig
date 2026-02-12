@@ -23,7 +23,9 @@ const Message = MessagePool.Message;
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
 
-const io_thread_stack_size = 512 * 1024;
+const KiB = stdx.KiB;
+
+const io_thread_stack_size = 512 * KiB;
 
 pub const InitParameters = extern struct {
     cluster_id: u128,
