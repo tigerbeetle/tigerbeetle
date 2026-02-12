@@ -57,6 +57,7 @@ fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed={libpath}");
 
     if windows {
+        println!("cargo:rustc-link-lib=ntdll");
         // tb_client needs access to the random number generator in here.
         println!("cargo:rustc-link-lib=advapi32");
     }
