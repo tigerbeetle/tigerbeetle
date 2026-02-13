@@ -287,10 +287,6 @@ pub const IO = struct {
         }
     }
 
-    pub fn cancel_all(_: *IO) void {
-        // TODO Cancel in-flight async IO and wait for all completions.
-    }
-
     pub const CancelError = error{
         NotRunning,
         NotInterruptable,
