@@ -501,6 +501,8 @@ pub const EventMetric = union(enum) {
     clock_delta_ns,
     message_bus_connections: struct { peer: std.meta.Tag(Peer) },
     message_bus_connections_max,
+    compaction_values_physical: struct { tree: TreeEnum },
+    compaction_values_logical: struct { tree: TreeEnum },
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_count(TreeEnum),
@@ -532,6 +534,8 @@ pub const EventMetric = union(enum) {
         .clock_delta_ns = 1,
         .message_bus_connections = enum_count(Peer),
         .message_bus_connections_max = 1,
+        .compaction_values_physical = enum_count(TreeEnum),
+        .compaction_values_logical = enum_count(TreeEnum),
     });
 
     pub const slot_bases = array: {
@@ -554,7 +558,11 @@ pub const EventMetric = union(enum) {
 
     pub fn slot(event: *const EventMetric) u32 {
         switch (event.*) {
-            inline .table_count_visible, .table_count_visible_max => |data| {
+            inline .table_count_visible,
+            .table_count_visible_max,
+            .compaction_values_physical,
+            .compaction_values_logical,
+            => |data| {
                 const tree_id = index_from_enum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
@@ -644,6 +652,12 @@ test "EventMetric slot doesn't have collisions" {
                 .tree = g.enum_value(TreeEnum),
             } },
             .table_count_visible_max => .{ .table_count_visible_max = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .compaction_values_physical => .{ .compaction_values_physical = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .compaction_values_logical => .{ .compaction_values_logical = .{
                 .tree = g.enum_value(TreeEnum),
             } },
             .replica_messages_in => .{ .replica_messages_in = .{
