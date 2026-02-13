@@ -24,7 +24,7 @@ const events_buffer_size_max = size: {
 
 pub const CLIArgs = struct {
     @"--": void,
-    @"cluster-id": u128,
+    cluster: u128,
     addresses: []const u8,
 };
 
@@ -40,14 +40,12 @@ pub fn main() !void {
     defer args_iterator.deinit();
 
     const args = stdx.flags(&args_iterator, CLIArgs);
-
-    const cluster_id = args.@"cluster-id";
     log.info("addresses: {s}", .{args.addresses});
 
     var tb_client: c.tb_client_t = undefined;
     const init_status = c.tb_client_init(
         &tb_client,
-        std.mem.asBytes(&cluster_id),
+        std.mem.asBytes(&args.cluster),
         args.addresses.ptr,
         @intCast(args.addresses.len),
         0,

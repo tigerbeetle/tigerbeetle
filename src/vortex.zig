@@ -31,7 +31,7 @@ pub const CLIArgs = union(enum) {
 };
 
 const WorkloadArgs = struct {
-    cluster_id: u128,
+    cluster: u128,
     addresses: []const u8,
     driver_command: []const u8,
 };
@@ -84,10 +84,10 @@ fn start_driver(allocator: std.mem.Allocator, args: WorkloadArgs) !std.process.C
         try argv.append(part);
     }
 
-    var cluster_id_argument: [32]u8 = undefined;
-    const cluster_id = try std.fmt.bufPrint(cluster_id_argument[0..], "{d}", .{args.cluster_id});
+    var cluster_argument: [32]u8 = undefined;
+    const cluster = try std.fmt.bufPrint(cluster_argument[0..], "{d}", .{args.cluster});
 
-    try argv.append(cluster_id);
+    try argv.append(cluster);
     try argv.append(args.addresses);
 
     var child = std.process.Child.init(argv.items, allocator);

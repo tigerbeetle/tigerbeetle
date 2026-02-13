@@ -672,7 +672,7 @@ const Workload = struct {
         const argv = &.{
             vortex_path,
             "workload",
-            std.fmt.comptimePrint("--cluster-id={d}", .{constants.vortex.cluster_id}),
+            std.fmt.comptimePrint("--cluster={d}", .{constants.vortex.cluster_id}),
             arg_addresses,
             driver_command_arg,
         };
