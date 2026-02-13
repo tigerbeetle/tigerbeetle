@@ -6,7 +6,7 @@ const Elem = std.meta.Elem;
 
 const binary_search = @import("lsm/binary_search.zig");
 
-/// Tree LSM is a sorted array with a monocle and a top hat.
+/// LSM Tree is a sorted array with a monocle and a top hat.
 ///
 /// We want to iterate it in both directions:
 /// - For CDC, you want to learn about all new objects with timestamp>threshold.
