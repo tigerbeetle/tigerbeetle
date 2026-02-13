@@ -3,6 +3,44 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.73
+
+Released: 2026-02-13
+
+### Safety And Performance
+
+- [#3505](https://github.com/tigerbeetle/tigerbeetle/pull/3505)
+
+  Making AOF recovery deterministic, and prevent interference from non-aof-recovery requests.
+
+- [#3508](https://github.com/tigerbeetle/tigerbeetle/pull/3508),
+  [#3516](https://github.com/tigerbeetle/tigerbeetle/pull/3516)
+
+  Improve Rust client testing.
+
+### Internals
+
+- [#3511](https://github.com/tigerbeetle/tigerbeetle/pull/3511)
+
+  Strip tracking parameters from Spotify links.
+
+- [#3517](https://github.com/tigerbeetle/tigerbeetle/pull/3517)
+
+  Include vortex zig driver executable in release artifacts,
+  in preparation for multiversion testing in vortex.
+
+- [#3522](https://github.com/tigerbeetle/tigerbeetle/pull/3522)
+
+  Add metrics tracking LSM write amplification.
+
+- [#3523](https://github.com/tigerbeetle/tigerbeetle/pull/3523)
+
+  Reduce the frequency of metrics tracking in the message bus.
+
+### TigerTracks 🎧
+
+- [Never Gonna Give You Up](https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ)
+
 ## TigerBeetle 0.16.72
 
 Released: 2026-02-06
