@@ -264,7 +264,9 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.process == .replica);
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
+        }
 
+        pub fn trace_gauge(bus: *MessageBus) void {
             if (bus.trace) |trace| {
                 var counts = std.enums.EnumArray(std.meta.Tag(vsr.Peer), u32).initFill(0);
                 for (bus.connections) |*connection| {

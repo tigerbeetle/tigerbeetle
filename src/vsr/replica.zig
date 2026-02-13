@@ -3924,6 +3924,8 @@ pub fn ReplicaType(
                 self.superblock.working.vsr_state.checkpoint.manifest_block_count,
             );
 
+            self.message_bus.trace_gauge();
+
             self.trace.emit_metrics();
         }
 
