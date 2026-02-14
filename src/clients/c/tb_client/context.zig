@@ -23,6 +23,10 @@ const Message = MessagePool.Message;
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
 
+const KiB = stdx.KiB;
+
+const io_thread_stack_size = 512 * KiB;
+
 pub const InitParameters = extern struct {
     cluster_id: u128,
     client_id: u128,
@@ -351,7 +355,11 @@ pub fn ContextType(
             context.client.register(client_register_callback, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
-            context.thread = std.Thread.spawn(.{}, Context.io_thread, .{context}) catch |err| {
+            context.thread = std.Thread.spawn(
+                .{ .stack_size = io_thread_stack_size },
+                Context.io_thread,
+                .{context},
+            ) catch |err| {
                 log.err("{}: failed to spawn thread: {s}", .{
                     context.client_id,
                     @errorName(err),
