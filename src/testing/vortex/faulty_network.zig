@@ -305,8 +305,9 @@ const Connection = struct {
             });
             return connection.try_close();
         };
-        connection.remote_fd = remote_fd;
+        log.debug("accepted ({d},{d})", .{ connection.replica_index, connection.connection_index });
 
+        connection.remote_fd = remote_fd;
         connection.state = .connecting;
 
         connection.io.connect(
