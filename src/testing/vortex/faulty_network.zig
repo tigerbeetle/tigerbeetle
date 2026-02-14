@@ -90,6 +90,8 @@ const Pipe = struct {
         pipe.recv_size = 0;
         pipe.send_size = 0;
 
+        log.debug("recv start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
+
         // We don't need to recv a certain count of bytes, because whatever we recv, we send along.
         pipe.connection.io.recv(
             *Pipe,
@@ -104,9 +106,14 @@ const Pipe = struct {
     fn on_recv(pipe: *Pipe, _: *IO.Completion, result: IO.RecvError!usize) void {
         assert(pipe.recv_size == 0);
         assert(pipe.send_size == 0);
+        assert(pipe.connection.state != .free);
+        assert(pipe.connection.state != .accepting);
+        assert(pipe.connection.state != .connecting);
 
         assert(pipe.status == .recv);
         pipe.status = .idle;
+
+        log.debug("recv done ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
 
         if (pipe.connection.state != .proxying) return;
 
@@ -188,6 +195,9 @@ const Pipe = struct {
 
     fn on_timeout(pipe: *Pipe, _: *IO.Completion, result: IO.TimeoutError!void) void {
         assert(pipe.status == .send_timeout);
+        assert(pipe.connection.state != .free);
+        assert(pipe.connection.state != .accepting);
+        assert(pipe.connection.state != .connecting);
         pipe.status = .idle;
 
         if (pipe.connection.state != .proxying) return;
@@ -203,6 +213,8 @@ const Pipe = struct {
         assert(pipe.status == .idle);
         pipe.status = .send;
 
+        log.debug("send start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
+
         pipe.io.send(
             *Pipe,
             pipe,
@@ -215,9 +227,14 @@ const Pipe = struct {
 
     fn on_send(pipe: *Pipe, _: *IO.Completion, result: IO.SendError!usize) void {
         assert(pipe.send_size < pipe.recv_size);
+        assert(pipe.connection.state != .free);
+        assert(pipe.connection.state != .accepting);
+        assert(pipe.connection.state != .connecting);
 
         assert(pipe.status == .send);
         pipe.status = .idle;
+
+        log.debug("send done ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
 
         if (pipe.connection.state != .proxying) return;
 
