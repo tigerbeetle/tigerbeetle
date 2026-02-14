@@ -259,6 +259,11 @@ pub const pipeline_prepare_queue_max: u32 = config.cluster.pipeline_prepare_queu
 pub const pipeline_request_queue_max: u32 = (clients_max + 1) -| pipeline_prepare_queue_max;
 
 comptime {
+    // Prepare queue capacity must be aligned with a half-bar boundary. This is to ensure that
+    // a checkpoint is marked durable at a half-bar boundary. This in turn ensures that there are
+    // no active free-set reservations held by compactions while the checkpoint is being marked as
+    // durable (see `mark_checkpoint_durable` in free_set.zig).
+    assert(pipeline_prepare_queue_max % @divExact(lsm_compaction_ops, 2) == 0);
     // A prepare-queue capacity larger than (clients_max + 1) is wasted.
     assert(pipeline_prepare_queue_max <= clients_max + 1);
     // A total queue capacity larger than (clients_max + 1) is wasted.
