@@ -16,7 +16,7 @@ const binary_search = @import("lsm/binary_search.zig");
 /// change a whole bunch of `<` to `>` throughout the stack.
 ///
 /// Direction encapsulate the logic of "if ascending use < if descending use >". The mnemonic is
-/// that usual comparison is horizontal along a number line, but Direciton-aware is vertical.
+/// that usual comparison is horizontal along a number line, but Direction-aware is vertical.
 ///
 /// In other words, `key_min` and `key_max` track natural ordering, while `key_lower` and
 /// `key_upper` are direction-aware.
