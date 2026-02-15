@@ -87,12 +87,20 @@ pub fn main() !void {
             packet.user_tag = 0;
             packet.status = c.TB_PACKET_OK;
 
+            log.debug("operation={s} submit...", .{
+                @tagName(operation),
+            });
+
             const client_status = c.tb_client_submit(&tb_client, &packet);
             assert(client_status == c.TB_CLIENT_OK);
 
             while (!context.completed) {
                 context.condition.wait(&context.lock);
             }
+
+            log.debug("operation={s} complete", .{
+                @tagName(operation),
+            });
         }
 
         write_results(stdout, operation, context.result[0..context.result_size]) catch |err| {

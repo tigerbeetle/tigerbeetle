@@ -129,7 +129,10 @@ fn execute(command: Command, driver: *const DriverStdio) !?Result {
     switch (command) {
         inline else => |events, tag| {
             const operation = comptime operation_from_command(tag);
+            log.debug("send {s}", .{@tagName(operation)});
             try send(driver, operation, events);
+            log.debug("receive {s}", .{@tagName(operation)});
+            defer log.debug("received {s}", .{@tagName(operation)});
 
             const buffer = @field(result_buffers, @tagName(tag))[0..events.len];
             const results = receive(driver, operation, buffer) catch |err| {

@@ -1065,6 +1065,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer == null);
             assert(connection.send_queue.empty());
             assert(connection.fd == null);
+            assert(!bus.connections_suspended.contains(connection));
 
             result catch |err| {
                 log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
