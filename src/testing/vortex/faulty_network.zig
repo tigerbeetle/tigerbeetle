@@ -555,6 +555,20 @@ pub const Network = struct {
         allocator.destroy(network);
     }
 
+    pub fn fail(network: *const Network) void {
+        for (network.proxies) |*proxy| {
+            for (&proxy.connections) |*connection| {
+                log.debug("({d},{d}): state={s} origin_to_remote={s} remote_to_origin_pipe={s}", .{
+                    connection.replica_index,
+                    connection.connection_index,
+                    @tagName(connection.state),
+                    @tagName(connection.origin_to_remote_pipe.status),
+                    @tagName(connection.remote_to_origin_pipe.status),
+                });
+            }
+        }
+    }
+
     pub fn tick(network: *Network) void {
         for (network.proxies, 0..) |*proxy, replica_index| {
             for (&proxy.connections) |*connection| {

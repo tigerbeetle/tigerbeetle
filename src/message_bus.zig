@@ -133,6 +133,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     .send_queue = .{
                         .buffer = send_queue_buffer[index * send_queue_max ..][0..send_queue_max],
                     },
+                    .index = index,
                 };
             }
 
@@ -586,6 +587,8 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(!connection.recv_submitted);
             connection.recv_submitted = true;
 
+            log.debug("{}: recv[{}]: peer={}", .{bus.id, connection.index, connection.peer});
+
             bus.io.recv(
                 *MessageBus,
                 bus,
@@ -626,6 +629,8 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bytes_received <= constants.message_size_max);
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
+
+            log.debug("{}: recv done[{}]: peer={} received={d}", .{bus.id, connection.index, connection.peer, bytes_received});
 
             switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
@@ -771,6 +776,11 @@ pub fn MessageBusType(comptime IO: type) type {
             }
 
             connection.peer = peer;
+
+            for (bus.connections, 0..) |*c, i| {
+                assert(c.index == i);
+                log.debug("{}: status[{d}]: peer={} state={s}", .{ bus.id, i, c.peer, @tagName(c.state) });
+            }
 
             return true;
         }
@@ -1107,6 +1117,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .send_queue = .{
                     .buffer = connection.send_queue.buffer,
                 },
+                .index = connection.index,
             };
         }
 
@@ -1175,6 +1186,7 @@ pub fn MessageBusType(comptime IO: type) type {
             /// connection. If the peer changes unexpectedly (for example, due to a misdirected
             /// message), we terminate the connection.
             peer: vsr.Peer = .unknown,
+            index: usize,
 
             state: enum {
                 /// The connection is not in use, with peer set to `.unknown`.

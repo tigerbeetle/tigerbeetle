@@ -296,6 +296,7 @@ const Supervisor = struct {
                 const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
 
                 if (no_finished_requests) {
+                    supervisor.network.fail();
                     log.err("liveness check: no finished requests after {d} seconds", .{
                         constants.vortex.liveness_requirement_seconds,
                     });
