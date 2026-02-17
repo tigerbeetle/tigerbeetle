@@ -630,7 +630,16 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
 
-            log.debug("{}: recv done[{}]: peer={} received={d}", .{bus.id, connection.index, connection.peer, bytes_received});
+            log.debug("{}: recv done[{}]: peer={} received={d} ({}, {}, {}, {})", .{
+                bus.id,
+                connection.index,
+                connection.peer,
+                bytes_received,
+                connection.recv_buffer.?.suspend_size,
+                connection.recv_buffer.?.process_size,
+                connection.recv_buffer.?.advance_size,
+                connection.recv_buffer.?.receive_size,
+            });
 
             switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
@@ -640,6 +649,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 // can send back to them.
                 .replica => {
                     while (connection.recv_buffer.?.next_header()) |header| {
+                        log.debug("{}: on_recv[{}]: {}", .{bus.id, connection.index, header});
                         if (bus.recv_update_peer(connection, header.peer_type())) {
                             connection.recv_buffer.?.suspend_message(&header);
                         } else {
