@@ -211,7 +211,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .replicas = replicas[0..args.replica_count],
         .workload = workload,
         .prng = &prng,
-        .test_duration = .minutes(5),//args.test_duration,
+        .test_duration = args.test_duration,
         .faulty = !args.disable_faults,
     });
     defer supervisor.destroy(allocator);
