@@ -92,7 +92,7 @@ const Pipe = struct {
         pipe.recv_size = 0;
         pipe.send_size = 0;
 
-        log.debug("recv start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
+        //log.debug("recv start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
 
         // We don't need to recv a certain count of bytes, because whatever we recv, we send along.
         pipe.connection.io.recv(
@@ -126,7 +126,7 @@ const Pipe = struct {
             return pipe.connection.try_close();
         };
 
-        log.debug("recv done ({d},{d}) bytes={}", .{ pipe.connection.replica_index, pipe.connection.connection_index, recv_size });
+        //log.debug("recv done ({d},{d}) bytes={}", .{ pipe.connection.replica_index, pipe.connection.connection_index, recv_size });
 
         pipe.recv_size = @intCast(recv_size);
         if (pipe.recv_size == 0) {
@@ -215,7 +215,7 @@ const Pipe = struct {
         assert(pipe.status == .idle);
         pipe.status = .send;
 
-        log.debug("send start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
+        //log.debug("send start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
 
         pipe.io.send(
             *Pipe,
@@ -248,7 +248,7 @@ const Pipe = struct {
         };
         pipe.send_size += @intCast(send_size);
 
-        log.debug("send done ({d},{d}) bytes={d}", .{ pipe.connection.replica_index, pipe.connection.connection_index, send_size });
+        //log.debug("send done ({d},{d}) bytes={d}", .{ pipe.connection.replica_index, pipe.connection.connection_index, send_size });
 
         if (pipe.send_size < pipe.recv_size) {
             pipe.send();
