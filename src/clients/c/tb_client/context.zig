@@ -984,8 +984,13 @@ pub fn ContextType(
             assert(thread_caller == .user);
 
             const self: *Context = @ptrCast(@alignCast(context));
+
+            // Copy the thread handle here, since stopping the I/O thread deinitializes
+            // the context and invalidates the `self` pointer.
+            const thread = self.thread;
+            defer thread.join();
+
             self.signal.stop();
-            self.thread.join();
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
