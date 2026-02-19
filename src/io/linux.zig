@@ -131,7 +131,18 @@ pub const IO = struct {
     /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         assert(self.cancel_all_status != .done);
+        const wait_count: u32 = if (self.completed.count() == 0) 1 else 0;
+        if (wait_count == 0) { // oooof
+            var timeouts: usize = 0;
+            var etime = false;
+            try self.flush(0, &timeouts, &etime);
+            assert(timeouts == 0);
+        } else {
+            try self.run_with_timeout(nanoseconds);
+        }
+    }
 
+    fn run_with_timeout(self: *IO, nanoseconds: u63) !void {
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
@@ -174,12 +185,17 @@ pub const IO = struct {
             .ios_queued = self.ios_queued,
             .ios_in_kernel = self.ios_in_kernel,
             .wait_nr = wait_nr,
+            .completion_count = self.completed.count()
         } };
         if (self.trace) |trace| {
             trace.start(flush_submissions_event);
-            defer trace.stop(flush_submissions_event);
         }
+
         try self.flush_submissions(wait_nr, timeouts, etime);
+
+        if (self.trace) |trace| {
+            trace.stop(flush_submissions_event);
+        }
 
         // We can now just peek for any CQEs without waiting and without another syscall:
         try self.flush_completions(0, timeouts, etime);
