@@ -393,7 +393,7 @@ pub fn ContextType(
 
         fn deinit(self: *Context) void {
             assert(thread_caller == .io);
-            assert(self.signal.status() == .stopped);
+            assert(self.signal.status() == .shutdown_completed);
             assert(self.submitted.pop() == null);
             assert(self.pending.pop() == null);
             maybe(self.eviction_reason != null);
@@ -424,7 +424,7 @@ pub fn ContextType(
             thread_caller = .{ .io = std.Thread.getCurrentId() };
             defer thread_caller = .user;
 
-            while (self.signal.status() != .stopped) {
+            while (self.signal.status() != .shutdown_completed) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -743,7 +743,7 @@ pub fn ContextType(
                     return;
                 },
                 // Shutdown flushes pending requests.
-                .stopped, .stop_requested => return,
+                .shutdown_completed, .shutdown_requested => return,
             }
 
             // Prevents IO thread starvation under heavy client load.
