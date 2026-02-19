@@ -735,13 +735,15 @@ pub fn ContextType(
             assert(thread_caller == .io);
 
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
-            assert(self.signal.status() != .stopped);
-
-            // Don't send any requests until registration completes.
-            if (self.batch_size_limit == null) {
-                assert(self.client.request_inflight != null);
-                assert(self.client.request_inflight.?.message.header.operation == .register);
-                return;
+            switch (self.signal.status()) {
+                .running => if (self.batch_size_limit == null) {
+                    // Don't send any requests until registration completes.
+                    assert(self.client.request_inflight != null);
+                    assert(self.client.request_inflight.?.message.header.operation == .register);
+                    return;
+                },
+                // Shutdown flushes pending requests.
+                .stopped, .stop_requested => return,
             }
 
             // Prevents IO thread starvation under heavy client load.
