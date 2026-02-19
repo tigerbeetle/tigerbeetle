@@ -120,8 +120,6 @@ pub const Event = union(enum) {
     loop_run_for_ns,
     loop_tick,
 
-    io_flush_submissions,
-
     io_flush_submissions: struct { ios_queued: u32, ios_in_kernel: u32, wait_nr: u32 },
 
     pub const Tag = std.meta.Tag(Event);
@@ -208,6 +206,8 @@ pub const EventTiming = union(Event.Tag) {
     loop_run_for_ns,
     loop_tick,
 
+    io_flush_submissions,
+
     pub const slot_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = enum_count(CommitStage.Tag),
         .replica_aof_write = 1,
@@ -234,6 +234,7 @@ pub const EventTiming = union(Event.Tag) {
         .client_request_round_trip = enum_count(Operation),
         .loop_run_for_ns = 1,
         .loop_tick = 1,
+        .io_flush_submissions = 1,
     });
 
     pub const slot_bases = array: {
@@ -373,6 +374,8 @@ pub const EventTracing = union(Event.Tag) {
     loop_run_for_ns,
     loop_tick,
 
+    io_flush_submissions,
+
     pub const stack_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = 1,
         .replica_aof_write = 1,
@@ -399,6 +402,7 @@ pub const EventTracing = union(Event.Tag) {
         .client_request_round_trip = 1,
         .loop_run_for_ns = 1,
         .loop_tick = 1,
+        .io_flush_submissions = 1,
     });
 
     pub const stack_bases = array: {
@@ -748,6 +752,7 @@ test "EventTiming slot doesn't have collisions" {
             .compact_mutable_suffix => .{ .compact_mutable_suffix = .{
                 .tree = g.enum_value(TreeEnum),
             } },
+            .completion_callbacks => .completion_callbacks,
             .lookup => .{ .lookup = .{
                 .tree = g.enum_value(TreeEnum),
             } },
@@ -770,6 +775,7 @@ test "EventTiming slot doesn't have collisions" {
             } },
             .loop_run_for_ns => .loop_run_for_ns,
             .loop_tick => .loop_tick,
+            .io_flush_submissions => .io_flush_submissions,
         };
         try stacks.append(allocator, event.slot());
     }

@@ -170,10 +170,17 @@ pub const IO = struct {
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
         // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
-        // trace; (include )
-            // self.ios_queued -= submitted;
-            // self.ios_in_kernel += submitted;
+        const flush_submissions_event: Tracer.Event = .{ .io_flush_submissions = .{
+            .ios_queued = self.ios_queued,
+            .ios_in_kernel = self.ios_in_kernel,
+            .wait_nr = wait_nr,
+        } };
+        if (self.trace) |trace| {
+            trace.start(flush_submissions_event);
+            defer trace.stop(flush_submissions_event);
+        }
         try self.flush_submissions(wait_nr, timeouts, etime);
+
         // We can now just peek for any CQEs without waiting and without another syscall:
         try self.flush_completions(0, timeouts, etime);
 
