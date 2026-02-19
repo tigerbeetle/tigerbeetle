@@ -267,10 +267,7 @@ fn ScanMergeType(
                             // 2. k_way_merge₁ relays 11 to its streams (tree₁ + zig_zag_merge₂).
                             // 3. Probing zig_zag_merge₂ with 12 trips the assert, because tree₃ has
                             //    already produced a higher key (11 < 12).
-                            switch (self.direction) {
-                                .ascending => maybe(key_popped < timestamp),
-                                .descending => maybe(key_popped > timestamp),
-                            }
+                            maybe(self.direction.cmp(key_popped, .@"<", timestamp));
                         }
 
                         // Once the underlying streams have been changed, the merge iterator needs

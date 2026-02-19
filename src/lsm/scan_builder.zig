@@ -482,10 +482,10 @@ pub fn ScanType(
 
                     if (comptime is_composite_key(Value)) {
                         const prefix = prefix: {
-                            const prefix_min = Value.key_prefix(scan_impl.key_min);
-                            const prefix_max = Value.key_prefix(scan_impl.key_max);
-                            assert(prefix_min == prefix_max);
-                            break :prefix prefix_min;
+                            const prefix_lower = Value.key_prefix(scan_impl.key_lower);
+                            const prefix_upper = Value.key_prefix(scan_impl.key_upper);
+                            assert(prefix_lower == prefix_upper);
+                            break :prefix prefix_lower;
                         };
                         scan_impl.probe(Value.key_from_value(&.{
                             .field = prefix,
@@ -496,7 +496,7 @@ pub fn ScanType(
                         comptime assert(Groove.IdTree != void);
 
                         // Scans over the IdTree cannot probe for a next timestamp.
-                        assert(scan_impl.key_min == scan_impl.key_max);
+                        assert(scan_impl.key_lower == scan_impl.key_upper);
                     }
                 },
             }
@@ -516,12 +516,12 @@ pub fn ScanType(
                     if (comptime is_composite_key(Value)) {
                         // Secondary indexes can only produce results sorted by timestamp if
                         // scanning over the same key prefix.
-                        assert(Value.key_prefix(scan_impl.key_min) ==
-                            Value.key_prefix(scan_impl.key_max));
+                        assert(Value.key_prefix(scan_impl.key_lower) ==
+                            Value.key_prefix(scan_impl.key_upper));
                     } else {
                         comptime assert(tag == .id);
                         comptime assert(Groove.IdTree != void);
-                        assert(scan_impl.key_min == scan_impl.key_max);
+                        assert(scan_impl.key_lower == scan_impl.key_upper);
                     }
 
                     return scan_impl.direction;
