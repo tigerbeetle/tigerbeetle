@@ -628,16 +628,19 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
 
-            log.debug("{}: recv done[{}]: peer={} received={d} ({}, {}, {}, {})", .{
-                bus.id,
-                connection.index,
-                connection.peer,
-                bytes_received,
-                connection.recv_buffer.?.suspend_size,
-                connection.recv_buffer.?.process_size,
-                connection.recv_buffer.?.advance_size,
-                connection.recv_buffer.?.receive_size,
-            });
+            if (connection.recv_buffer.?.receive_size - connection.recv_buffer.?.process_size >= @sizeOf(vsr.Header)) {
+                log.debug("{}: recv done[{}]: peer={} received={d} ({}, {}, {}, {}): {}", .{
+                    bus.id,
+                    connection.index,
+                    connection.peer,
+                    bytes_received,
+                    connection.recv_buffer.?.suspend_size,
+                    connection.recv_buffer.?.process_size,
+                    connection.recv_buffer.?.advance_size,
+                    connection.recv_buffer.?.receive_size,
+                    connection.recv_buffer.?.copy_header(),
+                });
+            }
 
             switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
@@ -646,9 +649,15 @@ pub fn MessageBusType(comptime IO: type) type {
                 // bounded by the time it takes to ping, we can hear from a peer before we
                 // can send back to them.
                 .replica => {
+                    var first: bool = true;
                     while (connection.recv_buffer.?.next_header()) |header| {
                         if (bus.recv_update_peer(connection, header.peer_type())) {
                             connection.recv_buffer.?.suspend_message(&header);
+
+                            if (first) {
+                                log.debug("{}: first: {}", .{bus.id, first});
+                                first = false;
+                            }
                         } else {
                             log.warn("{}: on_recv: invalid peer transition {any} -> {any}", .{
                                 bus.id,

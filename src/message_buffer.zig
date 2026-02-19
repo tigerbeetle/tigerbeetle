@@ -186,7 +186,7 @@ pub const MessageBuffer = struct {
     }
 
     /// Peek at the header for the incoming message. Necessitates a copy to guarantee alignment.
-    fn copy_header(buffer: *const MessageBuffer) Header {
+    pub fn copy_header(buffer: *const MessageBuffer) Header {
         assert(buffer.receive_size - buffer.process_size >= @sizeOf(Header));
         var header: Header = undefined;
         stdx.copy_disjoint(
