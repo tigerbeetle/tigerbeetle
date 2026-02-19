@@ -129,6 +129,9 @@ pub fn main() !void {
     });
     defer tracer.deinit(gpa);
 
+    // allow the I/O itself to trace
+    io.set_tracer(&tracer);
+
     switch (command) {
         .version => unreachable, // Handled earlier.
         inline .format, .start, .recover => |*args, command_storage| {

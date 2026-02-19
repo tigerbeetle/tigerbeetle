@@ -267,7 +267,10 @@ pub fn count(tracer: *Tracer, event: EventMetric, value: u64) void {
 
 pub fn start(tracer: *Tracer, event: Event) void {
     const event_tracing = event.as(EventTracing);
-    const event_timing = event.as(EventTiming);
+    const event_timing: ?EventTiming = switch (event) {
+        .completion_callbacks => null,
+        else => event.as(EventTiming),
+    };
     const stack = event_tracing.stack();
 
     const time_now = tracer.time.monotonic();
@@ -281,7 +284,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
 
     if (tracer.log_trace) {
         log.debug(
-            "{}: {s}({}): start: {}",
+            "{}: {s}({}): start: {any}",
             .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
         );
     }
@@ -299,7 +302,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         "\"ph\":\"{[event]c}\"," ++
         "\"ts\":{[timestamp]}," ++
         "\"cat\":\"{[category]s}\"," ++
-        "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
+        "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]any}\"," ++
         "\"args\":{[args]s}" ++
         "}},\n", .{
         .process_id = tracer.process_id.json(),
@@ -311,7 +314,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         .event_timing = event_timing,
         .args = std.json.Formatter(Event){ .value = event, .options = .{} },
     }) catch {
-        log.err("{}: {s}({}): event too large: {}", .{
+        log.err("{}: {s}({}): event too large: {any}", .{
             tracer.process_id,
             @tagName(event),
             event_tracing,
@@ -329,7 +332,10 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     const us_log_threshold_ns = 5 * std.time.ns_per_ms;
 
     const event_tracing = event.as(EventTracing);
-    const event_timing = event.as(EventTiming);
+    const event_timing: ?EventTiming = switch (event) {
+        .completion_callbacks => null,
+        else => event.as(EventTiming),
+    };
     const stack = event_tracing.stack();
 
     const event_start = tracer.events_started[stack].?;
@@ -339,7 +345,9 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
 
-    tracer.timing(event_timing, event_duration);
+    if (event_timing) |timing_event| {
+        tracer.timing(timing_event, event_duration);
+    }
 
     if (event_tracing.aggregate_only()) {
         return;
@@ -347,7 +355,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 
     if (tracer.log_trace) {
         // Double leading space to align with 'start: '.
-        log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
+        log.debug("{}: {s}({}): stop:  {any} (duration={}{s})", .{
             tracer.process_id,
             @tagName(event),
             event_tracing,

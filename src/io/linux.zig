@@ -97,6 +97,10 @@ pub const IO = struct {
         self.ring.deinit();
     }
 
+    pub fn set_tracer(self: *IO, tracer: *Tracer) void {
+        self.trace = tracer;
+    }
+
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
         assert(self.cancel_all_status != .done);
@@ -155,6 +159,7 @@ pub const IO = struct {
             self.ios_queued += 1;
 
             // The amount of time this call will block is bounded by the timeout we just submitted:
+            // XXX wait_num = if(completions.empty()) 1 else 0; or assert
             try self.flush(1, &timeouts, &etime);
         }
         // Reap any remaining timeouts, which reference the timespec in the current stack frame.
@@ -165,6 +170,9 @@ pub const IO = struct {
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
         // Flush any queued SQEs and reuse the same syscall to wait for completions if required:
+        // trace; (include )
+            // self.ios_queued -= submitted;
+            // self.ios_in_kernel += submitted;
         try self.flush_submissions(wait_nr, timeouts, etime);
         // We can now just peek for any CQEs without waiting and without another syscall:
         try self.flush_completions(0, timeouts, etime);
@@ -184,6 +192,21 @@ pub const IO = struct {
         // and extend the duration of the loop, but this is fine as it 1) executes completions
         // that become ready without going through another syscall from flush_submissions() and
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
+
+        const completed_count = @as(usize, @intCast(self.completed.count()));
+
+        const trace_event: Tracer.Event = if (completed_count == 1) blk: {
+            const completion = self.completed.peek().?;
+            break :blk .{ .completion_callbacks = .{
+                .count = completed_count,
+                .kind = std.meta.activeTag(completion.operation),
+                .result = completion.result,
+            } };
+        } else .{ .completion_callbacks = .{ .count = completed_count } };
+
+        if (self.trace) |trace| {
+            trace.start(trace_event);
+        }
         while (self.completed.pop()) |completion| {
             if (completion.operation == .timeout and
                 completion.operation.timeout.timespec.sec == 0 and
@@ -208,6 +231,10 @@ pub const IO = struct {
                 },
                 .done => unreachable,
             }
+        }
+
+        if (self.trace) |trace| {
+            trace.stop(trace_event);
         }
 
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
@@ -877,6 +904,8 @@ pub const IO = struct {
             offset: u64,
         },
     };
+
+    pub const OperationTypeTag = std.meta.Tag(Operation);
 
     pub const AcceptError = error{
         WouldBlock,

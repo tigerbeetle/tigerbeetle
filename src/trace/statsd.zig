@@ -437,7 +437,7 @@ fn struct_size_max(StructOrVoid: type) StructOrVoid {
     for (std.meta.fields(Struct)) |field| {
         const type_info = @typeInfo(field.type);
         assert(type_info == .int or type_info == .@"enum");
-        assert(type_info != .int or type_info.Int.signedness == .unsigned);
+        assert(type_info != .int or type_info.int.signedness == .unsigned);
         switch (type_info) {
             .int => @field(output, field.name) = std.math.maxInt(field.type),
             .@"enum" => @field(output, field.name) =

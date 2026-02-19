@@ -11,6 +11,8 @@ const Operation = @import("../tigerbeetle.zig").Operation;
 const Duration = stdx.Duration;
 const Peer = @import("../vsr.zig").Peer;
 
+const OperationTypeTag = @import("../io.zig").IO.OperationTypeTag;
+
 const TreeEnum = tree_enum: {
     const tree_ids = @import("../state_machine.zig").tree_ids;
     var tree_fields: []const std.builtin.Type.EnumField = &[_]std.builtin.Type.EnumField{};
@@ -98,6 +100,8 @@ pub const Event = union(enum) {
     compact_mutable: struct { tree: TreeEnum },
     compact_mutable_suffix: struct { tree: TreeEnum },
 
+    completion_callbacks: struct { count: usize, kind: ?OperationTypeTag = null, result: ?i32 = null },
+
     lookup: struct { tree: TreeEnum },
     lookup_worker: struct { index: u8, tree: TreeEnum },
 
@@ -115,6 +119,10 @@ pub const Event = union(enum) {
 
     loop_run_for_ns,
     loop_tick,
+
+    io_flush_submissions,
+
+    io_flush_submissions: struct { ios_queued: u32, ios_in_kernel: u32, wait_nr: u32 },
 
     pub const Tag = std.meta.Tag(Event);
 
@@ -139,6 +147,10 @@ pub const Event = union(enum) {
         @setEvalBranchQuota(32_000);
         return switch (event.*) {
             inline else => |source_payload, tag| {
+                if (!comptime @hasField(EventType, @tagName(tag))) {
+                    unreachable;
+                }
+
                 const TargetPayload = @FieldType(EventType, @tagName(tag));
                 const target_payload_info = @typeInfo(TargetPayload);
                 assert(target_payload_info == .void or target_payload_info == .@"struct");
@@ -176,6 +188,8 @@ pub const EventTiming = union(Event.Tag) {
     compact_mutable: struct { tree: TreeEnum },
     compact_mutable_suffix: struct { tree: TreeEnum },
 
+    completion_callbacks,
+
     lookup: struct { tree: TreeEnum },
     lookup_worker: struct { tree: TreeEnum },
 
@@ -207,6 +221,7 @@ pub const EventTiming = union(Event.Tag) {
         .compact_manifest = 1,
         .compact_mutable = enum_count(TreeEnum),
         .compact_mutable_suffix = enum_count(TreeEnum),
+        .completion_callbacks = 1,
         .lookup = enum_count(TreeEnum),
         .lookup_worker = enum_count(TreeEnum),
         .scan_tree = enum_count(TreeEnum),
@@ -338,6 +353,8 @@ pub const EventTracing = union(Event.Tag) {
     compact_mutable,
     compact_mutable_suffix,
 
+    completion_callbacks: struct { count: usize, kind: ?OperationTypeTag = null, result: ?i32 = null },
+
     lookup,
     lookup_worker: struct { index: u8 },
 
@@ -369,6 +386,7 @@ pub const EventTracing = union(Event.Tag) {
         .compact_manifest = 1,
         .compact_mutable = 1,
         .compact_mutable_suffix = 1,
+        .completion_callbacks = 16,
         .lookup = 1,
         .lookup_worker = constants.grid_iops_read_max,
         .scan_tree = constants.lsm_scans_max,
@@ -433,6 +451,9 @@ pub const EventTracing = union(Event.Tag) {
                 assert(data.iop < stack_limits.get(event.*));
                 const stack_base = stack_bases.get(event.*);
                 return stack_base + @as(u32, @intCast(data.iop));
+            },
+            .completion_callbacks => {
+                return comptime stack_bases.get(.completion_callbacks);
             },
             inline else => |data, event_tag| {
                 comptime assert(@TypeOf(data) == void);
@@ -602,18 +623,33 @@ pub fn format_data(
         assert(data_field.type == bool or
             @typeInfo(data_field.type) == .int or
             @typeInfo(data_field.type) == .@"enum" or
-            @typeInfo(data_field.type) == .@"union");
+            @typeInfo(data_field.type) == .@"union" or
+            @typeInfo(data_field.type) == .optional);
 
         const data_field_value = @field(data, data_field.name);
         try writer.writeAll(data_field.name);
         try writer.writeByte('=');
 
-        if (@typeInfo(data_field.type) == .@"enum" or
-            @typeInfo(data_field.type) == .@"union")
-        {
-            try writer.print("{s}", .{@tagName(data_field_value)});
-        } else {
-            try writer.print("{}", .{data_field_value});
+        switch (@typeInfo(data_field.type)) {
+            .@"enum", .@"union" => {
+                try writer.print("{s}", .{@tagName(data_field_value)});
+            },
+            .optional => |optional| {
+                if (data_field_value) |value| {
+                    if (@typeInfo(optional.child) == .@"enum" or
+                        @typeInfo(optional.child) == .@"union")
+                    {
+                        try writer.print("{s}", .{@tagName(value)});
+                    } else {
+                        try writer.print("{}", .{value});
+                    }
+                } else {
+                    try writer.writeAll("null");
+                }
+            },
+            else => {
+                try writer.print("{}", .{data_field_value});
+            },
         }
 
         if (i != fields.len - 1) {
