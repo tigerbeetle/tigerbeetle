@@ -24,9 +24,12 @@ pub const IO = struct {
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
     io_pending: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_pending" }),
 
-    pub fn init(entries: u12, flags: u32) !IO {
-        _ = entries;
-        _ = flags;
+    pub fn init(options: struct {
+        entries: u12,
+        flags: u32,
+    }) !IO {
+        _ = options.entries;
+        _ = options.flags;
 
         const kq = try posix.kqueue();
         assert(kq > -1);

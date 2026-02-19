@@ -279,7 +279,7 @@ pub fn ContextType(
             context.addresses.resize(addresses_parsed.len) catch unreachable;
 
             log.debug("{}: init: initializing IO", .{context.client_id});
-            context.io = IO.init(32, 0) catch |err| {
+            context.io = IO.init(.{ .entries = 32, .flags = 0 }) catch |err| {
                 log.err("{}: failed to initialize IO: {s}", .{
                     context.client_id,
                     @errorName(err),

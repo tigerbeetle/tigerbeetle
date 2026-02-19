@@ -791,7 +791,7 @@ test "aof write / read" {
 
     const allocator = std.testing.allocator;
 
-    var io = try IO.init(32, 0);
+    var io = try IO.init(.{ .entries = 32, .flags = 0 });
     defer io.deinit();
 
     const dir_fd = try IO.open_dir(".");
@@ -936,7 +936,7 @@ pub fn main() !void {
     defer allocator.destroy(target);
 
     const IO = @import("io.zig").IO;
-    var io = try IO.init(32, 0);
+    var io = try IO.init(.{ .entries = 32, .flags = 0 });
     defer io.deinit();
 
     const AOF = AOFType(IO);

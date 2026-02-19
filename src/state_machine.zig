@@ -2902,10 +2902,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             const results = stdx.bytes_as_slice(.inexact, Result, output_buffer);
             assert(events.len <= results.len);
 
-            var param = Params{ .name = "execute_create" };
-            var perf = perf_event.PerfEventBlockType(Params).init(&param, true);
-            defer perf.deinit();
-            perf.set_scale(events.len);
+            // var param = Params{ .name = "execute_create" };
+            // var perf = perf_event.PerfEventBlockType(Params).init(&param, true);
+            // defer perf.deinit();
+            // perf.set_scale(events.len);
 
             var count: usize = 0;
             var chain: ?usize = null;

@@ -165,7 +165,7 @@ test "signal" {
 
         fn run_test() !void {
             var self: Context = .{
-                .io = try IO.init(32, 0),
+                .io = try IO.init(.{ .entries = 32, .flags = 0 }),
                 .main_thread_id = std.Thread.getCurrentId(),
                 .signal = undefined,
             };

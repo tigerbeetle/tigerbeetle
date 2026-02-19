@@ -87,7 +87,7 @@ pub fn main() !void {
 
     // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
     // is not available) there won't be a dangling file.
-    var io = try IO.init(128, 0);
+    var io = try IO.init(.{ .entries = 128, .flags = 0 });
     defer io.deinit();
 
     var time_os: TimeOS = .{};

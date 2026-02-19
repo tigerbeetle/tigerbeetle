@@ -22,9 +22,12 @@ pub const IO = struct {
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
-    pub fn init(entries: u12, flags: u32) !IO {
-        _ = entries;
-        _ = flags;
+    pub fn init(options: struct {
+        entries: u12,
+        flags: u32,
+    }) !IO {
+        _ = options.entries;
+        _ = options.flags;
 
         _ = try os.windows.WSAStartup(2, 2);
         errdefer os.windows.WSACleanup() catch unreachable;

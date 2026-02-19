@@ -224,7 +224,7 @@ pub const Runner = struct {
             .flush_timeout_ticks = @divExact(30 * std.time.ms_per_s, constants.tick_ms),
         };
 
-        self.io = try IO.init(32, 0);
+        self.io = try IO.init(.{ .entries = 32, .flags = 0 });
         errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(allocator, .client);

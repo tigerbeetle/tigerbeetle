@@ -559,7 +559,7 @@ const AmqpContext = struct {
             .client = undefined,
         };
 
-        self.io = try vsr.io.IO.init(32, 0);
+        self.io = try vsr.io.IO.init(.{ .entries = 32, .flags = 0 });
         errdefer self.io.deinit();
 
         self.client = try amqp.Client.init(gpa, .{
@@ -710,7 +710,7 @@ const VSRContext = struct {
     event_count: ?u32,
 
     pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
-        self.io = try vsr.io.IO.init(32, 0);
+        self.io = try vsr.io.IO.init(.{ .entries = 32, .flags = 0 });
         errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(gpa, .client);

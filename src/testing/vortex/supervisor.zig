@@ -103,7 +103,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     try shell.pushd_dir(std.fs.cwd());
     defer shell.popd();
 
-    var io = try IO.init(128, 0);
+    var io = try IO.init(.{ .entries = 128, .flags = 0 });
 
     const tigerbeetle_executable = args.tigerbeetle_executable orelse tigerbeetle_exe_default;
     const output_directory = args.output_directory orelse try shell.create_tmp_dir();

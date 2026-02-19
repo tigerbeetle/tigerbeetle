@@ -18,12 +18,16 @@ const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 const parse_dirty_semver = stdx.parse_dirty_semver;
 const maybe = stdx.maybe;
 
+const vsr = @import("../vsr.zig");
+const Tracer = vsr.trace.Tracer;
+
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
+    trace: ?*Tracer,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
@@ -60,7 +64,12 @@ pub const IO = struct {
         done,
     } = .inactive,
 
-    pub fn init(entries: u12, flags: u32) !IO {
+    pub fn init(options: struct {
+        entries: u12,
+        flags: u32,
+        trace: ?*Tracer = null
+    }) !IO {
+            
         // Detect the linux version to ensure that we support all io_uring ops used.
         const uts = posix.uname();
         const version = try parse_dirty_semver(&uts.release);
@@ -81,7 +90,7 @@ pub const IO = struct {
             else => {},
         };
 
-        return IO{ .ring = try IO_Uring.init(entries, flags) };
+        return IO{ .ring = try IO_Uring.init(options.entries, options.flags), .trace = options.trace };
     }
 
     pub fn deinit(self: *IO) void {

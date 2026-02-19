@@ -2067,7 +2067,7 @@ pub fn print_information(
     exe_path: []const u8,
     output: std.io.AnyWriter,
 ) !void {
-    var io = try IO.init(32, 0);
+    var io = try IO.init(.{ .entries = 32, .flags = 0 });
     defer io.deinit();
 
     const absolute_exe_path = try std.fs.cwd().realpathAlloc(gpa, exe_path);

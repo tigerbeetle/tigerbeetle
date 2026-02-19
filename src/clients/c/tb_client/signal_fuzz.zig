@@ -29,7 +29,7 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const events_max = args.events_max orelse 100;
 
     for (0..events_max) |_| {
-        var io = try IO.init(32, 0);
+        var io = try IO.init(.{ .entries = 32, .flags = 0 });
         defer io.deinit();
 
         var context: Context = .{
