@@ -11,6 +11,13 @@ const maybe = stdx.maybe;
 const constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
+
+const perf_event = @import("./perf_event.zig");
+
+const Params = struct {
+    name: []const u8 = "",
+};
+
 const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 const GrooveType = @import("lsm/groove.zig").GrooveType;
@@ -2894,6 +2901,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             const events = stdx.bytes_as_slice(.exact, Event, batch);
             const results = stdx.bytes_as_slice(.inexact, Result, output_buffer);
             assert(events.len <= results.len);
+
+            var param = Params{ .name = "execute_create" };
+            var perf = perf_event.PerfEventBlockType(Params).init(&param, true);
+            defer perf.deinit();
+            perf.set_scale(events.len);
 
             var count: usize = 0;
             var chain: ?usize = null;
