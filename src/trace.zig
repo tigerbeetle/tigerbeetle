@@ -268,7 +268,7 @@ pub fn count(tracer: *Tracer, event: EventMetric, value: u64) void {
 pub fn start(tracer: *Tracer, event: Event) void {
     const event_tracing = event.as(EventTracing);
     const event_timing: ?EventTiming = switch (event) {
-        .completion_callbacks => null,
+        .completion_callbacks, .next_tick_callbacks => null,
         else => event.as(EventTiming),
     };
     const stack = event_tracing.stack();
@@ -333,7 +333,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 
     const event_tracing = event.as(EventTracing);
     const event_timing: ?EventTiming = switch (event) {
-        .completion_callbacks => null,
+        .completion_callbacks, .next_tick_callbacks => null,
         else => event.as(EventTiming),
     };
     const stack = event_tracing.stack();

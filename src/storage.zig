@@ -207,6 +207,18 @@ pub fn StorageType(comptime IO: type) type {
                 storage.next_tick_completion_scheduled = false;
             }
 
+            const next_tick_count = @as(usize, @intCast(storage.next_tick_queue.count()));
+            const trace_event: Tracer.Event = if (next_tick_count == 1) blk: {
+                const next_tick = storage.next_tick_queue.peek().?;
+                break :blk .{ .next_tick_callbacks = .{
+                    .count = next_tick_count,
+                    .source = @as(u8, @intCast(@intFromEnum(next_tick.source))),
+                } };
+            } else .{ .next_tick_callbacks = .{ .count = next_tick_count } };
+
+            storage.tracer.start(trace_event);
+            defer storage.tracer.stop(trace_event);
+
             while (storage.next_tick_queue.pop()) |next_tick| {
                 next_tick.callback(next_tick);
             }

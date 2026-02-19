@@ -101,6 +101,7 @@ pub const Event = union(enum) {
     compact_mutable_suffix: struct { tree: TreeEnum },
 
     completion_callbacks: struct { count: usize, kind: ?OperationTypeTag = null, result: ?i32 = null },
+    next_tick_callbacks: struct { count: usize, source: ?u8 = null },
 
     lookup: struct { tree: TreeEnum },
     lookup_worker: struct { index: u8, tree: TreeEnum },
@@ -120,7 +121,7 @@ pub const Event = union(enum) {
     loop_run_for_ns,
     loop_tick,
 
-    io_flush_submissions: struct { ios_queued: u32, ios_in_kernel: u32, wait_nr: u32 },
+    io_flush_submissions: struct { ios_queued: u32, ios_in_kernel: u32, wait_nr: u32, completion_count: usize },
 
     pub const Tag = std.meta.Tag(Event);
 
@@ -187,6 +188,7 @@ pub const EventTiming = union(Event.Tag) {
     compact_mutable_suffix: struct { tree: TreeEnum },
 
     completion_callbacks,
+    next_tick_callbacks,
 
     lookup: struct { tree: TreeEnum },
     lookup_worker: struct { tree: TreeEnum },
@@ -222,6 +224,7 @@ pub const EventTiming = union(Event.Tag) {
         .compact_mutable = enum_count(TreeEnum),
         .compact_mutable_suffix = enum_count(TreeEnum),
         .completion_callbacks = 1,
+        .next_tick_callbacks = 1,
         .lookup = enum_count(TreeEnum),
         .lookup_worker = enum_count(TreeEnum),
         .scan_tree = enum_count(TreeEnum),
@@ -355,6 +358,7 @@ pub const EventTracing = union(Event.Tag) {
     compact_mutable_suffix,
 
     completion_callbacks: struct { count: usize, kind: ?OperationTypeTag = null, result: ?i32 = null },
+    next_tick_callbacks: struct { count: usize, source: ?u8 = null },
 
     lookup,
     lookup_worker: struct { index: u8 },
@@ -374,7 +378,7 @@ pub const EventTracing = union(Event.Tag) {
     loop_run_for_ns,
     loop_tick,
 
-    io_flush_submissions,
+    io_flush_submissions: struct { ios_queued: u32, ios_in_kernel: u32, wait_nr: u32, completion_count: usize },
 
     pub const stack_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = 1,
@@ -390,6 +394,7 @@ pub const EventTracing = union(Event.Tag) {
         .compact_mutable = 1,
         .compact_mutable_suffix = 1,
         .completion_callbacks = 16,
+        .next_tick_callbacks = 1,
         .lookup = 1,
         .lookup_worker = constants.grid_iops_read_max,
         .scan_tree = constants.lsm_scans_max,
@@ -458,6 +463,12 @@ pub const EventTracing = union(Event.Tag) {
             },
             .completion_callbacks => {
                 return comptime stack_bases.get(.completion_callbacks);
+            },
+            .next_tick_callbacks => {
+                return comptime stack_bases.get(.next_tick_callbacks);
+            },
+            .io_flush_submissions => {
+                return comptime stack_bases.get(.io_flush_submissions);
             },
             inline else => |data, event_tag| {
                 comptime assert(@TypeOf(data) == void);
@@ -753,6 +764,7 @@ test "EventTiming slot doesn't have collisions" {
                 .tree = g.enum_value(TreeEnum),
             } },
             .completion_callbacks => .completion_callbacks,
+            .next_tick_callbacks => .next_tick_callbacks,
             .lookup => .{ .lookup = .{
                 .tree = g.enum_value(TreeEnum),
             } },
