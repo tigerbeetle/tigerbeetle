@@ -26,6 +26,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
+const composite_key = @import("composite_key.zig");
 const binary_search = @import("binary_search.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
@@ -595,9 +596,45 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(values.len == values_scratch.len);
             assert(offset <= values.len);
 
-            stdx.radix_sort(Key, Value, key_from_value, values[offset..], values_scratch[offset..]);
+            // This fast path assumes that timestamps are strictly monotonically increasing.
+            if (comptime composite_key.is_composite_key(Value) and
+                @FieldType(Value, "field") != void)
+            {
+                switch (@FieldType(Value, "field")) {
+                    // There are only timestamps, which are already sorted.
+                    void => {},
+                    else => {
+                        // We only need to sort by prefix assuming:
+                        // (1) the sort is stable.
+                        // (2) timestamps are ordered.
+                        const Prefix = @FieldType(Value, "field");
+                        comptime assert(@typeInfo(Prefix) == .int);
 
+                        const prefix_from_value = struct {
+                            inline fn prefix_from_value(key: *const Value) Prefix {
+                                return key.field;
+                            }
+                        }.prefix_from_value;
+                        stdx.radix_sort(
+                            Prefix,
+                            Value,
+                            prefix_from_value,
+                            values[offset..],
+                            values_scratch[offset..],
+                        );
+                    },
+                }
+            } else {
+                stdx.radix_sort(
+                    Key,
+                    Value,
+                    key_from_value,
+                    values[offset..],
+                    values_scratch[offset..],
+                );
+            }
             // Deduplicate values in streaming fashion.
+            // We still need to deduplicate because of Tombstones.
             var dedup_sink = DedupSink.init(values[offset..]);
             for (values[offset..]) |value| {
                 dedup_sink.push(value);
