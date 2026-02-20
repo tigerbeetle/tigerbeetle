@@ -476,6 +476,24 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, receive-only
     try c.request(2, 2);
 }
 
+test "Cluster: network: partition primary-all (isolate primary, asymmetric, send-only)" {
+    // The primary can send to the backups and clients, but not receive.
+    // Since primary can't see requests, it doesn't know that it needs to abdicate.
+    // The rest of the cluster needs to view-change anyway.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{});
+    try c.request(1, 1);
+    t.replica(.A0).drop(.__, .incoming, .request);
+    // Since the primary doesn't receive requests, it can't ever abdicate.
+    const mark = marks.check("send_commit: primary abdicating");
+    // TODO:
+    // try c.request(2, 2);
+    try c.request(2, 1);
+    try mark.expect_not_hit();
+}
+
 test "Cluster: network: partition client-primary (symmetric)" {
     // Clients cannot communicate with the primary, but they still request/reply via a backup.
     const t = try TestContext.init(.{ .replica_count = 3 });
