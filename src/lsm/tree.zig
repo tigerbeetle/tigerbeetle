@@ -218,13 +218,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         ///
         /// Specifically, it checks whether the key exists within the Tree's key range.
         pub fn key_range_contains(tree: *const Tree, snapshot: u64, key: Key) bool {
-            if (snapshot == snapshot_latest) {
-                return tree.key_range != null and
-                    tree.key_range.?.key_min <= key and
-                    key <= tree.key_range.?.key_max;
-            } else {
-                return true;
-            }
+            // TODO We currently assume that the snapshot passed in is the latest snapshot.
+            // This must be changed when persistent snapshots are implemented.
+            assert(snapshot < snapshot_latest);
+            return tree.key_range != null and
+                tree.key_range.?.key_min <= key and
+                key <= tree.key_range.?.key_max;
         }
 
         /// This function is intended to never be called by regular code. It only
