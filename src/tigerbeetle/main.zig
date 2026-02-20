@@ -62,13 +62,26 @@ pub const std_options: std.Options = .{
 
 pub fn main() !void {
     if (builtin.os.tag == .windows) try vsr.multiversion.wait_for_parent_to_exit();
+    const size = 1024*1024*1024*10;
+    var mapping_flags       = std.os.linux.MAP{ .TYPE = std.os.linux.MAP_TYPE.PRIVATE };
+    mapping_flags.ANONYMOUS = true;
 
-    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const buffer_huge_pages = try std.posix.mmap(
+        null,
+        size,
+        std.os.linux.PROT.WRITE | std.os.linux.PROT.READ,
+        mapping_flags,
+        -1,
+        0,
+    );
+    // try std.posix.madvise(buffer_huge_pages.ptr, size, std.os.linux.MADV.HUGEPAGE);
+
+    var alloc = std.heap.FixedBufferAllocator.init(buffer_huge_pages);
+    var arena_instance = std.heap.ArenaAllocator.init(alloc.allocator());
     defer arena_instance.deinit();
 
     // Arena is an implementation detail, all memory must be freed.
     const gpa = arena_instance.allocator();
-
     var arg_iterator = try std.process.argsWithAllocator(gpa);
     defer arg_iterator.deinit();
 

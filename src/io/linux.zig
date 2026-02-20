@@ -142,6 +142,11 @@ pub const IO = struct {
         }
     }
 
+    // exact bug conditions:
+    // - completion queue not empty, but we pass wait_nr = 1
+    // - no or only indefinitely timed I/Os in kernel (recv or similar)
+    // - only timeout queued (run_for_ms has to alway do this due to old io_uring interface)
+
     fn run_with_timeout(self: *IO, nanoseconds: u63) !void {
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are

@@ -1262,6 +1262,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn prefetch_create_transfers_callback_transfers(
             completion: *TransfersGroove.PrefetchContext,
         ) void {
+
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
@@ -1273,6 +1274,11 @@ pub fn StateMachineType(comptime Storage: type) type {
                 Transfer,
                 self.prefetch_input.?,
             );
+
+            var param = Params{ .name = "execute_create" };
+            var perf = perf_event.PerfEventBlockType(Params).init(&param, true);
+            perf.set_scale(transfers.len);
+
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     if (self.get_transfer(t.pending_id)) |p| {
@@ -1288,6 +1294,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                     self.forest.grooves.accounts.prefetch_enqueue(t.credit_account_id);
                 }
             }
+
+            perf.deinit();
 
             if (transfers.len > 0 and
                 transfers[0].flags.imported)
@@ -2891,6 +2899,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             batch: []const u8,
             output_buffer: []u8,
         ) usize {
+
             comptime assert(operation == .create_accounts or
                 operation == .create_transfers or
                 operation == .deprecated_create_accounts_unbatched or
