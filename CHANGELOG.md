@@ -3,6 +3,37 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.74
+
+Released: 2026-02-20
+
+### Safety And Performance
+
+- [#3528](https://github.com/tigerbeetle/tigerbeetle/pull/3528)
+
+  Add a replica test for an asymmetric partition where the primary can never receive
+  messages, yet still does not abdicate. This test documents the current behavior,
+  which must be fixed.
+
+### Internals
+
+- [#3400](https://github.com/tigerbeetle/tigerbeetle/pull/3400)
+
+  Refactor LSM scan direction handling to simplify key comparisons in ascending
+  and descending order.
+
+- [#3518](https://github.com/tigerbeetle/tigerbeetle/pull/3518)
+
+  Reduce the internal I/O thread stack size of the TigerBeetle client to 512 KiB.
+
+- [#3525](https://github.com/tigerbeetle/tigerbeetle/pull/3525)
+
+  Bump the minimum `rustc` version to 1.71 for building the TigerBeetle Rust client.
+
+### TigerTracks 🎧
+
+- [Don't Stop Me Now](https://www.youtube.com/watch?v=HgzGwKwLmgM)
+
 ## TigerBeetle 0.16.73
 
 Released: 2026-02-13
