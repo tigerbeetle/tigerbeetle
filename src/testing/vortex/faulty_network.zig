@@ -125,17 +125,17 @@ const Pipe = struct {
             return pipe.connection.try_close();
         }
 
-        if (pipe.connection.network.faults.lose) |lose| {
-            if (pipe.connection.network.prng.chance(lose)) {
-                log.debug("losing {d} bytes ({d},{d})", .{
-                    pipe.recv_size,
-                    pipe.connection.replica_index,
-                    pipe.connection.connection_index,
-                });
-                pipe.recv();
-                return;
-            }
-        }
+        //if (pipe.connection.network.faults.lose) |lose| {
+        //    if (pipe.connection.network.prng.chance(lose)) {
+        //        log.debug("losing {d} bytes ({d},{d})", .{
+        //            pipe.recv_size,
+        //            pipe.connection.replica_index,
+        //            pipe.connection.connection_index,
+        //        });
+        //        pipe.recv();
+        //        return;
+        //    }
+        //}
 
         if (pipe.connection.network.faults.corrupt) |corrupt| {
             if (pipe.connection.network.prng.chance(corrupt)) {

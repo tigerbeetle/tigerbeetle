@@ -133,6 +133,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     .send_queue = .{
                         .buffer = send_queue_buffer[index * send_queue_max ..][0..send_queue_max],
                     },
+                    .index = index,
                 };
             }
 
@@ -627,6 +628,20 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
 
+            if (connection.recv_buffer.?.receive_size - connection.recv_buffer.?.process_size >= @sizeOf(vsr.Header)) {
+                log.debug("{}: recv done[{}]: peer={} received={d} ({}, {}, {}, {}): {}", .{
+                    bus.id,
+                    connection.index,
+                    connection.peer,
+                    bytes_received,
+                    connection.recv_buffer.?.suspend_size,
+                    connection.recv_buffer.?.process_size,
+                    connection.recv_buffer.?.advance_size,
+                    connection.recv_buffer.?.receive_size,
+                    connection.recv_buffer.?.copy_header(),
+                });
+            }
+
             switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
                 // may receive messages from a peer before we know who they are:
@@ -634,9 +649,15 @@ pub fn MessageBusType(comptime IO: type) type {
                 // bounded by the time it takes to ping, we can hear from a peer before we
                 // can send back to them.
                 .replica => {
+                    var first: bool = true;
                     while (connection.recv_buffer.?.next_header()) |header| {
                         if (bus.recv_update_peer(connection, header.peer_type())) {
                             connection.recv_buffer.?.suspend_message(&header);
+
+                            if (first) {
+                                log.debug("{}: first: {}", .{bus.id, first});
+                                first = false;
+                            }
                         } else {
                             log.warn("{}: on_recv: invalid peer transition {any} -> {any}", .{
                                 bus.id,
@@ -1102,6 +1123,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .send_queue = .{
                     .buffer = connection.send_queue.buffer,
                 },
+                .index = connection.index,
             };
         }
 
@@ -1170,6 +1192,7 @@ pub fn MessageBusType(comptime IO: type) type {
             /// connection. If the peer changes unexpectedly (for example, due to a misdirected
             /// message), we terminate the connection.
             peer: vsr.Peer = .unknown,
+            index: usize,
 
             state: enum {
                 /// The connection is not in use, with peer set to `.unknown`.
