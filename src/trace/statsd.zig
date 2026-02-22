@@ -324,7 +324,7 @@ pub const StatsD = struct {
                 );
             },
             .log => {
-                log.debug("{}: statsd packet: {s}", .{ self.process_id, send_buffer });
+                //log.debug("{}: statsd packet: {s}", .{ self.process_id, send_buffer });
                 self.log_buffer.?.appendSliceAssumeCapacity(send_buffer);
                 StatsD.send_callback(self, send_completion, send_buffer.len);
             },

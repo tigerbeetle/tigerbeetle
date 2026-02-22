@@ -296,6 +296,7 @@ const Supervisor = struct {
                 const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
 
                 if (no_finished_requests) {
+                    supervisor.network.fail();
                     log.err("liveness check: no finished requests after {d} seconds", .{
                         constants.vortex.liveness_requirement_seconds,
                     });
@@ -724,8 +725,7 @@ const Workload = struct {
         if (workload.process.state != .running) return;
 
         const count = result catch |err| {
-            log.err("couldn't read from workload stdout: {}", .{err});
-            return;
+            std.debug.panic("couldn't read from workload stdout: {}", .{err});
         };
 
         workload.read_progress += count;

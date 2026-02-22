@@ -133,6 +133,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     .send_queue = .{
                         .buffer = send_queue_buffer[index * send_queue_max ..][0..send_queue_max],
                     },
+                    .index = index,
                 };
             }
 
@@ -586,6 +587,8 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(!connection.recv_submitted);
             connection.recv_submitted = true;
 
+            log.debug("{}: recv[{}]: peer={}", .{bus.id, connection.index, connection.peer});
+
             bus.io.recv(
                 *MessageBus,
                 bus,
@@ -627,6 +630,17 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
 
+            log.debug("{}: recv done[{}]: peer={} received={d} ({}, {}, {}, {})", .{
+                bus.id,
+                connection.index,
+                connection.peer,
+                bytes_received,
+                connection.recv_buffer.?.suspend_size,
+                connection.recv_buffer.?.process_size,
+                connection.recv_buffer.?.advance_size,
+                connection.recv_buffer.?.receive_size,
+            });
+
             switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
                 // may receive messages from a peer before we know who they are:
@@ -635,6 +649,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 // can send back to them.
                 .replica => {
                     while (connection.recv_buffer.?.next_header()) |header| {
+                        log.debug("{}: on_recv[{}]: {}", .{bus.id, connection.index, header});
                         if (bus.recv_update_peer(connection, header.peer_type())) {
                             connection.recv_buffer.?.suspend_message(&header);
                         } else {
@@ -717,6 +732,10 @@ pub fn MessageBusType(comptime IO: type) type {
                     // * client_likely  → client
                     assert(connection.peer == .unknown or connection.peer == .client_likely);
 
+                    if (connection.peer == .client_likely) {
+                        assert(connection.peer.client_likely == client_id);
+                    }
+
                     // If there is a connection to this client, terminate and replace it.
                     const result = bus.clients.getOrPutAssumeCapacity(client_id);
                     if (result.found_existing) {
@@ -737,7 +756,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     }
 
                     result.value_ptr.* = connection;
-                    log.info("{}: set_and_verify_peer connection from client={}", .{
+                    log.info("{}: set_and_verify_peer: connection from client={}", .{
                         bus.id,
                         client_id,
                     });
@@ -756,7 +775,7 @@ pub fn MessageBusType(comptime IO: type) type {
                                 bus.clients.getOrPutAssumeCapacity(client_id);
                             if (!result.found_existing) {
                                 result.value_ptr.* = connection;
-                                log.info("{}: set_and_verify_peer connection from " ++
+                                log.info("{}: set_and_verify_peer: connection from " ++
                                     "client_likely={}", .{ bus.id, client_id });
                             }
                         },
@@ -767,6 +786,11 @@ pub fn MessageBusType(comptime IO: type) type {
             }
 
             connection.peer = peer;
+
+            for (bus.connections, 0..) |*c, i| {
+                assert(c.index == i);
+                log.debug("{}: status[{d}]: peer={} state={s}", .{ bus.id, i, c.peer, @tagName(c.state) });
+            }
 
             return true;
         }
@@ -1065,6 +1089,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer == null);
             assert(connection.send_queue.empty());
             assert(connection.fd == null);
+            assert(!bus.connections_suspended.contains(connection));
 
             result catch |err| {
                 log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
@@ -1102,6 +1127,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .send_queue = .{
                     .buffer = connection.send_queue.buffer,
                 },
+                .index = connection.index,
             };
         }
 
@@ -1170,6 +1196,7 @@ pub fn MessageBusType(comptime IO: type) type {
             /// connection. If the peer changes unexpectedly (for example, due to a misdirected
             /// message), we terminate the connection.
             peer: vsr.Peer = .unknown,
+            index: usize,
 
             state: enum {
                 /// The connection is not in use, with peer set to `.unknown`.

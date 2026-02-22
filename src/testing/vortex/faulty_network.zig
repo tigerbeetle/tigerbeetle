@@ -70,11 +70,13 @@ const Pipe = struct {
     ) void {
         assert(pipe.connection.state == .proxying);
         assert(pipe.status == .idle);
+        assert(pipe.input == null);
+        assert(pipe.output == null);
+        assert(pipe.recv_size == 0);
+        assert(pipe.send_size == 0);
 
         pipe.input = input;
         pipe.output = output;
-        pipe.recv_size = 0;
-        pipe.send_size = 0;
 
         // Kick off the recv/send loop.
         pipe.recv();
@@ -90,6 +92,8 @@ const Pipe = struct {
         pipe.recv_size = 0;
         pipe.send_size = 0;
 
+        //log.debug("recv start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
+
         // We don't need to recv a certain count of bytes, because whatever we recv, we send along.
         pipe.connection.io.recv(
             *Pipe,
@@ -104,6 +108,9 @@ const Pipe = struct {
     fn on_recv(pipe: *Pipe, _: *IO.Completion, result: IO.RecvError!usize) void {
         assert(pipe.recv_size == 0);
         assert(pipe.send_size == 0);
+        assert(pipe.connection.state != .free);
+        assert(pipe.connection.state != .accepting);
+        assert(pipe.connection.state != .connecting);
 
         assert(pipe.status == .recv);
         pipe.status = .idle;
@@ -118,6 +125,8 @@ const Pipe = struct {
             });
             return pipe.connection.try_close();
         };
+
+        //log.debug("recv done ({d},{d}) bytes={}", .{ pipe.connection.replica_index, pipe.connection.connection_index, recv_size });
 
         pipe.recv_size = @intCast(recv_size);
         if (pipe.recv_size == 0) {
@@ -188,6 +197,9 @@ const Pipe = struct {
 
     fn on_timeout(pipe: *Pipe, _: *IO.Completion, result: IO.TimeoutError!void) void {
         assert(pipe.status == .send_timeout);
+        assert(pipe.connection.state != .free);
+        assert(pipe.connection.state != .accepting);
+        assert(pipe.connection.state != .connecting);
         pipe.status = .idle;
 
         if (pipe.connection.state != .proxying) return;
@@ -203,6 +215,8 @@ const Pipe = struct {
         assert(pipe.status == .idle);
         pipe.status = .send;
 
+        //log.debug("send start ({d},{d})", .{ pipe.connection.replica_index, pipe.connection.connection_index });
+
         pipe.io.send(
             *Pipe,
             pipe,
@@ -215,6 +229,9 @@ const Pipe = struct {
 
     fn on_send(pipe: *Pipe, _: *IO.Completion, result: IO.SendError!usize) void {
         assert(pipe.send_size < pipe.recv_size);
+        assert(pipe.connection.state != .free);
+        assert(pipe.connection.state != .accepting);
+        assert(pipe.connection.state != .connecting);
 
         assert(pipe.status == .send);
         pipe.status = .idle;
@@ -230,6 +247,8 @@ const Pipe = struct {
             return pipe.connection.try_close();
         };
         pipe.send_size += @intCast(send_size);
+
+        //log.debug("send done ({d},{d}) bytes={d}", .{ pipe.connection.replica_index, pipe.connection.connection_index, send_size });
 
         if (pipe.send_size < pipe.recv_size) {
             pipe.send();
@@ -274,14 +293,8 @@ const Connection = struct {
         result: IO.AcceptError!std.posix.socket_t,
     ) void {
         assert(connection.state == .accepting);
-        defer assert(connection.state == .connecting);
-
         assert(connection.origin_fd == null);
-        defer assert(connection.origin_fd != null);
-
         assert(connection.remote_fd == null);
-        defer assert(connection.remote_fd != null);
-
         assert(connection.remote_address != null);
 
         const fd = result catch |err| {
@@ -305,8 +318,9 @@ const Connection = struct {
             });
             return connection.try_close();
         };
-        connection.remote_fd = remote_fd;
+        log.debug("accepted ({d},{d})", .{ connection.replica_index, connection.connection_index });
 
+        connection.remote_fd = remote_fd;
         connection.state = .connecting;
 
         connection.io.connect(
@@ -357,25 +371,24 @@ const Connection = struct {
                 connection.connection_index,
             });
             connection.state = .closing;
-            std.posix.shutdown(connection.origin_fd.?, .both) catch |err| {
-                switch (err) {
-                    error.SocketNotConnected => {},
-                    else => log.warn("shutdown origin_fd ({d},{d}) failed: {}", .{
-                        connection.replica_index, connection.connection_index, err,
-                    }),
-                }
+            std.posix.shutdown(connection.origin_fd.?, .both) catch |err| switch (err) {
+                error.SocketNotConnected => {},
+                else => log.warn("shutdown origin_fd ({d},{d}) failed: {}", .{
+                    connection.replica_index, connection.connection_index, err,
+                }),
             };
-            std.posix.shutdown(connection.remote_fd.?, .both) catch |err| {
-                switch (err) {
-                    error.SocketNotConnected => {},
-                    else => log.warn("shutdown remote_fd ({d},{d}) failed: {}", .{
-                        connection.replica_index, connection.connection_index, err,
-                    }),
-                }
+            std.posix.shutdown(connection.remote_fd.?, .both) catch |err| switch (err) {
+                error.SocketNotConnected => {},
+                else => log.warn("shutdown remote_fd ({d},{d}) failed: {}", .{
+                    connection.replica_index, connection.connection_index, err,
+                }),
             };
         }
 
-        if (!has_inflight_operations) {
+        if (has_inflight_operations) {
+            // Network.tick() will keep calling try_close().
+            assert(connection.state == .closing);
+        } else {
             // Kick off the close sequence.
             connection.state = .closing_origin;
             connection.io.close(
@@ -385,10 +398,7 @@ const Connection = struct {
                 &connection.close_completion,
                 connection.origin_fd.?,
             );
-            return;
         }
-
-        assert(connection.state == .closing);
     }
 
     fn on_close_origin(
@@ -446,6 +456,9 @@ const Connection = struct {
         });
         connection.state = .free;
         connection.remote_fd = null;
+        connection.remote_address = null;
+        connection.origin_to_remote_pipe = .{ .io = connection.io, .connection = connection };
+        connection.remote_to_origin_pipe = .{ .io = connection.io, .connection = connection };
     }
 };
 
@@ -542,9 +555,25 @@ pub const Network = struct {
         allocator.destroy(network);
     }
 
-    pub fn tick(network: *Network) void {
+    pub fn fail(network: *const Network) void {
         for (network.proxies) |*proxy| {
             for (&proxy.connections) |*connection| {
+                log.debug("({d},{d}): state={s} origin_to_remote={s} remote_to_origin_pipe={s}", .{
+                    connection.replica_index,
+                    connection.connection_index,
+                    @tagName(connection.state),
+                    @tagName(connection.origin_to_remote_pipe.status),
+                    @tagName(connection.remote_to_origin_pipe.status),
+                });
+            }
+        }
+    }
+
+    pub fn tick(network: *Network) void {
+        for (network.proxies, 0..) |*proxy, replica_index| {
+            for (&proxy.connections) |*connection| {
+                assert(connection.replica_index == replica_index);
+
                 if (connection.state == .closing) {
                     connection.try_close();
                     continue;
@@ -555,6 +584,9 @@ pub const Network = struct {
                 if (connection.state == .free) {
                     assert(connection.origin_to_remote_pipe.status == .idle);
                     assert(connection.remote_to_origin_pipe.status == .idle);
+                    assert(connection.origin_fd == null);
+                    assert(connection.remote_fd == null);
+                    assert(connection.remote_address == null);
 
                     log.debug("accepting ({d},{d})", .{
                         connection.replica_index,
@@ -563,8 +595,6 @@ pub const Network = struct {
 
                     connection.state = .accepting;
                     connection.remote_address = proxy.remote_address;
-                    connection.origin_fd = null;
-                    connection.remote_fd = null;
 
                     network.io.accept(
                         *Connection,
