@@ -985,6 +985,14 @@ public class IntegrationTest {
                 } catch (RequestException requestException) {
                     assertEquals(PacketStatus.ClientEvicted.value, requestException.getStatus());
                 }
+
+                // The client is deinitialized after it learns it was evicted.
+                // Reusing an evicted client must return a "ClientShutdown" error.
+                try {
+                    client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                    assert false;
+                } catch (ClientClosedException clientClosedException) {
+                }
             }
         }
     }

@@ -67,8 +67,8 @@ pub const ClientInterface = extern struct {
     reserved: u32,
     magic_number: u64,
 
-    pub fn init(self: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
-        self.* = .{
+    pub fn init(interface: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
+        interface.* = .{
             .context = .{ .ptr = context },
             .vtable = .{ .ptr = vtable },
             .locker = .{},
@@ -77,54 +77,56 @@ pub const ClientInterface = extern struct {
         };
     }
 
-    pub fn submit(client: *ClientInterface, packet: *Packet.Extern) Error!void {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn submit(interface: *ClientInterface, packet: *Packet.Extern) Error!void {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
-        client.locker.lock();
-        defer client.locker.unlock();
+        interface.locker.lock();
+        defer interface.locker.unlock();
 
-        const context = client.context.ptr orelse return Error.ClientInvalid;
-        client.vtable.ptr.submit_fn(context, packet);
+        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        interface.vtable.ptr.submit_fn(context, packet);
     }
 
-    pub fn completion_context(client: *ClientInterface) Error!usize {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn completion_context(interface: *ClientInterface) Error!usize {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
-        client.locker.lock();
-        defer client.locker.unlock();
+        interface.locker.lock();
+        defer interface.locker.unlock();
 
-        const context = client.context.ptr orelse return Error.ClientInvalid;
-        return client.vtable.ptr.completion_context_fn(context);
+        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        return interface.vtable.ptr.completion_context_fn(context);
     }
 
-    pub fn deinit(client: *ClientInterface) Error!void {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn deinit(interface: *ClientInterface) Error!void {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
         const context: *anyopaque = context: {
-            client.locker.lock();
-            defer client.locker.unlock();
+            interface.locker.lock();
+            defer interface.locker.unlock();
 
-            if (client.context.ptr == null) return Error.ClientInvalid;
+            const context = interface.context.ptr orelse return Error.ClientInvalid;
+            interface.context = .{ .ptr = null };
 
-            defer client.context.ptr = null;
-
-            break :context client.context.ptr.?;
+            break :context context;
         };
-        client.vtable.ptr.deinit_fn(context);
+        interface.vtable.ptr.deinit_fn(context);
     }
 
-    pub fn init_parameters(client: *ClientInterface, out_parameters: *InitParameters) Error!void {
-        if (client.magic_number != beetle) return Error.ClientInvalid;
-        assert(client.reserved == 0);
+    pub fn init_parameters(
+        interface: *ClientInterface,
+        out_parameters: *InitParameters,
+    ) Error!void {
+        if (interface.magic_number != beetle) return Error.ClientInvalid;
+        assert(interface.reserved == 0);
 
-        client.locker.lock();
-        defer client.locker.unlock();
+        interface.locker.lock();
+        defer interface.locker.unlock();
 
-        const context = client.context.ptr orelse return Error.ClientInvalid;
-        return client.vtable.ptr.init_parameters_fn(context, out_parameters);
+        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        return interface.vtable.ptr.init_parameters_fn(context, out_parameters);
     }
 
     comptime {
@@ -194,11 +196,20 @@ pub fn ContextType(
             InvalidDataSize,
         };
 
+        /// Thread-local variable to track whether the current thread is
+        /// the IO thread or a user thread.
+        /// Used to assert that certain functions are only called from the
+        /// correct thread.
+        threadlocal var thread_caller: union(enum) {
+            user,
+            io: std.Thread.Id,
+        } = .user;
+
         gpa: GPA,
         time_os: TimeOS,
         client_id: u128,
         cluster_id: u128,
-        addresses_copy: []const u8,
+        addresses_owned: []const u8,
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
@@ -254,8 +265,8 @@ pub fn ContextType(
             const allocator = context.gpa.allocator();
             context.client_id = stdx.unique_u128();
             context.cluster_id = cluster_id;
-            context.addresses_copy = try allocator.dupe(u8, addresses);
-            errdefer allocator.free(context.addresses_copy);
+            context.addresses_owned = try allocator.dupe(u8, addresses);
+            errdefer allocator.free(context.addresses_owned);
 
             context.time_os = .{};
             const time = context.time_os.time();
@@ -380,6 +391,27 @@ pub fn ContextType(
             client_out.magic_number = ClientInterface.beetle;
         }
 
+        fn deinit(self: *Context) void {
+            assert(thread_caller == .io);
+            assert(self.signal.status() == .shutdown_completed);
+            assert(self.submitted.pop() == null);
+            assert(self.pending.pop() == null);
+            maybe(self.eviction_reason != null);
+
+            self.io.cancel_all();
+            self.signal.deinit();
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
+            self.io.deinit();
+
+            self.gpa.allocator().free(self.addresses_owned);
+
+            // NB: Copy the allocator back out before trying to destroy `self` with it!
+            var gpa: GPA = self.gpa;
+            gpa.allocator().destroy(self);
+            assert(gpa.deinit() == .ok);
+        }
+
         fn tick(self: *Context) void {
             if (self.eviction_reason == null) {
                 self.client.tick();
@@ -387,7 +419,12 @@ pub fn ContextType(
         }
 
         fn io_thread(self: *Context) void {
-            while (self.signal.status() != .stopped) {
+            // Initializing the flag as the IO thread.
+            assert(thread_caller == .user);
+            thread_caller = .{ .io = std.Thread.getCurrentId() };
+            defer thread_caller = .user;
+
+            while (self.signal.status() != .shutdown_completed) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -412,16 +449,13 @@ pub fn ContextType(
                 self.packet_cancel(packet);
             }
 
-            self.io.cancel_all();
-            self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
-            self.io.deinit();
+            self.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
+            assert(thread_caller == .io);
             if (self.client.request_inflight) |*inflight| {
                 if (inflight.message.header.operation != .register) {
                     const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
@@ -434,6 +468,7 @@ pub fn ContextType(
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
         fn packet_cancel(self: *Context, packet_list: *Packet) void {
+            assert(thread_caller == .io);
             assert(packet_list.link.next == null);
             assert(packet_list.phase != .complete);
             packet_list.assert_phase(packet_list.phase);
@@ -457,12 +492,9 @@ pub fn ContextType(
         }
 
         fn packet_enqueue(self: *Context, packet: *Packet) void {
+            assert(thread_caller == .io);
             assert(self.batch_size_limit != null);
             packet.assert_phase(.submitted);
-
-            if (self.eviction_reason != null) {
-                return self.packet_cancel(packet);
-            }
 
             const operation: Operation = operation_from_int(packet.operation) orelse {
                 return self.notify_completion(packet, error.InvalidOperation);
@@ -513,6 +545,7 @@ pub fn ContextType(
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.signal.status() != .running) {
+                maybe(self.eviction_reason != null);
                 self.packet_cancel(packet);
                 return;
             }
@@ -589,6 +622,7 @@ pub fn ContextType(
         /// Sends the packet (the entire batched linked list of packets) through the vsr client.
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
+            assert(thread_caller == .io);
             assert(self.batch_size_limit != null);
             assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
@@ -597,6 +631,7 @@ pub fn ContextType(
             if (self.signal.status() != .running) {
                 return self.packet_cancel(packet_list);
             }
+            assert(self.eviction_reason == null);
 
             const message = self.client.get_message().build(.request);
             defer {
@@ -697,14 +732,18 @@ pub fn ContextType(
         }
 
         fn signal_notify_callback(signal: *Signal) void {
-            const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
-            assert(self.signal.status() != .stopped);
+            assert(thread_caller == .io);
 
-            // Don't send any requests until registration completes.
-            if (self.batch_size_limit == null) {
-                assert(self.client.request_inflight != null);
-                assert(self.client.request_inflight.?.message.header.operation == .register);
-                return;
+            const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
+            switch (self.signal.status()) {
+                .running => if (self.batch_size_limit == null) {
+                    // Don't send any requests until registration completes.
+                    assert(self.client.request_inflight != null);
+                    assert(self.client.request_inflight.?.message.header.operation == .register);
+                    return;
+                },
+                // Shutdown flushes pending requests.
+                .shutdown_completed, .shutdown_requested => return,
             }
 
             // Prevents IO thread starvation under heavy client load.
@@ -742,6 +781,8 @@ pub fn ContextType(
         }
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
+            assert(thread_caller == .io);
+
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
@@ -756,6 +797,8 @@ pub fn ContextType(
         }
 
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
+            assert(thread_caller == .io);
+
             const self: *Context = @fieldParentPtr("client", client);
             assert(self.eviction_reason == null);
 
@@ -765,9 +808,17 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
-            // Now that the client is evicted, no more requests can be submitted to it and we can
-            // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
-            // client before it exits (see `io_thread`).
+            // The client was evicted, clearing the interface context so no more
+            // requests can be submitted.
+            // In-flight requests fail with the eviction reason; subsequent ones fail
+            // with "shutdown".
+            self.interface.locker.lock();
+            defer self.interface.locker.unlock();
+
+            self.interface.context = .{ .ptr = null };
+
+            // Stops the IO thread, which then deinitializes the client before
+            // it exits (see `io_thread`).
             self.eviction_reason = eviction.header.reason;
             self.signal.stop();
         }
@@ -778,10 +829,13 @@ pub fn ContextType(
             timestamp: u64,
             reply: []const u8,
         ) void {
+            assert(thread_caller == .io);
+
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
+            assert(self.eviction_reason == null);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
@@ -851,6 +905,8 @@ pub fn ContextType(
                 reply: []const u8,
             },
         ) void {
+            assert(thread_caller == .io);
+
             const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
@@ -890,6 +946,8 @@ pub fn ContextType(
         // VTable functions called by `ClientInterface`, which are thread-safe.
 
         fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
+            assert(thread_caller == .user);
+
             const self: *Context = @ptrCast(@alignCast(context));
 
             // Packet is caller-allocated to enable elastic intrusive-link-list-based
@@ -913,16 +971,10 @@ pub fn ContextType(
                 .phase = .submitted,
             };
 
-            if (self.eviction_reason == null) {
-                // Enqueue the packet and notify the IO thread to process it asynchronously.
-                assert(self.signal.status() == .running);
-                self.submitted.push(packet);
-                self.signal.notify();
-            } else {
-                // Cancel the packet since we stop the IO thread during eviction.
-                assert(self.signal.status() != .running);
-                self.packet_cancel(packet);
-            }
+            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            assert(self.signal.status() == .running);
+            self.submitted.push(packet);
+            self.signal.notify();
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
@@ -931,30 +983,28 @@ pub fn ContextType(
         }
 
         fn vtable_deinit_fn(context: *anyopaque) void {
+            assert(thread_caller == .user);
+
             const self: *Context = @ptrCast(@alignCast(context));
 
+            // Copy the thread handle here, since stopping the I/O thread deinitializes
+            // the context and invalidates the `self` pointer.
+            const thread = self.thread;
+            defer thread.join();
+
             self.signal.stop();
-            self.thread.join();
-
-            assert(self.submitted.pop() == null);
-            assert(self.pending.pop() == null);
-
-            self.gpa.allocator().free(self.addresses_copy);
-
-            // NB: Copy the allocator back out before trying to destroy `self` with it!
-            var gpa: GPA = self.gpa;
-            gpa.allocator().destroy(self);
-            assert(gpa.deinit() == .ok);
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
+            assert(thread_caller == .user);
+
             const self: *Context = @ptrCast(@alignCast(context));
             assert(self.signal.status() == .running);
 
             out_parameters.cluster_id = self.cluster_id;
             out_parameters.client_id = self.client_id;
-            out_parameters.addresses_ptr = self.addresses_copy.ptr;
-            out_parameters.addresses_len = self.addresses_copy.len;
+            out_parameters.addresses_ptr = self.addresses_owned.ptr;
+            out_parameters.addresses_len = self.addresses_owned.len;
         }
 
         fn operation_from_int(op: u8) ?Operation {

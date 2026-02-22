@@ -41,7 +41,7 @@ pub const Signal = struct {
 
     pub fn deinit(self: *Signal) void {
         assert(self.event != IO.INVALID_EVENT);
-        assert(self.status() == .stopped);
+        assert(self.status() == .shutdown_completed);
 
         self.io.close_event(self.event);
         self.* = undefined;
@@ -65,19 +65,19 @@ pub const Signal = struct {
         running,
         /// `stop()` was called, but the event listener is still waiting for the IO operation
         /// to complete. Further calls to `notify()` have no effect.
-        stop_requested,
+        shutdown_requested,
         /// No pending listening events. It is safe to call `deinit()`.
-        stopped,
+        shutdown_completed,
     } {
         return switch (self.event_state.load(.acquire)) {
-            .shutdown => .stopped,
+            .shutdown => .shutdown_completed,
             .running,
             .waiting,
             .notified,
             => if (self.listening.load(.acquire))
                 .running
             else
-                .stop_requested,
+                .shutdown_requested,
         };
     }
 
@@ -109,7 +109,7 @@ pub const Signal = struct {
     fn wait(self: *Signal) void {
         // It is not guaranteed to be `running` here, as another caller might have requested
         // a stop during the callback.
-        assert(self.status() != .stopped);
+        assert(self.status() != .shutdown_completed);
 
         const state = self.event_state.swap(.waiting, .acquire);
         self.io.event_listen(self.event, &self.completion, on_event);
@@ -185,7 +185,7 @@ test "signal" {
 
             // Begin shutdown and keep ticking until it's completed.
             self.signal.stop();
-            while (self.signal.status() != .stopped) try self.io.run();
+            while (self.signal.status() != .shutdown_completed) try self.io.run();
             thread.join();
 
             // Notify after shutdown should be ignored.
@@ -201,7 +201,7 @@ test "signal" {
 
         fn notify(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
-            while (self.signal.status() != .stopped) {
+            while (self.signal.status() != .shutdown_completed) {
                 std.time.sleep(delay + 1);
 
                 // Triggering the event:
@@ -221,8 +221,8 @@ test "signal" {
                     assert(self.count < events_count);
                     self.count += 1;
                 },
-                .stop_requested => assert(self.count == events_count),
-                .stopped => unreachable,
+                .shutdown_requested => assert(self.count == events_count),
+                .shutdown_completed => unreachable,
             }
         }
     }.run_test();
