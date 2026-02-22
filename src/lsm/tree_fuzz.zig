@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const stdx = @import("stdx");
 const constants = @import("../constants.zig");
@@ -91,10 +92,13 @@ const node_count = 1024;
 const scan_results_max = 4096;
 const events_max = 10_000_000;
 
-// We must call compact after every 'batch'.
+const half_bar = @divExact(constants.lsm_compaction_ops, 2);
+
+// We must call compact after every 'batch', and make sure that we fill up the mutable table once
+// a bar.
 // Every `lsm_compaction_ops` batches may put/remove `value_count_max` values.
 // Every `FuzzOp.put` issues one remove and one put.
-const puts_since_compact_max = @divTrunc(commit_entries_max, 2);
+const puts_since_compact_max = @divTrunc(commit_entries_max, 2 * half_bar);
 
 fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
@@ -278,8 +282,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn compact(env: *Environment, op: u64, beats_remaining: u64) void {
-            const half_bar = @divExact(constants.lsm_compaction_ops, 2);
-            if (op < half_bar) return;
+            if (op < constants.lsm_compaction_ops) return;
+
             const compaction_beat = op % constants.lsm_compaction_ops;
 
             const first_beat = compaction_beat == 0;
@@ -289,11 +293,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             if (last_beat or last_half_beat) assert(beats_remaining == 1);
-
-            assert(env.pool.idle());
-            if (first_beat or half_beat) {
-                assert(env.pool.blocks_acquired() == 0);
-            }
 
             var compactions_active: [constants.lsm_levels]*Tree.Compaction = undefined;
             var compactions_active_count: usize = 0;
@@ -306,37 +305,54 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(compactions_active_count <= stdx.div_ceil(constants.lsm_levels, 2));
             const compactions_slice = compactions_active[0..compactions_active_count];
 
-            // 1 since we may have partially finished index/value blocks from the previous beat.
-            var beat_value_blocks_max: u64 = 1;
-            var beat_index_blocks_max: u64 = 1;
+            assert(env.pool.idle());
+            if (first_beat or half_beat) {
+                assert(env.pool.blocks_acquired() == 0);
+                assert(env.pool.grid_reservation == null);
+                assert(env.manifest_log.grid_reservation == null);
+                defer {
+                    assert(env.manifest_log.grid_reservation != null);
+                    maybe(env.pool.grid_reservation != null);
+                }
+
+                // Reserve blocks for half a bar of ManifestLog appends and compaction.
+                env.manifest_log.compact_reserve_blocks();
+
+                // Reserve blocks for half a bar of tree compaction.
+                var bar_value_blocks_max: u64 = 0;
+                var bar_index_blocks_max: u64 = 0;
+
+                for (compactions_slice) |compaction| {
+                    const bar_input_values = compaction.bar_commence(op);
+                    if (bar_input_values > 0) {
+                        const bar_value_blocks = stdx.div_ceil(
+                            bar_input_values,
+                            Table.layout.block_value_count_max,
+                        );
+
+                        const bar_index_blocks = stdx.div_ceil(
+                            bar_value_blocks,
+                            Table.value_block_count_max,
+                        );
+                        bar_value_blocks_max += bar_value_blocks;
+                        bar_index_blocks_max += bar_index_blocks;
+                    }
+                }
+                if (bar_value_blocks_max + bar_index_blocks_max > 0) {
+                    env.pool.grid_reservation = env.grid.reserve(
+                        bar_index_blocks_max + bar_value_blocks_max,
+                    );
+                }
+            }
 
             for (compactions_slice) |compaction| {
-                if (first_beat or half_beat) _ = compaction.bar_commence(op);
-
                 const input_values_remaining_bar =
                     compaction.quotas.bar - compaction.quotas.bar_done;
                 const input_values_remaining_beat =
                     stdx.div_ceil(input_values_remaining_bar, beats_remaining);
 
                 compaction.beat_commence(input_values_remaining_beat);
-
-                // The +1 is for imperfections in pacing our immutable table, which
-                // might cause us to overshoot by a single block (limited to 1 due
-                // to how the immutable table values are consumed.)
-                beat_value_blocks_max += stdx.div_ceil(
-                    compaction.quotas.beat,
-                    Table.layout.block_value_count_max,
-                ) + 1;
-
-                beat_index_blocks_max += stdx.div_ceil(
-                    beat_value_blocks_max,
-                    Table.value_block_count_max,
-                );
             }
-
-            env.pool.grid_reservation = env.grid.reserve(
-                beat_value_blocks_max + beat_index_blocks_max,
-            );
 
             for (compactions_slice) |compaction| {
                 assert(env.pool.idle());
@@ -352,24 +368,23 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 assert(env.pool.idle());
             }
 
-            env.grid.forfeit(env.pool.grid_reservation.?);
-
             if (last_beat or last_half_beat) {
                 assert(env.pool.blocks_acquired() == 0);
 
-                if (op >= constants.lsm_compaction_ops) {
-                    env.change_state(.fuzzing, .manifest_log_compact);
-                    env.manifest_log.compact(manifest_log_compact_callback, op);
-                    env.tick_until_state_change(.manifest_log_compact, .fuzzing);
-                }
+                env.change_state(.fuzzing, .manifest_log_compact);
+                env.manifest_log.compact(manifest_log_compact_callback, op);
+                env.tick_until_state_change(.manifest_log_compact, .fuzzing);
 
                 for (compactions_slice) |compaction| {
                     compaction.bar_complete();
                 }
 
-                if (op >= constants.lsm_compaction_ops) {
-                    env.manifest_log.compact_end();
+                if (env.pool.grid_reservation) |reservation| {
+                    env.grid.forfeit(reservation);
+                    env.pool.grid_reservation = null;
                 }
+
+                env.manifest_log.compact_end();
             }
 
             if (last_beat) {
@@ -872,7 +887,6 @@ fn generate_compact(
     prng: *stdx.PRNG,
     options: struct { op: u64, persisted_op: u64 },
 ) FuzzOp {
-    const half_bar = @divExact(constants.lsm_compaction_ops, 2);
     const checkpoint =
         // Can only checkpoint on the last beat of the bar.
         options.op % constants.lsm_compaction_ops == constants.lsm_compaction_ops - 1 and
