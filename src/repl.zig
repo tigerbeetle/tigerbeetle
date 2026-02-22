@@ -14,6 +14,7 @@ const tb = vsr.tigerbeetle;
 const Terminal = @import("repl/terminal.zig").Terminal;
 const Completion = @import("repl/completion.zig").Completion;
 const Parser = @import("repl/parser.zig").Parser;
+const LineEditor = @import("repl/line_editor.zig").LineEditor;
 
 const repl_history_entries = 256;
 const repl_history_entry_bytes_with_nul = 512;
@@ -42,14 +43,15 @@ pub fn ReplType(comptime MessageBus: type) type {
         completion: Completion,
         history: HistoryBuffer,
 
-        /// Fixed-capacity buffer for reading input strings.
-        buffer: ReplBufferBoundedArray,
+        line_editor: LineEditor,
         /// Saved input string while navigating through history.
         buffer_outside_history: ReplBufferBoundedArray,
 
         arguments: std.ArrayListUnmanaged(u8),
         message_pool: *MessagePool,
         io: *IO,
+
+        statement_buffer: std.ArrayListUnmanaged(u8),
 
         static_allocator: StaticAllocator,
 
@@ -102,12 +104,33 @@ pub fn ReplType(comptime MessageBus: type) type {
             }
         }
 
-        const prompt = "> ";
+        fn redraw_line(repl: *const Repl, prompt_str: []const u8) !void {
+            const buf = repl.line_editor.const_slice();
+            const prompt_len = prompt_str.len;
+
+            // Move to the start of the line (CR).
+            try repl.terminal.print("\r", .{});
+
+            try repl.terminal.print("{s}", .{prompt_str});
+
+            // clear to end of line
+            try repl.terminal.print("\x1b[K", .{});
+
+            try repl.terminal.print("{s}", .{buf});
+
+            // compute cursor column in bytes: prompt bytes + byte offset of cursor.
+            const cursor_byte_offset = repl.line_editor.get_cursor_byte_offset();
+            const cursor_col_1based = prompt_len + cursor_byte_offset + 1;
+
+            // move cursor to calculated column (G is 1-based)
+            try repl.terminal.print("\x1b[{}G", .{cursor_col_1based});
+        }
 
         fn read_until_newline_or_eof(
             repl: *Repl,
+            prompt_str: []const u8,
         ) !?[]const u8 {
-            repl.buffer.clear();
+            repl.line_editor.clear();
             repl.buffer_outside_history.clear();
 
             try repl.terminal.prompt_mode_set();
@@ -115,298 +138,91 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             var terminal_screen = try repl.terminal.get_screen();
 
-            var buffer_index: usize = 0;
             var history_index = repl.history.count;
-
-            var current_completion: []const u8 = "";
 
             while (true) {
                 const user_input = try repl.terminal.read_user_input() orelse return null;
 
-                // Clear the completion menu when a match is selected or another key is pressed.
-                if (user_input != .tab and repl.completion.count() > 0) {
-                    repl.completion.clear();
-                    try repl.terminal.print("\x1b[{};1H\x1b[J\x1b[{};{}H", .{
-                        terminal_screen.cursor_row + 1,
-                        terminal_screen.cursor_row,
-                        terminal_screen.cursor_column,
-                    });
-                }
-
                 switch (user_input) {
                     .ctrld => {
-                        if (repl.buffer.count() == 0 and buffer_index == 0) {
+                        if (repl.line_editor.const_slice().len == 0) {
                             return null;
                         }
-                        if (buffer_index < repl.buffer.count()) {
-                            try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
-                                terminal_screen.cursor_row,
-                                terminal_screen.cursor_column,
-                                repl.buffer.const_slice()[buffer_index + 1 ..],
-                                terminal_screen.cursor_row,
-                                terminal_screen.cursor_column,
-                            });
-                            _ = repl.buffer.ordered_remove(buffer_index);
-                        }
+                        repl.line_editor.delete();
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrlc => {
                         // Move to end of line, print "^C" and abort the command.
-                        const position_end_diff = @as(
-                            isize,
-                            @intCast(repl.buffer.count() - buffer_index),
-                        );
-                        terminal_screen.update_cursor_position(position_end_diff);
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
+                        repl.line_editor.move_end();
+                        try redraw_line(repl, prompt_str);
                         try repl.terminal.print("^C\n", .{});
-                        repl.buffer.clear();
+                        repl.line_editor.clear();
                         return &.{};
                     },
                     .newline => {
-                        // Move to end of buffer, then return.
-                        const position_end_diff = @as(
-                            isize,
-                            @intCast(repl.buffer.count() - buffer_index),
-                        );
-                        terminal_screen.update_cursor_position(position_end_diff);
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
+                        repl.line_editor.move_end();
+                        try redraw_line(repl, prompt_str);
                         try repl.terminal.print("\n", .{});
-                        return repl.buffer.const_slice();
+                        return repl.line_editor.const_slice();
                     },
                     .printable => |character| {
-                        if (repl.buffer.count() == repl_history_entry_bytes_without_nul) {
+                        if (repl.line_editor.const_slice().len >= repl_history_entry_bytes_without_nul) {
                             continue;
                         }
-
-                        const is_append = buffer_index == repl.buffer.count();
-                        if (is_append) {
-                            terminal_screen.update_cursor_position(1);
-                            try repl.terminal.print("{c}", .{character});
-                            // Some terminals may not automatically move/scroll us down to the next
-                            // row after appending a character at the last column. This can cause us
-                            // to incorrectly report the cursor's position, so we force the terminal
-                            // to do so by moving the cursor forward and backward one space.
-                            if (terminal_screen.cursor_column == terminal_screen.columns) {
-                                try repl.terminal.print("\x20\x1b[{};{}H", .{
-                                    terminal_screen.cursor_row,
-                                    terminal_screen.cursor_column,
-                                });
-                            }
-                        } else {
-                            // If we're inserting mid-buffer, we need to redraw everything that
-                            // comes after as well. We'll track as if the cursor moved to the end of
-                            // the buffer after redrawing, and move it back to one position after
-                            // the newly inserted character.
-                            const buffer_redraw_len: isize = @intCast(
-                                repl.buffer.count() - buffer_index,
-                            );
-                            // It's crucial to update in two steps because the terminal may have
-                            // scrolled down as part of the text redraw.
-                            terminal_screen.update_cursor_position(buffer_redraw_len);
-                            terminal_screen.update_cursor_position(1 - buffer_redraw_len);
-                            try repl.terminal.print("{c}{s}\x1b[{};{}H", .{
-                                character,
-                                repl.buffer.const_slice()[buffer_index..],
-                                terminal_screen.cursor_row,
-                                terminal_screen.cursor_column,
-                            });
-                        }
-
-                        repl.buffer.insert_at(buffer_index, character);
-                        buffer_index += 1;
+                        repl.line_editor.insert(character);
+                        try redraw_line(repl, prompt_str);
                     },
-                    .backspace => if (buffer_index > 0) {
-                        terminal_screen.update_cursor_position(-1);
-                        // Move to new position, write the remaining buffer,
-                        // write a space (\x20) to overwrite the last character,
-                        // then move back to the new position.
-                        try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                            // If we're deleting mid-buffer, we need to redraw everything that
-                            // comes after as well.
-                            if (buffer_index < repl.buffer.count())
-                                repl.buffer.const_slice()[buffer_index..]
-                            else
-                                "",
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index -= 1;
-                        _ = repl.buffer.ordered_remove(buffer_index);
+                    .backspace => {
+                        repl.line_editor.backspace();
+                        try redraw_line(repl, prompt_str);
                     },
-                    .delete => if (buffer_index < repl.buffer.count()) {
-                        try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                            repl.buffer.const_slice()[buffer_index + 1 ..],
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        _ = repl.buffer.ordered_remove(buffer_index);
+                    .delete => {
+                        repl.line_editor.delete();
+                        try redraw_line(repl, prompt_str);
                     },
                     .tab => {
-                        try repl.completion.split_and_complete(repl.buffer.slice(), buffer_index);
+                        const buf = repl.line_editor.const_slice();
+                        const cursor_offset = repl.line_editor.get_cursor_byte_offset();
 
-                        current_completion = try repl.completion.get_next_completion();
+                        try repl.completion.split_and_complete(buf, cursor_offset);
+                        const completion = try repl.completion.get_next_completion();
 
-                        // Skip the current completion entry if adding it would overflow the buffer.
-                        if ((repl.completion.prefix.count() + repl.completion.suffix.count() +
-                            current_completion.len) >= repl_history_entry_bytes_without_nul)
-                        {
+                        const total_len = repl.completion.prefix.count() +
+                            repl.completion.suffix.count() + completion.len;
+
+                        if (total_len >= repl_history_entry_bytes_without_nul) {
                             continue;
                         }
 
-                        // Move cursor to the start of the current row, clear the screen from start
-                        // to end. Then print the leading buffer, currently selected completion and
-                        // trailing buffer(if any).
-                        terminal_screen.update_cursor_position(-@as(isize, @intCast(buffer_index)));
+                        // Reconstruct buffer with completion.
+                        var new_buffer: ReplBufferBoundedArray = .{};
+                        new_buffer.push_slice(repl.completion.prefix.const_slice());
+                        new_buffer.push_slice(completion);
+                        new_buffer.push_slice(repl.completion.suffix.const_slice());
 
-                        const buffer_row = terminal_screen.cursor_row;
-
-                        terminal_screen.update_cursor_position(
-                            @as(
-                                isize,
-                                @intCast(repl.completion.prefix.count() + current_completion.len),
-                            ),
-                        );
-
-                        // \x1b[n;mH - Moves the cursor to row n, column m.
-                        // \x1b[J - Clear the screen from current cursor position to end.
-                        try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}{s}{s}\x20\x08", .{
-                            buffer_row,
-                            prompt,
-                            repl.completion.prefix.const_slice(),
-                            current_completion,
-                            repl.completion.suffix.const_slice(),
-                        });
-
-                        // When cursor reaches the last row of terminal, scroll content upward
-                        // to create space for displaying completion menu.
-                        // \x1b[nS - Scroll whole page up by n lines; default 1 line.
-                        // \x1b[nA - Moves cursor up n cells; default 1 cell up.
-                        if (terminal_screen.cursor_row == terminal_screen.rows) {
-                            try repl.terminal.print("\x1b[S\x1b[A", .{});
-                        }
-
-                        // Position cursor for completion menu. If the current buffer overflows to
-                        // the next line after printing the prefix, selected completion and suffix,
-                        // the completion menu should effectively be placed `row_delta` lines below
-                        // the current buffer row.
-                        const buffer_width =
-                            repl.completion.prefix.count() +
-                            repl.completion.suffix.count() +
-                            current_completion.len + 1;
-                        const row_delta = @divFloor(buffer_width, terminal_screen.columns) + 1;
-                        try repl.terminal.print("\x1b[{};1H", .{buffer_row + row_delta});
-
-                        // Display completion menu in the next line and highlight the currently
-                        // selected completion.
-                        var menu_width: usize = 0;
-                        var match_itr = repl.completion.matches.iterator();
-
-                        while (match_itr.next()) |match| {
-                            const match_len = std.mem.indexOfScalar(u8, match[0..], '\x00').?;
-                            menu_width += match_len + 2;
-
-                            // \x1b[7m - Highlights the text by inverting the color. Inverts
-                            //           the text and background color.
-                            // \x1b[0m - Reset the style property of text. In this case, resets
-                            //           the effect of \x1b[7m - color inversion.
-                            if (std.mem.eql(u8, match[0..match_len], current_completion)) {
-                                try repl.terminal.print("\x20\x1b[7m{s}\x1b[0m\x20", .{
-                                    match[0..match_len],
-                                });
-                            } else {
-                                try repl.terminal.print("\x20{s}\x20", .{match[0..match_len]});
-                            }
-                        }
-
-                        // If the completion menu overflows past the last row of terminal screen,
-                        // move the cursor up by number of rows that would be overflown.
-                        const menu_rows = @divFloor(menu_width, terminal_screen.columns) + 1;
-                        const required_rows = terminal_screen.cursor_row + menu_rows;
-                        const overflow_rows = @as(
-                            isize,
-                            @intCast(required_rows),
-                        ) - @as(
-                            isize,
-                            @intCast(terminal_screen.rows),
-                        );
-                        if (overflow_rows > 0) {
-                            terminal_screen.update_cursor_position(
-                                -@as(isize, @intCast(terminal_screen.columns)) * overflow_rows,
-                            );
-                        }
-
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-
-                        // Re-fill the buffer with prefix, current match and suffix. Set the
-                        // buffer index where the current selected match ends.
-                        repl.buffer.clear();
-                        repl.buffer.push_slice(repl.completion.prefix.slice());
-                        repl.buffer.push_slice(current_completion);
-                        repl.buffer.push_slice(repl.completion.suffix.slice());
-                        buffer_index = repl.buffer.count() - repl.completion.suffix.count();
+                        try repl.line_editor.set_content(new_buffer.const_slice());
+                        try redraw_line(repl, prompt_str);
                     },
-                    .left, .ctrlb => if (buffer_index > 0) {
-                        terminal_screen.update_cursor_position(-1);
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index -= 1;
+                    .left, .ctrlb => {
+                        repl.line_editor.move_left();
+                        try redraw_line(repl, prompt_str);
                     },
-                    .right, .ctrlf => if (buffer_index < repl.buffer.count()) {
-                        terminal_screen.update_cursor_position(1);
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index += 1;
+                    .right, .ctrlf => {
+                        repl.line_editor.move_right();
+                        try redraw_line(repl, prompt_str);
                     },
                     .up, .ctrlp => if (history_index > 0) {
                         const history_index_next = history_index - 1;
                         const buffer_next_full = repl.history.get_ptr(history_index_next).?;
-                        const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
-                        assert(buffer_next.len < repl_history_entry_bytes_with_nul);
-
-                        // Move to the beginning of the current buffer.
-                        terminal_screen.update_cursor_position(
-                            -@as(isize, @intCast(buffer_index)),
-                        );
-                        const row_current_buffer_start = terminal_screen.cursor_row;
-
-                        // Move to the end of the new buffer.
-                        terminal_screen.update_cursor_position(
-                            @as(isize, @intCast(buffer_next.len)),
-                        );
-
-                        try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}\x20\x1b[{};{}H", .{
-                            row_current_buffer_start,
-                            prompt,
-                            buffer_next,
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
+                        const buffer_next = std.mem.sliceTo(buffer_next_full, 0);
 
                         if (history_index == repl.history.count) {
                             repl.buffer_outside_history.clear();
-                            repl.buffer_outside_history.push_slice(repl.buffer.const_slice());
+                            repl.buffer_outside_history.push_slice(repl.line_editor.const_slice());
                         }
+                        try repl.line_editor.set_content(buffer_next);
                         history_index = history_index_next;
-
-                        repl.buffer.clear();
-                        repl.buffer.push_slice(buffer_next);
-                        buffer_index = repl.buffer.count();
+                        try redraw_line(repl, prompt_str);
                     },
                     .down, .ctrln => if (history_index < repl.history.count) {
                         const history_index_next = history_index + 1;
@@ -415,100 +231,49 @@ pub fn ReplType(comptime MessageBus: type) type {
                             repl.buffer_outside_history.const_slice()
                         else brk: {
                             const buffer_next_full = repl.history.get_ptr(history_index_next).?;
-                            const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
-                            assert(buffer_next.len < repl_history_entry_bytes_with_nul);
+                            const buffer_next = std.mem.sliceTo(buffer_next_full, 0);
                             break :brk buffer_next;
                         };
 
                         history_index = history_index_next;
 
-                        // Move to the beginning of the current buffer.
-                        terminal_screen.update_cursor_position(
-                            -@as(isize, @intCast(buffer_index)),
-                        );
-                        const row_current_buffer_start = terminal_screen.cursor_row;
-
-                        // Move to the end of the new buffer.
-                        terminal_screen.update_cursor_position(
-                            @as(isize, @intCast(buffer_next.len)),
-                        );
-
-                        try repl.terminal.print("\x1b[{};1H\x1b[J{s}{s}\x20\x1b[{};{}H", .{
-                            row_current_buffer_start,
-                            prompt,
-                            buffer_next,
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-
-                        repl.buffer.clear();
-                        repl.buffer.push_slice(buffer_next);
-                        buffer_index = repl.buffer.count();
+                        try repl.line_editor.set_content(buffer_next);
+                        try redraw_line(repl, prompt_str);
                     },
                     .altf, .ctrlright => {
-                        const forward = move_forward_by_word(repl.buffer.slice(), buffer_index);
-                        terminal_screen.update_cursor_position(
-                            @as(isize, @intCast(forward - buffer_index)),
-                        );
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index = forward;
+                        repl.line_editor.move_forward_by_word();
+                        try redraw_line(repl, prompt_str);
                     },
                     .altb, .ctrlleft => {
-                        const backward = move_backward_by_word(repl.buffer.slice(), buffer_index);
-                        terminal_screen.update_cursor_position(
-                            -@as(isize, @intCast(buffer_index - backward)),
-                        );
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index = backward;
+                        repl.line_editor.move_backward_by_word();
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrla, .home => {
-                        // Move to start of line.
-                        const position_start_diff = -@as(isize, @intCast(buffer_index));
-                        terminal_screen.update_cursor_position(position_start_diff);
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index = 0;
+                        repl.line_editor.move_home();
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrle, .end => {
-                        // Move to end of line.
-                        const position_end_diff = @as(
-                            isize,
-                            @intCast(repl.buffer.count() - buffer_index),
-                        );
-                        terminal_screen.update_cursor_position(position_end_diff);
-                        try repl.terminal.print("\x1b[{};{}H", .{
-                            terminal_screen.cursor_row,
-                            terminal_screen.cursor_column,
-                        });
-                        buffer_index = repl.buffer.count();
+                        repl.line_editor.move_end();
+                        try redraw_line(repl, prompt_str);
                     },
                     .ctrlk => {
                         // Clear screen from cursor.
                         try repl.terminal.print("\x1b[J", .{});
-                        repl.buffer.resize(buffer_index) catch unreachable;
                     },
                     .ctrll => {
                         // Move to 0,0 and clear the screen from cursor, print the prompt, then ask
                         // the terminal for the new position.
                         try repl.terminal.print("\x1b[0;0H\x1b[J", .{});
-                        try repl.terminal.print(prompt, .{});
+                        try repl.terminal.print("{s}", .{prompt_str});
                         terminal_screen = try repl.terminal.get_screen();
 
-                        // Print whatever is in the buffer and move the cursor back to buffer_index.
+                        // Print whatever is in the buffer and move the cursor back to cursor.
                         terminal_screen.update_cursor_position(
-                            @as(isize, @intCast(buffer_index)),
+                            @as(isize, @intCast(repl.line_editor.cursor)),
                         );
 
                         try repl.terminal.print("{s}\x1b[{};{}H", .{
-                            repl.buffer.const_slice(),
+                            repl.line_editor.const_slice(),
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
                         });
@@ -519,34 +284,14 @@ pub fn ReplType(comptime MessageBus: type) type {
             unreachable;
         }
 
-        fn move_forward_by_word(buffer: []const u8, buffer_index: usize) usize {
-            var cur_pos = buffer_index;
-            while (cur_pos < buffer.len and std.ascii.isWhitespace(buffer[cur_pos])) {
-                cur_pos += 1;
-            }
-            while (cur_pos < buffer.len and !std.ascii.isWhitespace(buffer[cur_pos])) {
-                cur_pos += 1;
-            }
-            return cur_pos;
-        }
-
-        fn move_backward_by_word(buffer: []const u8, buffer_index: usize) usize {
-            var cur_pos = buffer_index;
-            while (cur_pos > 0 and std.ascii.isWhitespace(buffer[cur_pos - 1])) {
-                cur_pos -= 1;
-            }
-            while (cur_pos > 0 and !std.ascii.isWhitespace(buffer[cur_pos - 1])) {
-                cur_pos -= 1;
-            }
-            return cur_pos;
-        }
-
         fn do_repl(
             repl: *Repl,
             arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
-            try repl.terminal.print(prompt, .{});
-            const input = repl.read_until_newline_or_eof() catch |err| {
+            const prompt = if (repl.statement_buffer.items.len == 0) "> " else "... ";
+            try repl.terminal.print("{s}", .{prompt});
+
+            const input = repl.read_until_newline_or_eof(prompt) catch |err| {
                 repl.event_loop_done = true;
                 return err;
             } orelse {
@@ -556,74 +301,87 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             };
 
-            if (input.len > 0) {
-                const add_to_history = brk: {
-                    const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
-                    const last_entry_str = std.mem.sliceTo(last_entry, '\x00');
-                    break :brk !std.mem.eql(u8, last_entry_str, input);
-                };
+            try repl.statement_buffer.appendSlice(repl.static_allocator.allocator(), input);
+            try repl.statement_buffer.append(repl.static_allocator.allocator(), '\n');
 
-                if (add_to_history) {
-                    // NB: Avoiding big stack allocations below.
+            if (std.mem.indexOf(u8, repl.statement_buffer.items, ";")) |_| {
+                // Parse the accumulated statement
+                const statement = Parser.parse_statement(
+                    repl.statement_buffer.items,
+                    &repl.terminal,
+                    arguments,
+                ) catch |err| {
+                    switch (err) {
+                        // These are parsing errors, so the REPL should
+                        // not continue to execute this statement but can
+                        // still accept new statements.
+                        Parser.Error.IdentifierBad,
+                        Parser.Error.OperationBad,
+                        Parser.Error.ValueBad,
+                        Parser.Error.KeyValuePairBad,
+                        Parser.Error.KeyValuePairEqualMissing,
+                        Parser.Error.SyntaxMatchNone,
+                        Parser.Error.SliceOperationUnsupported,
+                        => {
+                            repl.statement_buffer.clearRetainingCapacity();
+                            return;
+                        },
 
-                    assert(input.len < repl_history_entry_bytes_with_nul);
-
-                    if (repl.history.full()) {
-                        repl.history.advance_head();
+                        // An unexpected error for which we do
+                        // want the stacktrace.
+                        error.AccessDenied,
+                        error.BrokenPipe,
+                        error.ConnectionResetByPeer,
+                        error.DeviceBusy,
+                        error.DiskQuota,
+                        error.FileTooBig,
+                        error.InputOutput,
+                        error.InvalidArgument,
+                        error.LockViolation,
+                        error.NoSpaceLeft,
+                        error.NotOpenForWriting,
+                        error.OperationAborted,
+                        error.OutOfMemory,
+                        error.SystemResources,
+                        error.Unexpected,
+                        error.WouldBlock,
+                        error.NoDevice,
+                        error.ProcessNotFound,
+                        => {
+                            repl.statement_buffer.clearRetainingCapacity();
+                            return err;
+                        },
                     }
-                    const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
-                        repl.history.next_tail_ptr().?;
-                    @memset(history_tail, '\x00');
-                    stdx.copy_left(.inexact, u8, history_tail, input);
-                    repl.history.advance_tail();
+                };
+                try repl.do_statement(statement);
+                // Add to history if successful
+                if (repl.statement_buffer.items.len > 0) {
+                    const history_input = std.mem.trimRight(u8, repl.statement_buffer.items, "\n");
+                    if (history_input.len > 0) {
+                        const add_to_history = brk: {
+                            const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
+                            const last_entry_str = std.mem.sliceTo(last_entry, 0);
+                            break :brk !std.mem.eql(u8, last_entry_str, history_input);
+                        };
+
+                        if (add_to_history) {
+                            // NB: Avoiding big stack allocations below.
+
+                            if (history_input.len < repl_history_entry_bytes_with_nul) {
+                                if (repl.history.full()) {
+                                    repl.history.advance_head();
+                                }
+                                const history_tail: *[repl_history_entry_bytes_with_nul]u8 =
+                                    repl.history.next_tail_ptr().?;
+                                @memset(history_tail, 0);
+                                stdx.copy_left(.inexact, u8, history_tail, history_input);
+                                repl.history.advance_tail();
+                            }
+                        }
+                    }
                 }
+                repl.statement_buffer.clearRetainingCapacity();
             }
-
-            const statement = Parser.parse_statement(
-                input,
-                &repl.terminal,
-                arguments,
-            ) catch |err| {
-                switch (err) {
-                    // These are parsing errors, so the REPL should
-                    // not continue to execute this statement but can
-                    // still accept new statements.
-                    Parser.Error.IdentifierBad,
-                    Parser.Error.OperationBad,
-                    Parser.Error.ValueBad,
-                    Parser.Error.KeyValuePairBad,
-                    Parser.Error.KeyValuePairEqualMissing,
-                    Parser.Error.SyntaxMatchNone,
-                    Parser.Error.SliceOperationUnsupported,
-                    // TODO(zig): This will be more convenient to express
-                    // once https://github.com/ziglang/zig/issues/2473 is
-                    // in.
-                    => return,
-
-                    // An unexpected error for which we do
-                    // want the stacktrace.
-                    error.AccessDenied,
-                    error.BrokenPipe,
-                    error.ConnectionResetByPeer,
-                    error.DeviceBusy,
-                    error.DiskQuota,
-                    error.FileTooBig,
-                    error.InputOutput,
-                    error.InvalidArgument,
-                    error.LockViolation,
-                    error.NoSpaceLeft,
-                    error.NotOpenForWriting,
-                    error.OperationAborted,
-                    error.OutOfMemory,
-                    error.SystemResources,
-                    error.Unexpected,
-                    error.WouldBlock,
-                    error.NoDevice,
-                    error.ProcessNotFound,
-                    => return err,
-                }
-            };
-            try repl.do_statement(statement);
         }
 
         fn display_help(repl: *Repl) !void {
@@ -662,6 +420,12 @@ pub fn ReplType(comptime MessageBus: type) type {
             );
             errdefer arguments.deinit(allocator);
 
+            var statement_buffer = try std.ArrayListUnmanaged(u8).initCapacity(
+                allocator,
+                constants.message_body_size_max,
+            );
+            errdefer statement_buffer.deinit(allocator);
+
             var message_pool = try allocator.create(MessagePool);
             errdefer allocator.destroy(message_pool);
 
@@ -699,11 +463,12 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .terminal = undefined, // Init on run.
                 .completion = undefined, // Init on run.
                 .history = HistoryBuffer.init(), // No corresponding deinit.
-                .buffer = .{},
+                .line_editor = .{},
                 .buffer_outside_history = .{},
                 .arguments = arguments,
                 .message_pool = message_pool,
                 .io = io,
+                .statement_buffer = statement_buffer,
                 .static_allocator = static_allocator,
             };
         }
@@ -715,6 +480,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl.message_pool.deinit(allocator);
             allocator.destroy(repl.message_pool);
             repl.arguments.deinit(allocator);
+            repl.statement_buffer.deinit(allocator);
         }
 
         pub fn run(repl: *Repl, statements: []const u8) !void {
