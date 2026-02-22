@@ -76,6 +76,10 @@ pub fn CompositeKeyType(comptime Field: type) type {
             return if (Field == void) {} else @truncate(key >> 64);
         }
 
+        pub inline fn key_suffix(key: Key) u64 {
+            return @truncate(key);
+        }
+
         pub inline fn tombstone(value: *const CompositeKey) bool {
             assert(value.padding == 0);
             return (value.timestamp & tombstone_bit) != 0;
