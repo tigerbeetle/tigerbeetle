@@ -37,7 +37,8 @@ pub fn CompositeKeyType(comptime Field: type) type {
 
         pub const Key = std.meta.Int(
             .unsigned,
-            @bitSizeOf(u64) + @bitSizeOf(Field) + @bitSizeOf(Pad),
+            // This is how the Key is structured; padding is MSB.
+            @bitSizeOf(Pad) + @bitSizeOf(Field) + @bitSizeOf(u64),
         );
 
         field: Field align(field_bitsize_alignment),
