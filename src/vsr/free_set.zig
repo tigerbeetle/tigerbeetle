@@ -600,6 +600,8 @@ pub const FreeSet = struct {
     pub fn mark_checkpoint_durable(set: *FreeSet) void {
         assert(set.opened);
         assert(!set.checkpoint_durable);
+        assert(set.reservation_count == 0);
+        assert(set.reservation_blocks == 0);
 
         set.checkpoint_durable = true;
 

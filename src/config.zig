@@ -153,8 +153,8 @@ const ConfigProcess = struct {
 const ConfigCluster = struct {
     cache_line_size: comptime_int = 64,
     clients_max: u32,
-    pipeline_prepare_queue_max: u32 = 8,
-    view_change_headers_suffix_max: u32 = 8 + 1,
+    pipeline_prepare_queue_max: u32 = 16,
+    view_change_headers_suffix_max: u32 = 16 + 1,
     quorum_replication_max: u8 = 3,
     journal_slot_count: u32 = 1024,
     message_size_max: u32 = 1 * MiB,
