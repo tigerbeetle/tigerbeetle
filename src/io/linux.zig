@@ -1444,6 +1444,16 @@ pub const IO = struct {
         return common.listen(fd, address, options);
     }
 
+    /// Bind socket to given address.
+    pub fn bind(
+        _: *IO,
+        fd: socket_t,
+        address: std.net.Address,
+    ) !void {
+        const addrlen: posix.socklen_t = @sizeOf(std.net.Address);
+        return posix.bind(fd, &address.any, addrlen);
+    }
+
     pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
         return posix.shutdown(socket, how);
     }
