@@ -105,7 +105,10 @@ pub fn prepare_streams(
     return .{ context, output };
 }
 
-fn KWayMergeContextType(comptime Value: type, comptime key_from_value: fn (*const Value) callconv(.@"inline") Value.Key) type {
+fn KWayMergeContextType(
+    comptime Value: type,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Value.Key,
+) type {
     return struct {
         const Context = @This();
 

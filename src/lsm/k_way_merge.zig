@@ -25,14 +25,15 @@ const maybe = stdx.maybe;
 const math = std.math;
 const mem = std.mem;
 
-const composite_key = @import("composite_key.zig");
 const Direction = @import("../direction.zig").Direction;
 const Pending = error{Pending};
 
 pub fn TournamentTreeType(
     comptime Key: type,
-    comptime Value: type,
     contestants_max: comptime_int,
+    /// `void` for standard comparison, or a type with
+    /// `key_prefix(Key)` and `key_suffix(Key)` for prefix-key optimization.
+    comptime CompositeKey: type,
 ) type {
     // TODO: we could just use the prefix when it is a composite key.
     return struct {
@@ -170,14 +171,20 @@ pub fn TournamentTreeType(
                 const opp_key = tree.loser_keys[idx];
                 const opp_id = tree.loser_ids[idx];
                 const new_wins = new_wins: {
-                    if (comptime composite_key.is_composite_key(Value) and @FieldType(Value, "field") != void) {
-                        const new_prefix = Value.key_prefix(new_key);
-                        const opp_prefix = Value.key_prefix(opp_key);
+                    if (CompositeKey != void) {
+                        const new_prefix = CompositeKey.key_prefix(new_key);
+                        const opp_prefix = CompositeKey.key_prefix(opp_key);
                         if (new_prefix == opp_prefix) {
                             @branchHint(.cold);
-                            const new_suffix = Value.key_suffix(new_key);
-                            const opp_suffix = Value.key_suffix(opp_key);
-                            break :new_wins beats(new_suffix, new_id, opp_suffix, opp_id, direction);
+                            const new_suffix = CompositeKey.key_suffix(new_key);
+                            const opp_suffix = CompositeKey.key_suffix(opp_key);
+                            break :new_wins beats(
+                                new_suffix,
+                                new_id,
+                                opp_suffix,
+                                opp_id,
+                                direction,
+                            );
                         }
                         break :new_wins beats(new_prefix, new_id, opp_prefix, opp_id, direction);
                     } else {
@@ -202,7 +209,13 @@ pub fn TournamentTreeType(
         /// In ascending mode, sentinel_key (maxInt) naturally loses on `<` so no
         /// explicit sentinel checks are needed. In descending mode, maxInt would
         /// incorrectly "win" on `>`, so explicit sentinel checks are required.
-        inline fn beats(a_key: anytype, a_id: u32, b_key: anytype, b_id: u32, direction: Direction) bool {
+        inline fn beats(
+            a_key: anytype,
+            a_id: u32,
+            b_key: anytype,
+            b_id: u32,
+            direction: Direction,
+        ) bool {
             const id_lt: u1 = @intFromBool(a_id < b_id);
             const keys_eq: u1 = @intFromBool(a_key == b_key);
             const eq_and_id_wins: u1 = keys_eq & id_lt;
@@ -245,7 +258,11 @@ pub fn KWayMergeIteratorType(
         key_popped: ?Key,
         tree: ?Tree,
 
-        const Tree = TournamentTreeType(Key, Value, options.streams_max);
+        const composite_key = @import("composite_key.zig");
+        // Composite keys enable a prefix optimization.
+        const CompositeKey = if (composite_key.is_composite_key(Value) and
+            @FieldType(Value, "field") != void) Value else void;
+        const Tree = TournamentTreeType(Key, options.streams_max, CompositeKey);
         const KWayMergeIterator = @This();
 
         pub fn init(
