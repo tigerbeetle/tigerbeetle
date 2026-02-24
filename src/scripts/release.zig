@@ -81,17 +81,16 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
     const release, const release_multiversion, const changelog_body = blk: {
         if (cli_args.no_changelog) {
+            assert(cli_args.devhub);
+            assert(!cli_args.publish);
+
             var last_release = changelog_iteratator.next_changelog().?;
             while (last_release.release == null) {
                 last_release = changelog_iteratator.next_changelog().?;
             }
 
             break :blk .{
-                multiversion.Release.from(.{
-                    .major = last_release.release.?.triple().major,
-                    .minor = last_release.release.?.triple().minor,
-                    .patch = last_release.release.?.triple().patch + 1,
-                }),
+                multiversion.Release.from(.{ .major = 65535, .minor = 0, .patch = 0 }),
                 last_release.release.?,
                 "",
             };
