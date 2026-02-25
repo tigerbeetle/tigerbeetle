@@ -953,14 +953,14 @@ test "Routing fuzz" {
         }
 
         fn run_step(env: *Environment) !void {
-            const Actions = enum {
+            const Action = enum {
                 view_change,
                 prepare,
                 prepare_ok,
                 reroute,
             };
 
-            const action = env.prng.enum_weighted(Actions, .{
+            const action = env.prng.enum_weighted(Action, .{
                 .view_change = 1,
                 .prepare = 5,
                 .prepare_ok = 10,
@@ -999,11 +999,7 @@ test "Routing fuzz" {
                             env.op,
                         )
                     else
-                        env.prng.range_inclusive(
-                            u64,
-                            1,
-                            env.op + 2 * env.pipeline_length,
-                        );
+                        env.prng.range_inclusive(u64, 1, env.op + 2 * env.pipeline_length);
                     const backup = env.prng.int_inclusive(u8, env.routing.replica_count - 1);
                     env.tick();
                     env.routing.op_prepare_ok(op, backup, .{ .ns = env.time });
