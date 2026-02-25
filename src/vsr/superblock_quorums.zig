@@ -7,7 +7,6 @@ const maybe = stdx.maybe;
 
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
-const fuzz = @import("./superblock_quorums_fuzz.zig");
 
 pub const Options = struct {
     superblock_copies: u8,
@@ -367,29 +366,4 @@ pub fn QuorumsType(comptime options: Options) type {
             }
         };
     };
-}
-
-test "Quorums.working" {
-    var prng = stdx.PRNG.from_seed_testing();
-
-    // Don't print warnings from the Quorums.
-    const level = std.testing.log_level;
-    std.testing.log_level = std.log.Level.err;
-    defer std.testing.log_level = level;
-
-    try fuzz.fuzz_quorums_working(&prng);
-}
-
-test "Quorum.repairs" {
-    var prng = stdx.PRNG.from_seed_testing();
-
-    // Don't print warnings from the Quorums.
-    const level = std.testing.log_level;
-    std.testing.log_level = std.log.Level.err;
-    defer std.testing.log_level = level;
-
-    try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 4 });
-    // TODO: Enable these once SuperBlockHeader is generic over its Constants.
-    // try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 6 });
-    // try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 8 });
 }
