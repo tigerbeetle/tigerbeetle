@@ -588,8 +588,33 @@ pub const Storage = struct {
     }
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
-        assert(storage.overlays.total() >= 2);
+        storage.write_sectors_finish_overlay_misdirect(write);
 
+        var sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
+        while (sectors.next()) |sector| {
+            storage.faults.unset(sector);
+            storage.memory_written.set(sector);
+        }
+
+        if (storage.prng.chance(storage.options.write_fault_probability)) {
+            if (storage.pick_faulty_sector(write.zone, write.offset, write.buffer.len)) |sector| {
+                storage.fault_sector(write.zone, sector);
+            }
+        }
+
+        const offset_in_storage = write.zone.offset(write.offset);
+        stdx.copy_disjoint(
+            .exact,
+            u8,
+            storage.memory[offset_in_storage..][0..write.buffer.len],
+            write.buffer,
+        );
+
+        write.callback(write);
+    }
+
+    fn write_sectors_finish_overlay_misdirect(storage: *Storage, write: *Storage.Write) void {
+        assert(storage.overlays.total() >= 2);
         // Clean up old misdirects if they are overwritten.
         var overlays_iterator = storage.overlays.iterate();
         while (overlays_iterator.next()) |overlay| {
@@ -636,28 +661,6 @@ pub const Storage = struct {
             stdx.copy_disjoint(.inexact, u8, overlay_mistaken_buffer, write.buffer);
             stdx.copy_disjoint(.inexact, u8, overlay_intended_buffer, target_intended_buffer);
         }
-
-        var sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
-        while (sectors.next()) |sector| {
-            storage.faults.unset(sector);
-            storage.memory_written.set(sector);
-        }
-
-        if (storage.prng.chance(storage.options.write_fault_probability)) {
-            if (storage.pick_faulty_sector(write.zone, write.offset, write.buffer.len)) |sector| {
-                storage.fault_sector(write.zone, sector);
-            }
-        }
-
-        const offset_in_storage = write.zone.offset(write.offset);
-        stdx.copy_disjoint(
-            .exact,
-            u8,
-            storage.memory[offset_in_storage..][0..write.buffer.len],
-            write.buffer,
-        );
-
-        write.callback(write);
     }
 
     fn read_latency(storage: *Storage) Duration {
