@@ -15,85 +15,90 @@ comptime {
 }
 
 pub const Options = union(vsr.ProcessType) {
-    replica: struct {
+    replica: Replica,
+    client,
+
+    const Replica = struct {
         members_count: u8,
         pipeline_requests_limit: u32,
         message_bus: enum { tcp, testing },
-    },
-    client,
+    };
 
     /// The number of messages allocated at initialization by the message pool.
     fn messages_max(options: *const Options) u32 {
         return switch (options.*) {
-            .client => messages_max: {
-                var sum: u32 = 0;
-
-                sum += constants.replicas_max; // Connection.recv_buffer
-                // Connection.send_queue:
-                sum += constants.replicas_max * constants.connection_send_queue_max_client;
-                sum += 1; // Client.request_inflight
-                // Handle bursts.
-                // (e.g. Connection.parse_message(), or sending a ping when the send queue is full).
-                sum += 1;
-
-                // This conditions is necessary (but not sufficient) to prevent deadlocks.
-                assert(sum > 1);
-                break :messages_max sum;
-            },
-
-            // The number of full-sized messages allocated at initialization by the replica message
-            // pool. There must be enough messages to ensure that the replica can always progress,
-            // to avoid deadlock.
-            .replica => |*replica| messages_max: {
-                assert(replica.members_count > 0);
-                assert(replica.members_count <= constants.members_max);
-                assert(replica.pipeline_requests_limit >= 0);
-                assert(replica.pipeline_requests_limit <= constants.pipeline_request_queue_max);
-
-                var sum: u32 = 0;
-
-                const pipeline_limit =
-                    constants.pipeline_prepare_queue_max + replica.pipeline_requests_limit;
-
-                sum += constants.journal_iops_read_max; // Journal reads
-                sum += constants.journal_iops_write_max; // Journal writes
-                sum += constants.client_replies_iops_read_max; // Client-reply reads
-                sum += constants.client_replies_iops_write_max; // Client-reply writes
-                // Replica.grid_reads (Replica.BlockRead)
-                sum += constants.grid_repair_reads_max;
-                sum += 1; // Replica.loopback_queue
-                sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
-                sum += 1; // Replica.commit_prepare
-                sum += 1; // Replica.sync_start_view
-                // Replica.do_view_change_from_all_replicas quorum:
-                // All other quorums are bitsets.
-                //
-                // This should be set to the runtime replica_count, but we don't know that precisely
-                // yet, so we may guess high. (We can't differentiate between replicas and
-                // standbys.)
-                sum += @min(replica.members_count, constants.replicas_max);
-                sum += 1; // Handle bursts (e.g. Connection.parse_message)
-                // Handle Replica.commit_op's reply:
-                // (This is separate from the burst +1 because they may occur concurrently).
-                sum += 1;
-
-                switch (replica.message_bus) {
-                    .tcp => {
-                        // The maximum number of simultaneous open connections on the server.
-                        // -1 since we never connect to ourself.
-                        const connections_max = replica.members_count + pipeline_limit - 1;
-                        sum += connections_max; // Connection.recv_buffer
-                        // Connection.send_queue:
-                        sum += connections_max * constants.connection_send_queue_max_replica;
-                    },
-                    .testing => {},
-                }
-
-                // This conditions is necessary (but not sufficient) to prevent deadlocks.
-                assert(sum > constants.replicas_max);
-                break :messages_max sum;
-            },
+            .client => messages_max_client(),
+            .replica => |replica| messages_max_replica(replica),
         };
+    }
+
+    fn messages_max_client() u32 {
+        var sum: u32 = 0;
+
+        sum += constants.replicas_max; // Connection.recv_buffer
+        // Connection.send_queue:
+        sum += constants.replicas_max * constants.connection_send_queue_max_client;
+        sum += 1; // Client.request_inflight
+        // Handle bursts.
+        // (e.g. Connection.parse_message(), or sending a ping when the send queue is full).
+        sum += 1;
+
+        // This conditions is necessary (but not sufficient) to prevent deadlocks.
+        assert(sum > 1);
+        return sum;
+    }
+
+    // The number of full-sized messages allocated at initialization by the replica message
+    // pool. There must be enough messages to ensure that the replica can always progress,
+    // to avoid deadlock.
+    fn messages_max_replica(replica: Options.Replica) u32 {
+        assert(replica.members_count > 0);
+        assert(replica.members_count <= constants.members_max);
+        assert(replica.pipeline_requests_limit >= 0);
+        assert(replica.pipeline_requests_limit <= constants.pipeline_request_queue_max);
+
+        var sum: u32 = 0;
+
+        const pipeline_limit =
+            constants.pipeline_prepare_queue_max + replica.pipeline_requests_limit;
+
+        sum += constants.journal_iops_read_max; // Journal reads
+        sum += constants.journal_iops_write_max; // Journal writes
+        sum += constants.client_replies_iops_read_max; // Client-reply reads
+        sum += constants.client_replies_iops_write_max; // Client-reply writes
+        // Replica.grid_reads (Replica.BlockRead)
+        sum += constants.grid_repair_reads_max;
+        sum += 1; // Replica.loopback_queue
+        sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
+        sum += 1; // Replica.commit_prepare
+        sum += 1; // Replica.sync_start_view
+        // Replica.do_view_change_from_all_replicas quorum:
+        // All other quorums are bitsets.
+        //
+        // This should be set to the runtime replica_count, but we don't know that precisely
+        // yet, so we may guess high. (We can't differentiate between replicas and
+        // standbys.)
+        sum += @min(replica.members_count, constants.replicas_max);
+        sum += 1; // Handle bursts (e.g. Connection.parse_message)
+        // Handle Replica.commit_op's reply:
+        // (This is separate from the burst +1 because they may occur concurrently).
+        sum += 1;
+
+        switch (replica.message_bus) {
+            .tcp => {
+                // The maximum number of simultaneous open connections on the server.
+                // -1 since we never connect to ourself.
+                const connections_max = replica.members_count + pipeline_limit - 1;
+                sum += connections_max; // Connection.recv_buffer
+                // Connection.send_queue:
+                sum += connections_max * constants.connection_send_queue_max_replica;
+            },
+            .testing => {},
+        }
+
+        // This conditions is necessary (but not sufficient) to prevent deadlocks.
+        assert(sum > constants.replicas_max);
+        return sum;
     }
 };
 
