@@ -91,7 +91,7 @@ pub const Options = union(vsr.ProcessType) {
 
                 // This conditions is necessary (but not sufficient) to prevent deadlocks.
                 assert(sum > constants.replicas_max);
-                break :messages_max sum;
+                break :messages_max sum - 1;
             },
         };
     }
