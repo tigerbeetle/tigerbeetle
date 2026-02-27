@@ -793,27 +793,7 @@ const Environment = struct {
 
         const thing = &env.model.items[model_index];
 
-        env.forest.grooves.things.objects.remove(thing);
-        env.forest.grooves.things.ids.remove(&.{
-            .id = thing.id,
-            .timestamp = thing.timestamp,
-        });
-
-        if (comptime ThingsGroove.ObjectsCache != void) {
-            if (comptime constants.verify) {
-                env.forest.grooves.things.objects_cache.remove(thing.id);
-            }
-        }
-
-        inline for (std.meta.fields(ThingsGroove.IndexTrees)) |field| {
-            const Helper = ThingsGroove.IndexTreeFieldHelperType(field.name);
-            if (Helper.index_from_object(thing)) |value| {
-                @field(env.forest.grooves.things.indexes, field.name).remove(&.{
-                    .timestamp = thing.timestamp,
-                    .field = value,
-                });
-            }
-        }
+        env.forest.grooves.things.remove(thing.id);
 
         env.model_live.setValue(model_index, false);
         for (query_specs, &env.model_matches) |_, *query_matches| {
