@@ -2,6 +2,7 @@
 //! Supports only the subset of flags used in this repository.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const elf = std.elf;
 const stdx = @import("stdx");
 const assert = std.debug.assert;
@@ -66,12 +67,16 @@ pub fn main() !void {
         return;
     }
 
-    const output = if (is_elf(input))
-        try transform_elf(gpa, input, &cli)
-    else if (is_pe(input))
-        try transform_pe(gpa, input, &cli)
-    else
-        return error.UnsupportedFormat;
+    const output = blk: {
+        if (is_elf(input)) {
+            break :blk try transform_elf(gpa, input, &cli);
+        } else if (is_pe(input)) {
+            break :blk try transform_pe(gpa, input, &cli);
+        } else {
+            assert(false); // TigerBeetle multiversion inputs are always ELF or PE.
+            unreachable;
+        }
+    };
     defer gpa.free(output);
 
     try std.fs.cwd().writeFile(.{
@@ -196,35 +201,37 @@ const ElfSection = struct {
 
 // Apply the requested section edits to an ELF input and emit rewritten bytes.
 fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
-    if (input.len < @sizeOf(elf.Elf64_Ehdr)) return error.InvalidELF;
+    assert(input.len >= @sizeOf(elf.Elf64_Ehdr)); // ELF header must be present.
 
     var elf_header = std.mem.bytesAsValue(elf.Elf64_Ehdr, input[0..@sizeOf(elf.Elf64_Ehdr)]).*;
-    if (!std.mem.eql(u8, elf_header.e_ident[0..4], elf.MAGIC)) return error.InvalidELF;
-    if (elf_header.e_ident[elf.EI_CLASS] != elf.ELFCLASS64) return error.UnsupportedELF;
-    if (elf_header.e_ident[elf.EI_DATA] != elf.ELFDATA2LSB) return error.UnsupportedELF;
-    if (elf_header.e_shentsize != @sizeOf(elf.Elf64_Shdr)) return error.InvalidELF;
+    assert(std.mem.eql(u8, elf_header.e_ident[0..4], elf.MAGIC)); // Input is ELF.
+    assert(elf_header.e_ident[elf.EI_CLASS] == elf.ELFCLASS64); // 64-bit only.
+    assert(elf_header.e_ident[elf.EI_DATA] == elf.ELFDATA2LSB); // Little-endian only.
+    assert(elf_header.e_shentsize == @sizeOf(elf.Elf64_Shdr)); // 64-bit section headers.
+    assert(elf_header.e_shnum != 0); // No ELF extended section numbering.
+    assert(elf_header.e_shstrndx != elf.SHN_HIRESERVE); // No SHN_XINDEX indirection.
 
     const section_headers_offset: usize = @intCast(elf_header.e_shoff);
     const section_headers_count: usize = elf_header.e_shnum;
-    if (section_headers_offset + section_headers_count * @sizeOf(elf.Elf64_Shdr) > input.len) {
-        return error.InvalidELF;
-    }
-
-    if (elf_header.e_shstrndx >= section_headers_count) return error.InvalidELF;
-    const section_name_table_header_offset =
-        section_headers_offset + elf_header.e_shstrndx * @sizeOf(elf.Elf64_Shdr);
-    const section_name_table_header = std.mem.bytesAsValue(
+    // Section header table must fit in file bytes.
+    assert(section_headers_offset + section_headers_count * @sizeOf(elf.Elf64_Shdr) <= input.len);
+    const section_headers = stdx.bytes_as_slice(
+        .exact,
         elf.Elf64_Shdr,
-        input[section_name_table_header_offset..][0..@sizeOf(elf.Elf64_Shdr)],
-    ).*;
+        input[section_headers_offset..][0 .. section_headers_count * @sizeOf(elf.Elf64_Shdr)],
+    );
+
+    // Section name table index must reference a real section.
+    assert(elf_header.e_shstrndx < section_headers_count);
+    const section_name_table_header = section_headers[elf_header.e_shstrndx];
     const section_name_table_offset: usize = @intCast(section_name_table_header.sh_offset);
     const section_name_table_size: usize = @intCast(section_name_table_header.sh_size);
-    if (section_name_table_offset + section_name_table_size > input.len) return error.InvalidELF;
+    // `.shstrtab` payload must fit in file bytes.
+    assert(section_name_table_offset + section_name_table_size <= input.len);
     const section_name_table = input[section_name_table_offset..][0..section_name_table_size];
 
     var sections, const section_data_end_max_original = try elf_collect_sections(gpa, input, cli, .{
-        .section_headers_offset = section_headers_offset,
-        .section_headers_count = section_headers_count,
+        .section_headers = section_headers,
         .section_name_table = section_name_table,
     });
     defer sections.deinit();
@@ -253,26 +260,23 @@ fn elf_collect_sections(
     input: []const u8,
     cli: *const CLI,
     options: struct {
-        section_headers_offset: usize,
-        section_headers_count: usize,
+        section_headers: []const elf.Elf64_Shdr,
         section_name_table: []const u8,
     },
 ) !struct { std.ArrayList(ElfSection), usize } {
     var sections = std.ArrayList(ElfSection).init(gpa);
     var data_end_max: usize = 0;
 
-    for (0..options.section_headers_count) |i| {
-        const shdr = std.mem.bytesAsValue(
-            elf.Elf64_Shdr,
-            input[options.section_headers_offset + i * @sizeOf(elf.Elf64_Shdr) ..][0..@sizeOf(
-                elf.Elf64_Shdr,
-            )],
-        ).*;
-        if (shdr.sh_name >= options.section_name_table.len) return error.InvalidELF;
-        const name = std.mem.sliceTo(
-            @as([*:0]const u8, @ptrCast(options.section_name_table.ptr + shdr.sh_name)),
+    for (options.section_headers) |shdr| {
+        assert(shdr.sh_name < options.section_name_table.len);
+        const name_offset: usize = @intCast(shdr.sh_name);
+        const name_end = std.mem.indexOfScalarPos(
+            u8,
+            options.section_name_table,
+            name_offset,
             0,
-        );
+        ) orelse unreachable;
+        const name = options.section_name_table[name_offset..name_end];
         if (section_parse(name)) |section| {
             if (cli.remove_sections[@intFromEnum(section)]) continue;
         }
@@ -281,7 +285,7 @@ fn elf_collect_sections(
             if (shdr.sh_type == elf.SHT_NOBITS or shdr.sh_size == 0) break :blk "";
             const offset: usize = @intCast(shdr.sh_offset);
             const size: usize = @intCast(shdr.sh_size);
-            if (offset + size > input.len) return error.InvalidELF;
+            assert(offset + size <= input.len); // Section payload must fit in file bytes.
             break :blk input[offset..][0..size];
         };
         const name_owned = if (name.len > 0) try gpa.dupe(u8, name) else "";
@@ -361,7 +365,7 @@ fn elf_apply_string_table(
             break;
         }
     }
-    if (shstr_index == null) return error.InvalidELF;
+    assert(shstr_index != null); // `.shstrtab` must exist in valid ELF output.
 
     // LLVM sorts and suffix-deduplicates names before materializing `.shstrtab`.
     const name_offsets, const shstr_bytes = try elf_build_string_table(gpa, sections.items);
@@ -437,7 +441,8 @@ fn elf_write_output(
     for (sections) |section| {
         if (section.header.sh_type == elf.SHT_NOBITS or section.header.sh_size == 0) continue;
         const section_data_offset: usize = @intCast(section.header.sh_offset);
-        if (section_data_offset + section.data.len > output.len) return error.InvalidELF;
+        // Rewritten section payload must fit in output buffer.
+        assert(section_data_offset + section.data.len <= output.len);
         stdx.copy_disjoint(
             .exact,
             u8,
@@ -447,6 +452,9 @@ fn elf_write_output(
     }
     if (max_data_end < section_headers_offset_new) {
         @memset(output[max_data_end..section_headers_offset_new], 0);
+        if (builtin.mode == .Debug) {
+            assert(stdx.zeroed(output[max_data_end..section_headers_offset_new]));
+        }
     }
 
     for (sections, 0..) |section, i| {
@@ -553,20 +561,30 @@ const PESection = struct {
 
 // Apply the requested section edits to a PE/COFF input and emit rewritten bytes.
 fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
-    if (input.len < 0x40) return error.InvalidPE;
+    assert(input.len >= 0x40); // DOS stub + `e_lfanew` must be present.
     const pe_header_offset = std.mem.readInt(u32, input[0x3c..][0..4], .little);
-    if (pe_header_offset + 4 + 20 > input.len) return error.InvalidPE;
-    if (!std.mem.eql(u8, input[pe_header_offset..][0..4], "PE\x00\x00")) return error.InvalidPE;
+    assert(pe_header_offset + 4 + 20 <= input.len); // PE signature + COFF header.
+    assert(std.mem.eql(u8, input[pe_header_offset..][0..4], "PE\x00\x00")); // PE/COFF only.
 
     const coff_offset = pe_header_offset + 4;
+    const machine = std.mem.readInt(u16, input[coff_offset..][0..2], .little);
+    assert(machine == 0x8664 or machine == 0xaa64); // PE32+ x86_64 or aarch64 only.
     const section_count = std.mem.readInt(u16, input[coff_offset + 2 ..][0..2], .little);
     const optional_header_size = std.mem.readInt(u16, input[coff_offset + 16 ..][0..2], .little);
     const optional_header_offset = coff_offset + 20;
+    // Optional header must fit in file bytes.
+    assert(optional_header_offset + optional_header_size <= input.len);
+    assert(optional_header_size >= 64); // We read fields through SizeOfHeaders.
+    const optional_header_magic = std.mem.readInt(
+        u16,
+        input[optional_header_offset..][0..2],
+        .little,
+    );
+    assert(optional_header_magic == 0x20b); // PE32+ only (reject PE32).
     const section_table_offset = optional_header_offset + optional_header_size;
     const section_header_size = 40;
-    if (section_table_offset + section_count * section_header_size > input.len) {
-        return error.InvalidPE;
-    }
+    // Section table must fit in file bytes.
+    assert(section_table_offset + section_count * section_header_size <= input.len);
 
     const section_alignment = std.mem.readInt(
         u32,
@@ -583,7 +601,7 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
         input[optional_header_offset + 60 ..][0..4],
         .little,
     );
-    if (section_alignment == 0 or file_alignment == 0) return error.InvalidPE;
+    assert(section_alignment > 0 and file_alignment > 0); // Required for alignment math.
 
     var sections = try pe_collect_sections(gpa, input, cli, .{
         .section_table_offset = section_table_offset,
@@ -614,7 +632,8 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
 
     for (sections.items, 0..) |section, i| {
         const section_header_offset = section_table_offset + i * section_header_size;
-        if (section_header_offset + section_header_size > output.len) return error.InvalidPE;
+        // Rewritten section header must fit in output buffer.
+        assert(section_header_offset + section_header_size <= output.len);
         stdx.copy_disjoint(.exact, u8, output[section_header_offset..][0..8], &section.name);
 
         inline for ([_]struct { field_offset: usize, field_value: u32 }{
@@ -650,16 +669,20 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
     const new_section_table_end = section_table_offset + sections.items.len * section_header_size;
     if (new_section_table_end < old_section_table_end and old_section_table_end <= output.len) {
         @memset(output[new_section_table_end..old_section_table_end], 0);
+        if (builtin.mode == .Debug) {
+            assert(stdx.zeroed(output[new_section_table_end..old_section_table_end]));
+        }
     }
 
     for (sections.items) |section| {
         if (section.size_of_raw_data == 0) continue;
         const raw_ptr: usize = @intCast(section.pointer_to_raw_data);
-        if (raw_ptr + section.data.len > output.len) return error.InvalidPE;
+        // Section raw bytes must fit in output buffer.
+        assert(raw_ptr + section.data.len <= output.len);
         stdx.copy_disjoint(.exact, u8, output[raw_ptr..][0..section.data.len], section.data);
     }
 
-    assert(output.len == output_size);
+    assert(output.len == output_size); // Allocated output length must match computed final size.
     return output;
 }
 
@@ -691,7 +714,7 @@ fn pe_collect_sections(
         const raw_ptr = std.mem.readInt(u32, input[section_header_offset + 20 ..][0..4], .little);
         const data = blk: {
             if (raw_size == 0) break :blk "";
-            if (raw_ptr + raw_size > input.len) return error.InvalidPE;
+            assert(raw_ptr + raw_size <= input.len); // Section raw bytes must fit in input file.
             break :blk input[raw_ptr..][0..raw_size];
         };
 

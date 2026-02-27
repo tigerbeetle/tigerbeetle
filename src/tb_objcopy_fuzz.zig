@@ -25,14 +25,13 @@ pub fn main() !void {
     defer arguments.deinit();
 
     const command_line = stdx.flags(&arguments, CLIArgs);
-    var prng = std.Random.DefaultPrng.init(command_line.seed orelse std.crypto.random.int(u64));
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(command_line.seed orelse std.crypto.random.int(u64));
 
     var tmp_dir_name_buffer: [64]u8 = undefined;
     const tmp_dir_name = try std.fmt.bufPrint(
         &tmp_dir_name_buffer,
         "{s}/tb_objcopy_fuzz_{d}",
-        .{ command_line.tmp, random.int(u64) },
+        .{ command_line.tmp, prng.int(u64) },
     );
     try std.fs.cwd().makePath(tmp_dir_name);
     defer std.fs.cwd().deleteTree(tmp_dir_name) catch {};
@@ -55,14 +54,14 @@ pub fn main() !void {
 
     for (0..command_line.iterations) |iteration| {
         for (fixtures.items) |fixture| {
-            try run_case(gpa, random, command_line, tmp_dir_name, fixture, iteration);
+            try run_case(gpa, &prng, command_line, tmp_dir_name, fixture, iteration);
         }
     }
 }
 
 fn run_case(
     gpa: std.mem.Allocator,
-    random: std.Random,
+    prng: *stdx.PRNG,
     command_line: CLIArgs,
     tmp_dir: []const u8,
     fixture: []const u8,
@@ -76,28 +75,28 @@ fn run_case(
 
     const body_data = try random_bytes_file(
         gpa,
-        random,
+        prng,
         case_dir,
         "body.bin",
-        fuzz_length(random, iteration * 3),
+        fuzz_length(prng, iteration * 3),
     );
     defer gpa.free(body_data.path);
 
     const header_data = try random_bytes_file(
         gpa,
-        random,
+        prng,
         case_dir,
         "header.bin",
-        fuzz_length(random, iteration * 3 + 1),
+        fuzz_length(prng, iteration * 3 + 1),
     );
     defer gpa.free(header_data.path);
 
     const header_replacement_data = try random_bytes_file(
         gpa,
-        random,
+        prng,
         case_dir,
         "header_replacement.bin",
-        fuzz_length(random, iteration * 3 + 2),
+        fuzz_length(prng, iteration * 3 + 2),
     );
     defer gpa.free(header_replacement_data.path);
 
@@ -237,7 +236,7 @@ const RandomBytesFile = struct {
 
 fn random_bytes_file(
     gpa: std.mem.Allocator,
-    random: std.Random,
+    prng: *stdx.PRNG,
     dir: []const u8,
     name: []const u8,
     length_bytes: usize,
@@ -246,7 +245,7 @@ fn random_bytes_file(
     const bytes = try gpa.alloc(u8, length_bytes);
     defer gpa.free(bytes);
 
-    random.bytes(bytes);
+    prng.fill(bytes);
     try std.fs.cwd().writeFile(.{
         .sub_path = path,
         .data = bytes,
@@ -254,9 +253,9 @@ fn random_bytes_file(
     return .{ .path = path };
 }
 
-fn fuzz_length(random: std.Random, index: usize) usize {
+fn fuzz_length(prng: *stdx.PRNG, index: usize) usize {
     if (index < edge_lengths.len) return edge_lengths[index];
-    return 1 + random.uintAtMost(usize, 8191);
+    return 1 + prng.int_inclusive(usize, 8191);
 }
 
 fn run_tool(
