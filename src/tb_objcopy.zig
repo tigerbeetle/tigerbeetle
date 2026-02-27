@@ -211,11 +211,11 @@ fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]
     }
 
     if (elf_header.e_shstrndx >= section_headers_count) return error.InvalidELF;
+    const section_name_table_header_offset =
+        section_headers_offset + elf_header.e_shstrndx * @sizeOf(elf.Elf64_Shdr);
     const section_name_table_header = std.mem.bytesAsValue(
         elf.Elf64_Shdr,
-        input[section_headers_offset + elf_header.e_shstrndx * @sizeOf(elf.Elf64_Shdr) ..][0..@sizeOf(
-            elf.Elf64_Shdr,
-        )],
+        input[section_name_table_header_offset..][0..@sizeOf(elf.Elf64_Shdr)],
     ).*;
     const section_name_table_offset: usize = @intCast(section_name_table_header.sh_offset);
     const section_name_table_size: usize = @intCast(section_name_table_header.sh_size);
@@ -677,7 +677,8 @@ fn pe_collect_sections(
     var sections = std.ArrayList(PESection).init(gpa);
 
     for (0..options.section_count) |i| {
-        const section_header_offset = options.section_table_offset + i * options.section_header_size;
+        const section_header_offset = options.section_table_offset + i *
+            options.section_header_size;
         var name: [8]u8 = undefined;
         stdx.copy_disjoint(.exact, u8, &name, input[section_header_offset..][0..8]);
 
