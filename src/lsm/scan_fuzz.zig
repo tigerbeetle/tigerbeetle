@@ -58,6 +58,14 @@ const Thing = extern struct {
         }
     }
 
+    fn set_index(thing: *Thing, index: Index, value: u64) void {
+        switch (index) {
+            inline else => |comptime_index| {
+                @field(thing, @tagName(comptime_index)) = value;
+            },
+        }
+    }
+
     comptime {
         assert(stdx.no_padding(Thing));
         assert(@sizeOf(Thing) == 128);
@@ -158,6 +166,12 @@ const QueryOperator = enum {
             .intersection_set => .union_set,
         };
     }
+};
+
+const Operation = enum {
+    insert,
+    update,
+    delete,
 };
 
 const QuerySpec = struct {
@@ -494,6 +508,7 @@ const Environment = struct {
     forest: Forest,
     model: std.ArrayListUnmanaged(Thing), // Ordered by ascending timestamp.
     model_matches: [query_spec_max]std.DynamicBitSetUnmanaged,
+    model_live: std.DynamicBitSetUnmanaged,
     ticks_remaining: usize,
 
     op: u64 = 1,
@@ -530,6 +545,7 @@ const Environment = struct {
             .forest = undefined,
             .model = .{},
             .model_matches = @splat(.{}),
+            .model_live = try std.DynamicBitSetUnmanaged.initEmpty(gpa, 0),
 
             .scan_lookup_buffer = try gpa.alloc(Thing, batch_objects_max),
             .checkpoint_op = null,
@@ -539,6 +555,7 @@ const Environment = struct {
 
     fn deinit(env: *Environment, gpa: std.mem.Allocator) void {
         for (&env.model_matches) |*matches| matches.deinit(gpa);
+        env.model_live.deinit(gpa);
         env.model.deinit(gpa);
         env.superblock.deinit(gpa);
         env.grid.deinit(gpa);
@@ -572,6 +589,7 @@ const Environment = struct {
         for (&query_specs, 0..) |*query_spec, i| {
             log.info("query_specs[{}]: {} {s}", .{ i, query_spec, @tagName(query_spec.direction) });
         }
+        const indexes_in_queries = collect_query_indexes(query_specs[0..]);
 
         for (0..commits_max) |_| {
             assert(env.state == .fuzzing);
@@ -582,36 +600,24 @@ const Environment = struct {
             else
                 prng.range_inclusive(u32, 1, batch_objects_max);
             try env.model.ensureUnusedCapacity(gpa, batch_objects);
-            for (&env.model_matches) |*query_matches| {
-                try query_matches.resize(gpa, env.model.items.len + batch_objects, false);
-            }
 
             for (0..batch_objects) |_| {
-                // TODO: sometimes update and delete things.
-                const thing_index = env.model.items.len;
-                const thing = Thing{
-                    .id = env.prng.int(u128),
-                    .index_01 = env.prng.range_inclusive(u64, 1, index_cardinality[0]),
-                    .index_02 = env.prng.range_inclusive(u64, 1, index_cardinality[1]),
-                    .index_03 = env.prng.range_inclusive(u64, 1, index_cardinality[2]),
-                    .index_04 = env.prng.range_inclusive(u64, 1, index_cardinality[3]),
-                    .index_05 = env.prng.range_inclusive(u64, 1, index_cardinality[4]),
-                    .index_06 = env.prng.range_inclusive(u64, 1, index_cardinality[5]),
-                    .index_07 = env.prng.range_inclusive(u64, 1, index_cardinality[6]),
-                    .index_08 = env.prng.range_inclusive(u64, 1, index_cardinality[7]),
-                    .index_09 = env.prng.range_inclusive(u64, 1, index_cardinality[8]),
-                    .index_10 = env.prng.range_inclusive(u64, 1, index_cardinality[9]),
-                    .index_11 = env.prng.range_inclusive(u64, 1, index_cardinality[10]),
-                    .index_12 = env.prng.range_inclusive(u64, 1, index_cardinality[11]),
-                    .index_13 = env.prng.range_inclusive(u64, 1, index_cardinality[12]),
-                    .timestamp = thing_index + 1,
+                const live_count = env.model_live.count();
+                const op: Operation = if (live_count == 0) .insert else op: {
+                    const roll = env.prng.range_inclusive(u32, 0, 99);
+                    break :op if (roll < 60) .insert else if (roll < 85) .update else .delete;
                 };
 
-                env.forest.grooves.things.insert(&thing);
-                env.model.appendAssumeCapacity(thing);
-
-                for (&query_specs, &env.model_matches) |*query_spec, *query_matches| {
-                    query_matches.setValue(thing_index, query_spec.query_matches(&thing));
+                switch (op) {
+                    .insert => try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
+                    .update => if (!env.update_thing(
+                        index_cardinality,
+                        query_specs[0..],
+                        indexes_in_queries,
+                    ))
+                        try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
+                    .delete => if (!env.delete_thing(query_specs[0..]))
+                        try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
                 }
             }
             try env.commit();
@@ -707,6 +713,223 @@ const Environment = struct {
         assert(model_matches.count() == results_count);
 
         return results_count;
+    }
+
+    fn insert_thing(
+        env: *Environment,
+        gpa: std.mem.Allocator,
+        index_cardinality: [thing_index_count]u64,
+        query_specs: []const QuerySpec,
+    ) !void {
+        const thing_index = env.model.items.len;
+        const required_len = thing_index + 1;
+
+        try env.model.ensureUnusedCapacity(gpa, 1);
+        if (env.model_live.bit_length < required_len) {
+            const current = env.model_live.bit_length;
+            const increment = @max(@as(usize, 64), current / 2);
+            const new_len = @max(required_len, current + increment);
+            try env.model_live.resize(gpa, new_len, false);
+            for (&env.model_matches) |*query_matches| {
+                try query_matches.resize(gpa, new_len, false);
+            }
+        }
+
+        const thing = Thing{
+            .id = env.prng.int(u128),
+            .index_01 = env.prng.range_inclusive(u64, 1, index_cardinality[0]),
+            .index_02 = env.prng.range_inclusive(u64, 1, index_cardinality[1]),
+            .index_03 = env.prng.range_inclusive(u64, 1, index_cardinality[2]),
+            .index_04 = env.prng.range_inclusive(u64, 1, index_cardinality[3]),
+            .index_05 = env.prng.range_inclusive(u64, 1, index_cardinality[4]),
+            .index_06 = env.prng.range_inclusive(u64, 1, index_cardinality[5]),
+            .index_07 = env.prng.range_inclusive(u64, 1, index_cardinality[6]),
+            .index_08 = env.prng.range_inclusive(u64, 1, index_cardinality[7]),
+            .index_09 = env.prng.range_inclusive(u64, 1, index_cardinality[8]),
+            .index_10 = env.prng.range_inclusive(u64, 1, index_cardinality[9]),
+            .index_11 = env.prng.range_inclusive(u64, 1, index_cardinality[10]),
+            .index_12 = env.prng.range_inclusive(u64, 1, index_cardinality[11]),
+            .index_13 = env.prng.range_inclusive(u64, 1, index_cardinality[12]),
+            .timestamp = thing_index + 1,
+        };
+
+        env.forest.grooves.things.insert(&thing);
+        env.model.appendAssumeCapacity(thing);
+        env.model_live.setValue(thing_index, true);
+
+        for (query_specs, &env.model_matches) |query_spec, *query_matches| {
+            query_matches.setValue(thing_index, query_spec.query_matches(&thing));
+        }
+    }
+
+    fn update_thing(
+        env: *Environment,
+        index_cardinality: [thing_index_count]u64,
+        query_specs: []const QuerySpec,
+        indexes_in_queries: std.EnumSet(Index),
+    ) bool {
+        const model_index = env.pick_live_index_for_mutation(query_specs) orelse return false;
+        assert(env.model_live.isSet(model_index));
+
+        const old = &env.model.items[model_index];
+        var new = env.build_updated_thing(
+            old,
+            index_cardinality,
+            indexes_in_queries,
+        ) orelse return false;
+        env.forest.grooves.things.update(.{ .old = old, .new = &new });
+        env.model.items[model_index] = new;
+
+        for (query_specs, &env.model_matches) |query_spec, *query_matches| {
+            query_matches.setValue(model_index, query_spec.query_matches(&new));
+        }
+
+        return true;
+    }
+
+    fn delete_thing(env: *Environment, query_specs: []const QuerySpec) bool {
+        const model_index = env.pick_live_index_for_mutation(query_specs) orelse return false;
+        assert(env.model_live.isSet(model_index));
+
+        const thing = &env.model.items[model_index];
+
+        env.forest.grooves.things.objects.remove(thing);
+        env.forest.grooves.things.ids.remove(&.{
+            .id = thing.id,
+            .timestamp = thing.timestamp,
+        });
+
+        if (comptime ThingsGroove.ObjectsCache != void) {
+            if (comptime constants.verify) {
+                env.forest.grooves.things.objects_cache.remove(thing.id);
+            }
+        }
+
+        inline for (std.meta.fields(ThingsGroove.IndexTrees)) |field| {
+            const Helper = ThingsGroove.IndexTreeFieldHelperType(field.name);
+            if (Helper.index_from_object(thing)) |value| {
+                @field(env.forest.grooves.things.indexes, field.name).remove(&.{
+                    .timestamp = thing.timestamp,
+                    .field = value,
+                });
+            }
+        }
+
+        env.model_live.setValue(model_index, false);
+        for (query_specs, &env.model_matches) |_, *query_matches| {
+            query_matches.setValue(model_index, false);
+        }
+
+        return true;
+    }
+
+    fn pick_live_index_for_mutation(
+        env: *Environment,
+        query_specs: []const QuerySpec,
+    ) ?usize {
+        const model_len = env.model.items.len;
+        if (model_len == 0 or env.model_live.count() == 0) return null;
+
+        const start = env.prng.range_inclusive(usize, 0, model_len - 1);
+        var offset: usize = 0;
+        while (offset < model_len) : (offset += 1) {
+            const index = (start + offset) % model_len;
+            if (!env.model_live.isSet(index)) continue;
+            if (is_scan_safe(&env.model.items[index], query_specs)) return index;
+        }
+
+        return null;
+    }
+
+    fn build_updated_thing(
+        env: *Environment,
+        old: *const Thing,
+        index_cardinality: [thing_index_count]u64,
+        indexes_in_queries: std.EnumSet(Index),
+    ) ?Thing {
+        var changeable: usize = 0;
+        for (std.enums.values(Index)) |index| {
+            if (indexes_in_queries.contains(index)) continue;
+            if (index_cardinality[@intFromEnum(index)] > 1) changeable += 1;
+        }
+        if (changeable == 0) return null;
+
+        var new = old.*;
+        var used = std.EnumSet(Index).initEmpty();
+        const changeable_u32: u32 = @intCast(changeable);
+        const changes_max = @min(@as(u32, 3), changeable_u32);
+        const changes = env.prng.range_inclusive(u32, 1, changes_max);
+
+        var changed: u32 = 0;
+        while (changed < changes) {
+            const index = env.pick_changeable_index(
+                index_cardinality,
+                indexes_in_queries,
+                &used,
+            ) orelse break;
+            const cardinality = index_cardinality[@intFromEnum(index)];
+            const old_value = old.get_index(index);
+
+            var value = env.prng.range_inclusive(u64, 1, cardinality);
+            if (value == old_value) {
+                value = (value % cardinality) + 1;
+            }
+
+            Thing.set_index(&new, index, value);
+            used.insert(index);
+            changed += 1;
+        }
+
+        if (changed == 0 or stdx.equal_bytes(Thing, old, &new)) return null;
+        return new;
+    }
+
+    fn pick_changeable_index(
+        env: *Environment,
+        index_cardinality: [thing_index_count]u64,
+        indexes_in_queries: std.EnumSet(Index),
+        used: *std.EnumSet(Index),
+    ) ?Index {
+        var attempts: usize = 0;
+        while (attempts < thing_index_count * 2) : (attempts += 1) {
+            const index = env.prng.enum_uniform(Index);
+            if (used.contains(index)) continue;
+            if (indexes_in_queries.contains(index)) continue;
+            if (index_cardinality[@intFromEnum(index)] <= 1) continue;
+            return index;
+        }
+
+        for (std.enums.values(Index)) |index| {
+            if (used.contains(index)) continue;
+            if (indexes_in_queries.contains(index)) continue;
+            if (index_cardinality[@intFromEnum(index)] <= 1) continue;
+            return index;
+        }
+
+        return null;
+    }
+
+    fn collect_query_indexes(query_specs: []const QuerySpec) std.EnumSet(Index) {
+        var used = std.EnumSet(Index).initEmpty();
+        for (query_specs) |query_spec| {
+            for (query_spec.query.const_slice()) |query_part| switch (query_part) {
+                .field => |field| used.insert(field.index),
+                .merge => {},
+            };
+        }
+        return used;
+    }
+
+    fn is_scan_safe(thing: *const Thing, query_specs: []const QuerySpec) bool {
+        for (query_specs) |query_spec| {
+            for (query_spec.query.const_slice()) |query_part| switch (query_part) {
+                .field => |field| {
+                    if (thing.get_index(field.index) == field.value) return false;
+                },
+                .merge => {},
+            };
+        }
+        return true;
     }
 
     fn scan_from_condition(
