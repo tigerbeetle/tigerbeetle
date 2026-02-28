@@ -16,13 +16,12 @@ const edge_lengths = [_]usize{
 };
 
 pub fn main() !void {
-    var gpa_state: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    defer if (gpa_state.deinit() != .ok) @panic("memory leaked");
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
 
-    const gpa = gpa_state.allocator();
+    const gpa = arena_allocator.allocator();
 
     var arguments = try std.process.argsWithAllocator(gpa);
-    defer arguments.deinit();
 
     const command_line = stdx.flags(&arguments, CLIArgs);
     var prng = stdx.PRNG.from_seed(command_line.seed orelse std.crypto.random.int(u64));
@@ -37,22 +36,28 @@ pub fn main() !void {
     defer std.fs.cwd().deleteTree(tmp_dir_name) catch {};
 
     const fixture_elf = try build_linux_fixture(gpa, command_line, tmp_dir_name);
-    defer gpa.free(fixture_elf);
 
     const fixture_pe = try std.fmt.allocPrint(gpa, "{s}/fixture.exe", .{tmp_dir_name});
-    defer gpa.free(fixture_pe);
 
     try build_windows_fixture(gpa, command_line, tmp_dir_name, fixture_pe);
 
     var fixtures = std.ArrayList([]const u8).init(gpa);
-    defer fixtures.deinit();
-
     try fixtures.append(fixture_elf);
     try fixtures.append(fixture_pe);
 
     for (0..command_line.iterations) |iteration| {
         for (fixtures.items) |fixture| {
-            try run_case(gpa, &prng, command_line, tmp_dir_name, fixture, iteration);
+            var case_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer case_arena.deinit();
+
+            try run_case(
+                case_arena.allocator(),
+                &prng,
+                command_line,
+                tmp_dir_name,
+                fixture,
+                iteration,
+            );
         }
     }
 }
@@ -66,7 +71,6 @@ fn run_case(
     iteration: usize,
 ) !void {
     const case_dir = try std.fmt.allocPrint(gpa, "{s}/case-{d}", .{ tmp_dir, iteration });
-    defer gpa.free(case_dir);
 
     try std.fs.cwd().makePath(case_dir);
     defer std.fs.cwd().deleteTree(case_dir) catch {};
@@ -78,7 +82,6 @@ fn run_case(
         "body.bin",
         fuzz_length(prng, iteration * 3),
     );
-    defer gpa.free(body_data.path);
 
     const header_data = try random_bytes_file(
         gpa,
@@ -87,7 +90,6 @@ fn run_case(
         "header.bin",
         fuzz_length(prng, iteration * 3 + 1),
     );
-    defer gpa.free(header_data.path);
 
     const header_replacement_data = try random_bytes_file(
         gpa,
@@ -96,22 +98,12 @@ fn run_case(
         "header_replacement.bin",
         fuzz_length(prng, iteration * 3 + 2),
     );
-    defer gpa.free(header_replacement_data.path);
 
     const tb_copy = try std.fmt.allocPrint(gpa, "{s}/tb_copy.bin", .{case_dir});
-    defer gpa.free(tb_copy);
-
     const tb_working = try std.fmt.allocPrint(gpa, "{s}/tb_working.bin", .{case_dir});
-    defer gpa.free(tb_working);
-
     const llvm_working = try std.fmt.allocPrint(gpa, "{s}/llvm_working.bin", .{case_dir});
-    defer gpa.free(llvm_working);
-
     const tb_removed = try std.fmt.allocPrint(gpa, "{s}/tb_removed.bin", .{case_dir});
-    defer gpa.free(tb_removed);
-
     const llvm_removed = try std.fmt.allocPrint(gpa, "{s}/llvm_removed.bin", .{case_dir});
-    defer gpa.free(llvm_removed);
 
     try run_tool(gpa, command_line.tb_objcopy, &.{
         "--enable-deterministic-archives",
@@ -134,10 +126,7 @@ fn run_case(
     }
 
     const add_mvb = try std.fmt.allocPrint(gpa, ".tb_mvb={s}", .{body_data.path});
-    defer gpa.free(add_mvb);
-
     const add_mvh = try std.fmt.allocPrint(gpa, ".tb_mvh={s}", .{header_data.path});
-    defer gpa.free(add_mvh);
 
     try run_tool(gpa, command_line.tb_objcopy, &.{
         "--enable-deterministic-archives",
@@ -174,7 +163,6 @@ fn run_case(
         ".tb_mvh={s}",
         .{header_replacement_data.path},
     );
-    defer gpa.free(add_mvh_replacement);
 
     try run_tool(gpa, command_line.tb_objcopy, &.{
         "--enable-deterministic-archives",
@@ -241,7 +229,6 @@ fn random_bytes_file(
 ) !RandomBytesFile {
     const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dir, name });
     const bytes = try gpa.alloc(u8, length_bytes);
-    defer gpa.free(bytes);
 
     prng.fill(bytes);
     try std.fs.cwd().writeFile(.{
@@ -278,7 +265,6 @@ fn build_linux_fixture(
     tmp_dir: []const u8,
 ) ![]const u8 {
     const source_path = try std.fmt.allocPrint(gpa, "{s}/fixture.zig", .{tmp_dir});
-    defer gpa.free(source_path);
 
     try std.fs.cwd().writeFile(.{
         .sub_path = source_path,
@@ -289,7 +275,6 @@ fn build_linux_fixture(
 
     const output_path = try std.fmt.allocPrint(gpa, "{s}/fixture", .{tmp_dir});
     const emit_bin_arg = try std.fmt.allocPrint(gpa, "-femit-bin={s}", .{output_path});
-    defer gpa.free(emit_bin_arg);
 
     var child = std.process.Child.init(&.{
         command_line.zig_exe,
@@ -313,10 +298,8 @@ fn build_linux_fixture(
 
 fn assert_equal_files(gpa: std.mem.Allocator, a: []const u8, b: []const u8) !void {
     const a_bytes = try std.fs.cwd().readFileAlloc(gpa, a, std.math.maxInt(usize));
-    defer gpa.free(a_bytes);
 
     const b_bytes = try std.fs.cwd().readFileAlloc(gpa, b, std.math.maxInt(usize));
-    defer gpa.free(b_bytes);
 
     if (!std.mem.eql(u8, a_bytes, b_bytes)) return error.BytesMismatch;
 }
@@ -341,7 +324,6 @@ fn build_windows_fixture(
     output_path: []const u8,
 ) !void {
     const source_path = try std.fmt.allocPrint(gpa, "{s}/fixture.zig", .{tmp_dir});
-    defer gpa.free(source_path);
 
     try std.fs.cwd().writeFile(.{
         .sub_path = source_path,
@@ -351,7 +333,6 @@ fn build_windows_fixture(
     });
 
     const emit_bin_arg = try std.fmt.allocPrint(gpa, "-femit-bin={s}", .{output_path});
-    defer gpa.free(emit_bin_arg);
 
     var child = std.process.Child.init(&.{
         command_line.zig_exe,
