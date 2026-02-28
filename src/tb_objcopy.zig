@@ -59,6 +59,7 @@ pub fn main() !void {
 
     const has_section_changes = cli_has_section_changes(&cli);
     if (!has_section_changes and is_pe(input)) {
+        assert(is_valid_pe(input)); // Fast-path copy is only valid for real PE/COFF files.
         try std.fs.cwd().writeFile(.{
             .sub_path = cli.output,
             .data = input,
@@ -187,6 +188,14 @@ fn is_elf(bytes: []const u8) bool {
 // Check DOS/PE magic prefix.
 fn is_pe(bytes: []const u8) bool {
     return bytes.len >= 2 and std.mem.eql(u8, bytes[0..2], "MZ");
+}
+
+// Validate enough PE structure to distinguish real PE/COFF from generic MZ files.
+fn is_valid_pe(bytes: []const u8) bool {
+    if (bytes.len < 0x40) return false;
+    const pe_header_offset = std.mem.readInt(u32, bytes[0x3c..][0..4], .little);
+    if (pe_header_offset + 4 + 20 > bytes.len) return false;
+    return std.mem.eql(u8, bytes[pe_header_offset..][0..4], "PE\x00\x00");
 }
 
 const ElfSection = struct {
@@ -388,14 +397,9 @@ fn elf_apply_string_table(
     gpa: std.mem.Allocator,
     sections: *std.ArrayList(ElfSection),
 ) !usize {
-    var shstr_index: ?usize = null;
-    for (sections.items, 0..) |section, i| {
-        if (std.mem.eql(u8, section.name, ".shstrtab")) {
-            shstr_index = i;
-            break;
-        }
-    }
-    assert(shstr_index != null); // `.shstrtab` must exist in valid ELF output.
+    const shstr_index: usize = for (sections.items, 0..) |section, i| {
+        if (std.mem.eql(u8, section.name, ".shstrtab")) break i;
+    } else unreachable; // `.shstrtab` must exist in valid ELF output.
 
     // LLVM sorts and suffix-deduplicates names before materializing `.shstrtab`.
     const name_offsets, const shstr_bytes = try elf_build_string_table(gpa, sections.items);
@@ -405,11 +409,11 @@ fn elf_apply_string_table(
         section.header.sh_name = name_offsets[i];
     }
     // Ownership is transferred to the section list and used by the final writer.
-    sections.items[shstr_index.?].data = shstr_bytes;
-    sections.items[shstr_index.?].data_owned = true;
-    sections.items[shstr_index.?].header.sh_size = shstr_bytes.len;
+    sections.items[shstr_index].data = shstr_bytes;
+    sections.items[shstr_index].data_owned = true;
+    sections.items[shstr_index].header.sh_size = shstr_bytes.len;
 
-    return shstr_index.?;
+    return shstr_index;
 }
 
 // Recompute section file offsets after add/remove/replace operations.
@@ -688,6 +692,17 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
     const new_section_count: u16 = @intCast(sections.items.len);
     const new_size_of_image = std.mem.alignForward(u32, next_va, section_alignment);
     const output_size: usize = @intCast(next_raw);
+    const new_section_table_end = section_table_offset + sections.items.len * section_header_size;
+    var first_section_raw_offset = output_size;
+    for (sections.items) |section| {
+        if (section.size_of_raw_data == 0) continue;
+        first_section_raw_offset = @min(
+            first_section_raw_offset,
+            @as(usize, @intCast(section.pointer_to_raw_data)),
+        );
+    }
+    // Added section headers must not overlap any section raw payload.
+    assert(new_section_table_end <= first_section_raw_offset);
 
     var output = try gpa.alloc(u8, output_size);
     @memset(output, 0);
@@ -734,7 +749,6 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
         }
     }
     const old_section_table_end = section_table_offset + section_count * section_header_size;
-    const new_section_table_end = section_table_offset + sections.items.len * section_header_size;
     if (new_section_table_end < old_section_table_end and old_section_table_end <= output.len) {
         @memset(output[new_section_table_end..old_section_table_end], 0);
         if (builtin.mode == .Debug) {
