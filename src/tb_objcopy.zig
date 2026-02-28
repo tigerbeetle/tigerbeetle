@@ -33,13 +33,12 @@ const CLI = struct {
 };
 
 pub fn main() !void {
-    var gpa_state: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    defer if (gpa_state.deinit() != .ok) @panic("memory leaked");
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
 
-    const gpa = gpa_state.allocator();
+    const gpa = arena_allocator.allocator();
 
     var arguments = try std.process.argsWithAllocator(gpa);
-    defer arguments.deinit();
 
     var cli = try parse_cli_args(&arguments);
     const source_file_mode = (try std.fs.cwd().statFile(cli.source)).mode;
@@ -50,12 +49,8 @@ pub fn main() !void {
         add.bytes = try std.fs.cwd().readFileAlloc(gpa, add.path, std.math.maxInt(usize));
         cli.add_sections[i] = add;
     }
-    defer for (cli.add_sections) |maybe_add| {
-        if (maybe_add) |add| gpa.free(add.bytes);
-    };
 
     const input = try std.fs.cwd().readFileAlloc(gpa, cli.source, std.math.maxInt(usize));
-    defer gpa.free(input);
 
     const has_section_changes = cli_has_section_changes(&cli);
     if (!has_section_changes and is_pe(input)) {
@@ -73,12 +68,8 @@ pub fn main() !void {
             break :blk try transform_elf(gpa, input, &cli);
         } else if (is_pe(input)) {
             break :blk try transform_pe(gpa, input, &cli);
-        } else {
-            assert(false); // TigerBeetle multiversion inputs are always ELF or PE.
-            unreachable;
-        }
+        } else unreachable;
     };
-    defer gpa.free(output);
 
     try std.fs.cwd().writeFile(.{
         .sub_path = cli.output,
@@ -273,11 +264,6 @@ fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]
         .section_headers = section_headers,
         .section_name_table = section_name_table,
     });
-    defer sections.deinit();
-    defer for (sections.items) |section| {
-        if (section.name.len > 0) gpa.free(section.name);
-        if (section.data_owned) gpa.free(section.data);
-    };
 
     try elf_apply_add_sections(gpa, &sections, cli, section_data_end_max_original);
     const section_name_table_index = try elf_apply_string_table(gpa, &sections);
@@ -364,9 +350,7 @@ fn elf_apply_add_sections(
             }
         }
         if (existing_index) |index| {
-            const removed = sections.orderedRemove(index);
-            if (removed.name.len > 0) gpa.free(removed.name);
-            if (removed.data_owned) gpa.free(removed.data);
+            _ = sections.orderedRemove(index);
         }
 
         try sections.append(.{
@@ -403,7 +387,6 @@ fn elf_apply_string_table(
 
     // LLVM sorts and suffix-deduplicates names before materializing `.shstrtab`.
     const name_offsets, const shstr_bytes = try elf_build_string_table(gpa, sections.items);
-    defer gpa.free(name_offsets);
 
     for (sections.items, 0..) |*section, i| {
         section.header.sh_name = name_offsets[i];
@@ -510,10 +493,8 @@ fn elf_build_string_table(
     sections: []const ElfSection,
 ) !struct { []u32, []u8 } {
     var unique_names = std.ArrayList([]const u8).init(gpa);
-    defer unique_names.deinit();
 
     var offset_by_name = std.StringHashMap(u32).init(gpa);
-    defer offset_by_name.deinit();
 
     try unique_names.append("");
     try offset_by_name.put("", 0);
@@ -680,7 +661,6 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
         .section_header_size = section_header_size,
         .section_count = section_count,
     });
-    defer sections.deinit();
 
     try pe_apply_add_sections(&sections, cli);
     const next_raw, const next_va = pe_layout_sections(
