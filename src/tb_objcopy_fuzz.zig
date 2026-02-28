@@ -1,5 +1,7 @@
 const std = @import("std");
 const stdx = @import("stdx");
+const fuzz = @import("./testing/fuzz.zig");
+const log = std.log.scoped(.tb_objcopy_fuzz);
 
 const CLIArgs = struct {
     zig_exe: []const u8,
@@ -10,7 +12,8 @@ const CLIArgs = struct {
     tmp: []const u8 = "/tmp",
 };
 
-const edge_lengths = [_]usize{
+// Stress N-1/N/N+1 boundaries around common alignment and page-size cutoffs.
+const boundary_lengths = [_]usize{
     1,   2,   7,   8,    15,   16,   31,   32,   63,   64,   127,  128,  255,  256,
     511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 4095, 4096, 4097, 8191,
 };
@@ -24,7 +27,9 @@ pub fn main() !void {
     var arguments = try std.process.argsWithAllocator(gpa);
 
     const command_line = stdx.flags(&arguments, CLIArgs);
-    var prng = stdx.PRNG.from_seed(command_line.seed orelse std.crypto.random.int(u64));
+    const seed = command_line.seed orelse std.crypto.random.int(u64);
+    log.info("seed={d} iterations={d}", .{ seed, command_line.iterations });
+    var prng = stdx.PRNG.from_seed(seed);
 
     var tmp_dir_name_buffer: [64]u8 = undefined;
     const tmp_dir_name = try std.fmt.bufPrint(
@@ -70,7 +75,12 @@ fn run_case(
     fixture: []const u8,
     iteration: usize,
 ) !void {
-    const case_dir = try std.fmt.allocPrint(gpa, "{s}/case-{d}", .{ tmp_dir, iteration });
+    const fixture_name = std.fs.path.basename(fixture);
+    const case_dir = try std.fmt.allocPrint(
+        gpa,
+        "{s}/case-{d}-{s}",
+        .{ tmp_dir, iteration, fixture_name },
+    );
 
     try std.fs.cwd().makePath(case_dir);
     defer std.fs.cwd().deleteTree(case_dir) catch {};
@@ -239,8 +249,10 @@ fn random_bytes_file(
 }
 
 fn fuzz_length(prng: *stdx.PRNG, index: usize) usize {
-    if (index < edge_lengths.len) return edge_lengths[index];
-    return 1 + prng.int_inclusive(usize, 8191);
+    if (index < boundary_lengths.len) return boundary_lengths[index];
+    // Keep broad coverage while biasing toward small payloads used most often in practice.
+    if (prng.boolean()) return 1 + prng.int_inclusive(usize, 8191);
+    return @min(1 + fuzz.random_int_exponential(prng, usize, 512), @as(usize, 8191));
 }
 
 fn run_tool(
