@@ -39,18 +39,16 @@ pub fn main() !void {
     const fixture_elf = try build_linux_fixture(gpa, command_line, tmp_dir_name);
     defer gpa.free(fixture_elf);
 
-    try build_windows_fixture(gpa, command_line, tmp_dir_name);
-
     const fixture_pe = try std.fmt.allocPrint(gpa, "{s}/fixture.exe", .{tmp_dir_name});
     defer gpa.free(fixture_pe);
+
+    try build_windows_fixture(gpa, command_line, tmp_dir_name, fixture_pe);
 
     var fixtures = std.ArrayList([]const u8).init(gpa);
     defer fixtures.deinit();
 
     try fixtures.append(fixture_elf);
-    if (std.fs.cwd().access(fixture_pe, .{})) |_| {
-        try fixtures.append(fixture_pe);
-    } else |_| {}
+    try fixtures.append(fixture_pe);
 
     for (0..command_line.iterations) |iteration| {
         for (fixtures.items) |fixture| {
@@ -340,6 +338,7 @@ fn build_windows_fixture(
     gpa: std.mem.Allocator,
     command_line: CLIArgs,
     tmp_dir: []const u8,
+    output_path: []const u8,
 ) !void {
     const source_path = try std.fmt.allocPrint(gpa, "{s}/fixture.zig", .{tmp_dir});
     defer gpa.free(source_path);
@@ -350,9 +349,6 @@ fn build_windows_fixture(
         \\pub fn main() void {}
         ,
     });
-
-    const output_path = try std.fmt.allocPrint(gpa, "{s}/fixture.exe", .{tmp_dir});
-    defer gpa.free(output_path);
 
     const emit_bin_arg = try std.fmt.allocPrint(gpa, "-femit-bin={s}", .{output_path});
     defer gpa.free(emit_bin_arg);
@@ -375,8 +371,5 @@ fn build_windows_fixture(
         emit_bin_arg,
     }, gpa);
     const term = try child.spawnAndWait();
-    if (term != .Exited or term.Exited != 0) {
-        // PE coverage is optional in local environments where cross-linking may be unavailable.
-        return;
-    }
+    if (term != .Exited or term.Exited != 0) return error.FixtureBuildFailed;
 }
