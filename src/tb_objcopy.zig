@@ -36,9 +36,9 @@ pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
 
-    const gpa = arena_allocator.allocator();
+    const arena = arena_allocator.allocator();
 
-    var arguments = try std.process.argsWithAllocator(gpa);
+    var arguments = try std.process.argsWithAllocator(arena);
 
     var cli = try parse_cli_args(&arguments);
     const source_file_mode = (try std.fs.cwd().statFile(cli.source)).mode;
@@ -46,11 +46,11 @@ pub fn main() !void {
     for (cli.add_sections, 0..) |maybe_add, i| {
         if (maybe_add == null) continue;
         var add = maybe_add.?;
-        add.bytes = try std.fs.cwd().readFileAlloc(gpa, add.path, std.math.maxInt(usize));
+        add.bytes = try std.fs.cwd().readFileAlloc(arena, add.path, std.math.maxInt(usize));
         cli.add_sections[i] = add;
     }
 
-    const input = try std.fs.cwd().readFileAlloc(gpa, cli.source, std.math.maxInt(usize));
+    const input = try std.fs.cwd().readFileAlloc(arena, cli.source, std.math.maxInt(usize));
 
     const has_section_changes = cli_has_section_changes(&cli);
     if (!has_section_changes and is_pe(input)) {
@@ -65,9 +65,9 @@ pub fn main() !void {
 
     const output = blk: {
         if (is_elf(input)) {
-            break :blk try transform_elf(gpa, input, &cli);
+            break :blk try transform_elf(arena, input, &cli);
         } else if (is_pe(input)) {
-            break :blk try transform_pe(gpa, input, &cli);
+            break :blk try transform_pe(arena, input, &cli);
         } else unreachable;
     };
 
@@ -230,7 +230,7 @@ const ElfSection = struct {
 // 2. `.shstrtab` exists as a normal section and is rebuilt LLVM-style.
 // 3. Only section table and section payload bytes are rewritten.
 // Apply the requested section edits to an ELF input and emit rewritten bytes.
-fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
+fn transform_elf(arena: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
     assert(input.len >= @sizeOf(elf.Elf64_Ehdr)); // ELF header must be present.
 
     var elf_header = std.mem.bytesAsValue(elf.Elf64_Ehdr, input[0..@sizeOf(elf.Elf64_Ehdr)]).*;
@@ -260,13 +260,18 @@ fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]
     assert(section_name_table_offset + section_name_table_size <= input.len);
     const section_name_table = input[section_name_table_offset..][0..section_name_table_size];
 
-    var sections, const section_data_end_max_original = try elf_collect_sections(gpa, input, cli, .{
-        .section_headers = section_headers,
-        .section_name_table = section_name_table,
-    });
+    var sections, const section_data_end_max_original = try elf_collect_sections(
+        arena,
+        input,
+        cli,
+        .{
+            .section_headers = section_headers,
+            .section_name_table = section_name_table,
+        },
+    );
 
-    try elf_apply_add_sections(gpa, &sections, cli, section_data_end_max_original);
-    const section_name_table_index = try elf_apply_string_table(gpa, &sections);
+    try elf_apply_add_sections(arena, &sections, cli, section_data_end_max_original);
+    const section_name_table_index = try elf_apply_string_table(arena, &sections);
 
     // Keep existing section data offsets as stable as possible and shift only the tail.
     const section_data_end_max = elf_relayout_sections(sections.items);
@@ -276,12 +281,12 @@ fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]
     elf_header.e_shnum = @intCast(sections.items.len);
     elf_header.e_shstrndx = @intCast(section_name_table_index);
 
-    return try elf_write_output(gpa, input, elf_header, sections.items, section_data_end_max);
+    return try elf_write_output(arena, input, elf_header, sections.items, section_data_end_max);
 }
 
 // Read ELF section headers/data, filtering removed sections.
 fn elf_collect_sections(
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     input: []const u8,
     cli: *const CLI,
     options: struct {
@@ -289,7 +294,7 @@ fn elf_collect_sections(
         section_name_table: []const u8,
     },
 ) !struct { std.ArrayList(ElfSection), usize } {
-    var sections = std.ArrayList(ElfSection).init(gpa);
+    var sections = std.ArrayList(ElfSection).init(arena);
     var data_end_max: usize = 0;
 
     for (options.section_headers) |shdr| {
@@ -313,7 +318,7 @@ fn elf_collect_sections(
             assert(offset + size <= input.len); // Section payload must fit in file bytes.
             break :blk input[offset..][0..size];
         };
-        const name_owned = if (name.len > 0) try gpa.dupe(u8, name) else "";
+        const name_owned = if (name.len > 0) try arena.dupe(u8, name) else "";
         try sections.append(.{
             .header = shdr,
             .name = name_owned,
@@ -333,7 +338,7 @@ fn elf_collect_sections(
 
 // Append requested ELF sections, replacing same-name sections when present.
 fn elf_apply_add_sections(
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     sections: *std.ArrayList(ElfSection),
     cli: *const CLI,
     data_end_max: usize,
@@ -366,7 +371,7 @@ fn elf_apply_add_sections(
                 .sh_addralign = 1,
                 .sh_entsize = 0,
             },
-            .name = try gpa.dupe(u8, add.section.name()),
+            .name = try arena.dupe(u8, add.section.name()),
             .data = add.bytes,
             .data_owned = false,
             .old_offset = data_end_max,
@@ -378,7 +383,7 @@ fn elf_apply_add_sections(
 
 // Rebuild `.shstrtab` and patch each section header `sh_name`.
 fn elf_apply_string_table(
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     sections: *std.ArrayList(ElfSection),
 ) !usize {
     const shstr_index: usize = for (sections.items, 0..) |section, i| {
@@ -386,7 +391,7 @@ fn elf_apply_string_table(
     } else unreachable; // `.shstrtab` must exist in valid ELF output.
 
     // LLVM sorts and suffix-deduplicates names before materializing `.shstrtab`.
-    const name_offsets, const shstr_bytes = try elf_build_string_table(gpa, sections.items);
+    const name_offsets, const shstr_bytes = try elf_build_string_table(arena, sections.items);
 
     for (sections.items, 0..) |*section, i| {
         section.header.sh_name = name_offsets[i];
@@ -430,7 +435,7 @@ fn elf_relayout_sections(sections: []ElfSection) usize {
 
 // Materialize final ELF bytes including data payloads and the section table.
 fn elf_write_output(
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     input: []const u8,
     elf_header: elf.Elf64_Ehdr,
     sections: []const ElfSection,
@@ -439,7 +444,7 @@ fn elf_write_output(
     const section_headers_offset_new: usize = @intCast(elf_header.e_shoff);
 
     const output_size = section_headers_offset_new + sections.len * @sizeOf(elf.Elf64_Shdr);
-    var output = try gpa.alloc(u8, output_size);
+    var output = try arena.alloc(u8, output_size);
     @memset(output, 0);
 
     stdx.copy_disjoint(
@@ -489,12 +494,12 @@ fn elf_write_output(
 
 // Build LLVM-compatible `.shstrtab` bytes and per-section name offsets.
 fn elf_build_string_table(
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     sections: []const ElfSection,
 ) !struct { []u32, []u8 } {
-    var unique_names = std.ArrayList([]const u8).init(gpa);
+    var unique_names = std.ArrayList([]const u8).init(arena);
 
-    var offset_by_name = std.StringHashMap(u32).init(gpa);
+    var offset_by_name = std.StringHashMap(u32).init(arena);
 
     try unique_names.append("");
     try offset_by_name.put("", 0);
@@ -541,7 +546,7 @@ fn elf_build_string_table(
     }
     try offset_by_name.put("", 0);
 
-    var table = try gpa.alloc(u8, size);
+    var table = try arena.alloc(u8, size);
     @memset(table, 0);
     var it = offset_by_name.iterator();
     while (it.next()) |entry| {
@@ -551,7 +556,7 @@ fn elf_build_string_table(
         stdx.copy_disjoint(.exact, u8, table[offset..][0..name.len], name);
     }
 
-    var offsets = try gpa.alloc(u32, sections.len);
+    var offsets = try arena.alloc(u32, sections.len);
     for (sections, 0..) |section, i| {
         offsets[i] = offset_by_name.get(section.name).?;
     }
@@ -613,7 +618,7 @@ const PESection = struct {
 // 2. Machine is x86_64 or aarch64.
 // 3. Header region is preserved up to `SizeOfHeaders`.
 // Apply the requested section edits to a PE/COFF input and emit rewritten bytes.
-fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
+fn transform_pe(arena: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
     assert(input.len >= 0x40); // DOS stub + `e_lfanew` must be present.
     const pe_header_offset = std.mem.readInt(u32, input[0x3c..][0..4], .little);
     assert(pe_header_offset + 4 + 20 <= input.len); // PE signature + COFF header.
@@ -656,7 +661,7 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
     );
     assert(section_alignment > 0 and file_alignment > 0); // Required for alignment math.
 
-    var sections = try pe_collect_sections(gpa, input, cli, .{
+    var sections = try pe_collect_sections(arena, input, cli, .{
         .section_table_offset = section_table_offset,
         .section_header_size = section_header_size,
         .section_count = section_count,
@@ -684,7 +689,7 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
     // Added section headers must not overlap any section raw payload.
     assert(new_section_table_end <= first_section_raw_offset);
 
-    var output = try gpa.alloc(u8, output_size);
+    var output = try arena.alloc(u8, output_size);
     @memset(output, 0);
     // LLVM only preserves the PE header region, not stale data from removed section payloads.
     const headers_copy_len: usize = @min(@min(output.len, input.len), size_of_headers);
@@ -750,7 +755,7 @@ fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u
 
 // Read PE section headers/data, filtering removed sections.
 fn pe_collect_sections(
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     input: []const u8,
     cli: *const CLI,
     options: struct {
@@ -759,7 +764,7 @@ fn pe_collect_sections(
         section_count: usize,
     },
 ) !std.ArrayList(PESection) {
-    var sections = std.ArrayList(PESection).init(gpa);
+    var sections = std.ArrayList(PESection).init(arena);
 
     for (0..options.section_count) |i| {
         const section_header_offset = options.section_table_offset + i *
