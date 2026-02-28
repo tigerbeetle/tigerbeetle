@@ -199,6 +199,36 @@ const ElfSection = struct {
     added: bool,
 };
 
+// ELF64 layout used by this tool:
+//
+//     +------------------------------+
+// 0x0 | Elf64_Ehdr                   |
+//     |   e_ident = 0x7F 'E' 'L' 'F' |
+//     |   EI_CLASS = ELFCLASS64      |
+//     |   EI_DATA  = ELFDATA2LSB     |
+//     |   e_shoff -> section table   |
+//     +------------------------------+
+//     | section payload bytes        |
+//     +------------------------------+
+//     | Elf64_Shdr[e_shnum]          |
+//     +------------------------------+
+//
+// Section header entry (64 bytes):
+//
+//     +0x00 sh_name
+//     +0x04 sh_type
+//     +0x08 sh_flags
+//     +0x10 sh_addr
+//     +0x18 sh_offset
+//     +0x20 sh_size
+//     +0x28 sh_link / sh_info
+//     +0x30 sh_addralign
+//     +0x38 sh_entsize
+//
+// Assumptions:
+// 1. No extended numbering (`e_shnum != 0` and `e_shstrndx != SHN_XINDEX`).
+// 2. `.shstrtab` exists as a normal section and is rebuilt LLVM-style.
+// 3. Only section table and section payload bytes are rewritten.
 // Apply the requested section edits to an ELF input and emit rewritten bytes.
 fn transform_elf(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
     assert(input.len >= @sizeOf(elf.Elf64_Ehdr)); // ELF header must be present.
@@ -559,6 +589,44 @@ const PESection = struct {
     added: bool,
 };
 
+// PE32+ layout used by this tool:
+//
+//     +------------------------------+
+// 0x00| DOS header ("MZ")            |
+//     |   e_lfanew @ 0x3C            |
+//     +------------------------------+
+//     | ... DOS stub ...             |
+//     +------------------------------+
+// e_lf| "PE\\0\\0" signature          |
+// anew| COFF header (20 bytes)       |
+//     | Optional header (PE32+)      |
+//     |   Magic = 0x20B              |
+//     |   SectionAlignment           |
+//     |   FileAlignment              |
+//     |   SizeOfHeaders              |
+//     +------------------------------+
+//     | Section table (40-byte rows) |
+//     +------------------------------+
+//     | Section raw data             |
+//     +------------------------------+
+//
+// Section header row (40 bytes):
+//
+//     +0x00 Name[8]
+//     +0x08 VirtualSize
+//     +0x0C VirtualAddress
+//     +0x10 SizeOfRawData
+//     +0x14 PointerToRawData
+//     +0x18 PointerToRelocations
+//     +0x1C PointerToLinenumbers
+//     +0x20 NumberOfRelocations
+//     +0x22 NumberOfLinenumbers
+//     +0x24 Characteristics
+//
+// Assumptions:
+// 1. Little-endian PE32+ only.
+// 2. Machine is x86_64 or aarch64.
+// 3. Header region is preserved up to `SizeOfHeaders`.
 // Apply the requested section edits to a PE/COFF input and emit rewritten bytes.
 fn transform_pe(gpa: std.mem.Allocator, input: []const u8, cli: *const CLI) ![]u8 {
     assert(input.len >= 0x40); // DOS stub + `e_lfanew` must be present.
