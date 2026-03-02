@@ -7,6 +7,11 @@ const assert = std.debug.assert;
 
 const is_linux = builtin.target.os.tag == .linux;
 
+pub const RecvMsgResult = struct {
+    size: usize,
+    address: std.net.Address,
+};
+
 pub const TCPOptions = struct {
     rcvbuf: c_int,
     sndbuf: c_int,

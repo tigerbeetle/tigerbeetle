@@ -14,11 +14,14 @@ const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
+const IOPSType = @import("./iops.zig").IOPSType;
+const Timeout = vsr.Timeout;
 const Tracer = vsr.trace.Tracer;
 
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
     const SendQueue = RingBufferType(*Message, .slice);
+    const Discovery = DiscoveryType(IO);
 
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
@@ -32,6 +35,8 @@ pub fn MessageBusType(comptime IO: type) type {
         process: ProcessID,
         /// Prefix for log messages.
         id: u128,
+
+        discovery: ?Discovery,
 
         /// The file descriptor for the process on which to accept connections.
         accept_fd: ?IO.socket_t = null,
@@ -63,7 +68,7 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
         replicas: []?*Connection,
-        replicas_addresses: []Address,
+        replicas_addresses: []?Address,
         /// The number of outgoing `connect()` attempts for a given replica:
         /// Reset to zero after a successful `on_connect()`.
         replicas_connect_attempts: []u64,
@@ -96,7 +101,8 @@ pub fn MessageBusType(comptime IO: type) type {
 
         /// Initialize the MessageBus for the given configuration and replica/client process.
         pub fn init(
-            allocator: mem.Allocator,
+            gpa: mem.Allocator,
+            cluster: u128,
             process_id: ProcessID,
             message_pool: *MessagePool,
             on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
@@ -119,15 +125,15 @@ pub fn MessageBusType(comptime IO: type) type {
                 .client => constants.connection_send_queue_max_client,
             };
 
-            const send_queue_buffer = try allocator.alloc(
+            const send_queue_buffer = try gpa.alloc(
                 *Message,
                 connections_max * send_queue_max,
             );
             @memset(send_queue_buffer, undefined);
-            errdefer allocator.free(send_queue_buffer);
+            errdefer gpa.free(send_queue_buffer);
 
-            const connections = try allocator.alloc(Connection, connections_max);
-            errdefer allocator.free(connections);
+            const connections = try gpa.alloc(Connection, connections_max);
+            errdefer gpa.free(connections);
             for (connections, 0..) |*connection, index| {
                 connection.* = .{
                     .send_queue = .{
@@ -136,24 +142,47 @@ pub fn MessageBusType(comptime IO: type) type {
                 };
             }
 
-            const replicas = try allocator.alloc(?*Connection, options.configuration.len);
-            errdefer allocator.free(replicas);
+            const replicas = try gpa.alloc(?*Connection, options.configuration.len);
+            errdefer gpa.free(replicas);
             @memset(replicas, null);
 
-            const replicas_addresses = try allocator.alloc(Address, options.configuration.len);
-            errdefer allocator.free(replicas_addresses);
-            stdx.copy_disjoint(.exact, Address, replicas_addresses, options.configuration);
+            const replicas_addresses = try gpa.alloc(?Address, options.configuration.len);
+            errdefer gpa.free(replicas_addresses);
+            @memset(replicas_addresses, null);
+            if (process_id == .replica) {
+                replicas_addresses[process_id.replica] =
+                    options.configuration[process_id.replica];
+            } else {
+                for (replicas_addresses, options.configuration) |*target, source| {
+                    target.* = source;
+                }
+            }
 
-            const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
-            errdefer allocator.free(replicas_connect_attempts);
+            const replicas_connect_attempts = try gpa.alloc(u64, options.configuration.len);
+            errdefer gpa.free(replicas_connect_attempts);
             @memset(replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_id) {
                 .replica => |replica| replica,
                 .client => |client| @as(u64, @truncate(client)),
             };
+            var prng = stdx.PRNG.from_seed(prng_seed);
+
+            var discovery = switch (process_id) {
+                .replica => |replica| try Discovery.init(gpa, options.io, .{
+                    .prng_seed = prng.int(u64),
+                    .cluster = cluster,
+                    .process = .{ .replica = replica },
+                    .source = options.configuration[replica],
+                    .targets = options.configuration,
+                }),
+                .client => null,
+            };
+
+            errdefer if (discovery) |*d| d.deinit(gpa);
 
             var bus: MessageBus = .{
+                .discovery = discovery,
                 .pool = message_pool,
                 .io = options.io,
                 .process = process_id,
@@ -175,8 +204,8 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replica => {
                     // Pre-allocate enough memory to hold all possible connections
                     // in the client map.
-                    try bus.clients.ensureTotalCapacity(allocator, connections_max);
-                    errdefer bus.clients.deinit(allocator);
+                    try bus.clients.ensureTotalCapacity(gpa, connections_max);
+                    errdefer bus.clients.deinit(gpa);
 
                     return bus;
                 },
@@ -184,14 +213,15 @@ pub fn MessageBusType(comptime IO: type) type {
             }
         }
 
-        pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
-            bus.clients.deinit(allocator);
-
+        pub fn deinit(bus: *MessageBus, gpa: std.mem.Allocator) void {
             if (bus.accept_fd) |fd| {
                 assert(bus.process == .replica);
                 assert(bus.accept_address != null);
                 bus.io.close_socket(fd);
             }
+
+            if (bus.discovery) |*d| d.deinit(gpa);
+            bus.clients.deinit(gpa);
 
             const send_queue_max = switch (bus.process) {
                 .replica => constants.connection_send_queue_max_replica,
@@ -218,11 +248,11 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.send_queue_buffer.ptr + bus.send_queue_buffer.len ==
                 send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
 
-            allocator.free(bus.replicas_connect_attempts);
-            allocator.free(bus.replicas_addresses);
-            allocator.free(bus.replicas);
-            allocator.free(bus.connections);
-            allocator.free(bus.send_queue_buffer);
+            gpa.free(bus.replicas_connect_attempts);
+            gpa.free(bus.replicas_addresses);
+            gpa.free(bus.replicas);
+            gpa.free(bus.connections);
+            gpa.free(bus.send_queue_buffer);
             bus.* = undefined;
         }
 
@@ -248,7 +278,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.accept_fd == null);
             assert(bus.accept_address == null);
 
-            const address = bus.replicas_addresses[bus.process.replica];
+            const address = bus.replicas_addresses[bus.process.replica].?;
             const fd = try init_tcp(bus.io, .replica, address.any.family);
             errdefer bus.io.close_socket(fd);
 
@@ -258,10 +288,22 @@ pub fn MessageBusType(comptime IO: type) type {
 
             bus.accept_fd = fd;
             bus.accept_address = accept_address;
+
+            if (bus.discovery) |*discovery| {
+                discovery.start();
+            }
         }
 
         pub fn tick(bus: *MessageBus) void {
             assert(bus.process == .replica);
+            if (bus.discovery) |*discovery| {
+                discovery.tick();
+                for (discovery.replicas, 0..) |address, replica_index| {
+                    if (address.age <= Discovery.age_max) {
+                        bus.replicas_addresses[replica_index] = address.to_std();
+                    }
+                }
+            }
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
         }
@@ -306,7 +348,7 @@ pub fn MessageBusType(comptime IO: type) type {
             for (bus.replicas[replica_next..], replica_next..) |*connection, replica| {
                 if (connection.* == null) bus.connect(@intCast(replica));
             }
-            assert(bus.connections_used >= bus.replicas.len - replica_next);
+            // assert(bus.connections_used >= bus.replicas.len - replica_next);
         }
 
         fn tick_accept(bus: *MessageBus) void {
@@ -443,7 +485,8 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .free);
             assert(connection.fd == null);
 
-            const family = bus.replicas_addresses[replica].any.family;
+            const address = bus.replicas_addresses[replica] orelse return;
+            const family = address.any.family;
             connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
                 log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,
@@ -511,6 +554,11 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(!connection.recv_submitted);
             connection.recv_submitted = true;
 
+            const address = bus.replicas_addresses[connection.peer.replica] orelse {
+                bus.terminate(connection, .no_shutdown);
+                return;
+            };
+
             bus.io.connect(
                 *MessageBus,
                 bus,
@@ -518,7 +566,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                 &connection.recv_completion,
                 connection.fd.?,
-                bus.replicas_addresses[connection.peer.replica],
+                address,
             );
         }
 
@@ -1215,5 +1263,403 @@ pub fn MessageBusType(comptime IO: type) type {
             /// For connections_suspended.
             link: QueueType(Connection).Link = .{},
         };
+    };
+}
+
+fn DiscoveryType(IO: type) type {
+    return struct {
+        io: *IO,
+        prng: stdx.PRNG,
+
+        socket: IO.socket_t,
+
+        addresses: [constants.discovery_addresses_max]Address,
+        replicas: [constants.members_max]Address = @splat(.expired),
+
+        discover_self: vsr.Header.Discover,
+        send_completion: IOPSType(IO.Completion, constants.discovery_concurrency) = .{},
+        recv_completion: IO.Completion = undefined,
+        recv_buffer: []align(16) u8,
+        recv_address: *std.net.Address,
+        timeout: Timeout,
+
+        const discovery_message_size_max = @sizeOf(vsr.Header) +
+            (constants.members_max * (@sizeOf(u128) + @sizeOf(u16)));
+
+        const age_max: u32 = std.math.maxInt(u32) - 1;
+        const age_min: u32 = 0;
+        const age_initial: u32 = 1;
+        const age_expired: u32 = std.math.maxInt(u32);
+
+        const replica_unset: u8 = 255;
+
+        // NB: Both IP and port are numbers, in native, little endian.
+        const Address = struct {
+            // IPv6 or IPv6-mapped IPv4.
+            ip: u128,
+            port: u16,
+            age: u32,
+
+            const expired: Address = .{
+                .ip = 0,
+                .port = 0,
+                .age = age_max + 1,
+            };
+
+            const ipv4_prefix: u128 = 0x0000_0000_0000_0000_0000_FFFF;
+
+            pub fn family(address: Address) enum { IPv4, IPv6 } {
+                if ((address.ip >> 32) == ipv4_prefix) return .IPv4;
+                return .IPv6;
+            }
+
+            pub fn format(
+                address: Address,
+                comptime fmt: []const u8,
+                options: std.fmt.FormatOptions,
+                writer: anytype,
+            ) !void {
+                _ = fmt;
+                _ = options;
+                switch (address.family()) {
+                    .IPv4 => {
+                        const ipv4: u32 = @truncate(address.ip);
+                        const octets: [4]u8 = @bitCast(mem.nativeToBig(u32, ipv4));
+                        try writer.print("{}.{}.{}.{}:{}", .{
+                            octets[0], octets[1], octets[2], octets[3], address.port,
+                        });
+                    },
+                    .IPv6 => {
+                        const quibbles: [8]u16 = @bitCast(mem.nativeToBig(u128, address.ip));
+                        try writer.writeAll("[");
+                        for (quibbles, 0..) |quibble, i| {
+                            if (i > 0) try writer.writeAll(":");
+                            if (quibble != 0) {
+                                try writer.print("{x}", .{mem.bigToNative(u16, quibble)});
+                            }
+                        }
+                        try writer.print("]:{}", .{address.port});
+                    },
+                }
+            }
+
+            pub fn to_std(address: Address) std.net.Address {
+                switch (address.family()) {
+                    .IPv4 => {
+                        const ipv4: u32 = @truncate(address.ip);
+                        const octets: [4]u8 = @bitCast(mem.nativeToBig(u32, ipv4));
+                        return .{ .in = std.net.Ip4Address.init(octets, address.port) };
+                    },
+                    .IPv6 => {
+                        const octets: [16]u8 = @bitCast(mem.nativeToBig(u128, address.ip));
+                        return .{ .in6 = std.net.Ip6Address.init(octets, address.port, 0, 0) };
+                    },
+                }
+            }
+
+            pub fn from_std_with_age(
+                address: std.net.Address,
+                age: u32,
+            ) error{UnsupportedFamily}!Address {
+                switch (address.any.family) {
+                    std.posix.AF.INET => {
+                        const port = mem.bigToNative(u16, address.in.sa.port);
+                        const ip: u32 = mem.bigToNative(u32, address.in.sa.addr);
+                        return .{
+                            .ip = (ipv4_prefix << 32) | @as(u128, ip),
+                            .port = port,
+                            .age = age,
+                        };
+                    },
+                    std.posix.AF.INET6 => {
+                        const port = mem.bigToNative(u16, address.in6.sa.port);
+                        const ip: u128 = mem.bigToNative(
+                            u128,
+                            @as(u128, @bitCast(address.in6.sa.addr)),
+                        );
+                        return .{
+                            .ip = ip,
+                            .port = port,
+                            .age = age,
+                        };
+                    },
+                    else => return error.UnsupportedFamily,
+                }
+            }
+        };
+
+        const Discovery = @This();
+
+        pub fn init(gpa: std.mem.Allocator, io: *IO, options: struct {
+            prng_seed: u64,
+            cluster: u128,
+            process: union(enum) { replica: u8, client },
+            source: std.net.Address,
+            targets: []const std.net.Address,
+        }) !Discovery {
+            assert(options.targets.len <= constants.discovery_addresses_max);
+
+            // Make sure incomming addresses are IPv4 or IPv6.
+            const source_address = try Address.from_std_with_age(options.source, age_min);
+
+            var addresses: [constants.discovery_addresses_max]Address = @splat(.expired);
+            for (options.targets, 0..) |target, index| {
+                const target_address = try Address.from_std_with_age(target, age_min);
+                if (std.meta.eql(source_address, target_address)) {
+                    // Don't broadcast to ourselves!
+                } else {
+                    addresses[index] = target_address;
+                }
+            }
+
+            var discover_self: vsr.Header.Discover = .{
+                .checksum = undefined,
+                .checksum_padding = 0,
+                .checksum_body = comptime vsr.checksum(&.{}),
+                .checksum_body_padding = 0,
+                .cluster = options.cluster,
+                .size = @sizeOf(vsr.Header),
+                .epoch = 0,
+                .view = 0,
+                .release = constants.config.process.release,
+                .protocol = vsr.Version,
+                .command = .discover,
+                .replica = switch (options.process) {
+                    .replica => |replica| replica,
+                    .client => std.math.maxInt(u8),
+                },
+            };
+            discover_self.set_checksum();
+
+            const recv_buffer = try gpa.alignedAlloc(u8, 16, discovery_message_size_max);
+            errdefer gpa.free(recv_buffer);
+
+            const recv_address = try gpa.create(std.net.Address);
+            errdefer gpa.destroy(recv_address);
+
+            const socket = try io.open_socket_udp(.{ .source = options.source });
+            errdefer io.close_socket(socket);
+
+            return .{
+                .io = io,
+                .prng = .from_seed(options.prng_seed),
+                .socket = socket,
+                .discover_self = discover_self,
+                .addresses = addresses,
+                .recv_buffer = recv_buffer,
+                .recv_address = recv_address,
+                .timeout = .{
+                    .name = "discovery_timeout",
+                    .id = 0,
+                    .after = 1_000 / constants.tick_ms,
+                },
+            };
+        }
+
+        pub fn deinit(discovery: *Discovery, gpa: std.mem.Allocator) void {
+            discovery.io.close_socket(discovery.socket);
+            gpa.destroy(discovery.recv_address);
+            assert(discovery.recv_buffer.len == discovery_message_size_max);
+            gpa.free(discovery.recv_buffer);
+            discovery.* = undefined;
+        }
+
+        pub fn start(discovery: *Discovery) void {
+            discovery.recv();
+            discovery.timeout.start();
+        }
+
+        pub fn tick(discovery: *Discovery) void {
+            for (&discovery.addresses) |*address| {
+                if (address.age == age_min) continue; // Pre-configured address.
+                address.age +|= 1;
+            }
+            discovery.timeout.tick();
+            if (discovery.timeout.fired()) {
+                discovery.timeout.reset();
+                discovery.broadcast();
+            }
+        }
+
+        pub fn broadcast(discovery: *Discovery) void {
+            var permutation: [constants.discovery_addresses_max]u8 = undefined;
+            for (&permutation, 0..) |*slot, index| slot.* = @intCast(index);
+            discovery.prng.shuffle(u8, &permutation);
+
+            for (permutation) |index| {
+                const address = discovery.addresses[index];
+                if (address.age <= age_max) {
+                    const completion = discovery.send_completion.acquire() orelse
+                        break;
+                    discovery.io.send_to(
+                        *Discovery,
+                        discovery,
+                        broadcast_send_callback,
+                        completion,
+                        discovery.socket,
+                        std.mem.asBytes(&discovery.discover_self),
+                        address.to_std(),
+                    );
+                }
+            }
+        }
+
+        fn broadcast_send_callback(
+            discovery: *Discovery,
+            completion: *IO.Completion,
+            result: IO.SendError!usize,
+        ) void {
+            discovery.send_completion.release(completion);
+            const send_size = result catch |err| {
+                log.err("send_msg: error={s}", .{@errorName(err)});
+                return;
+            };
+            if (send_size != @sizeOf(vsr.Header)) {
+                log.err("send_msg: unexpected size ({}!={})", .{ send_size, @sizeOf(vsr.Header) });
+            }
+        }
+
+        fn recv(discovery: *Discovery) void {
+            discovery.io.recv_from(
+                *Discovery,
+                discovery,
+                recv_callback,
+                &discovery.recv_completion,
+                discovery.socket,
+                discovery.recv_buffer,
+                discovery.recv_address,
+            );
+        }
+
+        fn recv_callback(
+            discovery: *Discovery,
+            completion: *IO.Completion,
+            size_or_error: IO.RecvError!usize,
+        ) void {
+            assert(completion == &discovery.recv_completion);
+            defer discovery.recv();
+
+            const size = size_or_error catch |err| {
+                log.err("recv_callback: err={s}", .{@errorName(err)});
+                return;
+            };
+            assert(size <= discovery.recv_buffer.len);
+            const address = Address.from_std_with_age(
+                discovery.recv_address.*,
+                age_initial,
+            ) catch |err| switch (err) {
+                // The family should match the socket, and socket's family checked in init.
+                error.UnsupportedFamily => unreachable,
+            };
+
+            const header, const ips, const ports =
+                discovery.parse_incoming(discovery.recv_buffer[0..size]) orelse return;
+            assert(ips.len == ports.len);
+            assert((ips.len == 0) == (header.size == @sizeOf(vsr.Header)));
+
+            if (ips.len == 0) {
+                if (header.replica == std.math.maxInt(u8)) {
+                    // Add to client queue, poke along.
+                } else {
+                    assert(header.replica < constants.members_max);
+                    log.info("recv_callback: learned replica={} address={}", .{
+                        header.replica,
+                        address,
+                    });
+                    discovery.replicas[header.replica] = address;
+                }
+            } else {
+                for (ips, ports) |ip_new, port_new| {
+                    if (discovery.find_existing(ip_new, port_new)) |index| {
+                        assert(discovery.addresses[index].ip == ip_new);
+                        assert(discovery.addresses[index].port == port_new);
+                        if (discovery.addresses[index].age == age_min) {
+                            // Heard back from pre-configured address, no changes, remains
+                            // pre-configured (perpetual).
+                        } else {
+                            // Heard again from a known address, reset the age.
+                            discovery.addresses[index].age = age_initial;
+                        }
+                    } else {
+                        // This is a new address, bump the oldest one.
+                        const index = discovery.find_evictee();
+                        discovery.addresses[index] = .{
+                            .ip = ip_new,
+                            .port = port_new,
+                            .age = age_initial,
+                        };
+                    }
+                }
+            }
+        }
+
+        fn find_existing(discovery: *const Discovery, ip: u128, port: u16) ?usize {
+            return for (&discovery.addresses, 0..) |address, index| {
+                if (address.ip == ip and address.port == port) break index;
+            } else null;
+        }
+
+        fn find_evictee(discovery: *const Discovery) usize {
+            var age_oldest: u32 = 0;
+            var age_oldest_index: ?usize = null;
+
+            for (&discovery.addresses, 0..) |address, index| {
+                if (address.age > age_oldest) {
+                    age_oldest = address.age;
+                    age_oldest_index = index;
+                }
+            }
+            assert(age_oldest > 0);
+            return age_oldest_index.?;
+        }
+
+        fn parse_incoming(
+            discovery: *Discovery,
+            untrusted: []align(16) const u8,
+        ) ?struct { *const vsr.Header, []const u128, []const u16 } {
+            // No longs, silence is golden.
+            if (untrusted.len > discovery_message_size_max) return null;
+            if (untrusted.len < @sizeOf(vsr.Header)) return null;
+            assert(untrusted.len >= @sizeOf(vsr.Header));
+            assert(untrusted.len <= discovery_message_size_max);
+
+            const body_size = untrusted.len - @sizeOf(vsr.Header);
+            if (body_size % (@sizeOf(u128) + @sizeOf(u16)) != 0) return null;
+
+            const header = std.mem.bytesAsValue(
+                vsr.Header,
+                untrusted[0..@sizeOf(vsr.Header)],
+            );
+            if (!stdx.equal_timing_safe(header.cluster, discovery.discover_self.cluster)) {
+                return null;
+            }
+            assert(header.cluster == discovery.discover_self.cluster);
+
+            if (!header.valid_checksum()) return null;
+            if (header.size != untrusted.len) return null;
+            if (header.replica >= constants.members_max) return null;
+            if (header.replica == discovery.discover_self.replica) return null;
+
+            const body = untrusted[@sizeOf(vsr.Header)..];
+            assert(body.len == body_size);
+
+            const address_count = @divExact(body.len, @sizeOf(u128) + @sizeOf(u16));
+
+            const addresses: []const u128 = std.mem.bytesAsSlice(
+                u128,
+                body[0 .. address_count * @sizeOf(u128)],
+            );
+            assert(addresses.len == address_count);
+
+            const ports: []const u16 = @alignCast(std.mem.bytesAsSlice(
+                u16,
+                body[address_count * @sizeOf(u128) ..],
+            ));
+            assert(ports.len == address_count);
+
+            assert(header.size ==
+                @sizeOf(vsr.Header) + @sizeOf(u128) * addresses.len + @sizeOf(u16) * ports.len);
+            return .{ header, addresses, ports };
+        }
     };
 }

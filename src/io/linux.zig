@@ -1406,13 +1406,28 @@ pub const IO = struct {
     }
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
-        _ = self;
-        return try posix.socket(
+    pub fn open_socket_udp(self: *IO, options: union(enum) {
+        source: std.net.Address,
+        target: std.net.Address,
+        family: u32,
+    }) !socket_t {
+        const family = switch (options) {
+            .family => |f| f,
+            inline else => |address| address.any.family,
+        };
+        const socket = try posix.socket(
             family,
             std.posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
             posix.IPPROTO.UDP,
         );
+        errdefer self.close_socket(socket);
+
+        switch (options) {
+            .source => |address| try posix.bind(socket, &address.any, address.getOsSockLen()),
+            .target => |address| try posix.connect(socket, &address.any, address.getOsSockLen()),
+        }
+
+        return socket;
     }
 
     /// Closes a socket opened by the IO instance.
