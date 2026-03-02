@@ -954,11 +954,10 @@ fn http_request(
     url: []const u8,
     options: HttpOptions,
 ) ![]const u8 {
-    errdefer |err| log.err("failed to HTTP {s} to \"{s}\": {s}", .{
-        @tagName(method),
-        url,
-        @errorName(err),
-    });
+    errdefer |err| log.err(
+        "failed to HTTP {s} to \"{s}\": {s}",
+        .{ @tagName(method), url, @errorName(err) },
+    );
 
     var client = std.http.Client{ .allocator = shell.gpa };
     defer client.deinit();
@@ -1001,10 +1000,7 @@ fn http_request(
         return error.ResponseTooLarge;
     }
 
-    const response_body_buffer = try shell.arena.allocator().alloc(
-        u8,
-        response_body_buffer_size,
-    );
+    const response_body_buffer = try shell.arena.allocator().alloc(u8, response_body_buffer_size);
     const response_body_size = try request.readAll(response_body_buffer);
     assert(response_body_size <= options.response_body_size_max);
     const response_body = response_body_buffer[0..response_body_size];

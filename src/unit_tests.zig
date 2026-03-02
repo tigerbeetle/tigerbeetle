@@ -70,7 +70,7 @@ comptime {
     _ = @import("vsr/replica_test.zig");
     _ = @import("vsr/routing.zig");
     _ = @import("vsr/superblock.zig");
-    _ = @import("vsr/superblock_quorums.zig");
+    _ = @import("vsr/superblock_quorums_fuzz.zig");
 }
 
 const quine =

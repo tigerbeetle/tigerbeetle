@@ -13,21 +13,19 @@ const fuzz = @import("../testing/fuzz.zig");
 const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
-pub fn main(_: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
-    var prng = stdx.PRNG.from_seed(fuzz_args.seed);
-
-    // TODO When there is a top-level fuzz.zig main(), split these fuzzers into two different
-    // commands.
-    try fuzz_quorums_working(&prng);
-
-    try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 4 });
-    // TODO: Enable these once SuperBlockHeader is generic over its Constants.
-    // try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 6 });
-    // try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 8 });
+pub fn main(_: std.mem.Allocator, _: fuzz.FuzzArgs) !void {
+    // TODO: remove one CFO is updated.
 }
 
-pub fn fuzz_quorums_working(prng: *stdx.PRNG) !void {
-    const r = prng;
+test "Quorums: fuzz working" {
+    // Don't print warnings from the Quorums.
+    const level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = level;
+
+    var prng = stdx.PRNG.from_seed_testing();
+
+    const r = &prng;
     const t = test_quorums_working;
     const o = CopyTemplate.make_valid;
     const x = CopyTemplate.make_invalid_broken;
@@ -97,6 +95,20 @@ pub fn fuzz_quorums_working(prng: *stdx.PRNG) !void {
     // A member of the quorum has an "invalid" copy, but an otherwise valid checksum.
     const h = CopyTemplate.make_valid_high_copy;
     try t(r, 2, &.{ o(2), o(2), o(3), h(3) }, 3);
+}
+
+test "Quorums: fuzz repairs" {
+    // Don't print warnings from the Quorums.
+    const level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = level;
+
+    var prng = stdx.PRNG.from_seed_testing();
+    try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 4 });
+    // TODO: Enable these once SuperBlockHeader is generic over its Constants.
+    // try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 6 });
+    // try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 8 });
+
 }
 
 fn test_quorums_working(

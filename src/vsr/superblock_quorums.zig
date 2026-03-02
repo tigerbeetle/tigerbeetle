@@ -3,10 +3,10 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_quorums);
 
 const stdx = @import("stdx");
+const maybe = stdx.maybe;
 
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
-const fuzz = @import("./superblock_quorums_fuzz.zig");
 
 pub const Options = struct {
     superblock_copies: u8,
@@ -206,41 +206,28 @@ pub fn QuorumsType(comptime options: Options) type {
             assert(threshold.count() >= 2 and threshold.count() <= 5);
 
             if (!copy.valid_checksum()) {
-                log.debug("copy: {}/{}: invalid checksum", .{ slot, options.superblock_copies });
+                log.warn("copy: {}/{}: invalid checksum", .{ slot, options.superblock_copies });
                 return;
             }
 
             if (copy.copy == slot) {
-                log.debug("copy: {}/{}: checksum={x:0>32} parent={x:0>32} sequence={}", .{
-                    slot,
-                    options.superblock_copies,
-                    copy.checksum,
-                    copy.parent,
-                    copy.sequence,
-                });
-            } else if (copy.copy >= options.superblock_copies) {
-                log.warn("copy: {}/{}: checksum={x:0>32} parent={x:0>32} sequence={} " ++
-                    "corrupt copy={}", .{
-                    slot,
-                    options.superblock_copies,
-                    copy.checksum,
-                    copy.parent,
-                    copy.sequence,
-                    copy.copy,
-                });
+                log.debug(
+                    "copy: {}/{}: valid checksum={x:0>32} parent={x:0>32} sequence={}",
+                    .{ slot, options.superblock_copies, copy.checksum, copy.parent, copy.sequence },
+                );
             } else {
-                // If our read was misdirected, we definitely still want to count the copy.
+                // Either the entire copy was misdirected, or just the copy field is corrupted.
+                // We definitely still want to count the copy.
                 // We must just be careful to count it idempotently.
                 log.warn(
-                    "copy: {}/{}: checksum={x:0>32} parent={x:0>32} sequence={} " ++
-                        "misdirected from copy={}",
+                    "copy: {}/{}: unexpected copy={} checksum={x:0>32} parent={x:0>32} sequence={}",
                     .{
                         slot,
                         options.superblock_copies,
+                        copy.copy,
                         copy.checksum,
                         copy.parent,
                         copy.sequence,
-                        copy.copy,
                     },
                 );
             }
@@ -261,9 +248,11 @@ pub fn QuorumsType(comptime options: Options) type {
             } else if (quorum.copies.is_set(copy.copy)) {
                 // Ignore the duplicate copy.
             } else {
+                maybe(slot != copy.copy);
                 quorum.slots[slot] = @intCast(copy.copy);
                 quorum.copies.set(copy.copy);
             }
+            assert(quorum.copies.count() >= 1);
 
             quorum.valid = quorum.copies.count() >= threshold.count();
         }
@@ -377,29 +366,4 @@ pub fn QuorumsType(comptime options: Options) type {
             }
         };
     };
-}
-
-test "Quorums.working" {
-    var prng = stdx.PRNG.from_seed_testing();
-
-    // Don't print warnings from the Quorums.
-    const level = std.testing.log_level;
-    std.testing.log_level = std.log.Level.err;
-    defer std.testing.log_level = level;
-
-    try fuzz.fuzz_quorums_working(&prng);
-}
-
-test "Quorum.repairs" {
-    var prng = stdx.PRNG.from_seed_testing();
-
-    // Don't print warnings from the Quorums.
-    const level = std.testing.log_level;
-    std.testing.log_level = std.log.Level.err;
-    defer std.testing.log_level = level;
-
-    try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 4 });
-    // TODO: Enable these once SuperBlockHeader is generic over its Constants.
-    // try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 6 });
-    // try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 8 });
 }
