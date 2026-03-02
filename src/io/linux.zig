@@ -452,6 +452,8 @@ pub const IO = struct {
                 .send => |op| {
                     sqe.prep_send(op.socket, op.buffer, posix.MSG.NOSIGNAL);
                 },
+                .recvmsg => @panic("todo"),
+                .sendmsg => @panic("todo"),
                 .statx => |op| {
                     sqe.prep_statx(
                         op.dir_fd,
@@ -737,6 +739,8 @@ pub const IO = struct {
                     };
                     completion.callback(completion.context, completion, &result);
                 },
+                .recvmsg => @panic("todo"),
+                .sendmsg => @panic("todo"),
                 .statx => {
                     const result: StatxError!void = blk: {
                         if (completion.result < 0) {
@@ -850,6 +854,11 @@ pub const IO = struct {
         },
         send: struct {
             socket: socket_t,
+            buffer: []const u8,
+        },
+        recvmsg: struct { hdr: posix.msghdr },
+        sendmsg: struct {
+            address: std.net.Address,
             buffer: []const u8,
         },
         statx: struct {
@@ -1137,6 +1146,34 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    pub const RecvMsgResult = common.RecvMsgResult;
+    pub fn recv_msg(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: RecvError!RecvMsgResult,
+        ) void,
+        completion: *Completion,
+        socket: socket_t,
+        buffer: []u8,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = erase_types(Context, RecvError!usize, callback),
+            .operation = .{
+                .recv = .{
+                    .socket = socket,
+                    .buffer = buffer,
+                },
+            },
+        };
+        self.enqueue(completion);
+    }
+
     pub const SendError = error{
         AccessDenied,
         WouldBlock,
@@ -1200,6 +1237,34 @@ pub const IO = struct {
             // To avoid duplicating error handling, force the caller to fallback to normal send.
             else => return null,
         };
+    }
+
+    pub const SendMsgError = posix.UnexpectedError;
+    pub fn send_msg(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: SendMsgError!usize,
+        ) void,
+        completion: *Completion,
+        address: std.net.Address,
+        buffer: []const u8,
+    ) void {
+        completion.* = .{
+            .io = self,
+            .context = context,
+            .callback = erase_types(Context, SendMsgError!usize, callback),
+            .operation = .{
+                .sendmsg = .{
+                    .address = address,
+                    .buffer = buffer,
+                },
+            },
+        };
+        self.enqueue(completion);
     }
 
     pub const StatxError = error{
@@ -1406,13 +1471,26 @@ pub const IO = struct {
     }
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
-        _ = self;
-        return try posix.socket(
+    pub fn open_socket_udp(self: *IO, options: union(enum) {
+        source: std.net.Address,
+        target: std.net.Address,
+    }) !socket_t {
+        const family = switch (options) {
+            inline else => |address| address,
+        }.any.family;
+        const socket = try posix.socket(
             family,
             std.posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
             posix.IPPROTO.UDP,
         );
+        errdefer self.close_socket(socket);
+
+        switch (options) {
+            .source => |address| try posix.bind(socket, &address.any, address.getOsSockLen()),
+            .target => |address| try posix.connect(socket, &address.any, address.getOsSockLen()),
+        }
+
+        return socket;
     }
 
     /// Closes a socket opened by the IO instance.

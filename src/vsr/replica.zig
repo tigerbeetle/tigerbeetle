@@ -1793,7 +1793,7 @@ pub fn ReplicaType(
                 .request_blocks => |m| self.on_request_blocks(m),
                 .block => |m| self.on_block(m),
                 // A replica should never handle misdirected messages intended for a client:
-                .pong_client, .eviction => {
+                .pong_client, .eviction, .discover => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
                         self.log_prefix(),
                         @tagName(message.header.command),
@@ -9023,6 +9023,7 @@ pub fn ReplicaType(
                 .request_reply,
                 .request_blocks,
                 .block,
+                .discover,
                 => unreachable,
             }
 
@@ -9133,6 +9134,7 @@ pub fn ReplicaType(
             switch (message.header.into_any()) {
                 .eviction,
                 .reserved,
+                .discover,
                 // Deprecated messages are always `invalid()`.
                 .deprecated_12,
                 .deprecated_21,
@@ -10152,11 +10154,7 @@ pub fn ReplicaType(
             };
 
             log.info("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
-                self.log_prefix(),
-                self.view,
-                view_new,
-                self.status,
-                Status.view_change,
+                self.log_prefix(), self.view, view_new, self.status, Status.view_change,
             });
 
             if (self.status == .normal or

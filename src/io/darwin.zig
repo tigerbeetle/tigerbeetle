@@ -223,6 +223,7 @@ pub const IO = struct {
             socket: socket_t,
             buf: [*]const u8,
             len: u32,
+            address: ?std.net.Address,
         },
         timeout: struct {
             expires: u64,
@@ -612,6 +613,7 @@ pub const IO = struct {
                 .socket = socket,
                 .buf = buffer.ptr,
                 .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .address = null,
             },
             struct {
                 fn do_operation(op: anytype) SendError!usize {
@@ -623,8 +625,8 @@ pub const IO = struct {
                         op.socket,
                         op.buf[0..op.len],
                         0,
-                        null,
-                        0,
+                        if (op.address) |*address| &address.any else null,
+                        if (op.address) |*address| address.getOsSockLen() else 0,
                     ) catch |err| switch (err) {
                         error.AddressFamilyNotSupported => unreachable,
                         error.SymLinkLoop => unreachable,
@@ -644,6 +646,49 @@ pub const IO = struct {
 
     pub fn send_now(_: *IO, _: socket_t, _: []const u8) ?usize {
         return null; // No support for best-effort non-blocking synchronous send.
+    }
+
+    pub fn send_to(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: SendError!usize,
+        ) void,
+        completion: *Completion,
+        socket: socket_t,
+        buffer: []const u8,
+        address: std.net.Address,
+    ) void {
+        self.submit(context, callback, completion, .send, .{
+            .socket = socket,
+            .buf = buffer.ptr,
+            .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+            .address = address,
+        }, struct {
+            fn do_operation(op: anytype) SendError!usize {
+                return posix.sendto(
+                    op.socket,
+                    op.buf[0..op.len],
+                    0,
+                    &op.address.any,
+                    op.address.any.getOsSockLen(),
+                ) catch |err| switch (err) {
+                    error.AddressFamilyNotSupported => unreachable,
+                    error.SymLinkLoop => unreachable,
+                    error.NameTooLong => unreachable,
+                    error.FileNotFound => unreachable,
+                    error.NotDir => unreachable,
+                    error.NetworkUnreachable => unreachable,
+                    error.AddressNotAvailable => unreachable,
+                    error.SocketNotConnected => unreachable,
+                    error.UnreachableAddress => unreachable,
+                    else => |e| return e,
+                };
+            }
+        });
     }
 
     pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
@@ -825,12 +870,26 @@ pub const IO = struct {
     }
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
-        return try self.open_socket(
+    pub fn open_socket_udp(self: *IO, options: union(enum) {
+        source: std.net.Address,
+        target: std.net.Address,
+    }) !socket_t {
+        const family = switch (options) {
+            inline else => |address| address,
+        }.any.family;
+        const socket = try self.open_socket(
             family,
             posix.SOCK.DGRAM | posix.SOCK.NONBLOCK,
             posix.IPPROTO.UDP,
         );
+        errdefer self.close_socket(socket);
+
+        switch (options) {
+            .source => |address| try posix.bind(socket, &address.any, address.getOsSockLen()),
+            .target => |address| try posix.connect(socket, &address.any, address.getOsSockLen()),
+        }
+
+        return socket;
     }
 
     fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
