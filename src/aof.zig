@@ -367,6 +367,8 @@ pub fn AOFType(comptime IO: type) type {
                         .aof_recovery = true,
                         .message_bus_options = .{
                             .configuration = addresses,
+                            .discovery = false,
+                            .listen = null,
                             .io = io,
                             .trace = null,
                         },

@@ -50,7 +50,7 @@ pub fn command_benchmark(
     };
 
     var maybe_stat_empty: ?std.fs.File.Stat = null;
-    if (args.addresses == null) {
+    if (args.configuration == null) {
         const me = try std.fs.selfExePathAlloc(allocator);
         defer allocator.free(me);
 
@@ -84,11 +84,13 @@ pub fn command_benchmark(
         }
     }
 
-    const addresses = if (args.addresses) |*addresses|
-        addresses.const_slice()
-    else
-        &.{tigerbeetle_process.?.address};
-    try benchmark_load.main(allocator, io, time, addresses, args);
+    try benchmark_load.main(allocator, io, time, args, .{
+        .configuration = if (args.configuration) |*addresses|
+            addresses.const_slice()
+        else
+            &.{tigerbeetle_process.?.address},
+        .discovery = args.discovery,
+    });
 
     if (tigerbeetle_process) |*p| {
         const rusage = p.deinit();

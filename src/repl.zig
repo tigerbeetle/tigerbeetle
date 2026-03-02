@@ -680,7 +680,10 @@ pub fn ReplType(comptime MessageBus: type) type {
                     .aof_recovery = false,
                     .message_bus_options = .{
                         .configuration = options.addresses,
+                        .discovery = false,
+                        .listen = null,
                         .io = io,
+                        .time = time,
                         .trace = null,
                     },
                 },

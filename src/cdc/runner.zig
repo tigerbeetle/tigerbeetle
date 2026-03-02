@@ -261,7 +261,10 @@ pub const Runner = struct {
                 .aof_recovery = false,
                 .message_bus_options = .{
                     .configuration = options.addresses,
+                    .discovery = false,
+                    .listen = null,
                     .io = &self.io,
+                    .time = time,
                     .trace = null,
                 },
             },

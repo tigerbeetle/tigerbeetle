@@ -64,7 +64,7 @@ const CLIArgs = union(enum) {
 
     const Start = struct {
         // Stable CLI arguments.
-        addresses: []const u8,
+        addresses: ?[]const u8 = null,
         cache_grid: ?ByteSize = null,
         development: bool = false,
 
@@ -93,6 +93,9 @@ const CLIArgs = union(enum) {
         replicate_star: bool = false,
 
         statsd: ?[]const u8 = null,
+
+        discovery: ?[]const u8 = null,
+        listen: ?[]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -160,6 +163,8 @@ const CLIArgs = union(enum) {
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
+        discovery: ?[]const u8 = null,
+        cluster: u128 = 0,
         seed: ?[]const u8 = null,
     };
 
@@ -524,6 +529,8 @@ pub const Command = union(enum) {
 
     pub const Start = struct {
         addresses: Addresses,
+        listen: ?std.net.Address,
+        discovery: bool,
         // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
         // testing. We check the raw string rather then the parsed address to prevent triggering
         // this logic by accident.
@@ -613,7 +620,9 @@ pub const Command = union(enum) {
         statsd: ?[]const u8,
         trace: ?[]const u8,
         file: ?[]const u8,
-        addresses: ?Addresses,
+        configuration: ?Addresses,
+        discovery: bool,
+        cluster: u128,
         seed: ?[]const u8,
     };
 
@@ -846,7 +855,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
         const required_default = if (field.type == bool) false else null;
-        assert(field.defaultValue().? == required_default);
+        assert(field.defaultValue().? == required_default); // Experimental flag default.
 
         if (@field(start, field.name) != required_default and !start.experimental) {
             vsr.fatal(
@@ -862,7 +871,23 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
     const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
 
-    const addresses = parse_addresses(start.addresses, "--addresses", Command.Addresses);
+    if (start.addresses != null and start.discovery != null) {
+        vsr.fatal(.cli, "--discovery: --addresses and --discovery are mutually exclusive", .{});
+    }
+    if (start.discovery == null and start.listen != null) {
+        vsr.fatal(.cli, "--listen: --discovery also must be set", .{});
+    }
+    if (start.discovery != null and start.listen == null) {
+        vsr.fatal(.cli, "--discovery: --listen also must be set", .{});
+    }
+
+    const addresses = if (start.addresses) |addresses|
+        parse_addresses(addresses, "--addresses", Command.Addresses)
+    else if (start.discovery) |addresses|
+        parse_addresses(addresses, "--discovery", Command.Addresses)
+    else
+        vsr.fatal(.cli, "--addresses: argument is required", .{});
+
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
@@ -1036,9 +1061,19 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         vsr.fatal(.cli, "--log-debug must be provided when using --log-trace", .{});
     }
 
+    const listen = if (start.listen) |string|
+        vsr.parse_address_and_port(.{ .string = string, .port_default = constants.port }) catch {
+            vsr.fatal(.cli, "--listen: invalid address", .{});
+        }
+    else
+        null;
+
     return .{
         .addresses = addresses,
-        .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
+        .discovery = start.discovery != null,
+        .listen = listen,
+
+        .addresses_zero = start.addresses != null and std.mem.eql(u8, start.addresses.?, "0"),
         .storage_size_limit = storage_size_limit,
         .pipeline_requests_limit = pipeline_limit,
         .request_size_limit = @intCast(request_size_limit.bytes()),
@@ -1122,12 +1157,19 @@ const transfer_batch_count_max = @divExact(
 );
 
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
-    const addresses = if (benchmark.addresses) |addresses|
+    if (benchmark.addresses != null and benchmark.discovery != null) {
+        vsr.fatal(.cli, "--discovery: --addresses and --discovery are mutually exclusive", .{});
+    }
+
+    const configuration: ?Command.Addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses, "--addresses", Command.Addresses)
+    else if (benchmark.discovery) |addresses|
+        parse_addresses(addresses, "--discovery", Command.Addresses)
     else
         null;
+    const discovery = benchmark.discovery != null;
 
-    if (benchmark.addresses != null and benchmark.file != null) {
+    if (configuration != null and benchmark.file != null) {
         vsr.fatal(.cli, "--file: --addresses and --file are mutually exclusive", .{});
     }
 
@@ -1182,7 +1224,9 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .statsd = benchmark.statsd,
         .trace = benchmark.trace,
         .file = benchmark.file,
-        .addresses = addresses,
+        .configuration = configuration,
+        .discovery = discovery,
+        .cluster = benchmark.cluster,
         .seed = benchmark.seed,
     };
 }

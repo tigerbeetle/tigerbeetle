@@ -412,6 +412,14 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     return total == 0;
 }
 
+pub fn equal_timing_safe(a: u128, b: u128) bool {
+    return std.crypto.timing_safe.eql(
+        [16]u8,
+        std.mem.asBytes(&a).*,
+        std.mem.asBytes(&b).*,
+    );
+}
+
 fn has_pointers(comptime T: type) bool {
     switch (@typeInfo(T)) {
         .pointer => return true,

@@ -13,6 +13,7 @@ pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");
 pub const stack = @import("stack.zig");
 pub const message_buffer = @import("message_buffer.zig");
+pub const discovery = @import("discovery.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
 pub const state_machine = @import("state_machine.zig");
@@ -259,6 +260,8 @@ pub const Command = enum(u8) {
     block = 20,
 
     view = 24,
+
+    discover = 25,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
     deprecated_12 = 12, // .view without checkpoint

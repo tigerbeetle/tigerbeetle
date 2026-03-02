@@ -152,6 +152,7 @@ pub fn ClientType(
 
             var message_bus = try MessageBus.init(
                 allocator,
+                options.cluster,
                 .{ .client = options.id },
                 message_pool,
                 Client.on_messages,

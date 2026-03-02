@@ -39,8 +39,11 @@ pub fn main(
     allocator: std.mem.Allocator,
     io: *IO,
     time: Time,
-    addresses: []const std.net.Address,
     cli_args: *const cli.Command.Benchmark,
+    options: struct {
+        configuration: []const std.net.Address,
+        discovery: bool,
+    },
 ) !void {
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         log.warn("Benchmark must be built with '-Drelease' for reasonable results.", .{});
@@ -84,8 +87,6 @@ pub fn main(
         .{},
     );
 
-    const cluster_id: u128 = 0;
-
     var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
     defer for (message_pools.slice()) |*message_pool| message_pool.deinit(allocator);
 
@@ -93,7 +94,11 @@ pub fn main(
         message_pools.push(try MessagePool.init(allocator, .client));
     }
 
-    std.log.info("Benchmark running against {any}", .{addresses});
+    std.log.info("Benchmark running against {any}", .{options.configuration});
+    const replica_count: u8 = if (options.discovery)
+        constants.replicas_max
+    else
+        @intCast(options.configuration.len);
 
     var clients = stdx.BoundedArrayType(Client, constants.clients_max){};
     defer for (clients.slice()) |*client| client.deinit(allocator);
@@ -105,10 +110,16 @@ pub fn main(
             &message_pools.slice()[i],
             .{
                 .id = stdx.unique_u128(),
-                .cluster = cluster_id,
-                .replica_count = @intCast(addresses.len),
+                .cluster = cli_args.cluster,
+                .replica_count = replica_count,
                 .aof_recovery = false,
-                .message_bus_options = .{ .configuration = addresses, .io = io, .trace = null },
+                .message_bus_options = .{
+                    .configuration = options.configuration,
+                    .discovery = options.discovery,
+                    .io = io,
+                    .time = time,
+                    .trace = null,
+                },
             },
         ));
     }

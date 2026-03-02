@@ -115,6 +115,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 Node.on_messages_callback,
                 .{
                     .configuration = configuration,
+                    .discovery = false,
                     .io = &io,
                     .clients_limit = clients_limit,
                     .trace = null,
@@ -140,6 +141,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 Node.on_messages_callback,
                 .{
                     .configuration = configuration,
+                    .discovery = false,
                     .io = &io,
                     .clients_limit = null,
                     .trace = null,

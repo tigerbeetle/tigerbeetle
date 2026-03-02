@@ -348,6 +348,8 @@ pub fn ContextType(
                     .aof_recovery = false,
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),
+                        .discovery = false,
+                        .listen = null,
                         .io = &context.io,
                         .trace = null,
                     },

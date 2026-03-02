@@ -800,6 +800,8 @@ const VSRContext = struct {
                 .aof_recovery = false,
                 .message_bus_options = .{
                     .configuration = &.{address},
+                    .discovery = false,
+                    .listen = null,
                     .io = &self.io,
                     .trace = null,
                 },

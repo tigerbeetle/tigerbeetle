@@ -342,7 +342,10 @@ fn command_start(
         storage,
         &message_pool,
         .{
-            .node_count = args.addresses.count_as(u8),
+            .node_count = if (args.listen != null)
+                constants.replicas_max
+            else
+                args.addresses.count_as(u8),
             .release = config.process.release,
             .release_client_min = config.process.release_client_min,
             .multiversion = multiversion,
@@ -366,7 +369,10 @@ fn command_start(
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
+                .discovery = args.listen != null,
+                .listen = args.listen,
                 .io = io,
+                .time = time,
                 .clients_limit = clients_limit,
                 .trace = tracer,
             },
@@ -533,7 +539,9 @@ fn command_reformat(
 
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
+                .discovery = false,
                 .io = io,
+                .time = time,
                 .clients_limit = null,
                 .trace = null,
             },
