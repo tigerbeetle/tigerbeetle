@@ -173,8 +173,8 @@ It is the consumer's responsibility to perform **idempotency checks** when proce
 The CDC job requires TigerBeetle cluster version `0.16.43` or greater.
 
 The same [upgrade planning](./upgrading.md#planning-for-upgrades) recommended for clients applies
-to the CDC job. The CDC job version must not be newer than the cluster version, as it will fail
-with an error message if so.
+to the CDC job. The CDC job version must not be newer than the cluster version, and if so will fail
+with an error message.
 
 Any transactions _originally_ created by TigerBeetle versions before `0.16.29` have the following
 limitations for CDC processing:
