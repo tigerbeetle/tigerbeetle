@@ -46,7 +46,7 @@ pub fn ClientType(
             },
         };
 
-        message_bus: MessageBus,
+        message_bus: *MessageBus,
 
         time: Time,
 
@@ -128,15 +128,14 @@ pub fn ClientType(
         ) void = null,
 
         pub fn init(
-            allocator: mem.Allocator,
+            _: mem.Allocator,
             time: Time,
-            message_pool: *MessagePool,
+            message_bus: *MessageBus,
             options: struct {
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
                 aof_recovery: bool,
-                message_bus_options: MessageBus.Options,
                 /// When eviction_callback is null, the client will panic on eviction.
                 ///
                 /// When eviction_callback is non-null, it must `deinit()` the Client.
@@ -149,15 +148,6 @@ pub fn ClientType(
         ) !Client {
             assert(options.id > 0);
             assert(options.replica_count > 0);
-
-            var message_bus = try MessageBus.init(
-                allocator,
-                .{ .client = options.id },
-                message_pool,
-                Client.on_messages,
-                options.message_bus_options,
-            );
-            errdefer message_bus.deinit(allocator);
 
             var self = Client{
                 .message_bus = message_bus,
@@ -182,6 +172,11 @@ pub fn ClientType(
             };
 
             self.ping_timeout.start();
+            self.message_bus.dial(.{
+                .client = self.id,
+                .on_messages_callback = on_messages,
+                .on_messages_callback_context = &self, // FIXME:
+            });
 
             return self;
         }
@@ -191,8 +186,8 @@ pub fn ClientType(
             self.message_bus.deinit(allocator);
         }
 
-        pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-            const self: *Client = @fieldParentPtr("message_bus", message_bus);
+        pub fn on_messages(context: *anyopaque, buffer: *MessageBuffer) void {
+            const self: *Client = @ptrCast(@alignCast(context));
             while (buffer.next_header()) |header| {
                 const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);

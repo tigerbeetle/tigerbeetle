@@ -50,6 +50,7 @@ pub const Runner = struct {
     event_count_max: u32,
 
     message_pool: MessagePool,
+    message_bus: MessageBus,
     vsr_client: Client,
     buffer: DualBuffer,
 
@@ -203,6 +204,7 @@ pub const Runner = struct {
             .state = .{ .unknown = options.recovery_mode },
             .buffer = dual_buffer,
             .message_pool = undefined,
+            .message_bus = undefined,
             .vsr_client = undefined,
             .amqp_client = undefined,
         };
@@ -230,20 +232,21 @@ pub const Runner = struct {
         self.message_pool = try MessagePool.init(allocator, .client);
         errdefer self.message_pool.deinit(allocator);
 
+        self.message_bus = try MessageBus.init(allocator, &self.io, null, &self.message_pool, .{
+            .process = .client,
+            .configuration = options.addresses,
+        });
+        errdefer self.message_bus.deinit(allocator);
+
         self.vsr_client = try Client.init(
             allocator,
             time,
-            &self.message_pool,
+            &self.message_bus,
             .{
                 .id = stdx.unique_u128(),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
                 .aof_recovery = false,
-                .message_bus_options = .{
-                    .configuration = options.addresses,
-                    .io = &self.io,
-                    .trace = null,
-                },
             },
         );
         errdefer self.vsr_client.deinit(allocator);
@@ -281,6 +284,7 @@ pub const Runner = struct {
     pub fn deinit(self: *Runner, allocator: std.mem.Allocator) void {
         self.amqp_client.deinit(allocator);
         self.vsr_client.deinit(allocator);
+        self.message_bus.deinit(allocator);
         self.message_pool.deinit(allocator);
         self.io.deinit();
         self.buffer.deinit(allocator);
