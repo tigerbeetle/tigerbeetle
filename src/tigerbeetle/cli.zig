@@ -1321,7 +1321,7 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         if (amqp_timeout_seconds == 0) {
             vsr.fatal(
                 .cli,
-                "--amqp-timeout-ms must not be zero.",
+                "--amqp-timeout-seconds must not be zero.",
                 .{},
             );
         }
@@ -1331,7 +1331,7 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         if (tigerbeetle_timeout_seconds == 0) {
             vsr.fatal(
                 .cli,
-                "--tigerbeetle-timeout-ms must not be zero.",
+                "--tigerbeetle-timeout-seconds must not be zero.",
                 .{},
             );
         }

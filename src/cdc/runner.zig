@@ -30,14 +30,14 @@ pub const Runner = struct {
 
     const constants = struct {
         const tick_ms = vsr.constants.tick_ms;
-        const idle_interval: stdx.Duration = .seconds(1);
-        const amqp_timeout: stdx.Duration = .seconds(30);
-        const tigerbeetle_timeout: stdx.Duration = .seconds(30);
-
         const app_id = "tigerbeetle";
         const progress_tracker_queue = "tigerbeetle.internal.progress";
         const locker_queue = "tigerbeetle.internal.locker";
-        const event_count_max: u32 = Operation.get_change_events.result_max(
+
+        const idle_interval_default: stdx.Duration = .seconds(1);
+        const amqp_timeout_default: stdx.Duration = .seconds(30);
+        const tigerbeetle_timeout_default: stdx.Duration = .seconds(30);
+        const event_count_max_default: u32 = Operation.get_change_events.result_max(
             vsr.constants.message_body_size_max,
         );
     };
@@ -156,25 +156,25 @@ pub const Runner = struct {
         const idle_interval: stdx.Duration = if (options.idle_interval_ms) |value|
             .ms(value)
         else
-            constants.idle_interval;
+            constants.idle_interval_default;
         assert(idle_interval.ns > 0);
 
         const event_count_max: u32 = if (options.event_count_max) |event_count_max|
-            @min(event_count_max, constants.event_count_max)
+            @min(event_count_max, constants.event_count_max_default)
         else
-            constants.event_count_max;
+            constants.event_count_max_default;
         assert(event_count_max > 0);
 
         const amqp_timeout: stdx.Duration = if (options.amqp_timeout_seconds) |value|
             .seconds(value)
         else
-            constants.amqp_timeout;
+            constants.amqp_timeout_default;
         assert(amqp_timeout.ns > 0);
 
         const tigerbeetle_timeout: stdx.Duration = if (options.tigerbeetle_timeout_seconds) |value|
             .seconds(value)
         else
-            constants.tigerbeetle_timeout;
+            constants.tigerbeetle_timeout_default;
         assert(tigerbeetle_timeout.ns > 0);
 
         const publish_exchange: []const u8 = options.publish_exchange orelse "";
@@ -960,7 +960,7 @@ pub const Runner = struct {
         self.vsr_client_timeout.tick();
         if (self.vsr_client_timeout.fired()) {
             const timeout: stdx.Duration = .ms(self.vsr_client_timeout.ticks * constants.tick_ms);
-            fatal("Timed out: no reply from the TigerBeetle cluster after {}.", .{timeout});
+            fatal("Timed out: no reply from the TigerBeetle cluster within {}.", .{timeout});
         }
     }
 };
@@ -1153,7 +1153,7 @@ const DualBuffer = struct {
 
     pub fn init(allocator: std.mem.Allocator, event_count: u32) !DualBuffer {
         assert(event_count > 0);
-        assert(event_count <= Runner.constants.event_count_max);
+        assert(event_count <= Runner.constants.event_count_max_default);
 
         const buffer_1 = try allocator.alloc(tb.ChangeEvent, event_count);
         errdefer allocator.free(buffer_1);
@@ -1546,7 +1546,7 @@ test "amqp: RateLimit" {
 }
 
 test "amqp: DualBuffer" {
-    const event_count_max = Runner.constants.event_count_max;
+    const event_count_max = Runner.constants.event_count_max_default;
 
     var prng = stdx.PRNG.from_seed_testing();
     var dual_buffer = try DualBuffer.init(testing.allocator, event_count_max);
