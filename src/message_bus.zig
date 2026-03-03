@@ -96,7 +96,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
         /// Initialize the MessageBus for the given configuration and replica/client process.
         pub fn init(
-            allocator: mem.Allocator,
+            gpa: mem.Allocator,
             process_id: ProcessID,
             message_pool: *MessagePool,
             on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
@@ -119,15 +119,15 @@ pub fn MessageBusType(comptime IO: type) type {
                 .client => constants.connection_send_queue_max_client,
             };
 
-            const send_queue_buffer = try allocator.alloc(
+            const send_queue_buffer = try gpa.alloc(
                 *Message,
                 connections_max * send_queue_max,
             );
             @memset(send_queue_buffer, undefined);
-            errdefer allocator.free(send_queue_buffer);
+            errdefer gpa.free(send_queue_buffer);
 
-            const connections = try allocator.alloc(Connection, connections_max);
-            errdefer allocator.free(connections);
+            const connections = try gpa.alloc(Connection, connections_max);
+            errdefer gpa.free(connections);
             for (connections, 0..) |*connection, index| {
                 connection.* = .{
                     .send_queue = .{
@@ -136,16 +136,16 @@ pub fn MessageBusType(comptime IO: type) type {
                 };
             }
 
-            const replicas = try allocator.alloc(?*Connection, options.configuration.len);
-            errdefer allocator.free(replicas);
+            const replicas = try gpa.alloc(?*Connection, options.configuration.len);
+            errdefer gpa.free(replicas);
             @memset(replicas, null);
 
-            const replicas_addresses = try allocator.alloc(Address, options.configuration.len);
-            errdefer allocator.free(replicas_addresses);
+            const replicas_addresses = try gpa.alloc(Address, options.configuration.len);
+            errdefer gpa.free(replicas_addresses);
             stdx.copy_disjoint(.exact, Address, replicas_addresses, options.configuration);
 
-            const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
-            errdefer allocator.free(replicas_connect_attempts);
+            const replicas_connect_attempts = try gpa.alloc(u64, options.configuration.len);
+            errdefer gpa.free(replicas_connect_attempts);
             @memset(replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_id) {
@@ -175,8 +175,8 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replica => {
                     // Pre-allocate enough memory to hold all possible connections
                     // in the client map.
-                    try bus.clients.ensureTotalCapacity(allocator, connections_max);
-                    errdefer bus.clients.deinit(allocator);
+                    try bus.clients.ensureTotalCapacity(gpa, connections_max);
+                    errdefer bus.clients.deinit(gpa);
 
                     return bus;
                 },
@@ -184,8 +184,8 @@ pub fn MessageBusType(comptime IO: type) type {
             }
         }
 
-        pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
-            bus.clients.deinit(allocator);
+        pub fn deinit(bus: *MessageBus, gpa: std.mem.Allocator) void {
+            bus.clients.deinit(gpa);
 
             if (bus.accept_fd) |fd| {
                 assert(bus.process == .replica);
@@ -218,11 +218,11 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.send_queue_buffer.ptr + bus.send_queue_buffer.len ==
                 send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
 
-            allocator.free(bus.replicas_connect_attempts);
-            allocator.free(bus.replicas_addresses);
-            allocator.free(bus.replicas);
-            allocator.free(bus.connections);
-            allocator.free(bus.send_queue_buffer);
+            gpa.free(bus.replicas_connect_attempts);
+            gpa.free(bus.replicas_addresses);
+            gpa.free(bus.replicas);
+            gpa.free(bus.connections);
+            gpa.free(bus.send_queue_buffer);
             bus.* = undefined;
         }
 
