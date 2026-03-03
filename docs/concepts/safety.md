@@ -178,28 +178,24 @@ to get lost, and even in that case **the system would safely halt**.
 
 ## `io_uring` Security
 
-`io_uring` is a relatively new part of the Linux kernel (support for it was added in version 5.1,
-which was released in May 2019). Since then, many kernel exploits have been found related to
-`io_uring` and in 2023
+Support for `io_uring` was added to the Linux kernel in 2019 
+([version 5.1](https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.1)). Since then, many kernel 
+exploits have been found related to `io_uring`, and in 2023
 [Google announced](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html)
 that they were disabling it in ChromeOS, for Android apps, and on Google production servers.
 
-Google's post is primarily about how they secure operating systems and web servers that handle
-hostile user content. In the Google blog post, they specifically note:
+Google's announcement is primarily about to how they secure operating systems and web servers that 
+handle **hostile user content**, noting that they consider `io_uring` safe for use by trusted 
+components. As a financial system of record, TigerBeetle is a trusted component, and should be running 
+in a trusted environment. Furthermore, TigerBeetle:
 
-> we currently consider it safe only for use by trusted components
+- Uses 128-byte [`Account`](../reference/account.md)s and [`Transfer`](../reference/transfer.md)s with pure integer fields only
+- Has no (de)serialization and does not take user-generated strings, which significantly constrains
+  the attack surface
 
-As a financial system of record, TigerBeetle is a trusted component and it should be running in a
-trusted environment.
-
-Furthermore, TigerBeetle only uses 128-byte [`Account`s](../reference/account.md) and
-[`Transfer`s](../reference/transfer.md) with pure integer fields. TigerBeetle has no
-(de)serialization and does not take user-generated strings, which significantly constrains the
-attack surface.
-
-We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle
-async I/O. It is significantly easier for the kernel to implement this correctly than for us to
-include a userspace multithreaded thread pool (for example, as libuv does).
+We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle async I/O. 
+It is significantly easier for the kernel to implement this correctly than for us to include a userspace 
+multi-threaded thread pool (for example, [as libuv does](https://docs.libuv.org/en/v1.x/threadpool.html)).
 
 ## Next: Coding
 
