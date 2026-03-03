@@ -4,7 +4,7 @@ TigerBeetle supports emitting metrics via StatsD, and uses the
 [DogStatsD format for tags.](https://docs.datadoghq.com/developers/dogstatsd/datagram_shell?tab=metrics)
 
 This requires a StatsD compatible agent running locally. The Datadog Agent works out of the
-box with its default configuration, as does Telegraf's [statsd plugin](https://github.com/influxdata/telegraf/blob/master/plugins/inputs/statsd/README.md),
+box with its default configuration, as does Telegraf's [StatsD plugin](https://github.com/influxdata/telegraf/blob/master/plugins/inputs/statsd/README.md),
 with `datadog_extensions` enabled.
 
 You can enable emitting metrics by adding the following CLI flags to each replica, depending on your
@@ -19,13 +19,13 @@ currently supported.
 
 All TigerBeetle metrics are namespaced under `tb.` and are tagged with `cluster` (the cluster ID
 specified at format time) and `replica` (the replica index). Specific metrics might have additional
-tags - you can see a full list of metrics and cardinality by running `tigerbeetle inspect metrics`.
+tags. You can see a full list of metrics and cardinality by running `tigerbeetle inspect metrics`.
 
 ## Specific Metrics
 
 ### Overall status
 The `replica_status` metric corresponds to the overall status of the replica. If it's anything other
-than 0, it should be alerted on as it indicates a non-normal status. The full values are:
+than `0`, it should be alerted on as it indicates a non-normal status. The full values are:
 
 | Value | Status          | Explanation                                                                                                                                    |
 |-------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------|
