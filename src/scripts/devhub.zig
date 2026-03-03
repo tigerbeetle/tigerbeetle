@@ -365,6 +365,10 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         },
     };
 
+    for (batch.metrics) |metric| {
+        std.log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
+    }
+
     upload_run(shell, &batch) catch |err| {
         log.err("failed to upload devhubdb metrics: {}", .{err});
     };
@@ -372,10 +376,6 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     upload_nyrkio(shell, &batch) catch |err| {
         log.err("failed to upload Nyrkiö metrics: {}", .{err});
     };
-
-    for (batch.metrics) |metric| {
-        std.log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
-    }
 }
 
 fn get_measurement(
