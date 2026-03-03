@@ -322,6 +322,8 @@ const CLIArgs = union(enum) {
         event_count_max: ?u32 = null,
         idle_interval_ms: ?u32 = null,
         requests_per_second_limit: ?u32 = null,
+        amqp_timeout_seconds: ?u32 = null,
+        tigerbeetle_timeout_seconds: ?u32 = null,
         timestamp_last: ?u64 = null,
         verbose: bool = false,
     };
@@ -674,6 +676,8 @@ pub const Command = union(enum) {
         event_count_max: ?u32,
         idle_interval_ms: ?u32,
         requests_per_second_limit: ?u32,
+        amqp_timeout_seconds: ?u32,
+        tigerbeetle_timeout_seconds: ?u32,
         timestamp_last: ?u64,
         log_debug: bool,
     };
@@ -1303,6 +1307,36 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         }
     }
 
+    if (amqp.idle_interval_ms) |idle_interval_ms| {
+        if (idle_interval_ms == 0) {
+            vsr.fatal(
+                .cli,
+                "--idle-interval-ms must not be zero.",
+                .{},
+            );
+        }
+    }
+
+    if (amqp.amqp_timeout_seconds) |amqp_timeout_seconds| {
+        if (amqp_timeout_seconds == 0) {
+            vsr.fatal(
+                .cli,
+                "--amqp-timeout-seconds must not be zero.",
+                .{},
+            );
+        }
+    }
+
+    if (amqp.tigerbeetle_timeout_seconds) |tigerbeetle_timeout_seconds| {
+        if (tigerbeetle_timeout_seconds == 0) {
+            vsr.fatal(
+                .cli,
+                "--tigerbeetle-timeout-seconds must not be zero.",
+                .{},
+            );
+        }
+    }
+
     return .{
         .addresses = addresses,
         .cluster = amqp.cluster,
@@ -1316,6 +1350,8 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         .idle_interval_ms = amqp.idle_interval_ms,
         .requests_per_second_limit = amqp.requests_per_second_limit,
         .timestamp_last = amqp.timestamp_last,
+        .amqp_timeout_seconds = amqp.amqp_timeout_seconds,
+        .tigerbeetle_timeout_seconds = amqp.tigerbeetle_timeout_seconds,
         .log_debug = amqp.verbose,
     };
 }

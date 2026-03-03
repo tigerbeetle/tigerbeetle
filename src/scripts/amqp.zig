@@ -49,6 +49,9 @@ pub fn main(_: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         try run_serialization_test(gpa, .{
             .host = rabbit_mq.host,
         });
+        try run_timeout_test(gpa, .{
+            .host = rabbit_mq.host,
+        });
         try run_cdc_test(gpa, .{
             .host = rabbit_mq.host,
             .transfer_count = cli_args.transfer_count,
@@ -532,6 +535,75 @@ fn run_cdc_test(
     }));
 }
 
+fn run_timeout_test(
+    gpa: std.mem.Allocator,
+    options: struct {
+        host: std.net.Address,
+    },
+) !void {
+    var amqp_context: AmqpContext = undefined;
+    try amqp_context.init(gpa);
+    defer amqp_context.deinit(gpa);
+
+    try amqp_context.connect(options.host);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var time_os: vsr.time.TimeOS = .{};
+    const time = &time_os.time();
+
+    const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
+        stdx.unique_u128(),
+    });
+    amqp_context.queue_declare(.{
+        .queue = queue,
+        .passive = false,
+        .durable = true,
+        .exclusive = false,
+        .auto_delete = false,
+        .arguments = .{},
+    });
+
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        .development = false,
+    });
+
+    const shell = try Shell.create(gpa);
+    defer shell.destroy();
+
+    // Starting the CDC job with a 1s timeout for the TigerBeetle cluster:
+    var cdc_job = try shell.spawn(
+        .{},
+        "{tigerbeetle} amqp " ++
+            "--cluster=0 --addresses={addresses} " ++
+            "--host=127.0.0.1:{port} --vhost=/ --user=guest --password=guest " ++
+            "--publish-routing-key={queue} " ++
+            "--idle-interval-ms={idle_interval_ms} " ++
+            "--tigerbeetle-timeout-seconds={tigerbeetle_timeout_seconds}",
+        .{
+            .tigerbeetle = tmp_beetle.tigerbeetle_exe,
+            .addresses = tmp_beetle.port_str,
+            .port = options.host.getPort(),
+            .queue = queue,
+            .idle_interval_ms = 1,
+            .tigerbeetle_timeout_seconds = 1,
+        },
+    );
+    defer _ = cdc_job.kill() catch undefined;
+
+    const started = time.monotonic();
+
+    // Kills the TigerBeetle cluster and waits for the CDC job to time out.
+    tmp_beetle.deinit(gpa);
+    const result = try cdc_job.wait();
+
+    const elapsed = time.monotonic().duration_since(started);
+
+    try testing.expectEqual(@as(u8, 1), result.Exited);
+    try testing.expect(elapsed.to_ms() > 1000);
+}
+
 const AmqpContext = struct {
     const Message = struct {
         header: amqp.GetMessagePropertiesResult,
@@ -764,7 +836,7 @@ const VSRContext = struct {
         defer self.event_count = null;
 
         const filter: tb.ChangeEventsFilter = .{
-            .limit = std.math.maxInt(u32),
+            .limit = @intCast(self.event_buffer.len),
             .timestamp_min = timestamp_min,
             .timestamp_max = 0,
         };

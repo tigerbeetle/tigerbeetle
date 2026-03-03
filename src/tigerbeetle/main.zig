@@ -610,6 +610,8 @@ fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !
             .event_count_max = args.event_count_max,
             .idle_interval_ms = args.idle_interval_ms,
             .requests_per_second_limit = args.requests_per_second_limit,
+            .amqp_timeout_seconds = args.amqp_timeout_seconds,
+            .tigerbeetle_timeout_seconds = args.tigerbeetle_timeout_seconds,
             .recovery_mode = if (args.timestamp_last) |timestamp_last|
                 .{ .override = timestamp_last }
             else

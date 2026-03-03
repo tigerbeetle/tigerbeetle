@@ -4,7 +4,6 @@ const log = std.log.scoped(.amqp);
 const vsr = @import("../vsr.zig");
 const assert = std.debug.assert;
 const maybe = vsr.stdx.maybe;
-const fatal = @import("amqp/protocol.zig").fatal;
 
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
@@ -31,26 +30,26 @@ pub const Runner = struct {
 
     const constants = struct {
         const tick_ms = vsr.constants.tick_ms;
-        const idle_interval_ns: u63 = 1 * std.time.ns_per_s;
-        const reply_timeout_ticks = @divExact(
-            30 * std.time.ms_per_s,
-            constants.tick_ms,
-        );
         const app_id = "tigerbeetle";
         const progress_tracker_queue = "tigerbeetle.internal.progress";
         const locker_queue = "tigerbeetle.internal.locker";
-        const event_count_max: u32 = Operation.get_change_events.result_max(
+
+        const idle_interval_default: stdx.Duration = .seconds(1);
+        const amqp_timeout_default: stdx.Duration = .seconds(30);
+        const tigerbeetle_timeout_default: stdx.Duration = .seconds(30);
+        const event_count_max_default: u32 = Operation.get_change_events.result_max(
             vsr.constants.message_body_size_max,
         );
     };
 
     io: IO,
     idle_completion: IO.Completion = undefined,
-    idle_interval_ns: u63,
+    idle_interval: stdx.Duration,
     event_count_max: u32,
 
     message_pool: MessagePool,
     vsr_client: Client,
+    vsr_client_timeout: vsr.Timeout,
     buffer: DualBuffer,
 
     amqp_client: amqp.Client,
@@ -139,6 +138,14 @@ pub const Runner = struct {
             /// Limits the number of requests per second.
             /// Must be greater than zero.
             requests_per_second_limit: ?u32,
+            /// Overrides the timeout, in seconds,
+            /// for receiving a reply from the AMQP server.
+            /// Must be greater than zero.
+            amqp_timeout_seconds: ?u32,
+            /// Overrides the timeout, in seconds,
+            /// for receiving a reply from the TigerBeetle cluster.
+            /// Must be greater than zero.
+            tigerbeetle_timeout_seconds: ?u32,
             /// Indicates whether to recover the last timestamp published on the state
             /// tracker queue, or override it with a user-defined value.
             recovery_mode: StateRecoveryMode,
@@ -146,17 +153,29 @@ pub const Runner = struct {
     ) !void {
         assert(options.addresses.len > 0);
 
-        const idle_interval_ns: u63 = if (options.idle_interval_ms) |value|
-            @intCast(@as(u64, value) * std.time.ns_per_ms)
+        const idle_interval: stdx.Duration = if (options.idle_interval_ms) |value|
+            .ms(value)
         else
-            constants.idle_interval_ns;
-        assert(idle_interval_ns > 0);
+            constants.idle_interval_default;
+        assert(idle_interval.ns > 0);
 
         const event_count_max: u32 = if (options.event_count_max) |event_count_max|
-            @min(event_count_max, constants.event_count_max)
+            @min(event_count_max, constants.event_count_max_default)
         else
-            constants.event_count_max;
+            constants.event_count_max_default;
         assert(event_count_max > 0);
+
+        const amqp_timeout: stdx.Duration = if (options.amqp_timeout_seconds) |value|
+            .seconds(value)
+        else
+            constants.amqp_timeout_default;
+        assert(amqp_timeout.ns > 0);
+
+        const tigerbeetle_timeout: stdx.Duration = if (options.tigerbeetle_timeout_seconds) |value|
+            .seconds(value)
+        else
+            constants.tigerbeetle_timeout_default;
+        assert(tigerbeetle_timeout.ns > 0);
 
         const publish_exchange: []const u8 = options.publish_exchange orelse "";
         const publish_routing_key: []const u8 = options.publish_routing_key orelse "";
@@ -188,7 +207,7 @@ pub const Runner = struct {
         errdefer self.buffer.deinit(allocator);
 
         self.* = .{
-            .idle_interval_ns = idle_interval_ns,
+            .idle_interval = idle_interval,
             .event_count_max = event_count_max,
             .publish_exchange = publish_exchange,
             .publish_routing_key = publish_routing_key,
@@ -204,6 +223,7 @@ pub const Runner = struct {
             .buffer = dual_buffer,
             .message_pool = undefined,
             .vsr_client = undefined,
+            .vsr_client_timeout = undefined,
             .amqp_client = undefined,
         };
 
@@ -248,11 +268,23 @@ pub const Runner = struct {
         );
         errdefer self.vsr_client.deinit(allocator);
 
+        self.vsr_client_timeout = .{
+            .name = "vsr_client_timeout",
+            .id = self.vsr_client.id,
+            .after = stdx.div_ceil(
+                tigerbeetle_timeout.to_ms(),
+                constants.tick_ms,
+            ),
+        };
+
         self.amqp_client = try amqp.Client.init(allocator, .{
             .io = &self.io,
             .message_count_max = self.event_count_max,
             .message_body_size_max = Message.json_string_size_max,
-            .reply_timeout_ticks = constants.reply_timeout_ticks,
+            .reply_timeout_ticks = stdx.div_ceil(
+                amqp_timeout.to_ms(),
+                constants.tick_ms,
+            ),
         });
         errdefer self.amqp_client.deinit(allocator);
 
@@ -579,6 +611,8 @@ pub const Runner = struct {
 
         // Register the VSR client as the last step to avoid unnecessarily joining the cluster
         // in case the CDC fails due to connectivity or configuration issues with the AMQP server.
+        assert(!self.vsr_client_timeout.ticking);
+        self.vsr_client_timeout.start();
         self.vsr_client.register(
             &struct {
                 fn callback(
@@ -588,6 +622,10 @@ pub const Runner = struct {
                     const runner: *Runner = @ptrFromInt(@as(usize, @intCast(user_data)));
                     assert(runner.connected.amqp);
                     assert(!runner.connected.vsr);
+
+                    assert(runner.vsr_client_timeout.ticking);
+                    runner.vsr_client_timeout.stop();
+
                     log.info("VSR client registered.", .{});
                     runner.vsr_client.batch_size_limit = result.batch_size_limit;
                     runner.connected.vsr = true;
@@ -680,6 +718,8 @@ pub const Runner = struct {
                     .timestamp_max = 0,
                 };
 
+                assert(!self.vsr_client_timeout.ticking);
+                self.vsr_client_timeout.start();
                 self.vsr_client.request(
                     &produce_request_callback,
                     @intFromPtr(self),
@@ -712,7 +752,7 @@ pub const Runner = struct {
                         }
                     }.callback,
                     &self.idle_completion,
-                    self.idle_interval_ns,
+                    @intCast(self.idle_interval.ns),
                 );
             },
         }
@@ -729,6 +769,9 @@ pub const Runner = struct {
         assert(timestamp != 0);
         const runner: *Runner = @ptrFromInt(@as(usize, @intCast(context)));
         assert(runner.producer == .request);
+
+        assert(runner.vsr_client_timeout.ticking);
+        runner.vsr_client_timeout.stop();
 
         const source: []const tb.ChangeEvent = stdx.bytes_as_slice(.exact, tb.ChangeEvent, result);
         const target: []tb.ChangeEvent = runner.buffer.get_producer_buffer();
@@ -913,8 +956,24 @@ pub const Runner = struct {
         self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
 
         self.metrics.tick();
+
+        self.vsr_client_timeout.tick();
+        if (self.vsr_client_timeout.fired()) {
+            const timeout: stdx.Duration = .ms(self.vsr_client_timeout.ticks * constants.tick_ms);
+            fatal("Timed out: no reply from the TigerBeetle cluster within {}.", .{timeout});
+        }
     }
 };
+
+/// Terminates the process with non-zero exit code.
+/// Similar to `vsr.fatal`, but not logged in the `vsr` scope.
+fn fatal(comptime format: []const u8, args: anytype) noreturn {
+    log.err(format, args);
+
+    const status = vsr.FatalReason.cli.exit_status();
+    assert(status != 0);
+    std.process.exit(status);
+}
 
 /// Rate limit to throttle the maximum number of requests to TigerBeetle within a time period.
 pub const RateLimit = struct {
@@ -1094,7 +1153,7 @@ const DualBuffer = struct {
 
     pub fn init(allocator: std.mem.Allocator, event_count: u32) !DualBuffer {
         assert(event_count > 0);
-        assert(event_count <= Runner.constants.event_count_max);
+        assert(event_count <= Runner.constants.event_count_max_default);
 
         const buffer_1 = try allocator.alloc(tb.ChangeEvent, event_count);
         errdefer allocator.free(buffer_1);
@@ -1487,7 +1546,7 @@ test "amqp: RateLimit" {
 }
 
 test "amqp: DualBuffer" {
-    const event_count_max = Runner.constants.event_count_max;
+    const event_count_max = Runner.constants.event_count_max_default;
 
     var prng = stdx.PRNG.from_seed_testing();
     var dual_buffer = try DualBuffer.init(testing.allocator, event_count_max);
