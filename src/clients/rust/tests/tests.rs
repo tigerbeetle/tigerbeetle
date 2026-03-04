@@ -5,7 +5,7 @@ use std::io::{BufRead as _, BufReader};
 use std::mem;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier, Once};
+use std::sync::{Arc, Barrier, Once, RwLock};
 
 use futures::executor::block_on;
 use futures::pin_mut;
@@ -135,9 +135,16 @@ impl TestDb {
     }
 }
 
-fn test_client() -> anyhow::Result<tb::Client> {
+// Only one database server should run at a time. Normal tests share a read
+// lock; the eviction test takes a write lock so it runs exclusively.
+static DB_LOCK: RwLock<()> = RwLock::new(());
+
+/// Returns the client and a read guard that must be held for the test's
+/// duration. The guard prevents the eviction test from running concurrently.
+fn test_client() -> anyhow::Result<(tb::Client, std::sync::RwLockReadGuard<'static, ()>)> {
+    let guard = DB_LOCK.read().unwrap();
     let client = tb::Client::new(0, &get_test_db().address())?;
-    Ok(client)
+    Ok((client, guard))
 }
 
 fn assert_send<T: Send>(t: T) -> T {
@@ -157,7 +164,7 @@ fn smoke() -> anyhow::Result<()> {
     let transfer_id1_user_data_128 = tb::id();
 
     block_on(async {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         {
             let fut = client.create_accounts(&[
@@ -357,7 +364,7 @@ fn ctor_fail() -> anyhow::Result<()> {
 
 #[test]
 fn dtor() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         // Let's at least talk to the server before dropping
@@ -369,7 +376,7 @@ fn dtor() -> anyhow::Result<()> {
 
 #[test]
 fn close() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]).await?;
@@ -382,7 +389,7 @@ fn close() -> anyhow::Result<()> {
 // Should still clean up correctly.
 #[test]
 fn dtor_no_wait() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]);
@@ -393,7 +400,7 @@ fn dtor_no_wait() -> anyhow::Result<()> {
 
 #[test]
 fn close_no_wait() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]);
@@ -405,7 +412,7 @@ fn close_no_wait() -> anyhow::Result<()> {
 #[test]
 fn client_drop_before_future_awaited() -> anyhow::Result<()> {
     let future = {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let account = tb::Account {
             id: tb::id(),
@@ -433,7 +440,7 @@ fn client_drop_before_future_awaited() -> anyhow::Result<()> {
 #[test]
 fn client_drop_causes_shutdown_status() -> anyhow::Result<()> {
     let futures = {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let mut futures = Vec::new();
         for _ in 0..10 {
@@ -467,7 +474,7 @@ fn client_drop_causes_shutdown_status() -> anyhow::Result<()> {
 
 #[test]
 fn too_many_events() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let accounts = lots_of_accounts();
@@ -505,7 +512,7 @@ fn lots_of_accounts() -> Vec<tb::Account> {
 
 #[test]
 fn zero_events_create_accounts() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.create_accounts(&[]).await?;
@@ -518,7 +525,7 @@ fn zero_events_create_accounts() -> anyhow::Result<()> {
 
 #[test]
 fn zero_events_create_transfers() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.create_transfers(&[]).await?;
@@ -531,7 +538,7 @@ fn zero_events_create_transfers() -> anyhow::Result<()> {
 
 #[test]
 fn zero_events_lookup_accounts() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.lookup_accounts(&[]).await?;
@@ -544,7 +551,7 @@ fn zero_events_lookup_accounts() -> anyhow::Result<()> {
 
 #[test]
 fn zero_events_lookup_transfers() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.lookup_transfers(&[]).await?;
@@ -557,7 +564,7 @@ fn zero_events_lookup_transfers() -> anyhow::Result<()> {
 
 #[test]
 fn multithread() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
     let client = Arc::new(client);
 
     let num_threads = 16;
@@ -617,7 +624,7 @@ fn multithread() -> anyhow::Result<()> {
 
 #[test]
 fn concurrent_requests() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     let mut responses = Vec::new();
 
@@ -655,7 +662,7 @@ fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
 
     // Queue up lots of transactions, drop their futures, drop the client.
     {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         // Timing-sensitive - trying to create enough pending transactions that
         // not all will be completed. I think test is unlikely to fail because
@@ -675,7 +682,7 @@ fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
     }
 
     // Some of those transactions will have been dropped by tb_client.
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     // Reverse because later transactions most likely to be lost.
     ids.reverse();
@@ -836,7 +843,7 @@ fn make_paging_test_transfers(client: &tb::Client) -> anyhow::Result<PagingTestP
 
 #[test]
 fn paging_forward() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
     let test_params = make_paging_test_transfers(&client)?;
 
     let query_results = get_account_transfers_paged(
@@ -868,7 +875,7 @@ fn paging_forward() -> anyhow::Result<()> {
 
 #[test]
 fn paging_reverse() -> anyhow::Result<()> {
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
     let test_params = make_paging_test_transfers(&client)?;
 
     let query_results = get_account_transfers_paged(
@@ -994,7 +1001,7 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
             tb::CreateAccountResult::CodeMustNotBeZero,
         ];
 
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         // Test the example.
         make_create_accounts_request(&client, &gen_accounts()).await?;
@@ -1077,7 +1084,7 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
     block_on(async {
         let account_id1 = tb::id();
         let account_id2 = tb::id();
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let accounts = [
             tb::Account {
@@ -1234,7 +1241,7 @@ fn example_lookup_accounts() -> Result<(), Box<dyn std::error::Error>> {
             (account_bogus3, None),
         ];
 
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let _ = client.create_accounts(accounts).await?;
 
@@ -1367,7 +1374,7 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
             (transfer_bogus3, None),
         ];
 
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let _ = client.create_accounts(accounts).await?;
         let _ = client.create_transfers(transfers).await?;
@@ -1398,6 +1405,9 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn client_evicted() -> anyhow::Result<()> {
     const CLIENTS_MAX: usize = 64;
+
+    // Hold the write lock so no other database is running concurrently.
+    let _guard = DB_LOCK.write().unwrap();
 
     // Use a separate server to avoid evicting the shared test client.
     let server = TestDb::new_development("client_evicted")?;
