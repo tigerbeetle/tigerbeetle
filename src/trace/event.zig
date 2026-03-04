@@ -91,9 +91,6 @@ fn index_from_enum(enum_tag: anytype) u8 {
     } else unreachable;
 }
 
-// TODO: It should be possible to get rid of all unbounded cardinality (eg, level_b being a u8) and
-// replace them with enums instead. This would allow for calculating the stack limit automatically.
-
 const EventOperationData = struct {
     operation: Operation,
 
@@ -102,6 +99,9 @@ const EventOperationData = struct {
         return .{ .operation = @enumFromInt(@intFromEnum(operation)) };
     }
 };
+
+// TODO: It should be possible to get rid of all unbounded cardinality (eg, level_b being a u8) and
+// replace them with enums instead. This would allow for calculating the stack limit automatically.
 
 /// Base {Timing,Tracing} Event. This is further split up into two different Events that share the
 /// same tag: ones for timing and ones for tracing.
