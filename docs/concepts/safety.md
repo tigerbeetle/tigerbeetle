@@ -7,7 +7,7 @@ data is there, but, under certain edge case conditions, it can get lost!
 As the purpose of TigerBeetle is to be the system of record for business transaction, associated
 with real-world value transfers, it is paramount that the data stored in TigerBeetle is safe.
 
-TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability -- 
+TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability --
 even under the most extreme failure scenarios.
 
 ## Strict Serializability
@@ -26,7 +26,7 @@ even in the presence of intermediate retry loops.
 
 Some databases rely on a single central server, which puts the data at risk as any single server
 might fail catastrophically (e.g. due to a fire in the data center). Primary/backup systems with
-ad-hoc failover can lose data due to 
+ad-hoc failover can lose data due to
 [split-brain](https://en.wikipedia.org/wiki/Split-brain_(computing)).
 
 To avoid these pitfalls, TigerBeetle implements pioneering
@@ -47,8 +47,8 @@ For the highest availability, TigerBeetle should be deployed as a cluster of six
 different cloud providers (two replicas per provider). Because TigerBeetle uses
 [Heidi Howard's flexible quorums](https://arxiv.org/pdf/1608.06696v1), this deployment is guaranteed
 to tolerate a complete outage of any cloud provider and will likely survive even if one extra
-replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protects availability 
--- even through provider slowdowns and disruptions.
+replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protects
+availability -- even through provider slowdowns and disruptions.
 
 TigerBeetle detects and overcomes
 [Gray Failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
@@ -104,11 +104,11 @@ TigerBeetle adheres to a strict code style,
 memory allocation, which designs away memory fragmentation, out-of-memory errors and
 use-after-frees.
 
-TigerBeetle is tested in the [VOPR](https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness/) 
+TigerBeetle is tested in the [VOPR](https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness/)
 -- a simulated environment where an entire cluster, running real
 code, is subjected to all kinds of network, storage and process faults, at 1000x speed. This
 simulation can find both logical errors in the algorithms and coding bugs in the source. This
-simulator is running 24/7 on 1024 cores, fuzzing the latest version of the database. You can also 
+simulator is running 24/7 on 1024 cores, fuzzing the latest version of the database. You can also
 [play it as a game](https://sim.tigerbeetle.com).
 
 ## Human Fallibility
@@ -159,7 +159,7 @@ within a batch.
 
 ### Durability
 
-Without Durability, the guarantees of Atomicity, Consistency, and Isolation collapse -- the only 
+Without Durability, the guarantees of Atomicity, Consistency, and Isolation collapse -- the only
 letter in ACID whose loss undoes the others.
 
 Up until 2018, traditional DBMS durability has focused on the Crash Consistency Model, however,
@@ -176,30 +176,21 @@ data durability in spite of imperfect disks. We actively work against such entro
 advantage of cluster-wide storage. A record would need to get corrupted on all replicas in a cluster
 to get lost, and even in that case **the system would safely halt**.
 
-## `io_uring` Security
+## Security
 
-`io_uring` is a relatively new part of the Linux kernel (support for it was added in version 5.1,
-which was released in May 2019). Since then, many kernel exploits have been found related to
-`io_uring` and in 2023
-[Google announced](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html)
-that they were disabling it in ChromeOS, for Android apps, and on Google production servers.
+As a financial system of record, TigerBeetle is a trusted component and must be running in a
+trusted environment. While TigerBeetle is extensively fuzzed, deals only with fixed-sized integer
+data structures, has no (de)serialization and doesn't take user-generated strings, TigerBeetle
+doesn't provide any permission system. The application must implement its own access controls.
 
-Google's post is primarily about how they secure operating systems and web servers that handle
-hostile user content. In the Google blog post, they specifically note:
-
-> we currently consider it safe only for use by trusted components
-
-As a financial system of record, TigerBeetle is a trusted component and it should be running in a
-trusted environment.
-
-Furthermore, TigerBeetle only uses 128-byte [`Account`s](../reference/account.md) and
-[`Transfer`s](../reference/transfer.md) with pure integer fields. TigerBeetle has no
-(de)serialization and does not take user-generated strings, which significantly constrains the
-attack surface.
-
-We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle
-async I/O. It is significantly easier for the kernel to implement this correctly than for us to
-include a userspace multithreaded thread pool (for example, as libuv does).
+Note on `io_uring`: it is a relatively recent
+([Linux 5.1, 2019](https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.1))
+part of the Linux kernel. It had some kernel exploits, which made it problematic for sandboxed
+applications, and lead to `io_uring` being
+[disabled](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html)
+for systems which deal with untrusted data. Because TigerBeetle, by design, only deals with trusted
+integer data, its usage of `io_uring` is secure, and is the safest and most performant way to handle
+asynchronous disk I/O.
 
 ## Next: Coding
 
