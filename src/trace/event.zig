@@ -4,12 +4,37 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 
-const Command = @import("../vsr.zig").Command;
-const Zone = @import("../vsr.zig").Zone;
+const vsr = @import("../vsr.zig");
+const Command = vsr.Command;
+const Peer = vsr.Peer;
+const Zone = vsr.Zone;
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
-const Operation = @import("../tigerbeetle.zig").Operation;
+const tigerbeetle = @import("../tigerbeetle.zig");
 const Duration = stdx.Duration;
-const Peer = @import("../vsr.zig").Peer;
+
+const Operation = operation_enum: {
+    var operation_fields: []const std.builtin.Type.EnumField = &[_]std.builtin.Type.EnumField{};
+
+    for (.{ vsr.Operation, tigerbeetle.Operation }, 0..) |Operation_, i| {
+        for (std.meta.fieldNames(Operation_)) |field_name| {
+            if (i == 1 and std.mem.eql(u8, field_name, "pulse")) {
+                // Pulse is included by both Operation types.
+                continue;
+            }
+            operation_fields = operation_fields ++ &[_]std.builtin.Type.EnumField{.{
+                .name = "Operation." ++ field_name,
+                .value = @intFromEnum(@field(Operation_, field_name)),
+            }};
+        }
+    }
+
+    break :operation_enum @Type(.{ .@"enum" = .{
+        .tag_type = u8,
+        .fields = operation_fields,
+        .decls = &.{},
+        .is_exhaustive = true,
+    } });
+};
 
 const TreeEnum = tree_enum: {
     const tree_ids = @import("../state_machine.zig").tree_ids;
@@ -69,6 +94,15 @@ fn index_from_enum(enum_tag: anytype) u8 {
 // TODO: It should be possible to get rid of all unbounded cardinality (eg, level_b being a u8) and
 // replace them with enums instead. This would allow for calculating the stack limit automatically.
 
+const EventOperationData = struct {
+    operation: Operation,
+
+    pub fn from(operation: vsr.Operation) EventOperationData {
+        assert(operation.valid(tigerbeetle.Operation));
+        return .{ .operation = @enumFromInt(@intFromEnum(operation)) };
+    }
+};
+
 /// Base {Timing,Tracing} Event. This is further split up into two different Events that share the
 /// same tag: ones for timing and ones for tracing.
 ///
@@ -88,9 +122,9 @@ pub const Event = union(enum) {
     replica_aof_write: struct { op: usize },
     replica_aof_checkpoint,
     replica_sync_table: struct { index: usize },
-    replica_request: struct { operation: Operation },
-    replica_request_execute: struct { operation: Operation },
-    replica_request_local: struct { operation: Operation },
+    replica_request: EventOperationData,
+    replica_request_execute: EventOperationData,
+    replica_request_local: EventOperationData,
 
     compact_beat: struct { tree: TreeEnum, level_b: u8 },
     compact_beat_merge: struct { tree: TreeEnum, level_b: u8 },
@@ -111,7 +145,7 @@ pub const Event = union(enum) {
 
     metrics_emit,
 
-    client_request_round_trip: struct { operation: Operation },
+    client_request_round_trip: EventOperationData,
 
     loop_run_for_ns,
     loop_tick,
@@ -166,9 +200,9 @@ pub const EventTiming = union(Event.Tag) {
     replica_aof_write,
     replica_aof_checkpoint,
     replica_sync_table,
-    replica_request: struct { operation: Operation },
-    replica_request_execute: struct { operation: Operation },
-    replica_request_local: struct { operation: Operation },
+    replica_request: EventOperationData,
+    replica_request_execute: EventOperationData,
+    replica_request_local: EventOperationData,
 
     compact_beat: struct { tree: TreeEnum },
     compact_beat_merge: struct { tree: TreeEnum },
@@ -189,7 +223,7 @@ pub const EventTiming = union(Event.Tag) {
 
     metrics_emit,
 
-    client_request_round_trip: struct { operation: Operation },
+    client_request_round_trip: EventOperationData,
 
     loop_run_for_ns,
     loop_tick,

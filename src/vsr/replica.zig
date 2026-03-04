@@ -5283,18 +5283,15 @@ pub fn ReplicaType(
             if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                 self.status == .normal)
             {
-                if (StateMachine.Operation.from_vsr(
-                    self.commit_prepare.?.header.operation,
-                )) |operation| {
-                    self.trace.timing(
-                        .{ .replica_request_local = .{ .operation = operation } },
-                        commit_completion_time_local,
-                    );
-                    self.trace.timing(
-                        .{ .replica_request = .{ .operation = operation } },
-                        commit_completion_time_request,
-                    );
-                }
+                const operation = self.commit_prepare.?.header.operation;
+                self.trace.timing(
+                    .{ .replica_request_local = .from(operation) },
+                    commit_completion_time_local,
+                );
+                self.trace.timing(
+                    .{ .replica_request = .from(operation) },
+                    commit_completion_time_request,
+                );
             }
         }
 
@@ -5525,14 +5522,11 @@ pub fn ReplicaType(
                     if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                         self.status == .normal)
                     {
-                        if (StateMachine.Operation.from_vsr(
-                            self.commit_prepare.?.header.operation,
-                        )) |operation| {
-                            self.trace.timing(
-                                .{ .replica_request_execute = .{ .operation = operation } },
-                                commit_execute_time_request,
-                            );
-                        }
+                        const operation = self.commit_prepare.?.header.operation;
+                        self.trace.timing(
+                            .{ .replica_request_execute = .from(operation) },
+                            commit_execute_time_request,
+                        );
                     }
                 }
             }
@@ -7260,14 +7254,11 @@ pub fn ReplicaType(
                 if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                     self.status == .normal)
                 {
-                    if (StateMachine.Operation.from_vsr(
-                        request.message.header.operation,
-                    )) |operation| {
-                        self.trace.timing(
-                            .{ .client_request_round_trip = .{ .operation = operation } },
-                            .{ .ns = request.message.header.previous_request_latency },
-                        );
-                    }
+                    const operation = request.message.header.operation;
+                    self.trace.timing(
+                        .{ .client_request_round_trip = .from(operation) },
+                        .{ .ns = request.message.header.previous_request_latency },
+                    );
                 }
             }
 
