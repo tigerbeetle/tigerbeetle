@@ -11,6 +11,14 @@ const stdx = @import("stdx.zig");
 pub const Instant = struct {
     ns: u64,
 
+    pub fn ms(timestamp_ms: u64) Instant {
+        return .{ .ns = timestamp_ms * std.time.ns_per_ms };
+    }
+
+    pub fn us(timestamp_us: u64) Instant {
+        return .{ .ns = timestamp_us * std.time.ns_per_us };
+    }
+
     pub fn add(now: Instant, duration: Duration) Instant {
         return .{ .ns = now.ns + duration.ns };
     }

@@ -778,7 +778,7 @@ test "Routing finds best route" {
         }
 
         pub fn now(env: *const Environment) Instant {
-            return .{ .ns = env.packet_simulator.ticks * constants.tick_ms * std.time.ns_per_ms };
+            return Instant.ms(env.packet_simulator.ticks * constants.tick_ms);
         }
 
         fn ring_index(env: *const Environment, replica: u8) i8 {

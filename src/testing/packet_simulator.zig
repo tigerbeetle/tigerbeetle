@@ -497,7 +497,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         fn tick_instant(self: *const PacketSimulator) Instant {
-            return .{ .ns = self.ticks * constants.tick_ms * std.time.ns_per_ms };
+            return Instant.ms(self.ticks * constants.tick_ms);
         }
 
         fn packet_command(self: *PacketSimulator, packet: Packet) vsr.Command {

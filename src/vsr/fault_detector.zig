@@ -118,7 +118,7 @@ fn ewma_add_duration(old: Duration, new: Duration) Duration {
 test "FaultDetector: smoke" {
     // Test that computed ewma interval tracks actual interval,
     // clamped to limits.
-    var now: Instant = .{ .ns = 1_000 };
+    var now = Instant.us(1);
     var detector = FaultDetector.init(.{
         .now = now,
         .interval_min = .ms(100),
@@ -170,7 +170,7 @@ test "FaultDetector: smoothing" {
     // Check that, after a burst of prepares is abruptly ended,
     // the primary can gradually reduce the arrival interval,
     // without triggering a view change.
-    var now: Instant = .{ .ns = 1_000 };
+    var now = Instant.us(1);
     var primary = FaultDetector.init(.{
         .now = now,
         .interval_min = .ms(50),

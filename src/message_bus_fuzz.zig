@@ -922,7 +922,7 @@ const IO = struct {
     }
 
     fn tick_instant(io: *const IO) stdx.Instant {
-        return .{ .ns = io.ticks * constants.tick_ms * std.time.ns_per_ms };
+        return stdx.Instant.ms(io.ticks * constants.tick_ms);
     }
 
     fn enqueue(io: *IO, completion: *Completion) void {
