@@ -1,6 +1,6 @@
-use std::{env, path::Path};
+use std::{env, error::Error, path::Path};
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
 
     if !Path::new(&format!("{cargo_manifest_dir}/assets/tb_client.h")).try_exists()? {
