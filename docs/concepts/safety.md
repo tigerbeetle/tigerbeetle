@@ -7,7 +7,7 @@ data is there, but, under certain edge case conditions, it can get lost!
 As the purpose of TigerBeetle is to be the system of record for business transaction, associated
 with real-world value transfers, it is paramount that the data stored in TigerBeetle is safe.
 
-TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability -- 
+TigerBeetle is therefore designed, engineered, and tested to deliver unbreakable durability --
 even under the most extreme failure scenarios.
 
 ## Strict Serializability
@@ -26,7 +26,7 @@ even in the presence of intermediate retry loops.
 
 Some databases rely on a single central server, which puts the data at risk as any single server
 might fail catastrophically (e.g. due to a fire in the data center). Primary/backup systems with
-ad-hoc failover can lose data due to 
+ad-hoc failover can lose data due to
 [split-brain](https://en.wikipedia.org/wiki/Split-brain_(computing)).
 
 To avoid these pitfalls, TigerBeetle implements pioneering
@@ -47,8 +47,8 @@ For the highest availability, TigerBeetle should be deployed as a cluster of six
 different cloud providers (two replicas per provider). Because TigerBeetle uses
 [Heidi Howard's flexible quorums](https://arxiv.org/pdf/1608.06696v1), this deployment is guaranteed
 to tolerate a complete outage of any cloud provider and will likely survive even if one extra
-replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protects availability 
--- even through provider slowdowns and disruptions.
+replica fails. Multi-cloud eliminates lock-in, meets regulatory requirements, and protects
+availability -- even through provider slowdowns and disruptions.
 
 TigerBeetle detects and overcomes
 [Gray Failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
@@ -104,11 +104,11 @@ TigerBeetle adheres to a strict code style,
 memory allocation, which designs away memory fragmentation, out-of-memory errors and
 use-after-frees.
 
-TigerBeetle is tested in the [VOPR](https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness/) 
+TigerBeetle is tested in the [VOPR](https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness/)
 -- a simulated environment where an entire cluster, running real
 code, is subjected to all kinds of network, storage and process faults, at 1000x speed. This
 simulation can find both logical errors in the algorithms and coding bugs in the source. This
-simulator is running 24/7 on 1024 cores, fuzzing the latest version of the database. You can also 
+simulator is running 24/7 on 1024 cores, fuzzing the latest version of the database. You can also
 [play it as a game](https://sim.tigerbeetle.com).
 
 ## Human Fallibility
@@ -159,7 +159,7 @@ within a batch.
 
 ### Durability
 
-Without Durability, the guarantees of Atomicity, Consistency, and Isolation collapse -- the only 
+Without Durability, the guarantees of Atomicity, Consistency, and Isolation collapse -- the only
 letter in ACID whose loss undoes the others.
 
 Up until 2018, traditional DBMS durability has focused on the Crash Consistency Model, however,
