@@ -117,9 +117,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     const build_time_ms, const executable_size_bytes = blk: {
         timer.reset();
         try shell.project_root.deleteTree(".zig-cache/tmp/devhub_cache");
-        try shell.exec_zig("build -Drelease install" ++
-            " --cache-dir .zig-cache/tmp/devhub_cache/project" ++
-            " --global-cache-dir .zig-cache/tmp/devhub_cache/global", .{});
+        try shell.exec_zig("build -Drelease install", .{});
         defer shell.project_root.deleteFile("tigerbeetle") catch unreachable;
 
         break :blk .{
@@ -366,7 +364,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     };
 
     for (batch.metrics) |metric| {
-        std.log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
+        log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
     }
 
     upload_run(shell, &batch) catch |err| {
