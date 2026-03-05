@@ -180,7 +180,9 @@ pub fn build(b: *std.Build) !void {
         .config_release = "65535.0.0",
         .config_release_client_min = "0.16.4",
     });
-    const tigerbeetle_test_previous = fetch_release(b, "latest", target, mode);
+
+    var releases_previous = release_history(b);
+    const tigerbeetle_test_previous = fetch_release(b, releases_previous.next().?, target, mode);
     const tigerbeetle_test = build_tigerbeetle_executable_multiversion(b, .{
         .stdx_module = stdx_module,
         .vsr_module = vsr_module_test,
@@ -1202,8 +1204,11 @@ fn build_vortex_executable(
     },
 ) *std.Build.Step.Compile {
     const vortex_options = b.addOptions();
-    vortex_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle_test);
-    vortex_options.addOptionPath("driver_exe", options.vortex_driver_zig);
+    const vortex_upgrades_max = 1; // TODO Pack more releases into Debug builds.
+    vortex_options.addOptionPath("dependencies_path", b.path("./zig-out/vortex"));
+    vortex_options.addOption(u32, "dependencies_count", vortex_upgrades_max + 1);
+
+    // TODO Include 65535.0.1 build, to test upgrading _from_ the latest version too.
 
     const vortex = b.addExecutable(.{
         .name = "vortex",
@@ -1217,7 +1222,44 @@ fn build_vortex_executable(
     vortex.root_module.addImport("stdx", options.stdx_module);
     vortex.root_module.addOptions("vsr_options", options.vsr_options_test);
     vortex.root_module.addOptions("vortex_options", vortex_options);
+
+    vortex.step.dependOn(&b.addInstallBinFile(
+        options.tigerbeetle_test,
+        "../vortex/tigerbeetle-0",
+    ).step);
+    vortex.step.dependOn(&b.addInstallBinFile(
+        options.vortex_driver_zig,
+        "../vortex/vortex-driver-zig-0",
+    ).step);
+
+    var tags_iterator = release_history(b);
+    var tags_index: u32 = 0;
+    while (tags_iterator.next()) |tag| : (tags_index += 1) {
+        if (tags_index == vortex_upgrades_max) break;
+
+        vortex.step.dependOn(&b.addInstallBinFile(
+            fetch_release(b, tag, options.target, options.mode),
+            b.fmt("../vortex/tigerbeetle-{d}", .{tags_index + 1}),
+        ).step);
+        vortex.step.dependOn(&b.addInstallBinFile(
+            fetch_vortex_driver_zig(b, tag, options.target, options.mode),
+            b.fmt("../vortex/vortex-driver-zig-{d}", .{tags_index + 1}),
+        ).step);
+    }
     return vortex;
+}
+
+fn release_history(b: *std.Build) std.mem.SplitIterator(u8, .scalar) {
+    const tags_string = b.run(&.{
+        "git", "tag",
+        // Only list ancestors of the current commit.
+        // Use "HEAD^" instead of "HEAD" so that if our current commit is a release commit, we don't
+        // include that release, since it is already tigerbeetle-0.
+        "--merged", "HEAD^",
+        "--sort=-committerdate", // Sort from newest to oldest.
+        "--list", "[0-9]*.[0-9]*.[0-9]*", // NB: This is not anchored (^$).
+    });
+    return std.mem.splitScalar(u8, tags_string, '\n');
 }
 
 fn build_vortex_driver_zig(
@@ -2241,6 +2283,29 @@ fn fetch_release(
         .file_name = if (target.result.os.tag == .windows) "tigerbeetle.exe" else "tigerbeetle",
         .hash = null,
     });
+}
+
+fn fetch_vortex_driver_zig(
+    b: *std.Build,
+    version: []const u8,
+    target: std.Build.ResolvedTarget,
+    mode: std.builtin.OptimizeMode,
+) std.Build.LazyPath {
+    assert(target.result.os.tag == .linux);
+    _ = mode;
+
+    const arch = switch (target.result.cpu.arch) {
+        .x86_64 => "x86_64",
+        .aarch64 => "aarch64",
+        else => @panic("unsupported CPU"),
+    };
+
+    const url = b.fmt(
+        "https://github.com/tigerbeetle/tigerbeetle" ++
+            "/releases/download/{s}/vortex-driver-zig-{s}-linux.zip",
+        .{ version, arch },
+    );
+    return fetch(b, .{ .url = url, .file_name = "vortex-driver-zig", .hash = null });
 }
 
 // Downloads a pre-build llvm-objcopy from <https://github.com/tigerbeetle/dependencies>.
