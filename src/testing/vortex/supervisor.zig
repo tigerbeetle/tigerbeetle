@@ -33,7 +33,7 @@
 //! * full partitioning
 //! * filesystem faults
 //! * clock faults
-//! * upgrades (replicas and clients)
+//! * upgrade clients
 //! * multiple drivers? could use a special multiplexer driver that delegates to others
 
 const std = @import("std");
@@ -49,14 +49,13 @@ const ratio = stdx.PRNG.ratio;
 const Shell = @import("../../shell.zig");
 
 const log = std.log.scoped(.supervisor);
-const tigerbeetle_exe_default: []const u8 = @import("vortex_options").tigerbeetle_exe;
-const vortex_driver_exe_default: []const u8 = @import("vortex_options").driver_exe;
+const dependencies_path: []const u8 = @import("vortex_options").dependencies_path;
+const dependencies_count: u32 = @import("vortex_options").dependencies_count;
 
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 pub const CLIArgs = struct {
-    tigerbeetle_executable: ?[]const u8 = null,
     test_duration: stdx.Duration = .minutes(1),
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
@@ -99,27 +98,55 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const shell = try Shell.create(allocator);
     defer shell.destroy();
 
+    comptime assert(dependencies_count > 0);
+    if (dependencies_count == 1) {
+        log.warn("not testing upgrades", .{});
+    }
+
+    // Executables are ordered from oldest to newest.
+    var server_executables_all: [dependencies_count][]const u8 = undefined;
+    var driver_executables_all: [dependencies_count][]const u8 = undefined;
+    for (&server_executables_all, &driver_executables_all, 0..) |*server, *driver, i| {
+        server.* = try shell.fmt(
+            "{s}/tigerbeetle-{d}",
+            .{ dependencies_path, dependencies_count - i - 1 },
+        );
+        driver.* = try shell.fmt(
+            "{s}/vortex-driver-zig-{d}",
+            .{ dependencies_path, dependencies_count - i - 1 },
+        );
+    }
+
     // By default, the shell uses project root as cwd, but we want to use the actual process cwd.
     try shell.pushd_dir(std.fs.cwd());
     defer shell.popd();
 
     var io = try IO.init(128, 0);
 
-    const tigerbeetle_executable = args.tigerbeetle_executable orelse tigerbeetle_exe_default;
-    const output_directory = args.output_directory orelse try shell.create_tmp_dir();
+    const output_directory_relative = args.output_directory orelse try shell.create_tmp_dir();
     defer {
         if (args.output_directory == null) {
-            shell.cwd.deleteTree(output_directory) catch |err| {
+            shell.cwd.deleteTree(output_directory_relative) catch |err| {
                 log.err("error deleting tree: {}", .{err});
             };
         }
     }
+
+    const output_directory =
+        try shell.cwd.realpathAlloc(shell.arena.allocator(), output_directory_relative);
 
     log.info("output directory: {s}", .{output_directory});
     log.info("starting test with target runtime of {}", .{args.test_duration});
 
     const seed = args.seed orelse std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
+
+    // Even if we have past versions available, only use them sometimes.
+    const release_count = prng.range_inclusive(u32, 1, dependencies_count);
+    const server_executables = server_executables_all[dependencies_count - release_count..];
+    const driver_executables = driver_executables_all[dependencies_count - release_count..];
+    assert(server_executables.len == release_count);
+    assert(driver_executables.len == release_count);
 
     var network = try faulty_network.Network.listen(
         allocator,
@@ -157,7 +184,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             \\    --replica-count={replica_count}
             \\    {datafile}
         , .{
-            .tigerbeetle_executable = tigerbeetle_executable,
+            .tigerbeetle_executable = server_executables[0],
             .cluster = constants.vortex.cluster_id,
             .replica_index = replica_index,
             .replica_count = args.replica_count,
@@ -178,7 +205,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
         var replica = try Replica.create(
             allocator,
-            tigerbeetle_executable,
+            server_executables,
+            try shell.fmt("{s}/tigerbeetle-R{d:0>2}", .{ output_directory, replica_index }),
             args.replica_count,
             @intCast(replica_index),
             replica_ports,
@@ -197,7 +225,15 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         port.* = network.proxies[i].origin_address.getPort();
     }
 
-    const workload = try Workload.spawn(allocator, &io, proxy_ports[0..args.replica_count], args);
+    log.info("launching workload with driver: {s}", .{driver_executables[0]});
+
+    const workload = try Workload.spawn(
+        allocator,
+        &io,
+        proxy_ports[0..args.replica_count],
+        // TODO Take client_release_min into account.
+        driver_executables[0],
+    );
     defer {
         if (workload.process.state == .running) {
             _ = workload.process.terminate() catch {};
@@ -228,6 +264,9 @@ const Supervisor = struct {
     test_deadline: i128,
     faulty: bool,
 
+    release_index: u32,
+    release_count: u32,
+
     fn create(allocator: std.mem.Allocator, options: struct {
         io: *IO,
         network: *faulty_network.Network,
@@ -237,6 +276,8 @@ const Supervisor = struct {
         test_duration: stdx.Duration,
         faulty: bool,
     }) !*Supervisor {
+        assert(options.replicas.len > 0);
+
         const supervisor = try allocator.create(Supervisor);
         errdefer allocator.destroy(supervisor);
 
@@ -248,6 +289,8 @@ const Supervisor = struct {
             .prng = options.prng,
             .test_deadline = std.time.nanoTimestamp() + options.test_duration.ns,
             .faulty = options.faulty,
+            .release_index = 0,
+            .release_count = @intCast(options.replicas[0].executable_paths.len),
         };
         return supervisor;
     }
@@ -332,6 +375,8 @@ const Supervisor = struct {
                     replica_restart,
                     replica_pause,
                     replica_resume,
+                    replica_upgrade,
+                    cluster_upgrade,
                     network_delay,
                     network_corrupt,
                     network_heal,
@@ -344,6 +389,9 @@ const Supervisor = struct {
                     .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
                     .replica_pause = if (running_replicas.len > 0) 3 else 0,
                     .replica_resume = if (paused_replicas.len > 0) 10 else 0,
+                    .replica_upgrade = if (supervisor.cluster_upgrading() != null) 15 else 0,
+                    .cluster_upgrade = if (supervisor.release_index + 1 <
+                        supervisor.release_count) 5 else 0,
                     .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
                     .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
                     .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
@@ -375,6 +423,22 @@ const Supervisor = struct {
                         const pick =
                             paused_replicas[supervisor.prng.index(paused_replicas)];
                         try pick.replica.unpause();
+                    },
+                    .replica_upgrade => {
+                        const replica_index = supervisor.cluster_upgrading().?;
+                        const replica = supervisor.replicas[replica_index];
+                        replica.upgrade(supervisor.release_index) catch |err| {
+                            std.debug.panic("error swapping executable: {}", .{err});
+                        };
+                        log.info(
+                            "{}: upgrading replica to {}",
+                            .{ replica_index, supervisor.release_index },
+                        );
+                    },
+                    .cluster_upgrade => {
+                        assert(supervisor.release_index + 1 < supervisor.release_count);
+                        supervisor.release_index += 1;
+                        log.info("upgrading cluster to {}", .{supervisor.release_index});
                     },
                     .network_delay => {
                         const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
@@ -471,6 +535,18 @@ const Supervisor = struct {
             },
         }
     }
+
+    fn cluster_upgrading(supervisor: *const Supervisor) ?u8 {
+        const index_base = supervisor.prng.index(supervisor.replicas);
+        for (0..supervisor.replicas.len) |index_offset| {
+            const replica_index = (index_base + index_offset) % supervisor.replicas.len;
+            const replica = supervisor.replicas[replica_index];
+            if (replica.executable_index < supervisor.release_index) {
+                return @intCast(replica_index);
+            }
+        }
+        return null;
+    }
 };
 
 const ReplicaWithIndex = struct { replica: *Replica, index: u8 };
@@ -515,7 +591,11 @@ const Replica = struct {
     pub const State = enum(u8) { initial, running, paused, terminated };
 
     allocator: std.mem.Allocator,
-    executable_path: []const u8,
+    executable_paths: []const []const u8,
+    executable_index: u32 = 0,
+    /// The path of this replica's executable. Executables from `executable_paths` are copied to
+    /// this location.
+    executable_target: []const u8,
     replica_count: u8,
     replica_index: u8,
     replica_ports: [constants.vsr.replicas_max]u16,
@@ -525,7 +605,8 @@ const Replica = struct {
 
     pub fn create(
         allocator: std.mem.Allocator,
-        executable_path: []const u8,
+        executable_paths: []const []const u8,
+        executable_target: []const u8,
         replica_count: u8,
         replica_index: u8,
         replica_ports: [constants.vsr.replicas_max]u16,
@@ -533,13 +614,17 @@ const Replica = struct {
         log_debug: bool,
     ) !*Replica {
         assert(replica_index < replica_count);
+        assert(executable_paths.len > 0);
+        assert(std.fs.path.isAbsolute(executable_target));
+        for (executable_paths) |exe| assert(std.fs.path.isAbsolute(exe));
 
         const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
 
         self.* = .{
             .allocator = allocator,
-            .executable_path = executable_path,
+            .executable_paths = executable_paths,
+            .executable_target = executable_target,
             .replica_count = replica_count,
             .replica_index = replica_index,
             .replica_ports = replica_ports,
@@ -547,6 +632,8 @@ const Replica = struct {
             .log_debug = log_debug,
             .process = null,
         };
+
+        try std.fs.copyFileAbsolute(executable_paths[0], executable_target, .{});
         return self;
     }
 
@@ -589,7 +676,7 @@ const Replica = struct {
         );
 
         var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
-        argv.push_slice(&.{ self.executable_path, "start" });
+        argv.push_slice(&.{ self.executable_target, "start" });
         if (self.log_debug) {
             argv.push_slice(&.{ "--log-debug", "--experimental" });
         }
@@ -622,6 +709,18 @@ const Replica = struct {
         log.info("{}: unpausing replica", .{self.replica_index});
         try self.process.?.unpause();
     }
+
+    pub fn upgrade(self: *Replica, release_index: u32) !void {
+        assert(self.executable_index < release_index);
+        assert(self.executable_paths.len > release_index);
+        self.executable_index = release_index;
+
+        try std.fs.copyFileAbsolute(
+            self.executable_paths[release_index],
+            self.executable_target,
+            .{},
+        );
+    }
 };
 
 const Workload = struct {
@@ -646,20 +745,17 @@ const Workload = struct {
     pub fn spawn(
         allocator: std.mem.Allocator,
         io: *IO,
-        proxy_ports: []u16,
-        args: CLIArgs,
+        proxy_ports: []const u16,
+        driver_command: []const u8,
     ) !*Workload {
         var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
-
-        const driver_command_selected = args.driver_command orelse vortex_driver_exe_default;
-        log.info("launching workload with driver: {s}", .{driver_command_selected});
 
         var driver_command_arg_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const driver_command_arg = try std.fmt.bufPrint(
             &driver_command_arg_buffer,
             "--driver-command={s}",
-            .{driver_command_selected},
+            .{driver_command},
         );
 
         const proxy_addresses = try comma_separate_ports(allocator, proxy_ports);
