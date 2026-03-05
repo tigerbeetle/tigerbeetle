@@ -86,6 +86,7 @@ const Fuzzer = enum {
     vopr_testing,
     vopr,
     vortex,
+    vortex_debug,
     vsr_free_set,
     vsr_superblock,
     vsr_multi_batch,
@@ -110,6 +111,7 @@ const Fuzzer = enum {
         .vopr_testing = 8,
         .vopr = 8,
         .vortex = 1,
+        .vortex_debug = 1,
         .vsr_free_set = 1,
         .vsr_superblock = 1,
         .vsr_multi_batch = 1,
@@ -127,10 +129,8 @@ const Fuzzer = enum {
             .vopr_testing,
             .vopr_testing_lite,
             => &.{ "vopr:build", "-Drelease", "-Dvopr-state-machine=testing" },
-            // TODO Once release builds have stack traces, add -Drelease so that we are testing
-            // release binaries (to test as close as possible to a real cluster).
-            // (Likewise in args_run()).
-            .vortex => &.{"vortex:build"},
+            .vortex => &.{ "vortex:build", "-Drelease" },
+            .vortex_debug => &.{"vortex:build"},
             else => &.{ "fuzz:build", "-Drelease" },
         };
     }
@@ -142,7 +142,8 @@ const Fuzzer = enum {
             .vopr_testing,
             .vopr_testing_lite,
             => .{ "vopr", "-Drelease", "-Dvopr-state-machine=testing" },
-            .vortex => .{"vortex"},
+            .vortex => .{ "vortex", "-Drelease" },
+            .vortex_debug => .{"vortex"},
             else => .{ "fuzz", "-Drelease" },
         } ++ .{"--"} ++ args_exec(fuzzer);
     }
@@ -151,7 +152,7 @@ const Fuzzer = enum {
         return comptime switch (fuzzer) {
             .vopr, .vopr_debug, .vopr_testing => &.{},
             .vopr_lite, .vopr_testing_lite => &.{"--lite"},
-            .vortex => &.{
+            .vortex, .vortex_debug => &.{
                 "supervisor",
                 "--log-debug",
                 "--replica-count=3",
@@ -162,7 +163,7 @@ const Fuzzer = enum {
     }
 
     fn capture_logs(fuzzer: Fuzzer) bool {
-        return fuzzer == .vortex;
+        return fuzzer == .vortex or fuzzer == .vortex_debug;
     }
 };
 
@@ -381,7 +382,7 @@ fn run_fuzzers(
                     const term_adapted: enum { sigkill, sigterm, other } = term: {
                         const code_kill = 128 + std.posix.SIG.KILL;
                         const code_term = 128 + std.posix.SIG.TERM;
-                        const vortex = fuzzer.fuzzer == .vortex;
+                        const vortex = fuzzer.fuzzer == .vortex or fuzzer.fuzzer == .vortex_debug;
 
                         if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL }) or
                             (std.meta.eql(term, .{ .Exited = @intCast(code_kill) }) and vortex))
