@@ -461,8 +461,8 @@ pub fn MessageBusType(comptime IO: type) type {
             const attempts = &bus.replicas_connect_attempts[replica];
             const ms = vsr.exponential_backoff_with_jitter(
                 &bus.prng,
-                constants.connection_delay_min_ms,
-                constants.connection_delay_max_ms,
+                constants.connection_delay_min.to_ms(),
+                constants.connection_delay_max.to_ms(),
                 attempts.*,
             );
             attempts.* += 1;

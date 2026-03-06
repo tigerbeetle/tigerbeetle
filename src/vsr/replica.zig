@@ -1128,7 +1128,7 @@ pub fn ReplicaType(
             // `request_blocks` messages, since the response for each `request_blocks` message is
             // potentially multiple blocks (up to `grid_repair_request_max`).
             const grid_repair_message_budget_max =
-                2 * @as(u32, constants.grid_repair_request_max) *
+                2 * constants.grid_repair_request_max *
                 (replica_count - @intFromBool(!self.standby()));
             const grid_repair_message_budget_refill =
                 @divFloor(grid_repair_message_budget_max, 2);
