@@ -3,6 +3,62 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.76
+
+Released: 2026-03-06
+
+### Features
+
+- [#3556](https://github.com/tigerbeetle/tigerbeetle/pull/3556)
+
+  Expose CLI arguments to diagnose connectivity issues with AMQP and
+  TigerBeetle during CDC.
+
+  Users can now specify `--amqp-timeout-seconds` and `--tigerbeetle-timeout-seconds`
+  (both default to 30), which define the maximum time to wait for a reply
+  from AMQP and TigerBeetle respectively.
+
+- [#3565](https://github.com/tigerbeetle/tigerbeetle/pull/3565)
+
+  Record request timing metrics for reserved VSR operations.
+
+  This gives users visibility into the latency of client registrations (the
+  first request a client sends to the cluster), using the `register` operation.
+
+
+### Internals
+
+- [#3543](https://github.com/tigerbeetle/tigerbeetle/pull/3543)
+
+  Add tidy check to flag functions with length [71, 72], as per TigerStyle.
+
+  This check intentionally incentivizes shortening the length to <=70 for
+  functions that are _just_ over, as a starting point towards the 70-line limit.
+
+- [#3561](https://github.com/tigerbeetle/tigerbeetle/pull/3561),
+  [#3560](https://github.com/tigerbeetle/tigerbeetle/pull/3560),
+  [#3559](https://github.com/tigerbeetle/tigerbeetle/pull/3559),
+  [#3558](https://github.com/tigerbeetle/tigerbeetle/pull/3558),
+
+  Various documentation improvements.
+
+- [#3552](https://github.com/tigerbeetle/tigerbeetle/pull/3552)
+
+  Use a fixed, high retry delay instead of exponential backoff to work
+  around GitHub availability.
+
+- [#3568](https://github.com/tigerbeetle/tigerbeetle/pull/3568)
+
+  Various refactors and debug logging improvements in compaction.
+
+- [#3555](https://github.com/tigerbeetle/tigerbeetle/pull/3555)
+
+  Add logging to clarify the semantics of multiversion upgrade polling.
+
+### TigerTracks 🎧
+
+- [What I've Done](https://open.spotify.com/track/18lR4BzEs7e3qzc0KVkTpU)
+
 ## TigerBeetle 0.16.75
 
 Released: 2026-02-27
