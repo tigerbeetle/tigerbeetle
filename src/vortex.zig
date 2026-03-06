@@ -8,7 +8,7 @@
 /// cluster, verifying its correctness.
 ///
 /// For practical use, Vortex should be run in a Linux namespace where it can control the network.
-/// The `run` command sets up a Linux namespace automatically.
+/// The `supervisor` command sets up a Linux namespace automatically.
 const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
