@@ -933,6 +933,55 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.callback == .checkpoint_durable) grid.checkpoint_durable_join();
         }
 
+        /// Fetch the block synchronously from the write queues, if possible.
+        ///
+        /// It is possible to read an address while it's being written to, in the
+        /// following scenarios:
+        /// * Reading a block that is currenly being repaired.
+        /// * Reading a block that is currently being created, if it is requested
+        ///   by another replica.
+        fn read_block_from_write_queues(grid: *Grid, address: u64, checksum: u128) ?BlockPtrConst {
+            assert(grid.superblock.opened);
+            assert(grid.callback != .cancel);
+            assert(address > 0);
+
+            var block_found_count: u64 = 0;
+            var block: ?BlockPtrConst = null;
+
+            var write_queue_iterator = grid.write_queue.iterate();
+            while (write_queue_iterator.next()) |queued_write| {
+                const queued_write_header = mem.bytesAsValue(
+                    vsr.Header.Block,
+                    queued_write.block.*[0..@sizeOf(vsr.Header)],
+                );
+
+                if (address == queued_write_header.address and
+                    checksum == queued_write_header.checksum)
+                {
+                    block_found_count += 1;
+                    block = queued_write.block.*;
+                }
+            }
+
+            var write_iops_iterator = grid.write_iops.iterate();
+            while (write_iops_iterator.next()) |iop| {
+                const queued_write_header = mem.bytesAsValue(
+                    vsr.Header.Block,
+                    iop.write.block.*[0..@sizeOf(vsr.Header)],
+                );
+
+                if (address == queued_write_header.address and
+                    checksum == queued_write_header.checksum)
+                {
+                    block_found_count += 1;
+                    block = iop.write.block.*;
+                }
+            }
+
+            assert(block_found_count <= 1);
+            return block;
+        }
+
         /// Fetch the block synchronously from cache, if possible.
         /// The returned block pointer is only valid until the next Grid write.
         pub fn read_block_from_cache(
@@ -950,6 +999,11 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             assert(address > 0);
+
+            if (grid.read_block_from_write_queues(address, checksum)) |block| {
+                grid.assert_coherent(address, checksum);
+                return block;
+            }
 
             const cache_index = grid.cache.get_index(address) orelse return null;
             const cache_block = grid.cache_blocks[cache_index];
