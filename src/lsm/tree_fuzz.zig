@@ -311,10 +311,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             var beat_index_blocks_max: u64 = 1;
 
             for (compactions_slice) |compaction| {
-                if (first_beat or half_beat) _ = compaction.bar_commence(op);
+                if (first_beat or half_beat) _ = compaction.half_bar_commence(op);
 
                 const input_values_remaining_bar =
-                    compaction.quotas.bar - compaction.quotas.bar_done;
+                    compaction.quotas.half_bar - compaction.quotas.half_bar_done;
                 const input_values_remaining_beat =
                     stdx.div_ceil(input_values_remaining_bar, beats_remaining);
 
@@ -364,7 +364,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 }
 
                 for (compactions_slice) |compaction| {
-                    compaction.bar_complete();
+                    compaction.half_bar_complete();
                 }
 
                 if (op >= constants.lsm_compaction_ops) {
