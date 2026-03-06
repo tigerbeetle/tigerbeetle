@@ -4967,7 +4967,6 @@ pub fn ReplicaType(
         fn commit_checkpoint_data(self: *Replica) enum { ready, pending } {
             assert(self.commit_stage == .checkpoint_data);
             assert(self.commit_stage.checkpoint_data.count() == 0);
-            self.grid.assert_only_repairing();
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -10759,16 +10758,14 @@ pub fn ReplicaType(
 
                     if (self.grid_repair_tables.available() == 0) break;
                 } else {
-                    if (Forest.Storage == TestStorage) {
-                        // Verify that we already have any table that is not within the sync range.
-                        if (table_info.snapshot_min < snapshot_from_commit(sync_op_min) or
-                            table_info.snapshot_min > snapshot_from_commit(sync_op_max_next))
-                        {
-                            self.superblock.storage.verify_table(
-                                table_info.address,
-                                table_info.checksum,
-                            );
-                        }
+                    // Verify that we already have any table that is not within the sync range.
+                    if (table_info.snapshot_min < snapshot_from_commit(sync_op_min) or
+                        table_info.snapshot_min > snapshot_from_commit(sync_op_max_next))
+                    {
+                        self.grid.verify_table(
+                            table_info.address,
+                            table_info.checksum,
+                        );
                     }
                 }
             }

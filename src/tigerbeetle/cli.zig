@@ -476,9 +476,11 @@ const start_defaults_production = StartDefaults{
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
     .cache_grid = .{ .value = constants.grid_cache_size_default },
+    // Add `lsm_compaction_iops_write_max` to allow pipelining reads of the next
+    // compaction in the beat with the writes of the current compaction.
     .memory_lsm_compaction = .{
-        // By default, add a few extra blocks for beat-scoped work.
-        .value = (lsm_compaction_block_count_min + 16) * constants.block_size,
+        .value = (lsm_compaction_block_count_min +
+            constants.lsm_compaction_iops_write_max) * constants.block_size,
     },
 };
 

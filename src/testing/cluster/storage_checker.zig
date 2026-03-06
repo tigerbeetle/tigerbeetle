@@ -430,14 +430,24 @@ pub const StorageChecker = struct {
                 assert(open_block_header.address > 0);
                 if (block_address == open_block_header.address) break;
             } else {
-                const block = superblock.storage.grid_block(block_address) orelse {
-                    log.err("{}: checksum_grid: missing block_address={}", .{
-                        superblock.replica_index.?,
+                const block = blk: {
+                    if (read_block_from_write_queues_by_address(
+                        Forest,
+                        forest,
                         block_address,
-                    });
+                    )) |block_write_queue| {
+                        break :blk block_write_queue;
+                    } else if (superblock.storage.grid_block(block_address)) |block_storage| {
+                        break :blk block_storage;
+                    } else {
+                        log.err("{}: checksum_grid: missing block_address={}", .{
+                            superblock.replica_index.?,
+                            block_address,
+                        });
 
-                    blocks_missing += 1;
-                    continue;
+                        blocks_missing += 1;
+                        continue;
+                    }
                 };
 
                 const block_header = schema.header_from_block(block);
@@ -454,5 +464,42 @@ pub const StorageChecker = struct {
         assert(blocks_missing == 0);
 
         return stream.checksum();
+    }
+
+    fn read_block_from_write_queues_by_address(
+        comptime Forest: type,
+        forest: *const Forest,
+        address: u64,
+    ) ?*align(constants.sector_size) const [constants.block_size]u8 {
+        const grid = forest.grid;
+        assert(grid.superblock.opened);
+        assert(grid.callback != .cancel);
+        assert(address > 0);
+
+        var write_queue_iterator = grid.write_queue.iterate();
+        while (write_queue_iterator.next()) |queued_write| {
+            const queued_write_header = std.mem.bytesAsValue(
+                vsr.Header.Block,
+                queued_write.block.*[0..@sizeOf(vsr.Header)],
+            );
+
+            if (address == queued_write_header.address) {
+                return queued_write.block.*;
+            }
+        }
+
+        var write_iops_iterator = grid.write_iops.iterate();
+        while (write_iops_iterator.next()) |iop| {
+            const queued_write_header = std.mem.bytesAsValue(
+                vsr.Header.Block,
+                iop.write.block.*[0..@sizeOf(vsr.Header)],
+            );
+
+            if (address == queued_write_header.address) {
+                return iop.write.block.*;
+            }
+        }
+
+        return null;
     }
 };
