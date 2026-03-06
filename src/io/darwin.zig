@@ -15,6 +15,7 @@ const DirectIO = @import("../io.zig").DirectIO;
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
+    pub const Stats = common.Stats;
 
     kq: fd_t,
     event_id: Event = 0,
@@ -23,6 +24,8 @@ pub const IO = struct {
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
     io_pending: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_pending" }),
+
+    stats: common.Stats = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -48,6 +51,9 @@ pub const IO = struct {
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the __kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        var timer = try std.time.Timer.start();
+        defer self.stats.time_wall.ns += timer.read();
+
         var timed_out = false;
         var completion: Completion = undefined;
         const on_timeout = struct {
@@ -127,9 +133,12 @@ pub const IO = struct {
 
         var completed = self.completed;
         self.completed.reset();
+
+        var timer = try std.time.Timer.start();
         while (completed.pop()) |completion| {
             (completion.callback)(self, completion);
         }
+        self.stats.time_cpu.ns += timer.read();
     }
 
     fn flush_io(self: *IO, events: []posix.Kevent) usize {

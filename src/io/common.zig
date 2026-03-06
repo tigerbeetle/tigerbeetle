@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 
+const stdx = @import("stdx");
+
 const assert = std.debug.assert;
 
 const is_linux = builtin.target.os.tag == .linux;
@@ -153,3 +155,18 @@ pub fn aof_blocking_open(dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
 
     return file.handle;
 }
+
+pub const Stats = struct {
+    time_cpu: stdx.Duration = .ms(0),
+    time_wall: stdx.Duration = .ms(0),
+
+    pub fn stats_since(now: Stats, earlier: Stats) Stats {
+        assert(now.time_cpu.ns >= earlier.time_cpu.ns);
+        assert(now.time_wall.ns >= earlier.time_wall.ns);
+
+        return .{
+            .time_cpu = now.time_cpu.subtract(earlier.time_cpu),
+            .time_wall = now.time_wall.subtract(earlier.time_wall),
+        };
+    }
+};

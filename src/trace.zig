@@ -129,6 +129,7 @@ events_timing: []?EventTimingAggregate,
 time_start: stdx.Instant,
 
 log_trace: bool,
+previous_io_stats: IO.Stats = .{},
 
 pub const ProcessID = union(enum) {
     unknown,
@@ -170,6 +171,9 @@ pub const Options = struct {
         },
     } = .log,
     log_trace: bool = true,
+
+    /// Used for recording stats from the event loop.
+    io: ?*IO = null,
 };
 
 pub fn init(
@@ -457,6 +461,16 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
             },
         };
     }
+}
+
+pub fn record_io_stats(tracer: *Tracer) void {
+    const io = tracer.options.io orelse return;
+
+    const stats_delta = io.stats.stats_since(tracer.previous_io_stats);
+    tracer.previous_io_stats = io.stats;
+
+    tracer.timing(.loop_run_for_ns, stats_delta.time_wall);
+    tracer.timing(.loop_cpu, stats_delta.time_cpu);
 }
 
 const fixtures = @import("testing/fixtures.zig");

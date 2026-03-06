@@ -15,12 +15,15 @@ const DirectIO = @import("../io.zig").DirectIO;
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
+    pub const Stats = common.Stats;
 
     iocp: os.windows.HANDLE,
     time_os: TimeOS = .{},
     io_pending: usize = 0,
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
+
+    stats: common.Stats = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -51,6 +54,9 @@ pub const IO = struct {
     }
 
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        var timer = try std.time.Timer.start();
+        defer self.stats.time_wall.ns += timer.read();
+
         const Callback = struct {
             fn on_timeout(
                 timed_out: *bool,
@@ -136,12 +142,15 @@ pub const IO = struct {
         // as the callbacks could potentially submit more completions.
         var completed = self.completed;
         self.completed.reset();
+
+        var timer = try std.time.Timer.start();
         while (completed.pop()) |completion| {
             (completion.callback)(Completion.Context{
                 .io = self,
                 .completion = completion,
             });
         }
+        self.stats.time_cpu.ns += timer.read();
     }
 
     fn flush_timeouts(self: *IO) ?u64 {

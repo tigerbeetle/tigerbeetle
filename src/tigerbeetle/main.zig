@@ -126,6 +126,7 @@ pub fn main() !void {
             },
         } else .log,
         .log_trace = log_trace,
+        .io = &io,
     });
     defer tracer.deinit(gpa);
 
@@ -503,13 +504,7 @@ fn command_start(
 
     while (true) {
         replica.tick();
-
-        {
-            tracer.start(.loop_run_for_ns);
-            defer tracer.stop(.loop_run_for_ns);
-
-            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
-        }
+        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
 }
 

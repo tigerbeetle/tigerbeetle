@@ -1527,6 +1527,11 @@ pub fn ReplicaType(
             self.trace.start(.loop_tick);
             defer self.trace.stop(.loop_tick);
 
+            // Record the times captured by the event loop, then reset them. Do this on every tick
+            // rather than in trace_emit_timeout() to capture higher resolution data: internally
+            // trace.timing() will capture min/max/avg/sum.
+            self.trace.record_io_stats();
+
             assert(self.opened);
             // Ensure that all asynchronous IO callbacks flushed the loopback queue as needed.
             // If an IO callback queues a loopback message without flushing the queue then this will
