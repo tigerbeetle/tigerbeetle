@@ -438,6 +438,7 @@ fn build_ci(
         @"test", // Main test suite, excluding VOPR and clients.
         fuzz, // Smoke tests for fuzzers and VOPR.
         aof, // Dedicated test for AOF, which is somewhat slow to run.
+        vortex, // Several minute vortex run.
 
         clients, // Tests for all language clients below.
         dotnet,
@@ -509,6 +510,16 @@ fn build_ci(
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
         hide_stderr(aof);
         step_ci.dependOn(&aof.step);
+    }
+    if (all or mode == .vortex) {
+        build_ci_step(b, step_ci, .{
+            "vortex",
+            "--",
+            "supervisor",
+            "--replica-count=3",
+            "--test-duration=5m",
+            "--disable-faults",
+        });
     }
     inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
         if (default or mode == .clients or mode == language) {

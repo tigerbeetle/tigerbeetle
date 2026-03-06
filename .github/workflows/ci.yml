@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - run: shellcheck ./zig/download.sh
       - shell: pwsh
         run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
@@ -45,19 +46,34 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2147483647 } # Fetch full history for tidy.
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch full history for tidy.
       - run: ./zig/download.ps1 && ./zig/zig build ci -- test
 
   test_aof:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2147483647 }
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - uses: actions/cache@v5
         with:
           path: ./zig/cache
           key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
       - run: ./zig/download.ps1 && ./zig/zig build ci -- aof
+
+  test_vortex:
+    strategy:
+      matrix:
+        include:
+          - { os: 'ubuntu-latest' }
+          - { os: 'ubuntu-latest-arm64' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
+      - run: | # Allow unshare for vortex.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: ./zig/download.ps1 && ./zig/zig build ci -- vortex
 
   clients:
     strategy:
@@ -109,6 +125,7 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/checkout@v4
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
 
       - if: matrix.language == 'dotnet'
         uses: actions/setup-dotnet@v4
@@ -150,7 +167,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2147483647 }
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: sudo rm -rf /usr/local/lib/android # Free up disk space for benchmarking.
       - uses: actions/cache@v5
@@ -192,7 +209,7 @@ jobs:
   core-pipeline:
     if: always() && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
-    needs: [smoke, test, test_aof, clients, devhub]
+    needs: [smoke, test, test_aof, test_vortex, clients, devhub]
     steps:
       - if: ${{ !(contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
         run: exit 0
