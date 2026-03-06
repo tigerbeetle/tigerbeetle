@@ -25,7 +25,6 @@ Released: 2026-03-06
   This gives users visibility into the latency of client registrations (the
   first request a client sends to the cluster), using the `register` operation.
 
-
 ### Internals
 
 - [#3543](https://github.com/tigerbeetle/tigerbeetle/pull/3543)
