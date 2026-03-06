@@ -92,11 +92,10 @@ const Time = @import("../time.zig").Time;
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Tracer = @import("../trace.zig").Tracer;
 
-const clock_offset_tolerance_max: u64 =
-    constants.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
-const epoch_max: u64 = constants.clock_epoch_max_ms * std.time.ns_per_ms;
-const window_min: u64 = constants.clock_synchronization_window_min_ms * std.time.ns_per_ms;
-const window_max: u64 = constants.clock_synchronization_window_max_ms * std.time.ns_per_ms;
+const clock_offset_tolerance_max: u64 = constants.clock_offset_tolerance_max.ns;
+const epoch_max: u64 = constants.clock_epoch_max.ns;
+const window_min: u64 = constants.clock_synchronization_window_min.ns;
+const window_max: u64 = constants.clock_synchronization_window_max.ns;
 
 const Marzullo = @import("marzullo.zig").Marzullo;
 
@@ -172,7 +171,7 @@ quorum: u8,
 time: Time,
 
 /// An epoch from which the clock can read synchronized clock timestamps within safe bounds.
-/// At least `constants.clock_synchronization_window_min_ms` is needed for this to be ready to use.
+/// At least `constants.clock_synchronization_window_min` is needed for this to be ready to use.
 epoch: Epoch,
 
 /// The next epoch (collecting samples and being synchronized) to replace the current epoch.

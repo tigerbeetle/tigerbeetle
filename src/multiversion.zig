@@ -834,7 +834,7 @@ pub const MultiversionOS = struct {
             .timeout = Timeout{
                 .name = "multiversioning_timeout",
                 .id = 0, // id for logging is set by timeout_enable after opening the superblock.
-                .after = constants.multiversion_poll_interval_ms / constants.tick_ms,
+                .after = constants.multiversion_poll_interval.to_ms() / constants.tick_ms,
             },
         };
     }

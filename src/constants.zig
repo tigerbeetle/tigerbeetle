@@ -110,7 +110,7 @@ comptime {
     }) <= multiversion_binary_size_max);
 }
 
-pub const multiversion_poll_interval_ms = config.process.multiversion_poll_interval_ms;
+pub const multiversion_poll_interval = config.process.multiversion_poll_interval;
 
 comptime {
     assert(vsr_releases_max >= 2);
@@ -377,7 +377,7 @@ comptime {
 /// set this higher than 1.
 pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 
-/// `grid_scrubber_cycle_ms` is the (approximate, target) total milliseconds per scrub of each
+/// `grid_scrubber_cycle` is the (approximate, target) total duration per scrub of each
 /// replica's entire grid. Scrubbing work is spread evenly across this duration.
 ///
 /// Napkin math for the "worst case" scrubber read overhead as a function of cycle duration
@@ -387,12 +387,14 @@ pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 ///   grid_scrubber_cycle_seconds = 180 days * 24 hr/day * 60 min/hr * 60 s/min (2 cycle/year)
 ///   read_bytes_per_second       = storage_size_limit / grid_scrubber_cycle_seconds ≈ 4.32 MiB/s
 ///
-pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
+pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle.to_ms() / tick_ms;
 
 /// Accelerate/throttle scrubber reads if they are less/more frequent than this range.
 /// (This is to keep the timeouts from being too extreme when the grid is tiny or huge.)
-pub const grid_scrubber_interval_ticks_min = config.process.grid_scrubber_interval_ms_min / tick_ms;
-pub const grid_scrubber_interval_ticks_max = config.process.grid_scrubber_interval_ms_max / tick_ms;
+pub const grid_scrubber_interval_ticks_min =
+    config.process.grid_scrubber_interval_min.to_ms() / tick_ms;
+pub const grid_scrubber_interval_ticks_max =
+    config.process.grid_scrubber_interval_max.to_ms() / tick_ms;
 
 comptime {
     assert(grid_scrubber_reads_max > 0);
@@ -404,10 +406,10 @@ comptime {
     assert(grid_scrubber_interval_ticks_max > 0);
 }
 
-/// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
+/// The minimum and maximum amount of time to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
-pub const connection_delay_min_ms = config.process.connection_delay_min_ms;
-pub const connection_delay_max_ms = config.process.connection_delay_max_ms;
+pub const connection_delay_min = config.process.connection_delay_min;
+pub const connection_delay_max = config.process.connection_delay_max;
 
 /// The maximum number of outgoing messages that may be queued on a replica connection.
 pub const connection_send_queue_max_replica = @max(@min(clients_max, 4), 2);
@@ -518,9 +520,6 @@ pub const client_replies_iops_read_max = config.process.client_replies_iops_read
 /// The maximum number of concurrent writes to the client-replies zone.
 /// Client replies are written after every commit.
 pub const client_replies_iops_write_max = config.process.client_replies_iops_write_max;
-/// The amount of time (in milliseconds) within which a client must receive a response from the
-/// cluster, after which it emits a warning log (for alerting/metrics).
-pub const client_request_completion_warn_ms = config.process.client_request_completion_warn_ms;
 
 /// The maximum number of concurrent grid read I/O operations to allow at once.
 pub const grid_iops_read_max = config.process.grid_iops_read_max;
@@ -719,17 +718,17 @@ pub const tick_ms = config.process.tick_ms;
 /// The conservative round-trip time at startup when there is no network knowledge.
 /// Adjusted dynamically thereafter for RTT-sensitive timeouts according to network congestion.
 /// This should be set higher rather than lower to avoid flooding the network at startup.
-pub const rtt_ticks = config.process.rtt_ms / tick_ms;
+pub const rtt_ticks = config.process.rtt.to_ms() / tick_ms;
 
 /// Maximum RTT, to prevent too-long timeouts.
-pub const rtt_max_ticks = config.process.rtt_max_ms / tick_ms;
+pub const rtt_max_ticks = config.process.rtt_max.to_ms() / tick_ms;
 
 /// The multiple of round-trip time for RTT-sensitive timeouts.
 pub const rtt_multiple = 2;
 
 /// The min/max bounds of exponential backoff (and jitter) to add to RTT-sensitive timeouts.
-pub const backoff_min_ticks = config.process.backoff_min_ms / tick_ms;
-pub const backoff_max_ticks = config.process.backoff_max_ms / tick_ms;
+pub const backoff_min_ticks = config.process.backoff_min.to_ms() / tick_ms;
+pub const backoff_max_ticks = config.process.backoff_max.to_ms() / tick_ms;
 
 /// The maximum skew between two clocks to allow when considering them to be in agreement.
 /// The principle is that no two clocks tick exactly alike but some clocks more or less agree.
@@ -737,26 +736,26 @@ pub const backoff_max_ticks = config.process.backoff_max_ms / tick_ms;
 /// The cluster will be unavailable if the majority of clocks are all further than this value apart.
 /// Decreasing this reduces the probability of reaching agreement on synchronized time.
 /// Increasing this reduces the accuracy of synchronized time.
-pub const clock_offset_tolerance_max_ms = config.process.clock_offset_tolerance_max_ms;
+pub const clock_offset_tolerance_max = config.process.clock_offset_tolerance_max;
 
 /// The amount of time before the clock's synchronized epoch is expired.
 /// If the epoch is expired before it can be replaced with a new synchronized epoch, then this most
 /// likely indicates either a network partition or else too many clock faults across the cluster.
 /// A new synchronized epoch will be installed as soon as these conditions resolve.
-pub const clock_epoch_max_ms = config.process.clock_epoch_max_ms;
+pub const clock_epoch_max = config.process.clock_epoch_max;
 
 /// The amount of time to wait for enough accurate samples before synchronizing the clock.
 /// The more samples we can take per remote clock source, the more accurate our estimation becomes.
 /// This impacts cluster startup time as the primary must first wait for synchronization to
 /// complete.
-pub const clock_synchronization_window_min_ms = config.process.clock_synchronization_window_min_ms;
+pub const clock_synchronization_window_min = config.process.clock_synchronization_window_min;
 
 /// The amount of time without agreement before the clock window is expired and a new window opened.
 /// This happens where some samples have been collected but not enough to reach agreement.
 /// The quality of samples degrades as they age so at some point we throw them away and start over.
 /// This eliminates the impact of gradual clock drift on our clock offset (clock skew) measurements.
 /// If a window expires because of this then it is likely that the clock epoch will also be expired.
-pub const clock_synchronization_window_max_ms = config.process.clock_synchronization_window_max_ms;
+pub const clock_synchronization_window_max = config.process.clock_synchronization_window_max;
 
 /// TigerBeetle uses asserts proactively, unless they severely degrade performance. For production,
 /// 5% slow down might be deemed critical, tests tolerate slowdowns up to 5x. Tests should be

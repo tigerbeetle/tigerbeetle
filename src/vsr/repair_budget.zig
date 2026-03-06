@@ -264,16 +264,16 @@ pub const RepairBudgetJournal = struct {
 };
 
 pub const RepairBudgetGrid = struct {
-    capacity: u32,
-    available: u32,
-    refill_max: u32,
+    capacity: u16,
+    available: u16,
+    refill_max: u16,
     requested: std.AutoArrayHashMapUnmanaged(BlockIdentifier, void),
 
     const BlockIdentifier = struct { address: u64, checksum: u128 };
 
     pub fn init(gpa: std.mem.Allocator, options: struct {
-        capacity: u32,
-        refill_max: u32,
+        capacity: u16,
+        refill_max: u16,
     }) !RepairBudgetGrid {
         assert(options.refill_max <= options.capacity);
 
