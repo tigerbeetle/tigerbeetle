@@ -37,7 +37,7 @@ Released: 2026-03-06
 - [#3561](https://github.com/tigerbeetle/tigerbeetle/pull/3561),
   [#3560](https://github.com/tigerbeetle/tigerbeetle/pull/3560),
   [#3559](https://github.com/tigerbeetle/tigerbeetle/pull/3559),
-  [#3558](https://github.com/tigerbeetle/tigerbeetle/pull/3558),
+  [#3558](https://github.com/tigerbeetle/tigerbeetle/pull/3558)
 
   Various documentation improvements.
 
