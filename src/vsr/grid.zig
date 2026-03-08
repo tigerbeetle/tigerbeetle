@@ -632,9 +632,10 @@ pub fn GridType(comptime Storage: type) type {
             for (addresses) |address| {
                 assert(address > 0);
 
-                // It's safe to release an address that is being read from, because the superblock
-                // will not allow it to be overwritten before the end of the bar.
-                assert(grid.writing(address, null) != .create);
+                // It's safe to release an address that is being read from or
+                // written to, as it can only be overwritten in the next
+                // checkpoint (when the address is freed and can be reacquired).
+                maybe(grid.writing(address, null) == .create);
 
                 grid.cache.demote(address);
                 grid.free_set.release(address);
@@ -933,7 +934,55 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.callback == .checkpoint_durable) grid.checkpoint_durable_join();
         }
 
-        /// Fetch the block synchronously from cache, if possible.
+        /// Fetch the block synchronously from the write queues, if possible.
+        ///
+        /// It is possible to read an address while it's being written to,
+        /// as we allow writes to an address to span the entirety of the
+        /// current checkpoint. This is safe to do as this address can only
+        /// only be freed and overwritten in the next checkpoint.
+        fn read_block_from_write_queues(grid: *Grid, address: u64, checksum: u128) ?BlockPtrConst {
+            assert(grid.superblock.opened);
+            assert(grid.callback != .cancel);
+            assert(address > 0);
+
+            var block_found_count: u64 = 0;
+            var block: ?BlockPtrConst = null;
+
+            var write_queue_iterator = grid.write_queue.iterate();
+            while (write_queue_iterator.next()) |queued_write| {
+                const queued_write_header = mem.bytesAsValue(
+                    vsr.Header.Block,
+                    queued_write.block.*[0..@sizeOf(vsr.Header)],
+                );
+
+                if (address == queued_write_header.address and
+                    checksum == queued_write_header.checksum)
+                {
+                    block_found_count += 1;
+                    block = queued_write.block.*;
+                }
+            }
+
+            var write_iops_iterator = grid.write_iops.iterate();
+            while (write_iops_iterator.next()) |iop| {
+                const queued_write_header = mem.bytesAsValue(
+                    vsr.Header.Block,
+                    iop.write.block.*[0..@sizeOf(vsr.Header)],
+                );
+
+                if (address == queued_write_header.address and
+                    checksum == queued_write_header.checksum)
+                {
+                    block_found_count += 1;
+                    block = iop.write.block.*;
+                }
+            }
+
+            assert(block_found_count <= 1);
+            return block;
+        }
+
+        /// Fetch the block synchronously from the write queues or grid cache, if possible.
         /// The returned block pointer is only valid until the next Grid write.
         pub fn read_block_from_cache(
             grid: *Grid,
@@ -944,12 +993,16 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
             if (options.coherent) {
-                assert(grid.writing(address, null) != .create);
                 assert(!grid.free_set.is_free(address));
                 grid.assert_coherent(address, checksum);
             }
 
             assert(address > 0);
+
+            if (grid.read_block_from_write_queues(address, checksum)) |block| {
+                grid.assert_coherent(address, checksum);
+                return block;
+            }
 
             const cache_index = grid.cache.get_index(address) orelse return null;
             const cache_block = grid.cache_blocks[cache_index];
@@ -993,18 +1046,20 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.callback != .cancel);
             assert(address > 0);
 
+            // It is possible to read an address while it's being written to
+            // (see `read_block_from_write_queues`).
+            maybe(grid.writing(address, null) == .create);
+
             switch (callback) {
                 .from_local_storage => {
                     maybe(grid.callback == .checkpoint);
-                    // We try to read the block even when it is free — if we recently released it,
-                    // it might be found on disk anyway.
+                    // We try to read the block even when it is free. If we
+                    // recently released it, it might be found on disk anyway.
                     maybe(grid.free_set.is_free(address));
-                    maybe(grid.writing(address, null) == .create);
                 },
                 .from_local_or_global_storage => {
                     assert(grid.callback != .checkpoint);
                     assert(!grid.free_set.is_free(address));
-                    assert(grid.writing(address, null) != .create);
                     grid.assert_coherent(address, checksum);
                 },
             }
@@ -1035,7 +1090,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.callback != .cancel);
             if (read.coherent) {
                 assert(!grid.free_set.is_free(read.address));
-                assert(grid.writing(read.address, null) != .create);
+                maybe(grid.writing(read.address, null) == .create);
             }
 
             assert(read.address > 0);
@@ -1064,8 +1119,14 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // When Read.cache_read is set, the caller of read_block() is responsible for calling
-            // us via next_tick().
+            if (grid.read_block_from_write_queues(read.address, read.checksum)) |block| {
+                grid.assert_coherent(read.address, read.checksum);
+                grid.read_block_resolve(read, .{ .valid = block });
+                return;
+            }
+
+            // When Read.cache_read is set, the caller of read_block()
+            // is responsible for calling us via next_tick().
             if (read.cache_read) {
                 if (grid.read_block_from_cache(
                     read.address,
@@ -1077,12 +1138,14 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // Become the "root" read that's fetching the block for the given address. The fetch
-            // happens asynchronously to avoid stack-overflow and nested cache invalidation.
+            // Become the "root" read that's fetching the block for the
+            // given address. The fetch happens asynchronously to avoid
+            // stack-overflow and nested cache invalidation.
             grid.read_queue.push(read);
 
             // Grab an IOP to resolve the block from storage.
-            // Failure to do so means the read is queued to receive an IOP when one finishes.
+            // Failure to do so means the read is queued to receive an
+            // IOP when one finishes.
             const iop = grid.read_iops.acquire() orelse {
                 grid.read_pending_queue.push(&read.pending);
                 return;
@@ -1095,8 +1158,8 @@ pub fn GridType(comptime Storage: type) type {
             const address = read.address;
             assert(address > 0);
 
-            // We can only update the cache if the Grid is not resolving callbacks with a cache
-            // block.
+            // We can only update the cache if the Grid is not resolving
+            // callbacks with a cache block.
             assert(!grid.read_resolving);
 
             grid.trace.start(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
@@ -1313,6 +1376,51 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             return (address - 1) * block_size;
+        }
+
+        /// Verify that the storage:
+        /// - contains the given index block
+        /// - contains every value block referenced by the index block
+        pub fn verify_table(grid: *Grid, index_address: u64, index_checksum: u128) void {
+            assert(index_address > 0);
+
+            const TestStorage = @import("../testing/storage.zig").Storage;
+            if (Storage != TestStorage) return;
+
+            const index_block = blk: {
+                if (grid.read_block_from_write_queues(index_address, index_checksum)) |block| {
+                    break :blk block;
+                } else {
+                    break :blk grid.superblock.storage.grid_block(index_address).?;
+                }
+            };
+            const index_schema = schema.TableIndex.from(index_block);
+            const index_block_header = schema.header_from_block(index_block);
+
+            assert(index_block_header.address == index_address);
+            assert(index_block_header.checksum == index_checksum);
+            assert(index_block_header.block_type == .index);
+
+            for (
+                index_schema.value_addresses_used(index_block),
+                index_schema.value_checksums_used(index_block),
+            ) |value_address, value_checksum| {
+                const value_block = blk: {
+                    if (grid.read_block_from_write_queues(
+                        value_address,
+                        value_checksum.value,
+                    )) |block| {
+                        break :blk block;
+                    } else {
+                        break :blk grid.superblock.storage.grid_block(value_address).?;
+                    }
+                };
+                const value_block_header = schema.header_from_block(value_block);
+
+                assert(value_block_header.address == value_address);
+                assert(value_block_header.checksum == value_checksum.value);
+                assert(value_block_header.block_type == .value);
+            }
         }
 
         fn assert_coherent(grid: *const Grid, address: u64, checksum: u128) void {
