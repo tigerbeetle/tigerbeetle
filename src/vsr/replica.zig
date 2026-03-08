@@ -313,7 +313,7 @@ pub fn ReplicaType(
         /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling
         /// `on_message_from_bus()`.
-        message_bus: MessageBus,
+        message_bus: *MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
         state_machine: StateMachine,
@@ -632,7 +632,6 @@ pub fn ReplicaType(
             aof: ?*AOF,
             aof_recovery: bool,
             state_machine_options: StateMachine.Options,
-            message_bus_options: MessageBus.Options,
             tracer: *Tracer,
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
@@ -651,7 +650,7 @@ pub fn ReplicaType(
             parent_allocator: std.mem.Allocator,
             time: Time,
             storage: *Storage,
-            message_pool: *MessagePool,
+            message_bus: *MessageBus,
             options: OpenOptions,
         ) !void {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
@@ -711,7 +710,7 @@ pub fn ReplicaType(
                 allocator,
                 time,
                 storage,
-                message_pool,
+                message_bus,
                 .{
                     .cluster = self.superblock.working.cluster,
                     .replica_index = replica,
@@ -722,7 +721,6 @@ pub fn ReplicaType(
                     .aof_recovery = options.aof_recovery,
                     .nonce = options.nonce,
                     .state_machine_options = options.state_machine_options,
-                    .message_bus_options = options.message_bus_options,
                     .grid_cache_blocks_count = options.grid_cache_blocks_count,
                     .release = options.release,
                     .release_client_min = options.release_client_min,
@@ -1067,7 +1065,6 @@ pub fn ReplicaType(
             nonce: Nonce,
             aof: ?*AOF,
             aof_recovery: bool,
-            message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
             grid_cache_blocks_count: u32,
             release: vsr.Release,
@@ -1086,7 +1083,7 @@ pub fn ReplicaType(
             allocator: Allocator,
             time: Time,
             storage: *Storage,
-            message_pool: *MessagePool,
+            message_bus: *MessageBus,
             options: Options,
         ) !void {
             assert(options.nonce != 0);
@@ -1231,7 +1228,7 @@ pub fn ReplicaType(
 
             var client_replies = ClientReplies.init(.{
                 .storage = storage,
-                .message_pool = message_pool,
+                .message_pool = message_bus.pool,
                 .replica_index = replica_index,
             });
             errdefer client_replies.deinit();
@@ -1276,23 +1273,6 @@ pub fn ReplicaType(
             );
             errdefer self.grid_scrubber.deinit(allocator);
 
-            // Initialize the MessageBus last. This brings the time when the replica can be
-            // externally spoken to (ie, MessageBus will accept TCP connections) closer to the time
-            // when Replica is actually listening for messages and won't simply drop them.
-            //
-            // Specifically, the grid cache in Grid.init above can take a long period of time while
-            // faulting in.
-            self.message_bus = try MessageBus.init(
-                allocator,
-                .{ .replica = options.replica_index },
-                message_pool,
-                Replica.on_messages_from_bus,
-                options.message_bus_options,
-            );
-            errdefer self.message_bus.deinit(allocator);
-
-            try self.message_bus.listen();
-
             self.* = .{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -1318,7 +1298,7 @@ pub fn ReplicaType(
                 .client_sessions = client_sessions,
                 .client_sessions_checkpoint = client_sessions_checkpoint,
                 .client_replies = client_replies,
-                .message_bus = self.message_bus,
+                .message_bus = message_bus,
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
                 .grid = self.grid,
@@ -1455,6 +1435,18 @@ pub fn ReplicaType(
                 .replicate_options = options.replicate_options,
             };
             self.routing.view_change(self.view);
+
+            // Bind and accept on a TCP scoket last. This brings the time when the replica can be
+            // externally spoken to (ie, MessageBus will accept TCP connections) closer to the time
+            // when Replica is actually listening for messages and won't simply drop them.
+            //
+            // Specifically, the grid cache in Grid.init above can take a long period of time while
+            // faulting in.
+            try self.message_bus.listen(.{
+                .replica = self.replica,
+                .on_messages_callback = on_messages_from_bus,
+                .on_messages_callback_context = self,
+            });
 
             log.info("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
                 "release={}", .{
@@ -1633,8 +1625,8 @@ pub fn ReplicaType(
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
-        fn on_messages_from_bus(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-            const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
+        fn on_messages_from_bus(context: *anyopaque, buffer: *MessageBuffer) void {
+            const self: *Replica = @alignCast(@ptrCast(context));
             self.on_messages(buffer);
         }
 

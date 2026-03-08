@@ -20,16 +20,17 @@ pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
     const SendQueue = RingBufferType(*Message, .slice);
 
-    const ProcessID = union(vsr.ProcessType) {
+    const ProcessID = union(enum) {
         replica: u8,
         client: u128,
+        unset,
     };
 
     return struct {
         pool: *MessagePool,
         io: *IO,
 
-        process: ProcessID,
+        process: ProcessID = .unset,
         /// Prefix for log messages.
         id: u128,
 
@@ -46,7 +47,8 @@ pub fn MessageBusType(comptime IO: type) type {
         accept_connection: ?*Connection = null,
 
         /// The callback to be called when a message is received.
-        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+        on_messages_callback: ?*const fn (context: *anyopaque, buffer: *MessageBuffer) void = null,
+        on_messages_callback_context: ?*anyopaque = null,
 
         /// SendQueue storage shared by all connections.
         send_queue_buffer: []*Message,
@@ -85,49 +87,47 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(constants.message_size_max < std.math.maxInt(u32));
         }
 
-        pub const Options = struct {
-            configuration: []const Address,
-            io: *IO,
-            trace: ?*Tracer,
-            clients_limit: ?u32 = null,
-        };
         const Address = std.net.Address;
         const MessageBus = @This();
 
         /// Initialize the MessageBus for the given configuration and replica/client process.
         pub fn init(
-            allocator: mem.Allocator,
-            process_id: ProcessID,
+            gpa: mem.Allocator,
+            io: *IO,
+            trace: ?*Tracer,
             message_pool: *MessagePool,
-            on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
-            options: Options,
+            options: struct {
+                process: vsr.ProcessType,
+                configuration: []const Address,
+                clients_limit: ?u32 = null,
+            },
         ) !MessageBus {
-            switch (process_id) {
+            switch (options.process) {
                 .replica => assert(options.clients_limit.? > 0),
                 .client => assert(options.clients_limit == null),
             }
 
-            const connections_max: u32 = switch (process_id) {
+            const connections_max: u32 = switch (options.process) {
                 // The maximum number of connections that can be held open by the server at any
                 // time. -1 since we don't need a connection to ourself.
                 .replica => @intCast(options.configuration.len - 1 + options.clients_limit.?),
                 .client => @intCast(options.configuration.len),
             };
 
-            const send_queue_max = switch (process_id) {
+            const send_queue_max = switch (options.process) {
                 .replica => constants.connection_send_queue_max_replica,
                 .client => constants.connection_send_queue_max_client,
             };
 
-            const send_queue_buffer = try allocator.alloc(
+            const send_queue_buffer = try gpa.alloc(
                 *Message,
                 connections_max * send_queue_max,
             );
             @memset(send_queue_buffer, undefined);
-            errdefer allocator.free(send_queue_buffer);
+            errdefer gpa.free(send_queue_buffer);
 
-            const connections = try allocator.alloc(Connection, connections_max);
-            errdefer allocator.free(connections);
+            const connections = try gpa.alloc(Connection, connections_max);
+            errdefer gpa.free(connections);
             for (connections, 0..) |*connection, index| {
                 connection.* = .{
                     .send_queue = .{
@@ -136,47 +136,38 @@ pub fn MessageBusType(comptime IO: type) type {
                 };
             }
 
-            const replicas = try allocator.alloc(?*Connection, options.configuration.len);
-            errdefer allocator.free(replicas);
+            const replicas = try gpa.alloc(?*Connection, options.configuration.len);
+            errdefer gpa.free(replicas);
             @memset(replicas, null);
 
-            const replicas_addresses = try allocator.alloc(Address, options.configuration.len);
-            errdefer allocator.free(replicas_addresses);
+            const replicas_addresses = try gpa.alloc(Address, options.configuration.len);
+            errdefer gpa.free(replicas_addresses);
             stdx.copy_disjoint(.exact, Address, replicas_addresses, options.configuration);
 
-            const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
-            errdefer allocator.free(replicas_connect_attempts);
+            const replicas_connect_attempts = try gpa.alloc(u64, options.configuration.len);
+            errdefer gpa.free(replicas_connect_attempts);
             @memset(replicas_connect_attempts, 0);
-
-            const prng_seed = switch (process_id) {
-                .replica => |replica| replica,
-                .client => |client| @as(u64, @truncate(client)),
-            };
 
             var bus: MessageBus = .{
                 .pool = message_pool,
-                .io = options.io,
-                .process = process_id,
-                .id = switch (process_id) {
-                    .replica => |index| @as(u128, index),
-                    .client => |id| id,
-                },
-                .on_messages_callback = on_messages_callback,
+                .io = io,
+                .process = .unset,
+                .id = undefined, // FIXME
                 .send_queue_buffer = send_queue_buffer,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_addresses = replicas_addresses,
                 .replicas_connect_attempts = replicas_connect_attempts,
-                .prng = stdx.PRNG.from_seed(prng_seed),
-                .trace = options.trace,
+                .prng = stdx.PRNG.from_seed(0), // TODO: re-seed
+                .trace = trace,
             };
 
-            switch (process_id) {
+            switch (options.process) {
                 .replica => {
                     // Pre-allocate enough memory to hold all possible connections
                     // in the client map.
-                    try bus.clients.ensureTotalCapacity(allocator, connections_max);
-                    errdefer bus.clients.deinit(allocator);
+                    try bus.clients.ensureTotalCapacity(gpa, connections_max);
+                    errdefer bus.clients.deinit(gpa);
 
                     return bus;
                 },
@@ -184,8 +175,8 @@ pub fn MessageBusType(comptime IO: type) type {
             }
         }
 
-        pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
-            bus.clients.deinit(allocator);
+        pub fn deinit(bus: *MessageBus, gpa: std.mem.Allocator) void {
+            bus.clients.deinit(gpa);
 
             if (bus.accept_fd) |fd| {
                 assert(bus.process == .replica);
@@ -196,6 +187,7 @@ pub fn MessageBusType(comptime IO: type) type {
             const send_queue_max = switch (bus.process) {
                 .replica => constants.connection_send_queue_max_replica,
                 .client => constants.connection_send_queue_max_client,
+                .unset => @panic("todo"), //FIXME
             };
             var send_queue_buffer_previous: ?[]*Message = null;
             for (bus.connections) |*connection| {
@@ -218,11 +210,11 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.send_queue_buffer.ptr + bus.send_queue_buffer.len ==
                 send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
 
-            allocator.free(bus.replicas_connect_attempts);
-            allocator.free(bus.replicas_addresses);
-            allocator.free(bus.replicas);
-            allocator.free(bus.connections);
-            allocator.free(bus.send_queue_buffer);
+            gpa.free(bus.replicas_connect_attempts);
+            gpa.free(bus.replicas_addresses);
+            gpa.free(bus.replicas);
+            gpa.free(bus.connections);
+            gpa.free(bus.send_queue_buffer);
             bus.* = undefined;
         }
 
@@ -243,10 +235,20 @@ pub fn MessageBusType(comptime IO: type) type {
             });
         }
 
-        pub fn listen(bus: *MessageBus) !void {
-            assert(bus.process == .replica);
+        pub fn listen(bus: *MessageBus, options: struct {
+            replica: u8,
+            on_messages_callback: *const fn (context: *anyopaque, buffer: *MessageBuffer) void,
+            on_messages_callback_context: *anyopaque,
+        }) !void {
+            assert(bus.process == .unset);
+            assert(bus.on_messages_callback == null);
+            assert(bus.on_messages_callback_context == null);
             assert(bus.accept_fd == null);
             assert(bus.accept_address == null);
+
+            bus.process = .{ .replica = options.replica };
+            bus.on_messages_callback = options.on_messages_callback;
+            bus.on_messages_callback_context = options.on_messages_callback_context;
 
             const address = bus.replicas_addresses[bus.process.replica];
             const fd = try init_tcp(bus.io, .replica, address.any.family);
@@ -258,6 +260,22 @@ pub fn MessageBusType(comptime IO: type) type {
 
             bus.accept_fd = fd;
             bus.accept_address = accept_address;
+        }
+
+        pub fn dial(bus: *MessageBus, options: struct {
+            client: u128,
+            on_messages_callback: *const fn (context: *anyopaque, buffer: *MessageBuffer) void,
+            on_messages_callback_context: *anyopaque,
+        }) void {
+            assert(bus.process == .unset);
+            assert(bus.on_messages_callback == null);
+            assert(bus.on_messages_callback_context == null);
+            assert(bus.accept_fd == null);
+            assert(bus.accept_address == null);
+
+            bus.process = .{ .client = options.client };
+            bus.on_messages_callback = options.on_messages_callback;
+            bus.on_messages_callback_context = options.on_messages_callback_context;
         }
 
         pub fn tick(bus: *MessageBus) void {
@@ -290,6 +308,7 @@ pub fn MessageBusType(comptime IO: type) type {
         // The same as tick, but asserts a client and avoids accept, allowing Zig's lazy semantics
         // to not add dead accept code to client libraries.
         pub fn tick_client(bus: *MessageBus) void {
+            assert(bus.on_messages_callback != null);
             assert(bus.process == .client);
             bus.tick_connect();
         }
@@ -302,6 +321,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replica => |replica| replica + 1,
                 // The client connects to all replicas.
                 .client => 0,
+                .unset => unreachable,
             };
             for (bus.replicas[replica_next..], replica_next..) |*connection, replica| {
                 if (connection.* == null) bus.connect(@intCast(replica));
@@ -443,8 +463,13 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .free);
             assert(connection.fd == null);
 
+            const process_type: vsr.ProcessType = switch (bus.process) {
+                .replica => .replica,
+                .client => .client,
+                .unset => unreachable,
+            };
             const family = bus.replicas_addresses[replica].any.family;
-            connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
+            connection.fd = init_tcp(bus.io, process_type, family) catch |err| {
                 log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,
                     @errorName(err),
@@ -649,6 +674,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 },
                 // The client connects only to replicas and should set peer when connecting:
                 .client => assert(connection.peer == .replica),
+                .unset => unreachable,
             }
             bus.recv_buffer_drain(connection);
         }
@@ -782,7 +808,10 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.recv_buffer != null);
 
             if (connection.recv_buffer.?.has_message()) {
-                bus.on_messages_callback(bus, &connection.recv_buffer.?);
+                bus.on_messages_callback.?(
+                    bus.on_messages_callback_context.?,
+                    &connection.recv_buffer.?,
+                );
             }
 
             if (connection.recv_buffer.?.invalid) |reason| {
