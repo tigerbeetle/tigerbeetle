@@ -47,7 +47,7 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             threads.push(thread);
         }
 
-        while (context.signal.status() != .stopped) {
+        while (context.signal.status() != .shutdown_completed) {
             if (context.running_count > 0) {
                 // Setting a random `stop_request`.
                 _ = context.stop_request.cmpxchgStrong(
@@ -73,7 +73,7 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
 fn notify(context: *Context) void {
     assert(std.Thread.getCurrentId() != context.main_thread_id);
-    while (context.signal.status() != .stopped) {
+    while (context.signal.status() != .shutdown_completed) {
         const delay_us = 1; // Shorter than `tick_us`.
         std.time.sleep(delay_us * std.time.ns_per_us);
 
@@ -98,13 +98,13 @@ fn on_signal(signal: *Signal) void {
                 context.signal.stop();
             }
         },
-        .stop_requested => {
+        .shutdown_requested => {
             // It's not possible if `stop` was called from the IO thread.
             assert(context.stop_request.load(.monotonic) == .user_thread);
 
             // Requested while running, so still counts as one event.
             context.running_count += 1;
         },
-        .stopped => unreachable,
+        .shutdown_completed => unreachable,
     }
 }
