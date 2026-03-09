@@ -42,7 +42,7 @@ const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
 const RingBufferType = stdx.RingBufferType;
 const LoggedProcess = @import("./logged_process.zig");
-const faulty_network = @import("./faulty_network.zig");
+const Network = @import("./faulty_network.zig").Network;
 const constants = @import("constants.zig");
 const Progress = @import("./workload.zig").Progress;
 const ratio = stdx.PRNG.ratio;
@@ -151,23 +151,147 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     // Even if we have past versions available, only use them sometimes.
     const release_count = prng.range_inclusive(u32, 1, dependencies_count);
-    const server_executables = server_executables_all[dependencies_count - release_count ..];
-    const driver_executables = driver_executables_all[dependencies_count - release_count ..];
-    assert(server_executables.len == release_count);
-    assert(driver_executables.len == release_count);
+    const supervisor = try Supervisor.create(allocator, .{
+        .prng = &prng,
+        .io = &io,
+        .shell = shell,
+        .replica_count = args.replica_count,
+        .output_directory = output_directory,
+        .server_executables = &server_executables_all,
+        .driver_executables = &driver_executables_all,
+        .test_duration = args.test_duration,
+        .faulty = !args.disable_faults,
+        .log_debug = args.log_debug,
+        .release_index = dependencies_count - release_count,
+    });
+    defer supervisor.destroy(allocator);
 
-    var network = try faulty_network.Network.listen(
-        allocator,
-        &prng,
-        &io,
-        constants.vortex.replica_ports_actual[0..args.replica_count],
-    );
-    defer network.destroy(allocator);
+    for (0..args.replica_count) |replica_index| {
+        try supervisor.replica_format(@intCast(replica_index));
+        try supervisor.replica_start(@intCast(replica_index));
+    }
 
-    var replicas: [constants.vsr.replicas_max]*Replica = undefined;
-    var replicas_initialized: usize = 0;
-    defer {
-        for (replicas[0..replicas_initialized]) |replica| {
+    try supervisor.run();
+}
+
+const Supervisor = struct {
+    allocator: std.mem.Allocator,
+    prng: *stdx.PRNG,
+    io: *IO,
+    shell: *Shell,
+    network: *Network,
+    workload: *Workload,
+    options: Options,
+
+    replica_datafiles: []const []const u8,
+    replicas: []*Replica,
+
+    release_index: u32,
+    release_count: u32,
+
+    const Options = struct {
+        prng: *stdx.PRNG,
+        io: *IO,
+        shell: *Shell,
+        replica_count: u8,
+        output_directory: []const u8,
+        server_executables: []const []const u8,
+        driver_executables: []const []const u8,
+        test_duration: stdx.Duration,
+        faulty: bool,
+        log_debug: bool,
+        release_index: u32,
+    };
+
+    fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
+        assert(options.replica_count > 0);
+        assert(options.server_executables.len == options.driver_executables.len);
+        assert(options.release_index < options.driver_executables.len);
+
+        const replica_ports_actual =
+            constants.vortex.replica_ports_actual[0..options.replica_count];
+        var network = try Network.listen(allocator, options.prng, options.io, replica_ports_actual);
+        errdefer network.destroy(allocator);
+
+        var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
+        for (proxy_ports_all[0..options.replica_count], 0..) |*port, i| {
+            port.* = network.proxies[i].origin_address.getPort();
+        }
+        const proxy_ports = proxy_ports_all[0..options.replica_count];
+
+        const replica_datafiles = try allocator.alloc([]const u8, options.replica_count);
+        errdefer allocator.free(replica_datafiles);
+
+        for (replica_datafiles, 0..) |*datafile, replica_index| {
+            datafile.* = try options.shell.fmt("{s}/{d}_{d}.tigerbeetle", .{
+                options.output_directory,
+                constants.vortex.cluster_id,
+                replica_index,
+            });
+        }
+
+        const replicas = try allocator.alloc(*Replica, options.replica_count);
+        errdefer allocator.free(replicas);
+
+        for (replicas, replica_datafiles, 0..) |*replica, replica_datafile, replica_index| {
+            errdefer for (replicas[0..replica_index]) |r| r.destroy();
+
+            var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
+            for (replica_ports[0..options.replica_count], 0..) |*replica_port, i| {
+                if (replica_index == i) {
+                    replica_port.* = network.proxies[i].remote_address.getPort();
+                } else {
+                    replica_port.* = network.proxies[i].origin_address.getPort();
+                }
+            }
+
+            replica.* = try Replica.create(
+                allocator,
+                options.server_executables,
+                try options.shell.fmt(
+                    "{s}/tigerbeetle-R{d:0>2}",
+                    .{ options.output_directory, replica_index },
+                ),
+                options.release_index,
+                options.replica_count,
+                @intCast(replica_index),
+                replica_ports,
+                replica_datafile,
+                options.log_debug,
+            );
+        }
+
+        // TODO Take client_release_min into account for driver.
+        const workload_driver = options.driver_executables[options.release_index];
+        const workload = try Workload.spawn(allocator, options.io, proxy_ports, workload_driver);
+        errdefer workload.destroy(allocator);
+
+        const supervisor = try allocator.create(Supervisor);
+        errdefer allocator.destroy(supervisor);
+
+        supervisor.* = .{
+            .allocator = allocator,
+            .prng = options.prng,
+            .io = options.io,
+            .shell = options.shell,
+            .network = network,
+            .workload = workload,
+            .options = options,
+            .replicas = replicas,
+            .replica_datafiles = replica_datafiles,
+            .release_index = options.release_index,
+            .release_count = @intCast(options.server_executables.len),
+        };
+        return supervisor;
+    }
+
+    fn destroy(supervisor: *Supervisor, allocator: std.mem.Allocator) void {
+        if (supervisor.workload.process.state == .running) {
+            _ = supervisor.workload.process.terminate() catch {};
+        }
+        supervisor.workload.destroy(allocator);
+
+        for (supervisor.replicas) |replica| {
             // We might have terminated the replica and never restarted it,
             // so we need to check its state.
             if (replica.state() != .terminated) {
@@ -175,142 +299,18 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             }
             replica.destroy();
         }
-    }
-
-    var datafile_buffers: [constants.vsr.replicas_max][std.fs.max_path_bytes]u8 = undefined;
-    for (0..args.replica_count) |replica_index| {
-        const datafile = try std.fmt.bufPrint(
-            datafile_buffers[replica_index][0..],
-            "{s}/{d}_{d}.tigerbeetle",
-            .{ output_directory, constants.vortex.cluster_id, replica_index },
-        );
-
-        shell.exec(
-            \\{tigerbeetle_executable} format
-            \\    --cluster={cluster}
-            \\    --replica={replica_index}
-            \\    --replica-count={replica_count}
-            \\    {datafile}
-        , .{
-            .tigerbeetle_executable = server_executables[0],
-            .cluster = constants.vortex.cluster_id,
-            .replica_index = replica_index,
-            .replica_count = args.replica_count,
-            .datafile = datafile,
-        }) catch |err| {
-            log.err("failed formatting datafile: {}", .{err});
-            return error.SetupFailed;
-        };
-
-        var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
-        for (replica_ports[0..args.replica_count], 0..) |*replica_port, i| {
-            if (replica_index == i) {
-                replica_port.* = network.proxies[i].remote_address.getPort();
-            } else {
-                replica_port.* = network.proxies[i].origin_address.getPort();
-            }
-        }
-
-        var replica = try Replica.create(
-            allocator,
-            server_executables,
-            try shell.fmt("{s}/tigerbeetle-R{d:0>2}", .{ output_directory, replica_index }),
-            args.replica_count,
-            @intCast(replica_index),
-            replica_ports,
-            datafile,
-            args.log_debug,
-        );
-
-        replicas[replica_index] = replica;
-        replicas_initialized += 1;
-
-        try replica.start();
-    }
-
-    var proxy_ports: [constants.vsr.replicas_max]u16 = undefined;
-    for (proxy_ports[0..args.replica_count], 0..) |*port, i| {
-        port.* = network.proxies[i].origin_address.getPort();
-    }
-
-    log.info("launching workload with driver: {s}", .{driver_executables[0]});
-
-    const workload = try Workload.spawn(
-        allocator,
-        &io,
-        proxy_ports[0..args.replica_count],
-        // TODO Take client_release_min into account.
-        driver_executables[0],
-    );
-    defer {
-        if (workload.process.state == .running) {
-            _ = workload.process.terminate() catch {};
-        }
-        workload.destroy(allocator);
-    }
-
-    const supervisor = try Supervisor.create(allocator, .{
-        .io = &io,
-        .network = network,
-        .replicas = replicas[0..args.replica_count],
-        .workload = workload,
-        .prng = &prng,
-        .test_duration = args.test_duration,
-        .faulty = !args.disable_faults,
-    });
-    defer supervisor.destroy(allocator);
-
-    try supervisor.run();
-}
-
-const Supervisor = struct {
-    io: *IO,
-    network: *faulty_network.Network,
-    replicas: []*Replica,
-    workload: *Workload,
-    prng: *stdx.PRNG,
-    test_deadline: i128,
-    faulty: bool,
-
-    release_index: u32,
-    release_count: u32,
-
-    fn create(allocator: std.mem.Allocator, options: struct {
-        io: *IO,
-        network: *faulty_network.Network,
-        replicas: []*Replica,
-        workload: *Workload,
-        prng: *stdx.PRNG,
-        test_duration: stdx.Duration,
-        faulty: bool,
-    }) !*Supervisor {
-        assert(options.replicas.len > 0);
-
-        const supervisor = try allocator.create(Supervisor);
-        errdefer allocator.destroy(supervisor);
-
-        supervisor.* = .{
-            .io = options.io,
-            .network = options.network,
-            .replicas = options.replicas,
-            .workload = options.workload,
-            .prng = options.prng,
-            .test_deadline = std.time.nanoTimestamp() + options.test_duration.ns,
-            .faulty = options.faulty,
-            .release_index = 0,
-            .release_count = @intCast(options.replicas[0].executable_paths.len),
-        };
-        return supervisor;
-    }
-
-    fn destroy(supervisor: *Supervisor, allocator: std.mem.Allocator) void {
+        allocator.free(supervisor.replicas);
+        allocator.free(supervisor.replica_datafiles);
+        supervisor.network.destroy(allocator);
         allocator.destroy(supervisor);
     }
 
     fn run(supervisor: *Supervisor) !void {
-        var running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
-        var terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
-        var paused_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+        var replicas_running_buffer: [constants.vsr.replicas_max]u8 = undefined;
+        var replicas_terminated_buffer: [constants.vsr.replicas_max]u8 = undefined;
+        var replicas_paused_buffer: [constants.vsr.replicas_max]u8 = undefined;
+
+        const test_deadline = std.time.nanoTimestamp() + supervisor.options.test_duration.ns;
 
         var sleep_deadline: u64 = 0;
         // This represents the start timestamp of a period where we have an acceptable number of
@@ -321,19 +321,19 @@ const Supervisor = struct {
         // How many replicas can be faulty while still expecting the cluster to
         // make progress (based on 2f+1).
         const liveness_faulty_replicas_max = @divFloor(supervisor.replicas.len - 1, 2);
-        const workload_result = while (std.time.nanoTimestamp() < supervisor.test_deadline) {
+        const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
             supervisor.network.tick();
             try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
             const now: u64 = @intCast(std.time.nanoTimestamp());
 
-            const running_replicas =
-                replicas_in_state(supervisor.replicas, &running_replicas_buffer, .running);
-            const terminated_replicas =
-                replicas_in_state(supervisor.replicas, &terminated_replicas_buffer, .terminated);
-            const paused_replicas =
-                replicas_in_state(supervisor.replicas, &paused_replicas_buffer, .paused);
+            const replicas_running =
+                replicas_in_state(supervisor.replicas, &replicas_running_buffer, .running);
+            const replicas_terminated =
+                replicas_in_state(supervisor.replicas, &replicas_terminated_buffer, .terminated);
+            const replicas_paused =
+                replicas_in_state(supervisor.replicas, &replicas_paused_buffer, .paused);
 
-            const faulty_replica_count = terminated_replicas.len + paused_replicas.len;
+            const faulty_replica_count = replicas_terminated.len + replicas_paused.len;
 
             if (acceptable_faults_start_ns) |start_ns| {
                 const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
@@ -376,7 +376,7 @@ const Supervisor = struct {
                 }
             }
 
-            if (sleep_deadline < now and supervisor.faulty) {
+            if (sleep_deadline < now and supervisor.options.faulty) {
                 const Action = enum {
                     sleep,
                     replica_terminate,
@@ -393,10 +393,10 @@ const Supervisor = struct {
 
                 switch (supervisor.prng.enum_weighted(Action, .{
                     .sleep = 10,
-                    .replica_terminate = if (running_replicas.len > 0) 4 else 0,
-                    .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
-                    .replica_pause = if (running_replicas.len > 0) 3 else 0,
-                    .replica_resume = if (paused_replicas.len > 0) 10 else 0,
+                    .replica_terminate = if (replicas_running.len > 0) 4 else 0,
+                    .replica_restart = if (replicas_terminated.len > 0) 3 else 0,
+                    .replica_pause = if (replicas_running.len > 0) 3 else 0,
+                    .replica_resume = if (replicas_paused.len > 0) 10 else 0,
                     .replica_upgrade = if (supervisor.cluster_upgrading() != null) 15 else 0,
                     .cluster_upgrade = if (supervisor.release_index + 1 <
                         supervisor.release_count) 5 else 0,
@@ -414,34 +414,31 @@ const Supervisor = struct {
                     },
                     .replica_terminate => {
                         const pick =
-                            running_replicas[supervisor.prng.index(running_replicas)];
-                        _ = try pick.replica.terminate();
+                            replicas_running[supervisor.prng.index(replicas_running)];
+                        try supervisor.replica_terminate(pick);
                     },
                     .replica_restart => {
                         const pick =
-                            terminated_replicas[supervisor.prng.index(terminated_replicas)];
-                        try pick.replica.start();
+                            replicas_terminated[supervisor.prng.index(replicas_terminated)];
+                        try supervisor.replica_start(pick);
                     },
                     .replica_pause => {
                         const pick =
-                            running_replicas[supervisor.prng.index(running_replicas)];
-                        try pick.replica.pause();
+                            replicas_running[supervisor.prng.index(replicas_running)];
+                        try supervisor.replica_pause(pick);
                     },
                     .replica_resume => {
                         const pick =
-                            paused_replicas[supervisor.prng.index(paused_replicas)];
-                        try pick.replica.unpause();
+                            replicas_paused[supervisor.prng.index(replicas_paused)];
+                        try supervisor.replica_unpause(pick);
                     },
                     .replica_upgrade => {
-                        const replica_index = supervisor.cluster_upgrading().?;
-                        const replica = supervisor.replicas[replica_index];
-                        replica.upgrade(supervisor.release_index) catch |err| {
+                        supervisor.replica_upgrade(
+                            supervisor.cluster_upgrading().?,
+                            supervisor.release_index,
+                        ) catch |err| {
                             std.debug.panic("error swapping executable: {}", .{err});
                         };
-                        log.info(
-                            "{}: upgrading replica to {}",
-                            .{ replica_index, supervisor.release_index },
-                        );
                     },
                     .cluster_upgrade => {
                         assert(supervisor.release_index + 1 < supervisor.release_count);
@@ -476,8 +473,8 @@ const Supervisor = struct {
                         sleep_deadline = now + duration;
 
                         supervisor.network.faults.heal();
-                        for (paused_replicas) |paused| try paused.replica.unpause();
-                        for (terminated_replicas) |terminated| try terminated.replica.start();
+                        for (replicas_paused) |index| try supervisor.replica_unpause(index);
+                        for (replicas_terminated) |index| try supervisor.replica_start(index);
 
                         log.info("going into {} quiescence (no faults)", .{
                             std.fmt.fmtDuration(duration),
@@ -555,24 +552,76 @@ const Supervisor = struct {
         }
         return null;
     }
+
+    pub fn replica_format(supervisor: *Supervisor, replica_index: u8) !void {
+        assert(supervisor.replicas[replica_index].state() == .initial or
+            supervisor.replicas[replica_index].state() == .terminated);
+
+        const server_executable = supervisor.options.server_executables[supervisor.release_index];
+        supervisor.shell.exec(
+            \\{tigerbeetle_executable} format
+            \\    --cluster={cluster}
+            \\    --replica={replica_index}
+            \\    --replica-count={replica_count}
+            \\    {datafile}
+        , .{
+            .tigerbeetle_executable = server_executable,
+            .cluster = constants.vortex.cluster_id,
+            .replica_index = replica_index,
+            .replica_count = supervisor.replicas.len,
+            .datafile = supervisor.replica_datafiles[replica_index],
+        }) catch |err| {
+            log.err("{}: failed formatting datafile: {}", .{ replica_index, err });
+            return err;
+        };
+    }
+
+    pub fn replica_start(supervisor: *Supervisor, replica_index: u8) !void {
+        assert(supervisor.replicas[replica_index].state() == .initial or
+            supervisor.replicas[replica_index].state() == .terminated);
+
+        try supervisor.replicas[replica_index].start();
+    }
+
+    pub fn replica_terminate(supervisor: *Supervisor, replica_index: u8) !void {
+        _ = try supervisor.replicas[replica_index].terminate();
+    }
+
+    pub fn replica_pause(supervisor: *Supervisor, replica_index: u8) !void {
+        try supervisor.replicas[replica_index].pause();
+    }
+
+    pub fn replica_unpause(supervisor: *Supervisor, replica_index: u8) !void {
+        try supervisor.replicas[replica_index].unpause();
+    }
+
+    pub fn replica_upgrade(supervisor: *Supervisor, replica_index: u8, release_index: u32) !void {
+        log.info("{}: upgrading replica to {}", .{ replica_index, release_index });
+
+        try supervisor.replicas[replica_index].upgrade(release_index);
+    }
 };
 
-const ReplicaWithIndex = struct { replica: *Replica, index: u8 };
-
 fn replicas_in_state(
-    replicas: []*Replica,
-    buffer: []ReplicaWithIndex,
+    replicas: []const ?*Replica,
+    replica_index_buffer: []u8,
     state: Replica.State,
-) []ReplicaWithIndex {
+) []u8 {
     var count: u8 = 0;
-
-    for (replicas, 0..) |replica, index| {
-        if (replica.state() == state) {
-            buffer[count] = .{ .replica = replica, .index = @intCast(index) };
-            count += 1;
+    for (replicas, 0..) |replica_or_null, index| {
+        if (replica_or_null) |replica| {
+            if (replica.state() == state) {
+                replica_index_buffer[count] = @intCast(index);
+                count += 1;
+            }
+        } else {
+            if (state == .terminated) {
+                replica_index_buffer[count] = @intCast(index);
+                count += 1;
+            }
         }
     }
-    return buffer[0..count];
+    return replica_index_buffer[0..count];
 }
 
 fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
@@ -600,7 +649,7 @@ const Replica = struct {
 
     allocator: std.mem.Allocator,
     executable_paths: []const []const u8,
-    executable_index: u32 = 0,
+    executable_index: u32,
     /// The path of this replica's executable. Executables from `executable_paths` are copied to
     /// this location.
     executable_target: []const u8,
@@ -615,6 +664,7 @@ const Replica = struct {
         allocator: std.mem.Allocator,
         executable_paths: []const []const u8,
         executable_target: []const u8,
+        executable_index: u32,
         replica_count: u8,
         replica_index: u8,
         replica_ports: [constants.vsr.replicas_max]u16,
@@ -633,6 +683,7 @@ const Replica = struct {
             .allocator = allocator,
             .executable_paths = executable_paths,
             .executable_target = executable_target,
+            .executable_index = executable_index,
             .replica_count = replica_count,
             .replica_index = replica_index,
             .replica_ports = replica_ports,
@@ -641,7 +692,7 @@ const Replica = struct {
             .process = null,
         };
 
-        try std.fs.copyFileAbsolute(executable_paths[0], executable_target, .{});
+        try std.fs.copyFileAbsolute(executable_paths[executable_index], executable_target, .{});
         return self;
     }
 
@@ -765,6 +816,8 @@ const Workload = struct {
             "--driver-command={s}",
             .{driver_command},
         );
+
+        log.info("launching workload with driver: {s}", .{driver_command});
 
         const proxy_addresses = try comma_separate_ports(allocator, proxy_ports);
         defer allocator.free(proxy_addresses);
