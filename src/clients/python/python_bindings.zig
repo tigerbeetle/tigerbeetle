@@ -371,7 +371,7 @@ fn emit_method(
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
         \\        return {[prefix_call]s}self._submit(  # type: ignore[no-any-return]
-        \\            Operation.{[operation_name]s},
+        \\            Operation.{[uppercase_name]s},
         \\            {[event_name_or_list]s},
         \\            {[event_type_c]s},
         \\            {[result_type_c]s},

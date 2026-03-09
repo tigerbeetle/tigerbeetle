@@ -488,7 +488,7 @@ transfer1 = tb.Transfer(
     debit_account_id=102,
     credit_account_id=103,
     # Post the entire pending amount.
-    amount=tb.amount_max,
+    amount=tb.AMOUNT_MAX,
     pending_id=6,
     user_data_128=0,
     user_data_64=0,

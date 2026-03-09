@@ -90,7 +90,7 @@ def id() -> int:
     return _id_generator.generate()
 
 
-amount_max = (2 ** 128) - 1
+AMOUNT_MAX = (2 ** 128) - 1
 
 
 class InitError(Exception):

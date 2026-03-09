@@ -1,5 +1,5 @@
 from .bindings import * # noqa
-from .client import ClientAsync, ClientSync, id, amount_max, configure_logging, PacketError # noqa
+from .client import ClientAsync, ClientSync, id, AMOUNT_MAX, configure_logging, PacketError # noqa
 from .lib import IntegerOverflowError, NativeError
 
 # Explicitly declare public exports:
@@ -8,7 +8,7 @@ __all__ = [
     "ClientAsync",
     "ClientSync",
     "id",
-    "amount_max",
+    "AMOUNT_MAX",
     "configure_logging",
     # from .lib:
     "IntegerOverflowError",

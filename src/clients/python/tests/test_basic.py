@@ -204,7 +204,7 @@ def test_post_a_two_phase_transfer(client):
         id=3,
         debit_account_id=0,
         credit_account_id=0,
-        amount=tb.amount_max,
+        amount=tb.AMOUNT_MAX,
         user_data_128=0,
         user_data_64=0,
         user_data_32=0,
