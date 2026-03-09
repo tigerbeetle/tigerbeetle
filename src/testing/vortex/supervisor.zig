@@ -125,10 +125,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const shell = try Shell.create(allocator);
     defer shell.destroy();
 
-    // By default, the shell uses project root as cwd, but we want to use the actual process cwd.
-    try shell.pushd_dir(std.fs.cwd());
-    defer shell.popd();
-
     var io = try IO.init(128, 0);
 
     const output_directory_relative = args.output_directory orelse try shell.create_tmp_dir();
@@ -141,16 +137,19 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     const output_directory =
-        try shell.cwd.realpathAlloc(shell.arena.allocator(), output_directory_relative);
-
-    log.info("output directory: {s}", .{output_directory});
-    log.info("starting test with target runtime of {}", .{args.test_duration});
+        try std.fs.cwd().realpathAlloc(shell.arena.allocator(), output_directory_relative);
 
     const seed = args.seed orelse std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
     // Even if we have past versions available, only use them sometimes.
     const release_count = prng.range_inclusive(u32, 1, dependencies_count);
+
+    log.info("output_directory={s}", .{output_directory});
+    log.info("duration={}", .{args.test_duration});
+    log.info("seed={}", .{seed});
+    log.info("release_index={}/{}", .{ release_count, dependencies_count });
+
     const supervisor = try Supervisor.create(allocator, .{
         .prng = &prng,
         .io = &io,
