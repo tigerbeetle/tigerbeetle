@@ -125,8 +125,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const shell = try Shell.create(allocator);
     defer shell.destroy();
 
-    var io = try IO.init(128, 0);
-
     const output_directory_relative = args.output_directory orelse try shell.create_tmp_dir();
     defer {
         if (args.output_directory == null) {
@@ -152,7 +150,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     const supervisor = try Supervisor.create(allocator, .{
         .prng = &prng,
-        .io = &io,
         .shell = shell,
         .replica_count = args.replica_count,
         .output_directory = output_directory,
@@ -190,7 +187,6 @@ const Supervisor = struct {
 
     const Options = struct {
         prng: *stdx.PRNG,
-        io: *IO,
         shell: *Shell,
         replica_count: u8,
         output_directory: []const u8,
@@ -207,9 +203,15 @@ const Supervisor = struct {
         assert(options.server_executables.len == options.driver_executables.len);
         assert(options.release_index < options.driver_executables.len);
 
+        var io = try allocator.create(IO);
+        errdefer allocator.destroy(io);
+
+        io.* = try IO.init(128, 0);
+        errdefer io.deinit();
+
         const replica_ports_actual =
             constants.vortex.replica_ports_actual[0..options.replica_count];
-        var network = try Network.listen(allocator, options.prng, options.io, replica_ports_actual);
+        var network = try Network.listen(allocator, options.prng, io, replica_ports_actual);
         errdefer network.destroy(allocator);
 
         var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
@@ -262,7 +264,7 @@ const Supervisor = struct {
 
         // TODO Take client_release_min into account for driver.
         const workload_driver = options.driver_executables[options.release_index];
-        const workload = try Workload.spawn(allocator, options.io, proxy_ports, workload_driver);
+        const workload = try Workload.spawn(allocator, io, proxy_ports, workload_driver);
         errdefer workload.destroy(allocator);
 
         const supervisor = try allocator.create(Supervisor);
@@ -271,7 +273,7 @@ const Supervisor = struct {
         supervisor.* = .{
             .allocator = allocator,
             .prng = options.prng,
-            .io = options.io,
+            .io = io,
             .shell = options.shell,
             .network = network,
             .workload = workload,
@@ -301,6 +303,9 @@ const Supervisor = struct {
         allocator.free(supervisor.replicas);
         allocator.free(supervisor.replica_datafiles);
         supervisor.network.destroy(allocator);
+
+        supervisor.io.deinit();
+        allocator.destroy(supervisor.io);
         allocator.destroy(supervisor);
     }
 
