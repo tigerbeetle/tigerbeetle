@@ -243,8 +243,10 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
     }
 
     if (languages.contains(.rust)) {
-        // Currently disabled.
-        _ = &build_rust;
+        var dist_dir_rust = try dist_dir.makeOpenPath("rust", .{});
+        defer dist_dir_rust.close();
+
+        try build_rust(shell, info, dist_dir_rust);
     }
 }
 
@@ -745,6 +747,7 @@ fn publish(
             \\  to `{[tag]s}`.
             \\* Node.js: `npm install --save-exact tigerbeetle-node@{[tag]s}`
             \\* Python: `pip install tigerbeetle=={[tag]s}`
+            \\* Rust: `cargo add tigerbeetle@{[tag]s}`
             \\
             \\## Changelog
             \\
@@ -793,8 +796,7 @@ fn publish(
     if (languages.contains(.java)) try publish_java(shell, info);
     if (languages.contains(.node)) try publish_node(shell, info);
     if (languages.contains(.python)) try publish_python(shell, info);
-    // Currently disabled.
-    _ = &publish_rust;
+    if (languages.contains(.rust)) try publish_rust(shell, info);
 
     if (languages.contains(.zig)) {
         try shell.exec(

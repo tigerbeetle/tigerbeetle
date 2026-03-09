@@ -179,8 +179,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
     // Check all the client releases to ensure the latest published release is what it should be.
     inline for (comptime std.enums.values(Language)) |language| {
-        if ((language == language_requested or language_requested == null) and
-            language != .rust) // Rust isn't published yet.
+        if (language == language_requested or language_requested == null)
         {
             const ci = @field(LanguageCI, @tagName(language));
             const release_published_latest = try ci.release_published_latest(shell);
