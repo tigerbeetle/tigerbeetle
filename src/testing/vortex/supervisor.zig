@@ -202,6 +202,8 @@ const Supervisor = struct {
         assert(options.replica_count > 0);
         assert(options.server_executables.len == options.driver_executables.len);
         assert(options.release_index < options.driver_executables.len);
+        for (options.server_executables) |path| assert(std.fs.path.isAbsolute(path));
+        for (options.driver_executables) |path| assert(std.fs.path.isAbsolute(path));
 
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
@@ -234,7 +236,7 @@ const Supervisor = struct {
         const replicas = try allocator.alloc(*Replica, options.replica_count);
         errdefer allocator.free(replicas);
 
-        for (replicas, replica_datafiles, 0..) |*replica, replica_datafile, replica_index| {
+        for (replicas, 0..) |*replica, replica_index| {
             errdefer for (replicas[0..replica_index]) |r| r.destroy();
 
             var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
@@ -248,7 +250,6 @@ const Supervisor = struct {
 
             replica.* = try Replica.create(
                 allocator,
-                options.server_executables,
                 try options.shell.fmt(
                     "{s}/tigerbeetle-R{d:0>2}",
                     .{ options.output_directory, replica_index },
@@ -257,8 +258,12 @@ const Supervisor = struct {
                 options.replica_count,
                 @intCast(replica_index),
                 replica_ports,
-                replica_datafile,
-                options.log_debug,
+            );
+
+            try std.fs.copyFileAbsolute(
+                options.server_executables[options.release_index],
+                replica.*.executable_target,
+                .{},
             );
         }
 
@@ -292,11 +297,11 @@ const Supervisor = struct {
         }
         supervisor.workload.destroy(allocator);
 
-        for (supervisor.replicas) |replica| {
+        for (supervisor.replicas, 0..) |replica, replica_index| {
             // We might have terminated the replica and never restarted it,
             // so we need to check its state.
             if (replica.state() != .terminated) {
-                _ = replica.terminate() catch {};
+                supervisor.replica_terminate(@intCast(replica_index)) catch {};
             }
             replica.destroy();
         }
@@ -581,48 +586,94 @@ const Supervisor = struct {
     }
 
     pub fn replica_start(supervisor: *Supervisor, replica_index: u8) !void {
-        assert(supervisor.replicas[replica_index].state() == .initial or
-            supervisor.replicas[replica_index].state() == .terminated);
+        log.info("{}: starting replica", .{replica_index});
 
-        try supervisor.replicas[replica_index].start();
+        const replica = supervisor.replicas[replica_index];
+        assert(replica.state() == .initial or replica.state() == .terminated);
+        defer assert(replica.state() == .running);
+
+        const replica_addresses = try comma_separate_ports(
+            supervisor.allocator,
+            replica.replica_ports[0..supervisor.options.replica_count],
+        );
+        defer supervisor.allocator.free(replica_addresses);
+
+        var addresses_buffer: [128]u8 = undefined;
+        const addresses_arg =
+            try std.fmt.bufPrint(addresses_buffer[0..], "--addresses={s}", .{replica_addresses});
+
+        var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
+        argv.push_slice(&.{ replica.executable_target, "start" });
+        if (supervisor.options.log_debug) {
+            argv.push_slice(&.{ "--log-debug", "--experimental" });
+        }
+        argv.push_slice(&.{ addresses_arg, supervisor.replica_datafiles[replica_index] });
+
+        assert(replica.process == null);
+        replica.process = try LoggedProcess.spawn(supervisor.allocator, argv.const_slice(), .{});
     }
 
     pub fn replica_terminate(supervisor: *Supervisor, replica_index: u8) !void {
-        _ = try supervisor.replicas[replica_index].terminate();
+        log.info("{}: terminating replica", .{replica_index});
+
+        const replica = supervisor.replicas[replica_index];
+        assert(replica.state() == .running or replica.state() == .paused);
+        defer assert(replica.state() == .terminated);
+
+        _ = try replica.process.?.terminate();
+        replica.process.?.destroy(supervisor.allocator);
+        replica.process = null;
     }
 
     pub fn replica_pause(supervisor: *Supervisor, replica_index: u8) !void {
-        try supervisor.replicas[replica_index].pause();
+        log.info("{}: pausing replica", .{replica_index});
+
+        const replica = supervisor.replicas[replica_index];
+        assert(replica.state() == .running);
+        defer assert(replica.state() == .paused);
+
+        try replica.process.?.pause();
     }
 
     pub fn replica_unpause(supervisor: *Supervisor, replica_index: u8) !void {
-        try supervisor.replicas[replica_index].unpause();
+        log.info("{}: unpausing replica", .{replica_index});
+
+        const replica = supervisor.replicas[replica_index];
+        assert(replica.state() == .paused);
+        defer assert(replica.state() == .running);
+
+        try replica.process.?.unpause();
     }
 
     pub fn replica_upgrade(supervisor: *Supervisor, replica_index: u8, release_index: u32) !void {
-        log.info("{}: upgrading replica to {}", .{ replica_index, release_index });
+        assert(release_index < supervisor.options.server_executables.len);
+        assert(release_index > supervisor.replicas[replica_index].executable_index);
 
-        try supervisor.replicas[replica_index].upgrade(release_index);
+        log.info(
+            "{}: upgrading replica to {}/{}",
+            .{ replica_index, release_index, supervisor.options.server_executables.len },
+        );
+
+        supervisor.replicas[replica_index].executable_index = release_index;
+
+        try std.fs.copyFileAbsolute(
+            supervisor.options.server_executables[release_index],
+            supervisor.replicas[replica_index].executable_target,
+            .{},
+        );
     }
 };
 
 fn replicas_in_state(
-    replicas: []const ?*Replica,
+    replicas: []const *Replica,
     replica_index_buffer: []u8,
     state: Replica.State,
 ) []u8 {
     var count: u8 = 0;
-    for (replicas, 0..) |replica_or_null, index| {
-        if (replica_or_null) |replica| {
-            if (replica.state() == state) {
-                replica_index_buffer[count] = @intCast(index);
-                count += 1;
-            }
-        } else {
-            if (state == .terminated) {
-                replica_index_buffer[count] = @intCast(index);
-                count += 1;
-            }
+    for (replicas, 0..) |replica, index| {
+        if (replica.state() == state) {
+            replica_index_buffer[count] = @intCast(index);
+            count += 1;
         }
     }
     return replica_index_buffer[0..count];
@@ -652,7 +703,6 @@ const Replica = struct {
     pub const State = enum(u8) { initial, running, paused, terminated };
 
     allocator: std.mem.Allocator,
-    executable_paths: []const []const u8,
     executable_index: u32,
     /// The path of this replica's executable. Executables from `executable_paths` are copied to
     /// this location.
@@ -660,43 +710,31 @@ const Replica = struct {
     replica_count: u8,
     replica_index: u8,
     replica_ports: [constants.vsr.replicas_max]u16,
-    datafile: []const u8,
-    log_debug: bool,
     process: ?*LoggedProcess,
 
     pub fn create(
         allocator: std.mem.Allocator,
-        executable_paths: []const []const u8,
         executable_target: []const u8,
         executable_index: u32,
         replica_count: u8,
         replica_index: u8,
         replica_ports: [constants.vsr.replicas_max]u16,
-        datafile: []const u8,
-        log_debug: bool,
     ) !*Replica {
         assert(replica_index < replica_count);
-        assert(executable_paths.len > 0);
         assert(std.fs.path.isAbsolute(executable_target));
-        for (executable_paths) |exe| assert(std.fs.path.isAbsolute(exe));
 
         const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
 
         self.* = .{
             .allocator = allocator,
-            .executable_paths = executable_paths,
             .executable_target = executable_target,
             .executable_index = executable_index,
             .replica_count = replica_count,
             .replica_index = replica_index,
             .replica_ports = replica_ports,
-            .datafile = datafile,
-            .log_debug = log_debug,
             .process = null,
         };
-
-        try std.fs.copyFileAbsolute(executable_paths[executable_index], executable_target, .{});
         return self;
     }
 
@@ -717,72 +755,6 @@ const Replica = struct {
                 .terminated => return .terminated,
             }
         } else return .initial;
-    }
-
-    pub fn start(self: *Replica) !void {
-        assert(self.state() != .running);
-        defer assert(self.state() == .running);
-
-        if (self.process) |process| {
-            process.destroy(self.allocator);
-        }
-
-        const replica_addresses =
-            try comma_separate_ports(self.allocator, self.replica_ports[0..self.replica_count]);
-        defer self.allocator.free(replica_addresses);
-
-        var addresses_buffer: [128]u8 = undefined;
-        const addresses_arg = try std.fmt.bufPrint(
-            addresses_buffer[0..],
-            "--addresses={s}",
-            .{replica_addresses},
-        );
-
-        var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
-        argv.push_slice(&.{ self.executable_target, "start" });
-        if (self.log_debug) {
-            argv.push_slice(&.{ "--log-debug", "--experimental" });
-        }
-        argv.push_slice(&.{ addresses_arg, self.datafile });
-
-        log.info("{}: starting replica", .{self.replica_index});
-        self.process = try LoggedProcess.spawn(self.allocator, argv.const_slice(), .{});
-    }
-
-    pub fn terminate(self: *Replica) !std.process.Child.Term {
-        assert(self.state() == .running or self.state() == .paused);
-        defer assert(self.state() == .terminated);
-
-        log.info("{}: terminating replica", .{self.replica_index});
-        return try self.process.?.terminate();
-    }
-
-    pub fn pause(self: *Replica) !void {
-        assert(self.state() == .running);
-        defer assert(self.state() == .paused);
-
-        log.info("{}: pausing replica", .{self.replica_index});
-        try self.process.?.pause();
-    }
-
-    pub fn unpause(self: *Replica) !void {
-        assert(self.state() == .paused);
-        defer assert(self.state() == .running);
-
-        log.info("{}: unpausing replica", .{self.replica_index});
-        try self.process.?.unpause();
-    }
-
-    pub fn upgrade(self: *Replica, release_index: u32) !void {
-        assert(self.executable_index < release_index);
-        assert(self.executable_paths.len > release_index);
-        self.executable_index = release_index;
-
-        try std.fs.copyFileAbsolute(
-            self.executable_paths[release_index],
-            self.executable_target,
-            .{},
-        );
     }
 };
 
