@@ -21,7 +21,6 @@ include = [
 
 [dependencies]
 bitflags = "2.6.0"
-futures-channel = "0.3.31"
 
 [dev-dependencies]
 futures = { version = "0.3.31", default-features = false, features = ["executor"] }
