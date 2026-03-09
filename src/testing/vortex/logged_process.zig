@@ -18,8 +18,10 @@ const Options = struct {
     stdout_behavior: std.process.Child.StdIo = .Ignore,
 };
 
+pub const State = enum { running, paused, terminated };
+
 child: std.process.Child,
-state: enum { running, paused, terminated },
+state: State,
 
 pub fn spawn(
     allocator: std.mem.Allocator,

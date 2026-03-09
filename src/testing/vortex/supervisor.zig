@@ -563,8 +563,7 @@ const Supervisor = struct {
     }
 
     pub fn replica_format(supervisor: *Supervisor, replica_index: u8) !void {
-        assert(supervisor.replicas[replica_index].state() == .initial or
-            supervisor.replicas[replica_index].state() == .terminated);
+        assert(supervisor.replicas[replica_index].state() == .terminated);
 
         const server_executable = supervisor.options.server_executables[supervisor.release_index];
         supervisor.shell.exec(
@@ -589,7 +588,7 @@ const Supervisor = struct {
         log.info("{}: starting replica", .{replica_index});
 
         const replica = supervisor.replicas[replica_index];
-        assert(replica.state() == .initial or replica.state() == .terminated);
+        assert(replica.state() == .terminated);
         defer assert(replica.state() == .running);
 
         const replica_addresses = try comma_separate_ports(
@@ -667,7 +666,7 @@ const Supervisor = struct {
 fn replicas_in_state(
     replicas: []const *Replica,
     replica_index_buffer: []u8,
-    state: Replica.State,
+    state: LoggedProcess.State,
 ) []u8 {
     var count: u8 = 0;
     for (replicas, 0..) |replica, index| {
@@ -700,8 +699,6 @@ test comma_separate_ports {
 }
 
 const Replica = struct {
-    pub const State = enum(u8) { initial, running, paused, terminated };
-
     allocator: std.mem.Allocator,
     executable_index: u32,
     /// The path of this replica's executable. Executables from `executable_paths` are copied to
@@ -739,7 +736,7 @@ const Replica = struct {
     }
 
     pub fn destroy(self: *Replica) void {
-        assert(self.state() == .initial or self.state() == .terminated);
+        assert(self.state() == .terminated);
         const allocator = self.allocator;
         if (self.process) |process| {
             process.destroy(allocator);
@@ -747,14 +744,14 @@ const Replica = struct {
         allocator.destroy(self);
     }
 
-    pub fn state(self: *Replica) State {
+    pub fn state(self: *Replica) LoggedProcess.State {
         if (self.process) |process| {
             switch (process.state) {
                 .running => return .running,
                 .paused => return .paused,
                 .terminated => return .terminated,
             }
-        } else return .initial;
+        } else return .terminated;
     }
 };
 
