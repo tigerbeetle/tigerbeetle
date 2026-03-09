@@ -48,12 +48,12 @@ const Progress = @import("./workload.zig").Progress;
 const ratio = stdx.PRNG.ratio;
 const Shell = @import("../../shell.zig");
 
-const log = std.log.scoped(.supervisor);
-const dependencies_path: []const u8 = @import("vortex_options").dependencies_path;
-const dependencies_count: u32 = @import("vortex_options").dependencies_count;
-
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const log = std.log.scoped(.supervisor);
+
+const dependencies_path: []const u8 = @import("vortex_options").dependencies_path;
+const dependencies_count: u32 = @import("vortex_options").dependencies_count;
 
 pub const CLIArgs = struct {
     test_duration: stdx.Duration = .minutes(1),
@@ -95,27 +95,35 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.warn("vortex may encounter port collisions non-Linux OS", .{});
     }
 
-    const shell = try Shell.create(allocator);
-    defer shell.destroy();
-
     comptime assert(dependencies_count > 0);
     if (dependencies_count == 1) {
         log.warn("not testing upgrades", .{});
     }
 
     // Executables are ordered from oldest to newest.
-    var server_executables_all: [dependencies_count][]const u8 = undefined;
-    var driver_executables_all: [dependencies_count][]const u8 = undefined;
-    for (&server_executables_all, &driver_executables_all, 0..) |*server, *driver, i| {
-        server.* = try shell.fmt(
-            "{s}/tigerbeetle-{d}",
-            .{ dependencies_path, dependencies_count - i - 1 },
-        );
-        driver.* = try shell.fmt(
-            "{s}/vortex-driver-zig-{d}",
-            .{ dependencies_path, dependencies_count - i - 1 },
-        );
-    }
+    const server_executables_all: [dependencies_count][]const u8 = comptime array: {
+        var server_executables_all: [dependencies_count][]const u8 = undefined;
+        for (&server_executables_all, 0..) |*server, i| {
+            server.* = std.fmt.comptimePrint(
+                "{s}/tigerbeetle-{d}",
+                .{ dependencies_path, dependencies_count - i - 1 },
+            );
+        }
+        break :array server_executables_all;
+    };
+    const driver_executables_all: [dependencies_count][]const u8 = comptime array: {
+        var driver_executables_all: [dependencies_count][]const u8 = undefined;
+        for (&driver_executables_all, 0..) |*server, i| {
+            server.* = std.fmt.comptimePrint(
+                "{s}/vortex-driver-zig-{d}",
+                .{ dependencies_path, dependencies_count - i - 1 },
+            );
+        }
+        break :array driver_executables_all;
+    };
+
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
 
     // By default, the shell uses project root as cwd, but we want to use the actual process cwd.
     try shell.pushd_dir(std.fs.cwd());
@@ -143,8 +151,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     // Even if we have past versions available, only use them sometimes.
     const release_count = prng.range_inclusive(u32, 1, dependencies_count);
-    const server_executables = server_executables_all[dependencies_count - release_count..];
-    const driver_executables = driver_executables_all[dependencies_count - release_count..];
+    const server_executables = server_executables_all[dependencies_count - release_count ..];
+    const driver_executables = driver_executables_all[dependencies_count - release_count ..];
     assert(server_executables.len == release_count);
     assert(driver_executables.len == release_count);
 
