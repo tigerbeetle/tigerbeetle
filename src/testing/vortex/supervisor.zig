@@ -142,6 +142,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 
     // Even if we have past versions available, only use them sometimes.
     const release_count = prng.range_inclusive(u32, 1, dependencies_count);
+    const release_min = dependencies_count - release_count;
 
     log.info("seed={}", .{seed});
     log.info("output_directory={s}", .{output_directory});
@@ -158,15 +159,16 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .test_duration = args.test_duration,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
-        .release_index = dependencies_count - release_count,
+        .release_index = release_min,
     });
     defer supervisor.destroy(allocator);
 
     for (0..args.replica_count) |replica_index| {
-        try supervisor.replica_install(@intCast(replica_index), supervisor.options.release_index);
+        try supervisor.replica_install(@intCast(replica_index), release_min);
         try supervisor.replica_format(@intCast(replica_index));
         try supervisor.replica_start(@intCast(replica_index));
     }
+    try supervisor.workload_start(supervisor.prng.range_inclusive(u32, 0, release_min));
 
     const test_deadline = std.time.nanoTimestamp() + supervisor.options.test_duration.ns;
     while (std.time.nanoTimestamp() < test_deadline) {
@@ -184,7 +186,7 @@ const Supervisor = struct {
     io: *IO,
     shell: *Shell,
     network: *Network,
-    workload: *Workload,
+    workload: ?*Workload = null,
     options: Options,
 
     replica_datafiles: []const []const u8,
@@ -268,17 +270,6 @@ const Supervisor = struct {
             );
         }
 
-        var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
-        for (proxy_ports_all[0..options.replica_count], 0..) |*port, i| {
-            port.* = network.proxies[i].origin_address.getPort();
-        }
-        const proxy_ports = proxy_ports_all[0..options.replica_count];
-
-        // TODO Take client_release_min into account for driver.
-        const workload_driver = options.driver_executables[options.release_index];
-        const workload = try Workload.spawn(allocator, io, proxy_ports, workload_driver);
-        errdefer workload.destroy(allocator);
-
         const supervisor = try allocator.create(Supervisor);
         errdefer allocator.destroy(supervisor);
 
@@ -288,7 +279,6 @@ const Supervisor = struct {
             .io = io,
             .shell = options.shell,
             .network = network,
-            .workload = workload,
             .options = options,
             .replicas = replicas,
             .replica_datafiles = replica_datafiles,
@@ -299,10 +289,12 @@ const Supervisor = struct {
     }
 
     fn destroy(supervisor: *Supervisor, allocator: std.mem.Allocator) void {
-        if (supervisor.workload.process.state == .running) {
-            _ = supervisor.workload.process.terminate() catch {};
+        if (supervisor.workload) |workload| {
+            if (workload.process.state == .running) {
+                _ = workload.process.terminate() catch {};
+            }
+            workload.destroy(allocator);
         }
-        supervisor.workload.destroy(allocator);
 
         for (supervisor.replicas, 0..) |replica, replica_index| {
             // We might have terminated the replica and never restarted it,
@@ -351,12 +343,15 @@ const Supervisor = struct {
             }
         }
 
-        if (supervisor.workload.process.wait_nonblocking()) |code| {
-            fatal(.workload_exit_early, "workload terminated by itself: code={}", .{code});
+        if (supervisor.workload) |workload| {
+            if (workload.process.wait_nonblocking()) |code| {
+                fatal(.workload_exit_early, "workload terminated by itself: code={}", .{code});
+            }
         }
     }
 
     fn tick_check_liveness(supervisor: *Supervisor) !void {
+        const workload = supervisor.workload orelse return;
         if (supervisor.acceptable_faults_start_ns) |start_ns| {
             const now: u64 = @intCast(std.time.nanoTimestamp());
             const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
@@ -364,10 +359,10 @@ const Supervisor = struct {
             // If we've been in a state with an acceptable number of faults for the required
             // amount of time, we should have seen finished requests.
             const no_finished_requests =
-                now > deadline and supervisor.workload.requests_finished.empty();
+                now > deadline and workload.requests_finished.empty();
             // Also, those that do finish should not have too long durations, counting from the
             // start of the acceptably-faulty period.
-            const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
+            const too_slow_request = workload.find_slow_request_since(start_ns);
 
             if (no_finished_requests) {
                 fatal(.liveness, "liveness check: no finished requests after {d} seconds", .{
@@ -400,13 +395,13 @@ const Supervisor = struct {
             // We have an acceptable number of faults, so we require liveness (after some time).
             if (supervisor.acceptable_faults_start_ns == null) {
                 supervisor.acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
-                supervisor.workload.requests_finished.clear();
+                workload.requests_finished.clear();
             }
         } else {
             // We have too many faults to require liveness.
             if (supervisor.acceptable_faults_start_ns) |_| {
                 supervisor.acceptable_faults_start_ns = null;
-                supervisor.workload.requests_finished.clear();
+                workload.requests_finished.clear();
             }
         }
     }
@@ -454,8 +449,7 @@ const Supervisor = struct {
             .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
             .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
             .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
-            .heal = if (faulty_replica_count > 0 or
-                !supervisor.network.faults.is_healed()) 1 else 0,
+            .heal = 2,
         })) {
             .none => {},
             .replica_terminate => {
@@ -482,8 +476,13 @@ const Supervisor = struct {
             },
             .cluster_upgrade => {
                 assert(supervisor.release_index + 1 < supervisor.release_count);
-                supervisor.release_index += 1;
-                log.info("upgrading cluster to {}", .{supervisor.release_index});
+                const release_max = supervisor.release_count - 1;
+                const release_source = supervisor.release_index;
+                const release_target =
+                    supervisor.prng.range_inclusive(u32, supervisor.release_index, release_max);
+                supervisor.release_index = release_target;
+
+                log.info("upgrading cluster to {}..{}", .{ release_source, release_target });
             },
             .network_delay => {
                 const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
@@ -496,7 +495,7 @@ const Supervisor = struct {
             .network_corrupt => {
                 supervisor.network.faults.corrupt =
                     ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
-                log.info("injecting network corruption: {any}", .{ supervisor.network.faults });
+                log.info("injecting network corruption: {any}", .{supervisor.network.faults});
             },
             .network_heal => {
                 log.info("healing network", .{});
@@ -606,11 +605,11 @@ const Supervisor = struct {
     }
 
     pub fn replica_install(supervisor: *Supervisor, replica_index: u8, release_index: u32) !void {
-        assert(release_index < supervisor.options.server_executables.len);
+        assert(release_index < supervisor.release_count);
 
         log.info(
             "{}: upgrading replica to {}/{}",
-            .{ replica_index, release_index, supervisor.options.server_executables.len - 1 },
+            .{ replica_index, release_index, supervisor.release_count - 1 },
         );
 
         supervisor.replicas[replica_index].executable_index = release_index;
@@ -622,8 +621,29 @@ const Supervisor = struct {
         );
     }
 
+    pub fn workload_start(supervisor: *Supervisor, release_index: u32) !void {
+        assert(supervisor.workload == null);
+
+        var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
+        for (proxy_ports_all[0..supervisor.options.replica_count], 0..) |*port, i| {
+            port.* = supervisor.network.proxies[i].origin_address.getPort();
+        }
+        const proxy_ports = proxy_ports_all[0..supervisor.options.replica_count];
+
+        // TODO Take client_release_min into account for driver.
+        const workload_driver = supervisor.options.driver_executables[release_index];
+        log.info("launching workload with driver: {s}", .{workload_driver});
+
+        const workload =
+            try Workload.spawn(supervisor.allocator, supervisor.io, proxy_ports, workload_driver);
+        errdefer workload.destroy(supervisor.allocator);
+
+        supervisor.workload = workload;
+    }
+
     pub fn workload_terminate(supervisor: *Supervisor) !void {
-        const workload_result = try supervisor.workload.process.terminate();
+        const workload = supervisor.workload.?;
+        const workload_result = try workload.process.terminate();
         if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.KILL })) {
             fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
         }
@@ -757,8 +777,6 @@ const Workload = struct {
             .{driver_command},
         );
 
-        log.info("launching workload with driver: {s}", .{driver_command});
-
         const proxy_addresses = try comma_separate_ports(allocator, proxy_ports);
         defer allocator.free(proxy_addresses);
 
@@ -777,15 +795,10 @@ const Workload = struct {
         const workload = try allocator.create(Workload);
         errdefer allocator.destroy(workload);
 
-        const process = try LoggedProcess.spawn(allocator, argv, .{
-            .stdout_behavior = .Pipe,
-        });
+        const process = try LoggedProcess.spawn(allocator, argv, .{ .stdout_behavior = .Pipe });
         errdefer process.destroy(allocator);
 
-        workload.* = .{
-            .io = io,
-            .process = process,
-        };
+        workload.* = .{ .io = io, .process = process };
 
         // Kick off read loop.
         workload.read();
@@ -813,11 +826,7 @@ const Workload = struct {
         );
     }
 
-    fn on_read(
-        workload: *Workload,
-        _: *IO.Completion,
-        result: IO.ReadError!usize,
-    ) void {
+    fn on_read(workload: *Workload, _: *IO.Completion, result: IO.ReadError!usize) void {
         if (workload.process.state != .running) return;
 
         const count = result catch |err| {
