@@ -95,32 +95,9 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.warn("vortex may encounter port collisions non-Linux OS", .{});
     }
 
-    comptime assert(dependencies_count > 0);
     if (dependencies_count == 1) {
         log.warn("not testing upgrades", .{});
     }
-
-    // Executables are ordered from oldest to newest.
-    const server_executables_all: [dependencies_count][]const u8 = comptime array: {
-        var server_executables_all: [dependencies_count][]const u8 = undefined;
-        for (&server_executables_all, 0..) |*server, i| {
-            server.* = std.fmt.comptimePrint(
-                "{s}/tigerbeetle-{d}",
-                .{ dependencies_path, dependencies_count - i - 1 },
-            );
-        }
-        break :array server_executables_all;
-    };
-    const driver_executables_all: [dependencies_count][]const u8 = comptime array: {
-        var driver_executables_all: [dependencies_count][]const u8 = undefined;
-        for (&driver_executables_all, 0..) |*server, i| {
-            server.* = std.fmt.comptimePrint(
-                "{s}/vortex-driver-zig-{d}",
-                .{ dependencies_path, dependencies_count - i - 1 },
-            );
-        }
-        break :array driver_executables_all;
-    };
 
     const shell = try Shell.create(allocator);
     defer shell.destroy();
@@ -141,7 +118,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     var prng = stdx.PRNG.from_seed(seed);
 
     // Even if we have past versions available, only use them sometimes.
-    const release_count = prng.range_inclusive(u32, 1, dependencies_count);
+    const release_count =
+        if (args.disable_faults) 1 else prng.range_inclusive(u32, 1, dependencies_count);
     const release_min = dependencies_count - release_count;
 
     log.info("seed={}", .{seed});
@@ -154,9 +132,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .shell = shell,
         .replica_count = args.replica_count,
         .output_directory = output_directory,
-        .server_executables = &server_executables_all,
-        .driver_executables = &driver_executables_all,
-        .test_duration = args.test_duration,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
         .release_index = release_min,
@@ -170,7 +145,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
     try supervisor.workload_start(supervisor.prng.range_inclusive(u32, 0, release_min));
 
-    const test_deadline = std.time.nanoTimestamp() + supervisor.options.test_duration.ns;
+    const test_deadline = std.time.nanoTimestamp() + args.test_duration.ns;
     while (std.time.nanoTimestamp() < test_deadline) {
         try supervisor.tick();
     }
@@ -178,6 +153,38 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     log.info("workload: terminating due to max duration", .{});
     try supervisor.workload_terminate();
     log.info("workload: terminated as requested", .{});
+}
+
+/// Executables are ordered from oldest to newest.
+fn configuration() struct {
+    server_executables: [dependencies_count][]const u8,
+    driver_executables: [dependencies_count][]const u8,
+} {
+    comptime assert(dependencies_count > 0);
+    const server_executables: [dependencies_count][]const u8 = comptime array: {
+        var executables: [dependencies_count][]const u8 = undefined;
+        for (&executables, 0..) |*server, i| {
+            server.* = std.fmt.comptimePrint(
+                "{s}/tigerbeetle-{d}",
+                .{ dependencies_path, dependencies_count - i - 1 },
+            );
+        }
+        break :array executables;
+    };
+    const driver_executables: [dependencies_count][]const u8 = comptime array: {
+        var executables: [dependencies_count][]const u8 = undefined;
+        for (&executables, 0..) |*server, i| {
+            server.* = std.fmt.comptimePrint(
+                "{s}/vortex-driver-zig-{d}",
+                .{ dependencies_path, dependencies_count - i - 1 },
+            );
+        }
+        break :array executables;
+    };
+    return .{
+        .server_executables = server_executables,
+        .driver_executables = driver_executables,
+    };
 }
 
 const Supervisor = struct {
@@ -188,6 +195,9 @@ const Supervisor = struct {
     network: *Network,
     workload: ?*Workload = null,
     options: Options,
+
+    server_executables: [dependencies_count][]const u8,
+    driver_executables: [dependencies_count][]const u8,
 
     replica_datafiles: []const []const u8,
     replicas: []*Replica,
@@ -206,20 +216,19 @@ const Supervisor = struct {
         shell: *Shell,
         replica_count: u8,
         output_directory: []const u8,
-        server_executables: []const []const u8,
-        driver_executables: []const []const u8,
-        test_duration: stdx.Duration,
         faulty: bool,
         log_debug: bool,
         release_index: u32,
     };
 
     fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
+        const dependencies = configuration();
+        assert(dependencies.server_executables.len == dependencies.driver_executables.len);
+        for (dependencies.server_executables) |path| assert(std.fs.path.isAbsolute(path));
+        for (dependencies.driver_executables) |path| assert(std.fs.path.isAbsolute(path));
+
         assert(options.replica_count > 0);
-        assert(options.server_executables.len == options.driver_executables.len);
-        assert(options.release_index < options.driver_executables.len);
-        for (options.server_executables) |path| assert(std.fs.path.isAbsolute(path));
-        for (options.driver_executables) |path| assert(std.fs.path.isAbsolute(path));
+        assert(options.release_index < dependencies.driver_executables.len);
 
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
@@ -280,10 +289,12 @@ const Supervisor = struct {
             .shell = options.shell,
             .network = network,
             .options = options,
+            .server_executables = dependencies.server_executables,
+            .driver_executables = dependencies.driver_executables,
             .replicas = replicas,
             .replica_datafiles = replica_datafiles,
             .release_index = options.release_index,
-            .release_count = @intCast(options.server_executables.len),
+            .release_count = @intCast(dependencies.server_executables.len),
         };
         return supervisor;
     }
@@ -525,7 +536,7 @@ const Supervisor = struct {
     pub fn replica_format(supervisor: *Supervisor, replica_index: u8) !void {
         assert(supervisor.replicas[replica_index].state() == .terminated);
 
-        const server_executable = supervisor.options.server_executables[supervisor.release_index];
+        const server_executable = supervisor.server_executables[supervisor.release_index];
         supervisor.shell.exec(
             \\{tigerbeetle_executable} format
             \\    --cluster={cluster}
@@ -615,7 +626,7 @@ const Supervisor = struct {
         supervisor.replicas[replica_index].executable_index = release_index;
 
         try std.fs.copyFileAbsolute(
-            supervisor.options.server_executables[release_index],
+            supervisor.server_executables[release_index],
             supervisor.replicas[replica_index].executable_target,
             .{},
         );
@@ -631,7 +642,7 @@ const Supervisor = struct {
         const proxy_ports = proxy_ports_all[0..supervisor.options.replica_count];
 
         // TODO Take client_release_min into account for driver.
-        const workload_driver = supervisor.options.driver_executables[release_index];
+        const workload_driver = supervisor.driver_executables[release_index];
         log.info("launching workload with driver: {s}", .{workload_driver});
 
         const workload =
