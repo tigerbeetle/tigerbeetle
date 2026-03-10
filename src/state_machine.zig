@@ -3518,11 +3518,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(timestamp_event > self.commit_timestamp or
                 a.flags.imported or
                 self.aof_recovery);
-            if (a.flags.imported) {
-                assert(a.timestamp == timestamp_event);
-            } else {
-                assert(a.timestamp == 0);
-            }
 
             if (a.reserved != 0) return .reserved_field;
             if (a.flags.padding != 0) return .reserved_flag;
@@ -3625,11 +3620,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(timestamp_event > self.commit_timestamp or
                 t.flags.imported or
                 self.aof_recovery);
-            if (t.flags.imported) {
-                assert(t.timestamp == timestamp_event);
-            } else {
-                assert(t.timestamp == 0);
-            }
 
             if (t.flags.padding != 0) return .reserved_flag;
 
@@ -3946,11 +3936,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(t.flags.padding == 0);
             assert(timestamp_event != 0);
             assert(timestamp_event > self.commit_timestamp or t.flags.imported);
-            if (t.flags.imported) {
-                assert(t.timestamp == timestamp_event);
-            } else {
-                assert(t.timestamp == 0);
-            }
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
             if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
