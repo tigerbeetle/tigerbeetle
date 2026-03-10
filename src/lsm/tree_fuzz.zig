@@ -3,6 +3,7 @@ const testing = std.testing;
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
+const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
@@ -144,7 +145,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_results: []Value,
         scan_results_count: u32,
         scan_results_model: []Value,
-        compaction_exhausted: bool = false,
+        checkpoint_grid_done: bool = false,
+        checkpoint_pool_done: bool = false,
         radix_buffer: ScratchMemory,
 
         pool: ResourcePool,
@@ -277,7 +279,23 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.manifest_log_open, .fuzzing);
         }
 
+        fn checkpoint_iop_release_callback(ctx: *anyopaque) void {
+            const env: *Environment = @alignCast(@ptrCast(ctx));
+            if (env.state != .grid_checkpoint) return;
+            if (!env.pool.idle()) return;
+
+            assert(!env.checkpoint_pool_done);
+            env.checkpoint_pool_done = true;
+
+            if (env.checkpoint_grid_done and env.checkpoint_pool_done) {
+                env.change_state(.grid_checkpoint, .superblock_checkpoint);
+            }
+        }
+
         pub fn compact(env: *Environment, op: u64, beats_remaining: u64) void {
+            maybe(!env.pool.idle());
+            maybe(env.pool.blocks_acquired() > 0);
+
             const half_bar = @divExact(constants.lsm_compaction_ops, 2);
             if (op < half_bar) return;
             const compaction_beat = op % constants.lsm_compaction_ops;
@@ -289,11 +307,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             if (last_beat or last_half_beat) assert(beats_remaining == 1);
-
-            assert(env.pool.idle());
-            if (first_beat or half_beat) {
-                assert(env.pool.blocks_acquired() == 0);
-            }
 
             var compactions_active: [constants.lsm_levels]*Tree.Compaction = undefined;
             var compactions_active_count: usize = 0;
@@ -323,15 +336,17 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 // The +1 is for imperfections in pacing our immutable table, which
                 // might cause us to overshoot by a single block (limited to 1 due
                 // to how the immutable table values are consumed.)
-                beat_value_blocks_max += stdx.div_ceil(
+                const beat_value_blocks = stdx.div_ceil(
                     compaction.quotas.beat,
                     Table.layout.block_value_count_max,
                 ) + 1;
-
-                beat_index_blocks_max += stdx.div_ceil(
-                    beat_value_blocks_max,
+                const beat_index_blocks = stdx.div_ceil(
+                    beat_value_blocks,
                     Table.value_block_count_max,
                 );
+
+                beat_value_blocks_max += beat_value_blocks;
+                beat_index_blocks_max += beat_index_blocks;
             }
 
             env.pool.grid_reservation = env.grid.reserve(
@@ -339,7 +354,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             );
 
             for (compactions_slice) |compaction| {
-                assert(env.pool.idle());
                 env.change_state(.fuzzing, .tree_compact);
 
                 switch (compaction.compaction_dispatch_enter(.{
@@ -349,14 +363,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     .pending => env.tick_until_state_change(.tree_compact, .fuzzing),
                     .ready => env.change_state(.tree_compact, .fuzzing),
                 }
-                assert(env.pool.idle());
             }
 
             env.grid.forfeit(env.pool.grid_reservation.?);
 
             if (last_beat or last_half_beat) {
-                assert(env.pool.blocks_acquired() == 0);
-
                 if (op >= constants.lsm_compaction_ops) {
                     env.change_state(.fuzzing, .manifest_log_compact);
                     env.manifest_log.compact(manifest_log_compact_callback, op);
@@ -395,6 +406,16 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         pub fn checkpoint(env: *Environment, op: u64) void {
             env.tree.assert_between_bars();
+
+            env.checkpoint_grid_done = false;
+            env.checkpoint_pool_done = env.pool.idle();
+            if (!env.checkpoint_pool_done) {
+                env.pool.iop_release_resume = .{
+                    .ctx = env,
+                    .callback = checkpoint_iop_release_callback,
+                };
+            }
+            defer env.pool.iop_release_resume = null;
 
             env.change_state(.fuzzing, .grid_checkpoint);
             env.grid.checkpoint(grid_checkpoint_callback);
@@ -441,7 +462,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         fn grid_checkpoint_callback(grid: *Grid) void {
             const env: *Environment = @alignCast(@fieldParentPtr("grid", grid));
-            env.change_state(.grid_checkpoint, .superblock_checkpoint);
+
+            assert(!env.checkpoint_grid_done);
+            env.checkpoint_grid_done = true;
+
+            if (env.checkpoint_grid_done and env.checkpoint_pool_done) {
+                env.change_state(.grid_checkpoint, .superblock_checkpoint);
+            }
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {

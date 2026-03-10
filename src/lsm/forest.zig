@@ -224,7 +224,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         progress: ?union(enum) {
             open: struct { callback: Callback },
-            checkpoint: struct { callback: Callback },
+            checkpoint: struct {
+                callback: Callback,
+                manifest_log_done: bool,
+                trees_done: bool,
+
+                fn all_done(progress: @This()) bool {
+                    return progress.trees_done and progress.manifest_log_done;
+                }
+            },
             compact: struct {
                 op: u64,
                 callback: Callback,
@@ -430,8 +438,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
-            log.debug("entering forest.compact() op={} constants.lsm_compaction_ops={} " ++
+            log.debug("{}: entering forest.compact() op={} constants.lsm_compaction_ops={} " ++
                 "first_beat={} last_half_beat={} half_beat={} last_beat={}", .{
+                forest.grid.superblock.replica_index.?,
                 op,
                 constants.lsm_compaction_ops,
                 first_beat,
@@ -458,7 +467,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             {
                 forest.progress.?.compact.manifest_log_done = true;
                 forest.progress.?.compact.trees_done = true;
-                forest.grid.on_next_tick(compact_finish_next_tick, &forest.next_tick);
+                forest.grid.on_next_tick(compact_finish_callback, &forest.next_tick);
                 return;
             }
 
@@ -475,13 +484,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
 
             forest.compact_trees_start();
-        }
-
-        fn compact_finish_next_tick(next_tick: *Grid.NextTick) void {
-            const forest: *Forest = @alignCast(
-                @fieldParentPtr("next_tick", next_tick),
-            );
-            forest.compact_finish();
         }
 
         /// Plans a half-bar's worth of compaction work across all the trees in the
@@ -690,13 +692,18 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
         }
 
+        fn compact_finish_callback(next_tick: *Grid.NextTick) void {
+            const forest: *Forest = @alignCast(@fieldParentPtr("next_tick", next_tick));
+            forest.compact_finish();
+        }
+
         fn compact_finish(forest: *Forest) void {
             assert(forest.progress.? == .compact);
             assert(forest.progress.?.compact.trees_done);
             assert(forest.progress.?.compact.manifest_log_done);
-            assert(forest.resource_pool.idle());
+            maybe(forest.resource_pool.idle());
             assert(forest.resource_pool.blocks_acquired() <=
-                compaction_block_count_beat_min);
+                compaction_block_count_beat_min + constants.lsm_compaction_iops_write_max);
 
             forest.verify_table_extents();
 
@@ -704,9 +711,24 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const op = forest.progress.?.compact.op;
 
             const compaction_beat = op % constants.lsm_compaction_ops;
+
+            const first_beat = compaction_beat == 0;
+            const half_beat = compaction_beat == @divExact(constants.lsm_compaction_ops, 2);
             const last_half_beat = compaction_beat ==
                 @divExact(constants.lsm_compaction_ops, 2) - 1;
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
+
+            log.debug("{}: entering forest.compact_finish() op={} " ++
+                "constants.lsm_compaction_ops={} first_beat={} " ++
+                "last_half_beat={} half_beat={} last_beat={}", .{
+                forest.grid.superblock.replica_index.?,
+                op,
+                constants.lsm_compaction_ops,
+                first_beat,
+                last_half_beat,
+                half_beat,
+                last_beat,
+            });
 
             if (op < constants.lsm_compaction_ops or
                 forest.grid.superblock.working.vsr_state.op_compacted(op))
@@ -769,12 +791,40 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             return &forest.tree_for_id(tree_id).compactions[level_b];
         }
 
+        fn checkpoint_iop_release_callback(ctx: *anyopaque) void {
+            const forest: *Forest = @alignCast(@ptrCast(ctx));
+
+            if (forest.progress == null) return;
+            if (forest.progress.? != .checkpoint) return;
+            if (!forest.resource_pool.idle()) return;
+
+            assert(!forest.progress.?.checkpoint.trees_done);
+            forest.progress.?.checkpoint.trees_done = true;
+            forest.resource_pool.iop_release_resume = null;
+
+            if (forest.progress.?.checkpoint.all_done()) {
+                const callback = forest.progress.?.checkpoint.callback;
+                forest.progress = null;
+                callback(forest);
+            }
+        }
+
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
-            forest.grid.assert_only_repairing();
             forest.verify_table_extents();
 
-            forest.progress = .{ .checkpoint = .{ .callback = callback } };
+            forest.progress = .{ .checkpoint = .{
+                .callback = callback,
+                .trees_done = forest.resource_pool.idle(),
+                .manifest_log_done = false,
+            } };
+
+            if (!forest.progress.?.checkpoint.trees_done) {
+                forest.resource_pool.iop_release_resume = .{
+                    .ctx = forest,
+                    .callback = checkpoint_iop_release_callback,
+                };
+            }
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).assert_between_bars();
@@ -800,9 +850,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.verify_table_extents();
             forest.verify_tables_recovered();
 
-            const callback = forest.progress.?.checkpoint.callback;
-            forest.progress = null;
-            callback(forest);
+            assert(!forest.progress.?.checkpoint.manifest_log_done);
+            forest.progress.?.checkpoint.manifest_log_done = true;
+
+            if (forest.progress.?.checkpoint.all_done()) {
+                const callback = forest.progress.?.checkpoint.callback;
+                forest.progress = null;
+                callback(forest);
+            }
         }
 
         pub fn tree_id_cast(tree_id: u16) TreeID {
