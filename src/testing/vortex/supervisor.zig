@@ -143,10 +143,10 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     // Even if we have past versions available, only use them sometimes.
     const release_count = prng.range_inclusive(u32, 1, dependencies_count);
 
+    log.info("seed={}", .{seed});
     log.info("output_directory={s}", .{output_directory});
     log.info("duration={}", .{args.test_duration});
-    log.info("seed={}", .{seed});
-    log.info("release_index={}/{}", .{ release_count, dependencies_count });
+    log.info("releases={}/{}", .{ release_count, dependencies_count });
 
     const supervisor = try Supervisor.create(allocator, .{
         .prng = &prng,
@@ -163,11 +163,19 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     defer supervisor.destroy(allocator);
 
     for (0..args.replica_count) |replica_index| {
+        try supervisor.replica_install(@intCast(replica_index), supervisor.options.release_index);
         try supervisor.replica_format(@intCast(replica_index));
         try supervisor.replica_start(@intCast(replica_index));
     }
 
-    try supervisor.run();
+    const test_deadline = std.time.nanoTimestamp() + supervisor.options.test_duration.ns;
+    while (std.time.nanoTimestamp() < test_deadline) {
+        try supervisor.tick();
+    }
+
+    log.info("workload: terminating due to max duration", .{});
+    try supervisor.workload_terminate();
+    log.info("workload: terminated as requested", .{});
 }
 
 const Supervisor = struct {
@@ -184,6 +192,12 @@ const Supervisor = struct {
 
     release_index: u32,
     release_count: u32,
+
+    /// This represents the start timestamp of a period where we have an acceptable number of
+    /// process faults, such that we require liveness (that requests are finished within a
+    /// certain time period). If null, it means we're in a period of too many faults, thus
+    /// enforcing no such requirement.
+    acceptable_faults_start_ns: ?u64 = null,
 
     const Options = struct {
         prng: *stdx.PRNG,
@@ -216,21 +230,14 @@ const Supervisor = struct {
         var network = try Network.listen(allocator, options.prng, io, replica_ports_actual);
         errdefer network.destroy(allocator);
 
-        var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
-        for (proxy_ports_all[0..options.replica_count], 0..) |*port, i| {
-            port.* = network.proxies[i].origin_address.getPort();
-        }
-        const proxy_ports = proxy_ports_all[0..options.replica_count];
-
         const replica_datafiles = try allocator.alloc([]const u8, options.replica_count);
         errdefer allocator.free(replica_datafiles);
 
         for (replica_datafiles, 0..) |*datafile, replica_index| {
-            datafile.* = try options.shell.fmt("{s}/{d}_{d}.tigerbeetle", .{
-                options.output_directory,
-                constants.vortex.cluster_id,
-                replica_index,
-            });
+            datafile.* = try options.shell.fmt(
+                "{s}/{d}_{d}.tigerbeetle",
+                .{ options.output_directory, constants.vortex.cluster_id, replica_index },
+            );
         }
 
         const replicas = try allocator.alloc(*Replica, options.replica_count);
@@ -259,13 +266,13 @@ const Supervisor = struct {
                 @intCast(replica_index),
                 replica_ports,
             );
-
-            try std.fs.copyFileAbsolute(
-                options.server_executables[options.release_index],
-                replica.*.executable_target,
-                .{},
-            );
         }
+
+        var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
+        for (proxy_ports_all[0..options.replica_count], 0..) |*port, i| {
+            port.* = network.proxies[i].origin_address.getPort();
+        }
+        const proxy_ports = proxy_ports_all[0..options.replica_count];
 
         // TODO Take client_release_min into account for driver.
         const workload_driver = options.driver_executables[options.release_index];
@@ -314,239 +321,188 @@ const Supervisor = struct {
         allocator.destroy(supervisor);
     }
 
-    fn run(supervisor: *Supervisor) !void {
+    pub fn tick(supervisor: *Supervisor) !void {
+        supervisor.network.tick();
+        try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
+
+        const now: u64 = @intCast(std.time.nanoTimestamp());
+
         var replicas_running_buffer: [constants.vsr.replicas_max]u8 = undefined;
         var replicas_terminated_buffer: [constants.vsr.replicas_max]u8 = undefined;
         var replicas_paused_buffer: [constants.vsr.replicas_max]u8 = undefined;
 
-        const test_deadline = std.time.nanoTimestamp() + supervisor.options.test_duration.ns;
+        const replicas_running =
+            replicas_in_state(supervisor.replicas, &replicas_running_buffer, .running);
+        const replicas_terminated =
+            replicas_in_state(supervisor.replicas, &replicas_terminated_buffer, .terminated);
+        const replicas_paused =
+            replicas_in_state(supervisor.replicas, &replicas_paused_buffer, .paused);
 
-        var sleep_deadline: u64 = 0;
-        // This represents the start timestamp of a period where we have an acceptable number of
-        // process faults, such that we require liveness (that requests are finished within a
-        // certain time period). If null, it means we're in a period of too many faults, thus
-        // enforcing no such requirement.
-        var acceptable_faults_start_ns: ?u64 = null;
+        const faulty_replica_count = replicas_terminated.len + replicas_paused.len;
+
+        if (supervisor.acceptable_faults_start_ns) |start_ns| {
+            const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
+                std.time.ns_per_s;
+            // If we've been in a state with an acceptable number of faults for the required
+            // amount of time, we should have seen finished requests.
+            const no_finished_requests =
+                now > deadline and supervisor.workload.requests_finished.empty();
+            // Also, those that do finish should not have too long durations, counting from the
+            // start of the acceptably-faulty period.
+            const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
+
+            if (no_finished_requests) {
+                fatal(.liveness, "liveness check: no finished requests after {d} seconds", .{
+                    constants.vortex.liveness_requirement_seconds,
+                });
+            }
+
+            if (too_slow_request) |_| {
+                fatal(.request_slow, "liveness check: too slow request", .{});
+            }
+        }
+
         // How many replicas can be faulty while still expecting the cluster to
         // make progress (based on 2f+1).
         const liveness_faulty_replicas_max = @divFloor(supervisor.replicas.len - 1, 2);
-        const workload_result = while (std.time.nanoTimestamp() < test_deadline) {
-            supervisor.network.tick();
-            try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
-            const now: u64 = @intCast(std.time.nanoTimestamp());
+        // Check if `acceptable_faults_start_ns` should change state. If so, we reset the max
+        // request duration too.
+        // NOTE: Network faults are currently global, so we relax the requirement in such cases.
+        if (faulty_replica_count <= liveness_faulty_replicas_max and
+            supervisor.network.faults.is_healed())
+        {
+            // We have an acceptable number of faults, so we require liveness (after some time).
+            if (supervisor.acceptable_faults_start_ns == null) {
+                supervisor.acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
+                supervisor.workload.requests_finished.clear();
+            }
+        } else {
+            // We have too many faults to require liveness.
+            if (supervisor.acceptable_faults_start_ns) |_| {
+                supervisor.acceptable_faults_start_ns = null;
+                supervisor.workload.requests_finished.clear();
+            }
+        }
 
-            const replicas_running =
-                replicas_in_state(supervisor.replicas, &replicas_running_buffer, .running);
-            const replicas_terminated =
-                replicas_in_state(supervisor.replicas, &replicas_terminated_buffer, .terminated);
-            const replicas_paused =
-                replicas_in_state(supervisor.replicas, &replicas_paused_buffer, .paused);
+        if (supervisor.options.faulty) {
+            const Action = enum {
+                none,
+                replica_terminate,
+                replica_restart,
+                replica_pause,
+                replica_resume,
+                replica_upgrade,
+                cluster_upgrade,
+                network_delay,
+                network_corrupt,
+                network_heal,
+                heal,
+            };
 
-            const faulty_replica_count = replicas_terminated.len + replicas_paused.len;
-
-            if (acceptable_faults_start_ns) |start_ns| {
-                const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
-                    std.time.ns_per_s;
-                // If we've been in a state with an acceptable number of faults for the required
-                // amount of time, we should have seen finished requests.
-                const no_finished_requests =
-                    now > deadline and supervisor.workload.requests_finished.empty();
-                // Also, those that do finish should not have too long durations, counting from the
-                // start of the acceptably-faulty period.
-                const too_slow_request = supervisor.workload.find_slow_request_since(start_ns);
-
-                if (no_finished_requests) {
-                    fatal(.liveness, "liveness check: no finished requests after {d} seconds", .{
-                        constants.vortex.liveness_requirement_seconds,
+            // Since "none" dominates the others, the fault values can be thought of as
+            // "expected number of occurrences per 2 minutes".
+            const minute_ticks = 60 * (std.time.ms_per_s / constants.vsr.tick_ms);
+            switch (supervisor.prng.enum_weighted(Action, .{
+                .none = 2 * minute_ticks,
+                .replica_terminate = if (replicas_running.len > 0) 4 else 0,
+                .replica_restart = if (replicas_terminated.len > 0) 3 else 0,
+                .replica_pause = if (replicas_running.len > 0) 3 else 0,
+                .replica_resume = if (replicas_paused.len > 0) 10 else 0,
+                .replica_upgrade = if (supervisor.cluster_upgrading() != null) 15 else 0,
+                .cluster_upgrade = if (supervisor.release_index + 1 <
+                    supervisor.release_count) 2 else 0,
+                .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
+                .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
+                .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
+                .heal = if (faulty_replica_count > 0 or
+                    !supervisor.network.faults.is_healed()) 1 else 0,
+            })) {
+                .none => {},
+                .replica_terminate => {
+                    const pick =
+                        replicas_running[supervisor.prng.index(replicas_running)];
+                    try supervisor.replica_terminate(pick);
+                },
+                .replica_restart => {
+                    const pick =
+                        replicas_terminated[supervisor.prng.index(replicas_terminated)];
+                    try supervisor.replica_start(pick);
+                },
+                .replica_pause => {
+                    const pick =
+                        replicas_running[supervisor.prng.index(replicas_running)];
+                    try supervisor.replica_pause(pick);
+                },
+                .replica_resume => {
+                    const pick =
+                        replicas_paused[supervisor.prng.index(replicas_paused)];
+                    try supervisor.replica_unpause(pick);
+                },
+                .replica_upgrade => {
+                    try supervisor.replica_install(
+                        supervisor.cluster_upgrading().?,
+                        supervisor.release_index,
+                    );
+                },
+                .cluster_upgrade => {
+                    assert(supervisor.release_index + 1 < supervisor.release_count);
+                    supervisor.release_index += 1;
+                    log.info("upgrading cluster to {}", .{supervisor.release_index});
+                },
+                .network_delay => {
+                    const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
+                    supervisor.network.faults.delay = .{
+                        .time_ms = time_ms,
+                        .jitter_ms = @min(time_ms, 50),
+                    };
+                    log.info("injecting network delays: {any}", .{supervisor.network.faults});
+                },
+                .network_corrupt => {
+                    supervisor.network.faults.corrupt =
+                        ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
+                    log.info("injecting network corruption: {any}", .{
+                        supervisor.network.faults,
                     });
-                }
+                },
+                .network_heal => {
+                    log.info("healing network", .{});
+                    supervisor.network.faults.heal();
+                },
+                .heal => {
+                    supervisor.network.faults.heal();
+                    for (replicas_paused) |index| try supervisor.replica_unpause(index);
+                    for (replicas_terminated) |index| try supervisor.replica_start(index);
 
-                if (too_slow_request) |_| {
-                    fatal(.request_slow, "liveness check: too slow request", .{});
-                }
+                    log.info("healing all faults", .{});
+                },
             }
+        }
 
-            // Check if `acceptable_faults_start_ns` should change state. If so, we reset the max
-            // request duration too.
-            // NOTE: Network faults are currently global, so we relax the requirement in such cases.
-            if (faulty_replica_count <= liveness_faulty_replicas_max and
-                supervisor.network.faults.is_healed())
-            {
-                // We have an acceptable number of faults, so we require liveness (after some time).
-                if (acceptable_faults_start_ns == null) {
-                    acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
-                    supervisor.workload.requests_finished.clear();
-                }
-            } else {
-                // We have too many faults to require liveness.
-                if (acceptable_faults_start_ns) |_| {
-                    acceptable_faults_start_ns = null;
-                    supervisor.workload.requests_finished.clear();
-                }
-            }
+        // Check for replicas that have exited.
+        for (supervisor.replicas, 0..) |replica, replica_index| {
+            if (replica.state() != .terminated) {
+                if (replica.process.?.wait_nonblocking()) |term| {
+                    // Replicas shouldn't exit on their own, even with code=0.
+                    maybe(std.meta.eql(term, .{ .Exited = 0 }));
 
-            if (sleep_deadline < now and supervisor.options.faulty) {
-                const Action = enum {
-                    sleep,
-                    replica_terminate,
-                    replica_restart,
-                    replica_pause,
-                    replica_resume,
-                    replica_upgrade,
-                    cluster_upgrade,
-                    network_delay,
-                    network_corrupt,
-                    network_heal,
-                    quiesce,
-                };
-
-                switch (supervisor.prng.enum_weighted(Action, .{
-                    .sleep = 10,
-                    .replica_terminate = if (replicas_running.len > 0) 4 else 0,
-                    .replica_restart = if (replicas_terminated.len > 0) 3 else 0,
-                    .replica_pause = if (replicas_running.len > 0) 3 else 0,
-                    .replica_resume = if (replicas_paused.len > 0) 10 else 0,
-                    .replica_upgrade = if (supervisor.cluster_upgrading() != null) 15 else 0,
-                    .cluster_upgrade = if (supervisor.release_index + 1 <
-                        supervisor.release_count) 5 else 0,
-                    .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
-                    .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
-                    .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
-                    .quiesce = if (faulty_replica_count > 0 or
-                        !supervisor.network.faults.is_healed()) 1 else 0,
-                })) {
-                    .sleep => {
-                        const duration =
-                            supervisor.prng.int_inclusive(u64, 10 * std.time.ns_per_s);
-                        log.info("sleeping for {}", .{std.fmt.fmtDuration(duration)});
-                        sleep_deadline = now + duration;
-                    },
-                    .replica_terminate => {
-                        const pick =
-                            replicas_running[supervisor.prng.index(replicas_running)];
-                        try supervisor.replica_terminate(pick);
-                    },
-                    .replica_restart => {
-                        const pick =
-                            replicas_terminated[supervisor.prng.index(replicas_terminated)];
-                        try supervisor.replica_start(pick);
-                    },
-                    .replica_pause => {
-                        const pick =
-                            replicas_running[supervisor.prng.index(replicas_running)];
-                        try supervisor.replica_pause(pick);
-                    },
-                    .replica_resume => {
-                        const pick =
-                            replicas_paused[supervisor.prng.index(replicas_paused)];
-                        try supervisor.replica_unpause(pick);
-                    },
-                    .replica_upgrade => {
-                        supervisor.replica_upgrade(
-                            supervisor.cluster_upgrading().?,
-                            supervisor.release_index,
-                        ) catch |err| {
-                            std.debug.panic("error swapping executable: {}", .{err});
-                        };
-                    },
-                    .cluster_upgrade => {
-                        assert(supervisor.release_index + 1 < supervisor.release_count);
-                        supervisor.release_index += 1;
-                        log.info("upgrading cluster to {}", .{supervisor.release_index});
-                    },
-                    .network_delay => {
-                        const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
-                        supervisor.network.faults.delay = .{
-                            .time_ms = time_ms,
-                            .jitter_ms = @min(time_ms, 50),
-                        };
-                        log.info("injecting network delays: {any}", .{supervisor.network.faults});
-                    },
-                    .network_corrupt => {
-                        supervisor.network.faults.corrupt =
-                            ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
-                        log.info("injecting network corruption: {any}", .{
-                            supervisor.network.faults,
-                        });
-                    },
-                    .network_heal => {
-                        log.info("healing network", .{});
-                        supervisor.network.faults.heal();
-                    },
-                    .quiesce => {
-                        const duration = supervisor.prng.range_inclusive(
-                            u64,
-                            constants.vortex.liveness_requirement_seconds,
-                            constants.vortex.liveness_requirement_seconds * 2,
-                        ) * std.time.ns_per_s;
-                        sleep_deadline = now + duration;
-
-                        supervisor.network.faults.heal();
-                        for (replicas_paused) |index| try supervisor.replica_unpause(index);
-                        for (replicas_terminated) |index| try supervisor.replica_start(index);
-
-                        log.info("going into {} quiescence (no faults)", .{
-                            std.fmt.fmtDuration(duration),
-                        });
-                    },
-                }
-            }
-
-            // Check for replicas that have exited.
-            for (supervisor.replicas, 0..) |replica, replica_index| {
-                if (replica.state() != .terminated) {
-                    if (replica.process.?.wait_nonblocking()) |term| {
-                        // Replicas shouldn't exit on their own, even with code=0.
-                        maybe(std.meta.eql(term, .{ .Exited = 0 }));
-
-                        log.err(
-                            "{}: replica terminated unexpectedly with {}",
-                            .{ replica_index, term },
-                        );
-                        if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
-                            // If one of the replica dies to SIGKILL, it is likely an OOM.
-                            // Bubble that up to CFO so that this Vortex run is counted as neither a
-                            // success or failure.
-                            std.posix.exit(@intCast(128 + term.Signal));
-                        } else {
-                            fatal(.replica_exit_result, "replica exited with: {}", .{term});
-                        }
+                    log.err(
+                        "{}: replica terminated unexpectedly with {}",
+                        .{ replica_index, term },
+                    );
+                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
+                        // If one of the replica dies to SIGKILL, it is likely an OOM.
+                        // Bubble that up to CFO so that this Vortex run is counted as neither a
+                        // success or failure.
+                        std.posix.exit(@intCast(128 + term.Signal));
+                    } else {
+                        fatal(.replica_exit_result, "replica exited with: {}", .{term});
                     }
                 }
             }
+        }
 
-            if (supervisor.workload.process.wait_nonblocking()) |code| {
-                fatal(
-                    .workload_exit_early,
-                    "workload terminated by itself: code={}",
-                    .{code},
-                );
-            }
-        } else blk: {
-            log.info("terminating workload due to max duration", .{});
-            break :blk try supervisor.workload.process.terminate();
-        };
-
-        switch (workload_result) {
-            .Signal => |signal| {
-                switch (signal) {
-                    std.posix.SIG.KILL => log.info("workload terminated as requested", .{}),
-                    else => {
-                        fatal(
-                            .workload_exit_result,
-                            "workload exited unexpectedly with signal {d}",
-                            .{signal},
-                        );
-                    },
-                }
-            },
-            else => {
-                fatal(
-                    .workload_exit_result,
-                    "unexpected workload result: {any}",
-                    .{workload_result},
-                );
-            },
+        if (supervisor.workload.process.wait_nonblocking()) |code| {
+            fatal(.workload_exit_early, "workload terminated by itself: code={}", .{code});
         }
     }
 
@@ -644,13 +600,12 @@ const Supervisor = struct {
         try replica.process.?.unpause();
     }
 
-    pub fn replica_upgrade(supervisor: *Supervisor, replica_index: u8, release_index: u32) !void {
+    pub fn replica_install(supervisor: *Supervisor, replica_index: u8, release_index: u32) !void {
         assert(release_index < supervisor.options.server_executables.len);
-        assert(release_index > supervisor.replicas[replica_index].executable_index);
 
         log.info(
             "{}: upgrading replica to {}/{}",
-            .{ replica_index, release_index, supervisor.options.server_executables.len },
+            .{ replica_index, release_index, supervisor.options.server_executables.len - 1 },
         );
 
         supervisor.replicas[replica_index].executable_index = release_index;
@@ -660,6 +615,13 @@ const Supervisor = struct {
             supervisor.replicas[replica_index].executable_target,
             .{},
         );
+    }
+
+    pub fn workload_terminate(supervisor: *Supervisor) !void {
+        const workload_result = try supervisor.workload.process.terminate();
+        if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.KILL })) {
+            fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
+        }
     }
 };
 
