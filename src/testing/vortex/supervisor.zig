@@ -60,7 +60,6 @@ pub const CLIArgs = struct {
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
     disable_faults: bool = false,
-    output_directory: ?[]const u8 = null,
     log_debug: bool = false,
     /// Log file path.
     log: ?[]const u8 = null,
@@ -99,43 +98,28 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.warn("not testing upgrades", .{});
     }
 
-    const shell = try Shell.create(allocator);
-    defer shell.destroy();
-
-    const output_directory_relative = args.output_directory orelse try shell.create_tmp_dir();
-    defer {
-        if (args.output_directory == null) {
-            shell.cwd.deleteTree(output_directory_relative) catch |err| {
-                log.err("error deleting tree: {}", .{err});
-            };
-        }
-    }
-
-    const output_directory =
-        try std.fs.cwd().realpathAlloc(shell.arena.allocator(), output_directory_relative);
-
     const seed = args.seed orelse std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
     // Even if we have past versions available, only use them sometimes.
-    const release_count =
-        if (args.disable_faults) 1 else prng.range_inclusive(u32, 1, dependencies_count);
-    const release_min = dependencies_count - release_count;
-
-    log.info("seed={}", .{seed});
-    log.info("output_directory={s}", .{output_directory});
-    log.info("duration={}", .{args.test_duration});
-    log.info("releases={}/{}", .{ release_count, dependencies_count });
+    const release_min = prng.range_inclusive(
+        u32,
+        if (args.disable_faults) dependencies_count - 1 else 0,
+        dependencies_count,
+    );
 
     const supervisor = try Supervisor.create(allocator, .{
         .prng = &prng,
-        .shell = shell,
         .replica_count = args.replica_count,
-        .output_directory = output_directory,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
     });
     defer supervisor.destroy(allocator);
+
+    log.info("seed={}", .{seed});
+    log.info("output_directory={s}", .{supervisor.output_directory});
+    log.info("duration={}", .{args.test_duration});
+    log.info("release={}/{}", .{ release_min, dependencies_count });
 
     for (0..args.replica_count) |replica_index| {
         try supervisor.replica_install(@intCast(replica_index), release_min);
@@ -198,6 +182,7 @@ const Supervisor = struct {
     server_executables: [dependencies_count][]const u8,
     driver_executables: [dependencies_count][]const u8,
 
+    output_directory: []const u8,
     replica_datafiles: []const []const u8,
     replicas: []*Replica,
 
@@ -212,9 +197,7 @@ const Supervisor = struct {
 
     const Options = struct {
         prng: *stdx.PRNG,
-        shell: *Shell,
         replica_count: u8,
-        output_directory: []const u8,
         faulty: bool,
         log_debug: bool,
     };
@@ -226,6 +209,16 @@ const Supervisor = struct {
         for (dependencies.driver_executables) |path| assert(std.fs.path.isAbsolute(path));
 
         assert(options.replica_count > 0);
+
+        const shell = try Shell.create(allocator);
+        errdefer shell.destroy();
+
+        const output_directory = try shell.create_tmp_dir();
+        errdefer {
+            shell.cwd.deleteTree(output_directory) catch |err| {
+                log.err("error deleting tree: {}", .{err});
+            };
+        }
 
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
@@ -242,9 +235,9 @@ const Supervisor = struct {
         errdefer allocator.free(replica_datafiles);
 
         for (replica_datafiles, 0..) |*datafile, replica_index| {
-            datafile.* = try options.shell.fmt(
+            datafile.* = try shell.fmt(
                 "{s}/{d}_{d}.tigerbeetle",
-                .{ options.output_directory, constants.vortex.cluster_id, replica_index },
+                .{ output_directory, constants.vortex.cluster_id, replica_index },
             );
         }
 
@@ -265,10 +258,7 @@ const Supervisor = struct {
 
             replica.* = try Replica.create(
                 allocator,
-                try options.shell.fmt(
-                    "{s}/tigerbeetle-R{d:0>2}",
-                    .{ options.output_directory, replica_index },
-                ),
+                try shell.fmt("{s}/tigerbeetle-R{d:0>2}", .{ output_directory, replica_index }),
                 options.replica_count,
                 @intCast(replica_index),
                 replica_ports,
@@ -282,9 +272,10 @@ const Supervisor = struct {
             .allocator = allocator,
             .prng = options.prng,
             .io = io,
-            .shell = options.shell,
+            .shell = shell,
             .network = network,
             .options = options,
+            .output_directory = output_directory,
             .server_executables = dependencies.server_executables,
             .driver_executables = dependencies.driver_executables,
             .replicas = replicas,
@@ -317,6 +308,11 @@ const Supervisor = struct {
 
         supervisor.io.deinit();
         allocator.destroy(supervisor.io);
+
+        supervisor.shell.cwd.deleteTree(supervisor.output_directory) catch |err| {
+            log.err("error deleting tree: {}", .{err});
+        };
+        supervisor.shell.destroy();
         allocator.destroy(supervisor);
     }
 
