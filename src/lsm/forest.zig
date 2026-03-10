@@ -793,9 +793,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         fn checkpoint_iop_release_callback(ctx: *anyopaque) void {
             const forest: *Forest = @alignCast(@ptrCast(ctx));
+            assert(forest.progress.? == .checkpoint);
 
-            if (forest.progress == null) return;
-            if (forest.progress.? != .checkpoint) return;
             if (!forest.resource_pool.idle()) return;
 
             assert(!forest.progress.?.checkpoint.trees_done);

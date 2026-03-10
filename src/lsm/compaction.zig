@@ -97,14 +97,14 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         const ResourcePool = @This();
 
         const BlockRead = struct {
-            grid_read: Grid.Read,
-            counters: ?*CompactionCounters,
+            grid_read: Grid.Read = undefined,
+            counters: ?*CompactionCounters = null,
             block: *Block,
             pool: *ResourcePool,
         };
 
         const BlockWrite = struct {
-            grid_write: Grid.Write,
+            grid_write: Grid.Write = undefined,
             block: *Block,
             pool: *ResourcePool,
         };
@@ -515,8 +515,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
             while (level_a_value_block_iterator.next()) |block| {
                 if (block.stage == .read_value_block_done) {
-                    const value_count = Table.value_block_values_used(block.ptr).len;
-                    values_in_flight += value_count;
+                    values_in_flight += Table.value_block_values_used(block.ptr).len;
                 }
             }
             values_in_flight -= compaction.level_a_position.value;
@@ -524,8 +523,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             var level_b_value_block_iterator = compaction.level_b_value_block.iterator();
             while (level_b_value_block_iterator.next()) |block| {
                 if (block.stage == .read_value_block_done) {
-                    const value_count = Table.value_block_values_used(block.ptr).len;
-                    values_in_flight += value_count;
+                    values_in_flight += Table.value_block_values_used(block.ptr).len;
                 }
             }
 
@@ -1386,8 +1384,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .level_b => compaction.range_b.?.tables.get(level_b_index_block_next - 1),
             };
 
-            read.block = index_block;
-            read.pool = compaction.pool.?;
+            read.* = .{
+                .block = index_block,
+                .pool = compaction.pool.?,
+            };
 
             compaction.grid.read_block(
                 .{ .from_local_or_global_storage = read_index_block_callback },
@@ -1400,13 +1400,13 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
         fn read_index_block_callback(grid_read: *Grid.Read, index_block: BlockPtrConst) void {
             const read: *ResourcePool.BlockRead = @fieldParentPtr("grid_read", grid_read);
-            const pool: *ResourcePool = read.pool;
-            const block = read.block;
 
-            assert(block.stage == .read_index_block);
-            stdx.copy_disjoint(.exact, u8, block.ptr, index_block);
-            block.stage = .read_index_block_done;
-            return pool.iop_release(.{ .read = read });
+            assert(read.block.stage == .read_index_block);
+            assert(read.counters == null);
+
+            stdx.copy_disjoint(.exact, u8, read.block.ptr, index_block);
+            read.block.stage = .read_index_block_done;
+            return read.pool.iop_release(.{ .read = read });
         }
 
         fn read_value_block(
@@ -1451,9 +1451,11 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             const value_block_checksum =
                 index_schema.value_checksums_used(index_block.ptr)[value_block_index];
 
-            read.block = value_block;
-            read.pool = compaction.pool.?;
-            read.counters = &compaction.counters;
+            read.* = .{
+                .block = value_block,
+                .pool = compaction.pool.?,
+                .counters = &compaction.counters,
+            };
 
             compaction.grid.read_block(
                 .{ .from_local_or_global_storage = read_value_block_callback },
@@ -1488,16 +1490,13 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
         fn read_value_block_callback(grid_read: *Grid.Read, value_block: BlockPtrConst) void {
             const read: *ResourcePool.BlockRead = @fieldParentPtr("grid_read", grid_read);
-            const pool: *ResourcePool = read.pool;
-            const block = read.block;
 
             read.counters.?.in += Table.value_block_values_used(value_block).len;
-            read.counters = null;
 
-            assert(block.stage == .read_value_block);
-            stdx.copy_disjoint(.exact, u8, block.ptr, value_block);
-            block.stage = .read_value_block_done;
-            return pool.iop_release(.{ .read = read });
+            assert(read.block.stage == .read_value_block);
+            stdx.copy_disjoint(.exact, u8, read.block.ptr, value_block);
+            read.block.stage = .read_value_block_done;
+            return read.pool.iop_release(.{ .read = read });
         }
 
         fn merge(compaction: *Compaction, cpu: *ResourcePool.CPU) void {
@@ -1697,8 +1696,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                     if (compaction.level_a_position.value ==
                         Table.value_block_values_used(value_block.ptr).len)
                     {
-                        const popped_value_block = compaction.level_a_value_block.pop();
-                        assert(value_block == popped_value_block);
+                        const value_block_popped = compaction.level_a_value_block.pop();
+                        assert(value_block == value_block_popped);
 
                         compaction.level_a_position.value_block += 1;
                         compaction.level_a_position.value = 0;
@@ -1719,8 +1718,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                             assert(compaction.level_a_position.index_block == 1);
                             compaction.level_a_position.value_block = 0;
 
-                            const popped_index_block = compaction.level_a_index_block.pop().?;
-                            assert(popped_index_block == index_block);
+                            const index_block_popped = compaction.level_a_index_block.pop().?;
+                            assert(index_block_popped == index_block);
                             compaction.read_value_block_release_table(index_block.ptr);
                             index_block.stage = .free;
                             compaction.pool.?.block_release(index_block);
@@ -1741,8 +1740,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 if (compaction.level_b_position.value ==
                     Table.value_block_values_used(value_block.ptr).len)
                 {
-                    const popped_value_block = compaction.level_b_value_block.pop().?;
-                    assert(popped_value_block == value_block);
+                    const value_block_popped = compaction.level_b_value_block.pop().?;
+                    assert(value_block == value_block_popped);
 
                     compaction.level_b_position.value_block += 1;
                     compaction.level_b_position.value = 0;
@@ -1762,8 +1761,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                         compaction.level_b_position.index_block += 1;
                         compaction.level_b_position.value_block = 0;
 
-                        const popped_index_block = compaction.level_b_index_block.pop().?;
-                        assert(popped_index_block == index_block);
+                        const index_block_popped = compaction.level_b_index_block.pop().?;
+                        assert(index_block_popped == index_block);
                         compaction.read_value_block_release_table(index_block.ptr);
                         index_block.stage = .free;
 
@@ -1802,8 +1801,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
             block.stage = .write_value_block;
 
-            write.block = block;
-            write.pool = compaction.pool.?;
+            write.* = .{
+                .block = block,
+                .pool = compaction.pool.?,
+            };
 
             compaction.grid.create_block(write_block_callback, &write.grid_write, &write.block.ptr);
         }
@@ -1834,21 +1835,22 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
             block.stage = .write_index_block;
 
-            write.block = block;
-            write.pool = compaction.pool.?;
+            write.* = .{
+                .block = block,
+                .pool = compaction.pool.?,
+            };
 
             compaction.grid.create_block(write_block_callback, &write.grid_write, &write.block.ptr);
         }
 
         fn write_block_callback(grid_write: *Grid.Write) void {
             const write: *ResourcePool.BlockWrite = @fieldParentPtr("grid_write", grid_write);
-            const pool: *ResourcePool = write.pool;
-            const block = write.block;
 
-            assert(block.stage == .write_value_block or block.stage == .write_index_block);
-            block.stage = .free;
-            pool.block_release(block);
-            return pool.iop_release(.{ .write = write });
+            assert(write.block.stage == .write_value_block or
+                write.block.stage == .write_index_block);
+            write.block.stage = .free;
+            write.pool.block_release(write.block);
+            return write.pool.iop_release(.{ .write = write });
         }
 
         // The three functions below are hot CPU loops doing the actual merging, TigerBeetle's data
