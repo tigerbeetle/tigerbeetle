@@ -134,7 +134,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .output_directory = output_directory,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
-        .release_index = release_min,
     });
     defer supervisor.destroy(allocator);
 
@@ -218,7 +217,6 @@ const Supervisor = struct {
         output_directory: []const u8,
         faulty: bool,
         log_debug: bool,
-        release_index: u32,
     };
 
     fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
@@ -228,7 +226,6 @@ const Supervisor = struct {
         for (dependencies.driver_executables) |path| assert(std.fs.path.isAbsolute(path));
 
         assert(options.replica_count > 0);
-        assert(options.release_index < dependencies.driver_executables.len);
 
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
@@ -272,7 +269,6 @@ const Supervisor = struct {
                     "{s}/tigerbeetle-R{d:0>2}",
                     .{ options.output_directory, replica_index },
                 ),
-                options.release_index,
                 options.replica_count,
                 @intCast(replica_index),
                 replica_ports,
@@ -293,7 +289,7 @@ const Supervisor = struct {
             .driver_executables = dependencies.driver_executables,
             .replicas = replicas,
             .replica_datafiles = replica_datafiles,
-            .release_index = options.release_index,
+            .release_index = 0,
             .release_count = @intCast(dependencies.server_executables.len),
         };
         return supervisor;
@@ -420,6 +416,7 @@ const Supervisor = struct {
     fn tick_faults(supervisor: *Supervisor) !void {
         assert(supervisor.options.faulty);
 
+        const prng = supervisor.prng;
         var replicas_running_buffer: [constants.vsr.replicas_max]u8 = undefined;
         var replicas_terminated_buffer: [constants.vsr.replicas_max]u8 = undefined;
         var replicas_paused_buffer: [constants.vsr.replicas_max]u8 = undefined;
@@ -445,6 +442,7 @@ const Supervisor = struct {
             heal,
         };
 
+        const cluster_release_ = supervisor.cluster_release();
         // Since "none" dominates the others, the fault values can be thought of as
         // "expected number of occurrences per 2 minutes".
         const minute_ticks = 60 * (std.time.ms_per_s / constants.vsr.tick_ms);
@@ -455,48 +453,39 @@ const Supervisor = struct {
             .replica_pause = if (replicas_running.len > 0) 3 else 0,
             .replica_resume = if (replicas_paused.len > 0) 10 else 0,
             .replica_upgrade = if (supervisor.cluster_upgrading() != null) 15 else 0,
-            .cluster_upgrade = if (supervisor.release_index + 1 <
-                supervisor.release_count) 2 else 0,
+            .cluster_upgrade = if (cluster_release_ + 1 < supervisor.release_count) 2 else 0,
             .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
             .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
-            .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
+            .network_heal = if (supervisor.network.faults.is_healed()) 0 else 10,
             .heal = 2,
         })) {
             .none => {},
             .replica_terminate => {
-                const pick = replicas_running[supervisor.prng.index(replicas_running)];
-                try supervisor.replica_terminate(pick);
+                try supervisor.replica_terminate(replicas_running[prng.index(replicas_running)]);
             },
             .replica_restart => {
-                const pick = replicas_terminated[supervisor.prng.index(replicas_terminated)];
-                try supervisor.replica_start(pick);
+                try supervisor.replica_start(replicas_terminated[prng.index(replicas_terminated)]);
             },
             .replica_pause => {
-                const pick = replicas_running[supervisor.prng.index(replicas_running)];
-                try supervisor.replica_pause(pick);
+                try supervisor.replica_pause(replicas_running[prng.index(replicas_running)]);
             },
             .replica_resume => {
-                const pick = replicas_paused[supervisor.prng.index(replicas_paused)];
-                try supervisor.replica_unpause(pick);
+                try supervisor.replica_unpause(replicas_paused[prng.index(replicas_paused)]);
             },
             .replica_upgrade => {
-                try supervisor.replica_install(
-                    supervisor.cluster_upgrading().?,
-                    supervisor.release_index,
-                );
+                try supervisor.replica_install(supervisor.cluster_upgrading().?, cluster_release_);
             },
             .cluster_upgrade => {
-                assert(supervisor.release_index + 1 < supervisor.release_count);
+                assert(cluster_release_ + 1 < supervisor.release_count);
                 const release_max = supervisor.release_count - 1;
-                const release_source = supervisor.release_index;
-                const release_target =
-                    supervisor.prng.range_inclusive(u32, supervisor.release_index, release_max);
-                supervisor.release_index = release_target;
+                const release_target = prng.range_inclusive(u32, cluster_release_, release_max);
+                log.info("upgrading cluster to {}..{}", .{ cluster_release_, release_target });
 
-                log.info("upgrading cluster to {}..{}", .{ release_source, release_target });
+                const replica = prng.int_inclusive(u8, @intCast(supervisor.replicas.len));
+                try supervisor.replica_install(replica, release_target);
             },
             .network_delay => {
-                const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
+                const time_ms = prng.range_inclusive(u32, 10, 500);
                 supervisor.network.faults.delay = .{
                     .time_ms = time_ms,
                     .jitter_ms = @min(time_ms, 50),
@@ -504,12 +493,11 @@ const Supervisor = struct {
                 log.info("injecting network delays: {any}", .{supervisor.network.faults});
             },
             .network_corrupt => {
-                supervisor.network.faults.corrupt =
-                    ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
+                supervisor.network.faults.corrupt = ratio(prng.range_inclusive(u8, 1, 10), 100);
                 log.info("injecting network corruption: {any}", .{supervisor.network.faults});
             },
             .network_heal => {
-                log.info("healing network", .{});
+                log.info("healing network faults", .{});
                 supervisor.network.faults.heal();
             },
             .heal => {
@@ -521,12 +509,21 @@ const Supervisor = struct {
         }
     }
 
+    fn cluster_release(supervisor: *const Supervisor) u32 {
+        var release_max: u32 = 0;
+        for (supervisor.replicas) |replica| {
+            release_max = @max(release_max, replica.executable_index);
+        }
+        return release_max;
+    }
+
     fn cluster_upgrading(supervisor: *const Supervisor) ?u8 {
+        const cluster_release_ = supervisor.cluster_release();
         const index_base = supervisor.prng.index(supervisor.replicas);
         for (0..supervisor.replicas.len) |index_offset| {
             const replica_index = (index_base + index_offset) % supervisor.replicas.len;
             const replica = supervisor.replicas[replica_index];
-            if (replica.executable_index < supervisor.release_index) {
+            if (replica.executable_index < cluster_release_) {
                 return @intCast(replica_index);
             }
         }
@@ -699,8 +696,8 @@ test comma_separate_ports {
 const Replica = struct {
     allocator: std.mem.Allocator,
     executable_index: u32,
-    /// The path of this replica's executable. Executables from `executable_paths` are copied to
-    /// this location.
+    /// The path of this replica's executable.
+    /// Executables from `server_executables` are copied to this location.
     executable_target: []const u8,
     replica_count: u8,
     replica_index: u8,
@@ -710,7 +707,6 @@ const Replica = struct {
     pub fn create(
         allocator: std.mem.Allocator,
         executable_target: []const u8,
-        executable_index: u32,
         replica_count: u8,
         replica_index: u8,
         replica_ports: [constants.vsr.replicas_max]u16,
@@ -724,7 +720,7 @@ const Replica = struct {
         self.* = .{
             .allocator = allocator,
             .executable_target = executable_target,
-            .executable_index = executable_index,
+            .executable_index = 0,
             .replica_count = replica_count,
             .replica_index = replica_index,
             .replica_ports = replica_ports,
