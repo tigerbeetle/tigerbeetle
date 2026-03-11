@@ -21,6 +21,7 @@ const maybe = stdx.maybe;
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
+    pub const Stats = common.Stats;
     const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
@@ -59,6 +60,8 @@ pub const IO = struct {
         // All operations have been canceled.
         done,
     } = .inactive,
+
+    stats: common.Stats = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -118,6 +121,10 @@ pub const IO = struct {
     /// in the kernel_timespec struct.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         assert(self.cancel_all_status != .done);
+        defer self.stats.trace();
+
+        var timer = try std.time.Timer.start();
+        defer self.stats.now.time_run_for_ns.ns += timer.read();
 
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
@@ -170,6 +177,8 @@ pub const IO = struct {
             while (copy.pop()) |completion| self.enqueue(completion);
         }
 
+        var timer = try std.time.Timer.start();
+
         // Run completions only after all completions have been flushed:
         // Loop until all completions are processed. Calls to complete() may queue more work
         // and extend the duration of the loop, but this is fine as it 1) executes completions
@@ -200,6 +209,8 @@ pub const IO = struct {
                 .done => unreachable,
             }
         }
+
+        self.stats.now.time_callbacks.ns += timer.read();
 
         // At this point, unqueued could have completions either by 1) those who didn't get an SQE
         // during the popping of unqueued or 2) completion.complete() which start new IO. These

@@ -69,6 +69,12 @@ pub const Duration = struct {
         }
     };
 
+    pub fn subtract(longer: Duration, shorter: Duration) Duration {
+        assert(longer.ns >= shorter.ns);
+        const difference_ns = longer.ns - shorter.ns;
+        return .{ .ns = difference_ns };
+    }
+
     // Human readable format like `1.123s`.
     // NB: this is a lossy operation, durations are rounded to look nice.
     pub fn format(
