@@ -34,6 +34,7 @@ const WorkloadArgs = struct {
     cluster: u128,
     addresses: []const u8,
     driver_command: []const u8,
+    transfer_count: u64,
 };
 
 pub fn main() !void {
@@ -68,6 +69,8 @@ pub fn main() !void {
             try Workload.main(allocator, &.{
                 .input = driver.stdin.?,
                 .output = driver.stdout.?,
+            }, .{
+                .transfer_count = driver_args.transfer_count,
             });
         },
     }

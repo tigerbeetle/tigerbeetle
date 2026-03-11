@@ -47,6 +47,9 @@ const DriverStdio = struct { input: std.fs.File, output: std.fs.File };
 pub fn main(
     allocator: std.mem.Allocator,
     driver: *const DriverStdio,
+    options: struct {
+        transfer_count: u64,
+    },
 ) !void {
     var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
 
@@ -94,6 +97,8 @@ pub fn main(
                 i + 1,
             },
         );
+
+        if (options.transfer_count <= model.transfers_created) break;
     }
 }
 

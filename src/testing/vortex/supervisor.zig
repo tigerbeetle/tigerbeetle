@@ -126,7 +126,10 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         try supervisor.replica_format(@intCast(replica_index));
         try supervisor.replica_start(@intCast(replica_index));
     }
-    try supervisor.workload_start(supervisor.prng.range_inclusive(u32, 0, release_min));
+    try supervisor.workload_start(.{
+        .release = supervisor.prng.range_inclusive(u32, 0, release_min),
+        .transfer_count = std.math.maxInt(u64),
+    });
 
     const test_deadline = std.time.nanoTimestamp() + args.test_duration.ns;
     while (std.time.nanoTimestamp() < test_deadline) {
@@ -627,7 +630,10 @@ const Supervisor = struct {
         );
     }
 
-    pub fn workload_start(supervisor: *Supervisor, release_index: u32) !void {
+    pub fn workload_start(supervisor: *Supervisor, options: struct {
+        release: u32,
+        transfer_count: u64,
+    }) !void {
         assert(supervisor.workload == null);
 
         var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
@@ -637,11 +643,16 @@ const Supervisor = struct {
         const proxy_ports = proxy_ports_all[0..supervisor.options.replica_count];
 
         // TODO Take client_release_min into account for driver.
-        const workload_driver = supervisor.driver_executables[release_index];
+        const workload_driver = supervisor.driver_executables[options.release];
         log.info("launching workload with driver: {s}", .{workload_driver});
 
-        const workload =
-            try Workload.spawn(supervisor.allocator, supervisor.io, proxy_ports, workload_driver);
+        const workload = try Workload.spawn(
+            supervisor.allocator,
+            supervisor.io,
+            proxy_ports,
+            workload_driver,
+            .{ .transfer_count = options.transfer_count },
+        );
         errdefer workload.destroy(supervisor.allocator);
 
         supervisor.workload = workload;
@@ -771,6 +782,9 @@ const Workload = struct {
         io: *IO,
         proxy_ports: []const u16,
         driver_command: []const u8,
+        options: struct {
+            transfer_count: u64,
+        },
     ) !*Workload {
         var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
@@ -789,11 +803,16 @@ const Workload = struct {
             try std.fmt.allocPrint(allocator, "--addresses={s}", .{proxy_addresses});
         defer allocator.free(arg_addresses);
 
+        const arg_transfer_count =
+            try std.fmt.allocPrint(allocator, "--transfer-count={d}", .{options.transfer_count});
+        defer allocator.free(arg_transfer_count);
+
         const argv = &.{
             vortex_path,
             "workload",
             std.fmt.comptimePrint("--cluster={d}", .{constants.vortex.cluster_id}),
             arg_addresses,
+            arg_transfer_count,
             driver_command_arg,
         };
 
