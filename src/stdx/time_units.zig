@@ -198,6 +198,10 @@ test "Duration.parse_flag_value" {
 pub const InstantUnix = struct {
     ns: u64,
 
+    pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
+        return .{ .ns = instant.ns + duration.ns };
+    }
+
     pub fn now() InstantUnix {
         const timestamp_ns = std.time.nanoTimestamp();
         assert(timestamp_ns > 0);
