@@ -109,7 +109,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     );
 
     const supervisor = try Supervisor.create(allocator, .{
-        .prng = &prng,
+        .seed = prng.int(u64),
         .replica_count = args.replica_count,
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
@@ -172,7 +172,7 @@ fn configuration() struct {
 
 const Supervisor = struct {
     allocator: std.mem.Allocator,
-    prng: *stdx.PRNG,
+    prng: stdx.PRNG,
     io: *IO,
     shell: *Shell,
     network: *Network,
@@ -196,7 +196,7 @@ const Supervisor = struct {
     acceptable_faults_start_ns: ?u64 = null,
 
     const Options = struct {
-        prng: *stdx.PRNG,
+        seed: u64,
         replica_count: u8,
         faulty: bool,
         log_debug: bool,
@@ -220,6 +220,8 @@ const Supervisor = struct {
             };
         }
 
+        var prng = stdx.PRNG.from_seed(options.seed);
+
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
 
@@ -228,7 +230,7 @@ const Supervisor = struct {
 
         const replica_ports_actual =
             constants.vortex.replica_ports_actual[0..options.replica_count];
-        var network = try Network.listen(allocator, options.prng, io, replica_ports_actual);
+        var network = try Network.listen(allocator, &prng, io, replica_ports_actual);
         errdefer network.destroy(allocator);
 
         const replica_datafiles = try allocator.alloc([]const u8, options.replica_count);
@@ -270,7 +272,7 @@ const Supervisor = struct {
 
         supervisor.* = .{
             .allocator = allocator,
-            .prng = options.prng,
+            .prng = prng,
             .io = io,
             .shell = shell,
             .network = network,
@@ -412,7 +414,7 @@ const Supervisor = struct {
     fn tick_faults(supervisor: *Supervisor) !void {
         assert(supervisor.options.faulty);
 
-        const prng = supervisor.prng;
+        const prng = &supervisor.prng;
         var replicas_running_buffer: [constants.vsr.replicas_max]u8 = undefined;
         var replicas_terminated_buffer: [constants.vsr.replicas_max]u8 = undefined;
         var replicas_paused_buffer: [constants.vsr.replicas_max]u8 = undefined;
@@ -513,7 +515,7 @@ const Supervisor = struct {
         return release_max;
     }
 
-    fn cluster_upgrading(supervisor: *const Supervisor) ?u8 {
+    fn cluster_upgrading(supervisor: *Supervisor) ?u8 {
         const cluster_release_ = supervisor.cluster_release();
         const index_base = supervisor.prng.index(supervisor.replicas);
         for (0..supervisor.replicas.len) |index_offset| {
