@@ -620,14 +620,23 @@ const Supervisor = struct {
             "{}: upgrading replica to {}/{}",
             .{ replica_index, release_index, supervisor.release_count - 1 },
         );
-
         supervisor.replicas[replica_index].executable_index = release_index;
+
+        const upgrade_requires_restart = builtin.os.tag != .linux and
+            supervisor.replicas[replica_index].state() != .terminated;
+        if (upgrade_requires_restart) {
+            try supervisor.replica_terminate(replica_index);
+        }
 
         try std.fs.copyFileAbsolute(
             supervisor.server_executables[release_index],
             supervisor.replicas[replica_index].executable_target,
             .{},
         );
+
+        if (upgrade_requires_restart) {
+            try supervisor.replica_start(replica_index);
+        }
     }
 
     pub fn workload_start(supervisor: *Supervisor, options: struct {
