@@ -391,8 +391,17 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
         if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
     } else unreachable;
 
-    const a_words = std.mem.bytesAsSlice(Word, std.mem.asBytes(a));
-    const b_words = std.mem.bytesAsSlice(Word, std.mem.asBytes(b));
+    // NOTE: Alignment is intentionally downcast here to work around a Zig code generation bug
+    // described in  https://codeberg.org/ziglang/zig/issues/31473.
+    // TODO: Remove the following two lines once the issue is fixed.
+    const a_bytes: *align(@alignOf(Word)) const [@sizeOf(T)]u8 =
+        @alignCast(std.mem.asBytes(a));
+    const b_bytes: *align(@alignOf(Word)) const [@sizeOf(T)]u8 =
+        @alignCast(std.mem.asBytes(b));
+
+    const a_words = std.mem.bytesAsSlice(Word, a_bytes);
+    const b_words = std.mem.bytesAsSlice(Word, b_bytes);
+
     assert(a_words.len == b_words.len);
 
     var total: Word = 0;
