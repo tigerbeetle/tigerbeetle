@@ -5,13 +5,15 @@ use std::io::{BufRead as _, BufReader};
 use std::mem;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier, Once};
+use std::sync::{Arc, Barrier, Once, RwLock};
 
 use futures::executor::block_on;
 use futures::pin_mut;
 use futures::{Stream, StreamExt};
 
 use tigerbeetle as tb;
+
+type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // Singleton test database.
 // This can be a OnceLock in Rust 1.70+, and LazyLock in 1.80.
@@ -56,7 +58,7 @@ fn work_dir() -> &'static str {
 }
 
 impl TestDb {
-    fn new() -> anyhow::Result<TestDb> {
+    fn new() -> Result<TestDb> {
         // NB: There is one test database shared between all tests, and reused
         // between test runs. If the tests choose their IDs correctly there
         // should never be any collisions, and that one database should work
@@ -83,7 +85,7 @@ impl TestDb {
     }
 
     /// Create a unique development-mode server for a specific test.
-    fn new_development(label: &str) -> anyhow::Result<TestDb> {
+    fn new_development(label: &str) -> Result<TestDb> {
         let database_name = format!("0_0.{label}.tigerbeetle");
 
         // Always start fresh for development instances.
@@ -107,7 +109,7 @@ impl TestDb {
         Ok(server)
     }
 
-    fn start(args: &[&str]) -> anyhow::Result<TestDb> {
+    fn start(args: &[&str]) -> Result<TestDb> {
         let mut server = Command::new(tigerbeetle_bin())
             .current_dir(work_dir())
             // magic address 0: tell us the port to use,
@@ -135,9 +137,16 @@ impl TestDb {
     }
 }
 
-fn test_client() -> anyhow::Result<tb::Client> {
+// Only one database server should run at a time. Normal tests share a read
+// lock; the eviction test takes a write lock so it runs exclusively.
+static DB_LOCK: RwLock<()> = RwLock::new(());
+
+/// Returns the client and a read guard that must be held for the test's
+/// duration. The guard prevents the eviction test from running concurrently.
+fn test_client() -> Result<(tb::Client, std::sync::RwLockReadGuard<'static, ()>)> {
+    let guard = DB_LOCK.read().unwrap();
     let client = tb::Client::new(0, &get_test_db().address())?;
-    Ok(client)
+    Ok((client, guard))
 }
 
 fn assert_send<T: Send>(t: T) -> T {
@@ -148,7 +157,7 @@ const TEST_LEDGER: u32 = 10;
 const TEST_CODE: u16 = 20;
 
 #[test]
-fn smoke() -> anyhow::Result<()> {
+fn smoke() -> Result<()> {
     let account_id1 = tb::id();
     let account_id2 = tb::id();
     let transfer_id1 = tb::id();
@@ -157,7 +166,7 @@ fn smoke() -> anyhow::Result<()> {
     let transfer_id1_user_data_128 = tb::id();
 
     block_on(async {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         {
             let fut = client.create_accounts(&[
@@ -353,7 +362,7 @@ fn smoke() -> anyhow::Result<()> {
 }
 
 #[test]
-fn ctor_fail() -> anyhow::Result<()> {
+fn ctor_fail() -> Result<()> {
     let client = tb::Client::new(0, "hey");
 
     assert!(matches!(client, Err(tb::InitStatus::AddressInvalid)));
@@ -362,8 +371,8 @@ fn ctor_fail() -> anyhow::Result<()> {
 }
 
 #[test]
-fn dtor() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn dtor() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         // Let's at least talk to the server before dropping
@@ -374,8 +383,8 @@ fn dtor() -> anyhow::Result<()> {
 }
 
 #[test]
-fn close() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn close() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]).await?;
@@ -387,8 +396,8 @@ fn close() -> anyhow::Result<()> {
 // Send a request and immediately drop the client.
 // Should still clean up correctly.
 #[test]
-fn dtor_no_wait() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn dtor_no_wait() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]);
@@ -398,8 +407,8 @@ fn dtor_no_wait() -> anyhow::Result<()> {
 }
 
 #[test]
-fn close_no_wait() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn close_no_wait() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let _ = client.create_accounts(&[]);
@@ -409,9 +418,9 @@ fn close_no_wait() -> anyhow::Result<()> {
 }
 
 #[test]
-fn client_drop_before_future_awaited() -> anyhow::Result<()> {
+fn client_drop_before_future_awaited() -> Result<()> {
     let future = {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let account = tb::Account {
             id: tb::id(),
@@ -437,9 +446,9 @@ fn client_drop_before_future_awaited() -> anyhow::Result<()> {
 }
 
 #[test]
-fn client_drop_causes_shutdown_status() -> anyhow::Result<()> {
+fn client_drop_causes_shutdown_status() -> Result<()> {
     let futures = {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let mut futures = Vec::new();
         for _ in 0..10 {
@@ -472,8 +481,8 @@ fn client_drop_causes_shutdown_status() -> anyhow::Result<()> {
 }
 
 #[test]
-fn too_many_events() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn too_many_events() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let accounts = lots_of_accounts();
@@ -510,8 +519,8 @@ fn lots_of_accounts() -> Vec<tb::Account> {
 }
 
 #[test]
-fn zero_events_create_accounts() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn zero_events_create_accounts() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.create_accounts(&[]).await?;
@@ -523,8 +532,8 @@ fn zero_events_create_accounts() -> anyhow::Result<()> {
 }
 
 #[test]
-fn zero_events_create_transfers() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn zero_events_create_transfers() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.create_transfers(&[]).await?;
@@ -536,8 +545,8 @@ fn zero_events_create_transfers() -> anyhow::Result<()> {
 }
 
 #[test]
-fn zero_events_lookup_accounts() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn zero_events_lookup_accounts() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.lookup_accounts(&[]).await?;
@@ -549,8 +558,8 @@ fn zero_events_lookup_accounts() -> anyhow::Result<()> {
 }
 
 #[test]
-fn zero_events_lookup_transfers() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn zero_events_lookup_transfers() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     block_on(async {
         let result = client.lookup_transfers(&[]).await?;
@@ -562,8 +571,8 @@ fn zero_events_lookup_transfers() -> anyhow::Result<()> {
 }
 
 #[test]
-fn multithread() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn multithread() -> Result<()> {
+    let (client, _guard) = test_client()?;
     let client = Arc::new(client);
 
     let num_threads = 16;
@@ -574,37 +583,40 @@ fn multithread() -> anyhow::Result<()> {
     let join_handles = std::iter::repeat(()).take(num_threads).map(|_| {
         let client = client.clone();
         let barrier = barrier.clone();
-        std::thread::spawn(move || -> anyhow::Result<()> {
-            barrier.wait();
-            block_on(async {
-                for _ in 0..num_requests {
-                    let results = client
-                        .create_accounts(&[tb::Account {
-                            id: tb::id(),
-                            debits_pending: 0,
-                            debits_posted: 0,
-                            credits_pending: 0,
-                            credits_posted: 0,
-                            user_data_128: 0,
-                            user_data_64: 0,
-                            user_data_32: 0,
-                            reserved: tb::Reserved::default(),
-                            ledger: TEST_LEDGER,
-                            code: TEST_CODE,
-                            flags: tb::AccountFlags::History,
-                            timestamp: 0,
-                        }])
-                        .await?;
+        std::thread::spawn(
+            move || -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                barrier.wait();
+                block_on(async {
+                    for _ in 0..num_requests {
+                        let results = client
+                            .create_accounts(&[tb::Account {
+                                id: tb::id(),
+                                debits_pending: 0,
+                                debits_posted: 0,
+                                credits_pending: 0,
+                                credits_posted: 0,
+                                user_data_128: 0,
+                                user_data_64: 0,
+                                user_data_32: 0,
+                                reserved: tb::Reserved::default(),
+                                ledger: TEST_LEDGER,
+                                code: TEST_CODE,
+                                flags: tb::AccountFlags::History,
+                                timestamp: 0,
+                            }])
+                            .await?;
 
-                    assert_eq!(results.len(), 1);
-                    assert!(results.iter().all(|result| {
-                        result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
-                    }));
-                }
+                        assert_eq!(results.len(), 1);
+                        assert!(results.iter().all(|result| {
+                            result.timestamp > 0
+                                && result.status == tb::CreateAccountStatus::Created
+                        }));
+                    }
 
-                Ok(())
-            })
-        })
+                    Ok(())
+                })
+            },
+        )
     });
 
     // collect the handles to evaluate the thread::spawns
@@ -625,8 +637,8 @@ fn multithread() -> anyhow::Result<()> {
 }
 
 #[test]
-fn concurrent_requests() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn concurrent_requests() -> Result<()> {
+    let (client, _guard) = test_client()?;
 
     let mut responses = Vec::new();
 
@@ -662,12 +674,12 @@ fn concurrent_requests() -> anyhow::Result<()> {
 
 // A potentially suprising behavior, documented in the crate docs.
 #[test]
-fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
+fn client_drop_loses_pending_transactions() -> Result<()> {
     let mut ids = Vec::new();
 
     // Queue up lots of transactions, drop their futures, drop the client.
     {
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         // Timing-sensitive - trying to create enough pending transactions that
         // not all will be completed. I think test is unlikely to fail because
@@ -687,7 +699,7 @@ fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
     }
 
     // Some of those transactions will have been dropped by tb_client.
-    let client = test_client()?;
+    let (client, _guard) = test_client()?;
 
     // Reverse because later transactions most likely to be lost.
     ids.reverse();
@@ -720,7 +732,7 @@ fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
 fn get_account_transfers_paged(
     client: &tb::Client,
     event: tb::AccountFilter,
-) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + '_ {
+) -> impl Stream<Item = std::result::Result<Vec<tb::Transfer>, tb::PacketStatus>> + '_ {
     assert!(
         event.limit > 1,
         "paged queries should use an explicit limit"
@@ -796,7 +808,7 @@ struct PagingTestParams {
     transfer_count: usize,
 }
 
-fn make_paging_test_transfers(client: &tb::Client) -> anyhow::Result<PagingTestParams> {
+fn make_paging_test_transfers(client: &tb::Client) -> Result<PagingTestParams> {
     let batch_size: usize = 1234;
     let transfer_count: usize = 5678;
     let account_id1 = tb::id();
@@ -853,8 +865,8 @@ fn make_paging_test_transfers(client: &tb::Client) -> anyhow::Result<PagingTestP
 }
 
 #[test]
-fn paging_forward() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn paging_forward() -> Result<()> {
+    let (client, _guard) = test_client()?;
     let test_params = make_paging_test_transfers(&client)?;
 
     let query_results = get_account_transfers_paged(
@@ -885,8 +897,8 @@ fn paging_forward() -> anyhow::Result<()> {
 }
 
 #[test]
-fn paging_reverse() -> anyhow::Result<()> {
-    let client = test_client()?;
+fn paging_reverse() -> Result<()> {
+    let (client, _guard) = test_client()?;
     let test_params = make_paging_test_transfers(&client)?;
 
     let query_results = get_account_transfers_paged(
@@ -919,11 +931,11 @@ fn paging_reverse() -> anyhow::Result<()> {
 // NB: This is a runnable version of an example in the `create_accounts` docs.
 // Try to keep them in sync.
 #[test]
-fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
+fn example_create_accounts() -> std::result::Result<(), Box<dyn std::error::Error>> {
     async fn make_create_accounts_request(
         client: &tb::Client,
         accounts: &[tb::Account],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let create_accounts_results = client.create_accounts(accounts).await?;
         assert_eq!(accounts.len(), create_accounts_results.len());
         let it = accounts
@@ -947,14 +959,14 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
     async fn handle_create_account_success(
         _account: &tb::Account,
         _result: tb::CreateAccountResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_create_account_failure(
         _account: &tb::Account,
         _result: tb::CreateAccountResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
@@ -988,7 +1000,7 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
             tb::CreateAccountStatus::CodeMustNotBeZero,
         ];
 
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         // Test the example.
         make_create_accounts_request(&client, &gen_accounts()).await?;
@@ -1008,11 +1020,11 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
 // NB: This is a runnable version of an example in the `create_transfers` docs.
 // Try to keep them in sync.
 #[test]
-fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
+fn example_create_transfers() -> std::result::Result<(), Box<dyn std::error::Error>> {
     async fn make_create_transfers_request(
         client: &tb::Client,
         transfers: &[tb::Transfer],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let results = client.create_transfers(transfers).await?;
         let it = transfers
             .iter()
@@ -1034,21 +1046,21 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
     async fn handle_create_transfer_success(
         _transfer: &tb::Transfer,
         _result: tb::CreateTransferResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_create_transfer_failure(
         _transfer: &tb::Transfer,
         _result: tb::CreateTransferResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     block_on(async {
         let account_id1 = tb::id();
         let account_id2 = tb::id();
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let accounts = [
             tb::Account {
@@ -1123,11 +1135,11 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
 // NB: This is a runnable version of an example in the `lookup_accounts` docs.
 // Try to keep them in sync.
 #[test]
-fn example_lookup_accounts() -> Result<(), Box<dyn std::error::Error>> {
+fn example_lookup_accounts() -> std::result::Result<(), Box<dyn std::error::Error>> {
     async fn make_lookup_accounts_request(
         client: &tb::Client,
         accounts: &[u128],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let lookup_accounts_results = client.lookup_accounts(accounts).await?;
         let lookup_accounts_results_merged =
             merge_lookup_accounts_results(accounts, lookup_accounts_results);
@@ -1158,13 +1170,13 @@ fn example_lookup_accounts() -> Result<(), Box<dyn std::error::Error>> {
 
     async fn handle_lookup_accounts_success(
         _account: tb::Account,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_lookup_accounts_failure(
         _account_id: u128,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
@@ -1204,7 +1216,7 @@ fn example_lookup_accounts() -> Result<(), Box<dyn std::error::Error>> {
             (account_bogus3, None),
         ];
 
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let _ = client.create_accounts(accounts).await?;
 
@@ -1234,11 +1246,11 @@ fn example_lookup_accounts() -> Result<(), Box<dyn std::error::Error>> {
 // NB: This is a runnable version of an example in the `lookup_transfers` docs.
 // Try to keep them in sync.
 #[test]
-fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
+fn example_lookup_transfers() -> std::result::Result<(), Box<dyn std::error::Error>> {
     async fn make_lookup_transfers_request(
         client: &tb::Client,
         transfers: &[u128],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let lookup_transfers_results = client.lookup_transfers(transfers).await?;
         let lookup_transfers_results_merged =
             merge_lookup_transfers_results(transfers, lookup_transfers_results);
@@ -1269,13 +1281,13 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
 
     async fn handle_lookup_transfers_success(
         _transfer: tb::Transfer,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_lookup_transfers_failure(
         _transfer_id: u128,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
@@ -1337,7 +1349,7 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
             (transfer_bogus3, None),
         ];
 
-        let client = test_client()?;
+        let (client, _guard) = test_client()?;
 
         let _ = client.create_accounts(accounts).await?;
         let _ = client.create_transfers(transfers).await?;
@@ -1366,8 +1378,11 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn client_evicted() -> anyhow::Result<()> {
+fn client_evicted() -> Result<()> {
     const CLIENTS_MAX: usize = 64;
+
+    // Hold the write lock so no other database is running concurrently.
+    let _guard = DB_LOCK.write().unwrap();
 
     // Use a separate server to avoid evicting the shared test client.
     let server = TestDb::new_development("client_evicted")?;

@@ -897,32 +897,6 @@ pub const Storage = struct {
         }
     }
 
-    /// Verify that the storage:
-    /// - contains the given index block
-    /// - contains every value block referenced by the index block
-    pub fn verify_table(storage: *const Storage, index_address: u64, index_checksum: u128) void {
-        assert(index_address > 0);
-
-        const index_block = storage.grid_block(index_address).?;
-        const index_schema = schema.TableIndex.from(index_block);
-        const index_block_header = schema.header_from_block(index_block);
-        assert(index_block_header.address == index_address);
-        assert(index_block_header.checksum == index_checksum);
-        assert(index_block_header.block_type == .index);
-
-        for (
-            index_schema.value_addresses_used(index_block),
-            index_schema.value_checksums_used(index_block),
-        ) |address, checksum| {
-            const value_block = storage.grid_block(address).?;
-            const value_block_header = schema.header_from_block(value_block);
-
-            assert(value_block_header.address == address);
-            assert(value_block_header.checksum == checksum.value);
-            assert(value_block_header.block_type == .value);
-        }
-    }
-
     pub fn transition_to_liveness_mode(storage: *Storage) void {
         storage.options.write_latency_mean = .ms(1);
         storage.options.write_latency_min = .ms(1);

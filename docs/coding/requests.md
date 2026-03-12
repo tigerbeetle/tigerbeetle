@@ -26,8 +26,6 @@ event in the request.
 - [`query_accounts`](../reference/requests/query_accounts.md): query `Account`s
 - [`query_transfers`](../reference/requests/query_transfers.md): query `Transfer`s
 
-_More request types, including more powerful queries, are coming soon!_
-
 ## Events and Results
 
 Each request has a corresponding _event_ and _result_ type:

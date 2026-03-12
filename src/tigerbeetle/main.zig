@@ -501,15 +501,13 @@ fn command_start(
         }
     }
 
+    // Enable tracing for the event loop. Internally, it'll emit its statistics every time
+    // run_for_ns() is called.
+    io.stats.tracer = tracer;
+
     while (true) {
         replica.tick();
-
-        {
-            tracer.start(.loop_run_for_ns);
-            defer tracer.stop(.loop_run_for_ns);
-
-            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
-        }
+        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
 }
 

@@ -316,12 +316,12 @@
 //! [The TigerBeetle Reference](https://docs.tigerbeetle.com/reference/).
 
 use bitflags::bitflags;
-use futures_channel::oneshot::{channel, Receiver};
 
-use std::convert::Infallible;
 use std::future::Future;
 use std::os::raw::{c_char, c_void};
 use std::{fmt, mem, ptr};
+
+mod oneshot;
 
 // The generated bindings.
 // These are not part of the public API but are re-exported hidden
@@ -486,7 +486,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
 
             let responses: &[tbc::tb_create_account_result_t] = handle_message(&msg)?;
 
@@ -590,7 +590,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
 
             let responses: &[tbc::tb_create_transfer_result_t] = handle_message(&msg)?;
 
@@ -698,7 +698,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
             let responses: &[Account] = handle_message(&msg)?;
             Ok(Vec::from(responses))
         }
@@ -787,7 +787,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
             let responses: &[Transfer] = handle_message(&msg)?;
             Ok(Vec::from(responses))
         }
@@ -820,7 +820,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
             let result: &[Transfer] = handle_message(&msg)?;
 
             Ok(result.to_vec())
@@ -854,7 +854,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
             let result: &[AccountBalance] = handle_message(&msg)?;
 
             Ok(result.to_vec())
@@ -886,7 +886,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
             let result: &[Account] = handle_message(&msg)?;
 
             Ok(result.to_vec())
@@ -918,7 +918,7 @@ impl Client {
         }
 
         async {
-            let msg = rx.await.expect("channel");
+            let msg = rx.await;
             let result: &[Transfer] = handle_message(&msg)?;
 
             Ok(result.to_vec())
@@ -940,7 +940,7 @@ impl Client {
         let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
         let client = SendClient(client);
 
-        let (tx, rx) = channel::<Infallible>();
+        let (tx, rx) = oneshot::channel::<()>();
 
         std::thread::spawn(move || {
             let client = client;
@@ -950,12 +950,11 @@ impl Client {
                 assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
                 std::mem::drop(Box::from_raw(client.0));
             }
-            drop(tx);
+            tx.send(());
         });
 
         async {
-            // wait for the channel to close
-            let _ = rx.await;
+            rx.await;
         }
     }
 }
@@ -1670,35 +1669,21 @@ impl<const N: usize> Default for Reserved<N> {
 fn create_packet<Event>(
     op: u8, // TB_OPERATION
     events: &[Event],
-) -> (Box<tbc::tb_packet_t>, Receiver<CompletionMessage<Event>>)
+) -> (
+    Box<tbc::tb_packet_t>,
+    oneshot::Receiver<CompletionMessage<Event>>,
+)
 where
     Event: Copy + 'static,
 {
-    let (tx, rx) = channel::<CompletionMessage<Event>>();
-    let callback: Box<OnCompletion> = Box::new(Box::new(
-        |context, packet, timestamp, result, result_size| unsafe {
-            let events_len = (*packet).data_size as usize / mem::size_of::<Event>();
-            let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
-            (*packet).data = ptr::null_mut();
+    let (tx, rx) = oneshot::channel::<CompletionMessage<Event>>();
 
-            let packet = Packet(Box::from_raw(packet));
-
-            let result = if result_size != 0 {
-                std::slice::from_raw_parts(result, result_size as usize)
-            } else {
-                &[]
-            };
-            let result = Vec::from(result);
-
-            let _ = tx.send(CompletionMessage {
-                _context: context,
-                packet,
-                _timestamp: timestamp,
-                result,
-                _events: events,
-            });
+    let callback = Box::new(CallbackData {
+        header: CallbackHeader {
+            complete: complete_typed::<Event>,
         },
-    ));
+        sender: tx,
+    });
 
     let mut events: Vec<Event> = events.to_vec();
     assert_eq!(events.len(), events.capacity());
@@ -1761,7 +1746,57 @@ struct CompletionMessage<E> {
     _events: Vec<E>,
 }
 
-type OnCompletion = Box<dyn FnOnce(usize, *mut tbc::tb_packet_t, u64, *const u8, u32)>;
+/// Type-erased header stored in `packet.user_data`.
+///
+/// By using an unsafe type-erased bare function instead a closure here
+/// we avoid double boxing that closure to store it as a thin pointer,
+/// reducing allocations per request by 1.
+///
+/// `on_completion` reads the `complete` function pointer without knowing
+/// the `Event` type and unsafely casts from `CallbackHeader` to the typed
+/// `CallbackData<Event>`.
+#[repr(C)]
+struct CallbackHeader {
+    complete: unsafe fn(*mut CallbackHeader, usize, *mut tbc::tb_packet_t, u64, *const u8, u32),
+}
+
+/// Full callback data, generic over `Event`.
+#[repr(C)]
+struct CallbackData<Event> {
+    header: CallbackHeader,
+    sender: oneshot::Sender<CompletionMessage<Event>>,
+}
+
+unsafe fn complete_typed<Event: Copy + 'static>(
+    header: *mut CallbackHeader,
+    context: usize,
+    packet: *mut tbc::tb_packet_t,
+    timestamp: u64,
+    result: *const u8,
+    result_size: u32,
+) {
+    let callback = Box::from_raw(header as *mut CallbackData<Event>);
+
+    let events_len = (*packet).data_size as usize / mem::size_of::<Event>();
+    let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
+    (*packet).data = ptr::null_mut();
+    let packet = Packet(Box::from_raw(packet));
+
+    let result = if result_size != 0 {
+        std::slice::from_raw_parts(result, result_size as usize)
+    } else {
+        &[]
+    };
+    let result = Vec::from(result);
+
+    callback.sender.send(CompletionMessage {
+        _context: context,
+        packet,
+        _timestamp: timestamp,
+        result,
+        _events: events,
+    });
+}
 
 extern "C" fn on_completion(
     context: usize,
@@ -1771,8 +1806,8 @@ extern "C" fn on_completion(
     result_len: u32,
 ) {
     unsafe {
-        let callback: Box<OnCompletion> = Box::from_raw((*packet).user_data as *mut OnCompletion);
+        let header = (*packet).user_data as *mut CallbackHeader;
         (*packet).user_data = ptr::null_mut();
-        callback(context, packet, timestamp, result_ptr, result_len);
+        ((*header).complete)(header, context, packet, timestamp, result_ptr, result_len);
     }
 }

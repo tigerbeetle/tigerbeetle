@@ -244,6 +244,7 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
 
     if (languages.contains(.rust)) {
         // Currently disabled.
+        _ = &build_rust;
     }
 }
 
@@ -587,6 +588,62 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     );
 }
 
+fn build_rust(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
+    var section = try shell.open_section("build rust");
+    defer section.close();
+
+    try shell.pushd("./src/clients/rust");
+    defer shell.popd();
+
+    const cargo_version = shell.exec_stdout("cargo --version", .{}) catch {
+        return error.NoCargo;
+    };
+    log.info("{s}", .{cargo_version});
+
+    try shell.exec_zig(
+        \\build clients:rust -Drelease -Dconfig-release={release_triple}
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
+
+    try backup_create(shell.cwd, "Cargo.toml");
+    defer backup_restore(shell.cwd, "Cargo.toml");
+
+    const cargo_toml = try shell.cwd.readFileAlloc(
+        shell.arena.allocator(),
+        "Cargo.toml",
+        1 * MiB,
+    );
+    const version_line = try shell.fmt(
+        "version = \"{s}\"",
+        .{info.tag},
+    );
+    const cargo_toml_updated = try std.mem.replaceOwned(
+        u8,
+        shell.arena.allocator(),
+        cargo_toml,
+        "version = \"0.0.0\"",
+        version_line,
+    );
+    assert(std.mem.indexOf(u8, cargo_toml_updated, version_line) != null);
+
+    try shell.cwd.writeFile(.{
+        .sub_path = "Cargo.toml",
+        .data = cargo_toml_updated,
+    });
+
+    try shell.exec("cargo package --allow-dirty", .{});
+
+    try Shell.copy_path(
+        shell.cwd,
+        try shell.fmt("target/package/tigerbeetle-{s}.crate", .{info.tag}),
+        dist_dir,
+        try shell.fmt("tigerbeetle-{s}.crate", .{info.tag}),
+    );
+}
+
 fn publish(
     shell: *Shell,
     languages: LanguageSet,
@@ -736,6 +793,8 @@ fn publish(
     if (languages.contains(.java)) try publish_java(shell, info);
     if (languages.contains(.node)) try publish_node(shell, info);
     if (languages.contains(.python)) try publish_python(shell, info);
+    // Currently disabled.
+    _ = &publish_rust;
 
     if (languages.contains(.zig)) {
         try shell.exec(
@@ -901,6 +960,56 @@ fn publish_python(shell: *Shell, info: VersionInfo) !void {
         .package = try shell.fmt("zig-out/dist/python/tigerbeetle-{s}-py3-none-any.whl", .{
             info.tag,
         }),
+    });
+}
+
+fn publish_rust(shell: *Shell, info: VersionInfo) !void {
+    var section = try shell.open_section("publish rust");
+    defer section.close();
+
+    assert(try shell.dir_exists("zig-out/dist/rust"));
+
+    const token = try shell.env_get("CRATES_IO_TOKEN");
+
+    try shell.pushd("./src/clients/rust");
+    defer shell.popd();
+
+    try shell.exec_zig(
+        \\build clients:rust -Drelease -Dconfig-release={release_triple}
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
+
+    try backup_create(shell.cwd, "Cargo.toml");
+    defer backup_restore(shell.cwd, "Cargo.toml");
+
+    const cargo_toml = try shell.cwd.readFileAlloc(
+        shell.arena.allocator(),
+        "Cargo.toml",
+        1 * MiB,
+    );
+    const version_line = try shell.fmt(
+        "version = \"{s}\"",
+        .{info.tag},
+    );
+    const cargo_toml_updated = try std.mem.replaceOwned(
+        u8,
+        shell.arena.allocator(),
+        cargo_toml,
+        "version = \"0.0.0\"",
+        version_line,
+    );
+    assert(std.mem.indexOf(u8, cargo_toml_updated, version_line) != null);
+
+    try shell.cwd.writeFile(.{
+        .sub_path = "Cargo.toml",
+        .data = cargo_toml_updated,
+    });
+
+    try shell.exec("cargo publish --token {token} --allow-dirty", .{
+        .token = token,
     });
 }
 

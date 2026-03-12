@@ -149,6 +149,7 @@ pub const Event = union(enum) {
 
     loop_run_for_ns,
     loop_tick,
+    loop_callbacks,
 
     pub const Tag = std.meta.Tag(Event);
 
@@ -227,6 +228,7 @@ pub const EventTiming = union(Event.Tag) {
 
     loop_run_for_ns,
     loop_tick,
+    loop_callbacks,
 
     pub const slot_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = enum_count(CommitStage.Tag),
@@ -253,6 +255,7 @@ pub const EventTiming = union(Event.Tag) {
         .client_request_round_trip = enum_count(Operation),
         .loop_run_for_ns = 1,
         .loop_tick = 1,
+        .loop_callbacks = 1,
     });
 
     pub const slot_bases = array: {
@@ -389,6 +392,7 @@ pub const EventTracing = union(Event.Tag) {
 
     loop_run_for_ns,
     loop_tick,
+    loop_callbacks,
 
     pub const stack_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = 1,
@@ -415,6 +419,7 @@ pub const EventTracing = union(Event.Tag) {
         .client_request_round_trip = 1,
         .loop_run_for_ns = 1,
         .loop_tick = 1,
+        .loop_callbacks = 1,
     });
 
     pub const stack_bases = array: {
@@ -497,7 +502,7 @@ pub const EventTracing = union(Event.Tag) {
     // captured, but no per trace logs or JSON will be emitted.
     pub fn aggregate_only(event: *const EventTracing) bool {
         return switch (event.*) {
-            .loop_run_for_ns, .loop_tick => true,
+            .loop_run_for_ns, .loop_tick, .loop_callbacks => true,
             else => false,
         };
     }
@@ -768,6 +773,7 @@ test "EventTiming slot doesn't have collisions" {
             } },
             .loop_run_for_ns => .loop_run_for_ns,
             .loop_tick => .loop_tick,
+            .loop_callbacks => .loop_callbacks,
         };
         try stacks.append(allocator, event.slot());
     }

@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;
 
+const stdx = @import("stdx");
+
 const assert = std.debug.assert;
 
 const is_linux = builtin.target.os.tag == .linux;
@@ -153,3 +155,35 @@ pub fn aof_blocking_open(dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
 
     return file.handle;
 }
+
+pub const Stats = struct {
+    const Tracer = @import("../trace.zig").Tracer;
+    const Timings = struct {
+        time_callbacks: stdx.Duration = .ms(0),
+        time_run_for_ns: stdx.Duration = .ms(0),
+
+        pub fn time_since(now: Timings, earlier: Timings) Timings {
+            assert(now.time_callbacks.ns >= earlier.time_callbacks.ns);
+            assert(now.time_run_for_ns.ns >= earlier.time_run_for_ns.ns);
+
+            return .{
+                .time_callbacks = now.time_callbacks.subtract(earlier.time_callbacks),
+                .time_run_for_ns = now.time_run_for_ns.subtract(earlier.time_run_for_ns),
+            };
+        }
+    };
+
+    now: Timings = .{},
+    earlier: Timings = .{},
+    tracer: ?*Tracer = null,
+
+    pub fn trace(stats: *Stats) void {
+        if (stats.tracer) |tracer| {
+            const timings_delta = stats.now.time_since(stats.earlier);
+            stats.earlier = stats.now;
+
+            tracer.timing(.loop_run_for_ns, timings_delta.time_run_for_ns);
+            tracer.timing(.loop_callbacks, timings_delta.time_callbacks);
+        }
+    }
+};

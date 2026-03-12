@@ -37,7 +37,6 @@ const allocate_block = @import("./grid.zig").allocate_block;
 const GridType = @import("./grid.zig").GridType;
 const BlockPtr = @import("./grid.zig").BlockPtr;
 const ForestTableIteratorType = @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
-const TestStorage = @import("../testing/storage.zig").Storage;
 
 pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime_int) type {
     return struct {
@@ -438,12 +437,10 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
 
             if (tour.* == .table_index) {
                 if (scrubber.tour_tables.?.next(scrubber.forest)) |table_info| {
-                    if (Forest.Storage == TestStorage) {
-                        scrubber.superblock.storage.verify_table(
-                            table_info.address,
-                            table_info.checksum,
-                        );
-                    }
+                    scrubber.forest.grid.verify_table(
+                        table_info.address,
+                        table_info.checksum,
+                    );
 
                     tour.* = .{ .table_value = .{
                         .index_checksum = table_info.checksum,
