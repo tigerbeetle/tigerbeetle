@@ -1364,9 +1364,7 @@ pub fn GrooveType(
 
         /// Asserts that the object with the given PrimaryKey exists.
         pub fn remove(groove: *Groove, key: PrimaryKey) void {
-            // TODO: Nothing currently calls or tests this method. The forest fuzzer should be
-            // extended to cover it.
-            assert(false);
+            assert(ObjectsCache != void);
 
             const object = groove.objects_cache.get(key).?;
             assert(TimestampRange.valid(object.timestamp));
@@ -1377,8 +1375,6 @@ pub fn GrooveType(
                 groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
             }
 
-            groove.objects_cache.remove(key);
-
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
                 if (Helper.index_from_object(object)) |value| {
@@ -1388,6 +1384,10 @@ pub fn GrooveType(
                     });
                 }
             }
+
+            // Remove from the cache last: `object` is a pointer into the cache,
+            // so removing it first would invalidate the pointer used above.
+            groove.objects_cache.remove(key);
         }
 
         /// Insert an id associated with no object.
