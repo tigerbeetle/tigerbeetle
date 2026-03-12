@@ -105,7 +105,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const release_min = prng.range_inclusive(
         u32,
         if (args.disable_faults) dependencies_count - 1 else 0,
-        dependencies_count,
+        dependencies_count - 1,
     );
 
     const supervisor = try Supervisor.create(allocator, .{
@@ -114,7 +114,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .faulty = !args.disable_faults,
         .log_debug = args.log_debug,
     });
-    defer supervisor.destroy(allocator);
+    defer supervisor.destroy();
 
     log.info("seed={}", .{seed});
     log.info("output_directory={s}", .{supervisor.output_directory});
@@ -134,6 +134,10 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const test_deadline = std.time.nanoTimestamp() + args.test_duration.ns;
     while (std.time.nanoTimestamp() < test_deadline) {
         try supervisor.tick();
+
+        if (supervisor.workload.?.process.state == .terminated) {
+            fatal(.workload_exit_early, "workload terminated by itself", .{});
+        }
     }
 
     log.info("workload: terminating due to max duration", .{});
@@ -173,7 +177,7 @@ fn configuration() struct {
     };
 }
 
-const Supervisor = struct {
+pub const Supervisor = struct {
     allocator: std.mem.Allocator,
     prng: stdx.PRNG,
     io: *IO,
@@ -205,7 +209,7 @@ const Supervisor = struct {
         log_debug: bool,
     };
 
-    fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
+    pub fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
         const dependencies = configuration();
         assert(dependencies.server_executables.len == dependencies.driver_executables.len);
         for (dependencies.server_executables) |path| assert(std.fs.path.isAbsolute(path));
@@ -291,12 +295,12 @@ const Supervisor = struct {
         return supervisor;
     }
 
-    fn destroy(supervisor: *Supervisor, allocator: std.mem.Allocator) void {
+    pub fn destroy(supervisor: *Supervisor) void {
         if (supervisor.workload) |workload| {
             if (workload.process.state == .running) {
                 _ = workload.process.terminate() catch {};
             }
-            workload.destroy(allocator);
+            workload.destroy(supervisor.allocator);
         }
 
         for (supervisor.replicas, 0..) |replica, replica_index| {
@@ -307,18 +311,18 @@ const Supervisor = struct {
             }
             replica.destroy();
         }
-        allocator.free(supervisor.replicas);
-        allocator.free(supervisor.replica_datafiles);
-        supervisor.network.destroy(allocator);
+        supervisor.allocator.free(supervisor.replicas);
+        supervisor.allocator.free(supervisor.replica_datafiles);
+        supervisor.network.destroy(supervisor.allocator);
 
         supervisor.io.deinit();
-        allocator.destroy(supervisor.io);
+        supervisor.allocator.destroy(supervisor.io);
 
         supervisor.shell.cwd.deleteTree(supervisor.output_directory) catch |err| {
             log.err("error deleting tree: {}", .{err});
         };
         supervisor.shell.destroy();
-        allocator.destroy(supervisor);
+        supervisor.allocator.destroy(supervisor);
     }
 
     pub fn tick(supervisor: *Supervisor) !void {
@@ -352,8 +356,12 @@ const Supervisor = struct {
         }
 
         if (supervisor.workload) |workload| {
-            if (workload.process.wait_nonblocking()) |code| {
-                fatal(.workload_exit_early, "workload terminated by itself: code={}", .{code});
+            if (workload.process.wait_nonblocking()) |term| {
+                if (std.meta.eql(term, .{ .Exited = 0 })) {
+                    log.info("workload complete", .{});
+                } else {
+                    fatal(.workload_exit_result, "workload error: term={}", .{term});
+                }
             }
         }
     }
