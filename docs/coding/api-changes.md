@@ -113,7 +113,7 @@ The TigerBeetle .NET Client `0.17.0` introduced the following breaking changes:
 
 - The enum types <code>CreateAccount<b>Result</b></code> and
   <code>CreateTransfer<b>Result</b></code>, with the status codes for the
-  [`create_accounts`](../reference/requests/create_accounts.md ) and
+  [`create_accounts`](../reference/requests/create_accounts.md) and
   [`create_transfers`](../reference/requests/create_transfers.md) operations respectively,
   were renamed to <code>CreateAccount<b>Status</b></code> and
   <code>CreateTransfer<b>Status</b></code>.
@@ -198,7 +198,7 @@ The TigerBeetle Go Client `0.17.0` introduced the following breaking changes:
 
 - The enum types <code>CreateAccount<b>Result</b></code> and
   <code>CreateTransfer<b>Result</b></code>, with the status codes for the
-  [`create_accounts`](../reference/requests/create_accounts.md ) and
+  [`create_accounts`](../reference/requests/create_accounts.md) and
   [`create_transfers`](../reference/requests/create_transfers.md) operations respectively,
   were renamed to <code>CreateAccount<b>Status</b></code> and
   <code>CreateTransfer<b>Status</b></code>.
@@ -294,7 +294,7 @@ The TigerBeetle Java Client `0.17.0` introduced the following breaking changes:
 
 - The enum types <code>CreateAccount<b>Result</b></code> and
   <code>CreateTransfer<b>Result</b></code>, with the status codes for the
-  [`create_accounts`](../reference/requests/create_accounts.md ) and
+  [`create_accounts`](../reference/requests/create_accounts.md) and
   [`create_transfers`](../reference/requests/create_transfers.md) operations respectively,
   were renamed to <code>CreateAccount<b>Status</b></code> and
   <code>CreateTransfer<b>Status</b></code>.
@@ -378,7 +378,7 @@ For more details, please refer to the
 The TigerBeetle Node.js Client `0.17.0` introduced the following breaking changes:
 
 - The enum types `CreateAccountError` and `CreateTransferError`, with the status codes
-  for the [`create_accounts`](../reference/requests/create_accounts.md ) and
+  for the [`create_accounts`](../reference/requests/create_accounts.md) and
   [`create_transfers`](../reference/requests/create_transfers.md) operations respectively,
   were renamed to `CreateAccountStatus` and `CreateTransferStatus`.
 
@@ -451,7 +451,7 @@ For more details, please refer to the
 The TigerBeetle Python Client `0.17.0` introduced the following breaking changes:
 
 - The enum types `CreateAccountResult` and `CreateTransferResult`, with the status codes
-  for the [`create_accounts`](../reference/requests/create_accounts.md ) and
+  for the [`create_accounts`](../reference/requests/create_accounts.md) and
   [`create_transfers`](../reference/requests/create_transfers.md) operations respectively,
   were renamed to `CreateAccountStatus` and `CreateTransferStatus`.
 
