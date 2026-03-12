@@ -607,7 +607,6 @@ const Environment = struct {
                     const roll = env.prng.range_inclusive(u32, 0, 99);
                     break :op if (roll < 60) .insert else if (roll < 85) .update else .delete;
                 };
-
                 switch (op) {
                     .insert => try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
                     .update => if (!env.update_thing(
