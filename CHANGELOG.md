@@ -3,6 +3,58 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.77
+
+Released: 2026-03-13
+
+### Safety And Performance
+
+- [#3485](https://github.com/tigerbeetle/tigerbeetle/pull/3485)
+
+  Rework how eviction is signaled in `tb_client` to avoid race conditions between eviction and
+  shutdown, unify notification logic, and add assertions for running on the correct thread.
+
+- [#3553](https://github.com/tigerbeetle/tigerbeetle/pull/3553)
+
+  Optimize compaction performance by removing IO stalls at the end of each beat, allowing IO to
+  overlap with other work and increasing throughput by ~4%.
+
+- [#3567](https://github.com/tigerbeetle/tigerbeetle/pull/3567)
+
+  Allow the grid to serve reads directly from write queues, improving performance for blocks being
+  currently repaired or created.
+
+- [#3575](https://github.com/tigerbeetle/tigerbeetle/pull/3575)
+
+  Work around a miscompilation in Zig's LLVM backend by downcasting alignment in `stdx.equal_bytes`.
+
+### Internals
+
+- [#3572](https://github.com/tigerbeetle/tigerbeetle/pull/3572)
+
+  Prepare the Rust client for release by removing dependencies (`anyhow`, `futures-channel`),
+  and setting up automated release builds (not enabled yet).
+
+- [#3537](https://github.com/tigerbeetle/tigerbeetle/pull/3537)
+
+  Fuzz updates on `CompositeKeys`, identifying a bug in a proposed prefix-only sort optimization.
+
+- [#3566](https://github.com/tigerbeetle/tigerbeetle/pull/3566)
+
+  Add a new metric to track time spent on CPU work, specifically callbacks.
+
+- [#3569](https://github.com/tigerbeetle/tigerbeetle/pull/3569)
+
+  Tighten units for IOPS, concurrency, and durations in config.
+
+- [#3576](https://github.com/tigerbeetle/tigerbeetle/pull/3576)
+
+  Fix worst case sizing and add prefetch in the scan fuzzer, to mirror state machine logic.
+
+### TigerTracks 🎧
+
+- [Stairway To Heaven](https://www.youtube.com/watch?v=Ly6ZhQVnVow)
+
 ## TigerBeetle 0.16.76
 
 Released: 2026-03-06
