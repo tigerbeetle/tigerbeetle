@@ -9,8 +9,10 @@ TigerBeetle has official client libraries for the following languages:
 - [Python](/src/clients/python/) ([PyPi package](https://pypi.org/project/tigerbeetle/)).
 - [Rust](/src/clients/rust/) ([Cargo package](https://crates.io/crates/tigerbeetle)).
 
+See [API Changes](../api-changes.md) for the history of changes introduced in the TigerBeetle
+Client libraries.<br>
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
-to receive notifications about breaking changes!
+to receive notifications about breaking changes.
 
 Please report any client bugs to the
 [main issue tracker](https://github.com/tigerbeetle/tigerbeetle/issues).

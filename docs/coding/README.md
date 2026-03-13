@@ -1,7 +1,7 @@
 # Coding
 
-This section is aimed at programmers building applications on top of TigerBeetle. It is organized as
-a series of loosely connected guides which can be read in any order.
+This section is aimed at programmers building applications on top of TigerBeetle. It is organized
+as a series of loosely connected guides which can be read in any order.
 
 - [System Architecture](./system-architecture.md) paints the big picture.
 - [Data Modeling](./data-modeling.md) shows how to map business-level entities to the primitives
@@ -17,8 +17,9 @@ a series of loosely connected guides which can be read in any order.
 - [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.
 - [Recipes](./recipes/) is a library of ready-made solutions for common business requirements such
   as a currency exchange.
-- [Clients](./clients/) shows how to use TigerBeetle from the comfort of .NET, Go, Java, Node.js, or
-  Python.
-
-Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
-to receive notifications about breaking changes!
+- [Clients](./clients/) shows how to use TigerBeetle from the comfort of .NET, Go, Java, Node.js,
+  or Python.
+- [API Changes](./api-changes.md) describes changes introduced in the TigerBeetle Client libraries.
+  <br>
+  Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+  to receive notifications about breaking changes!
