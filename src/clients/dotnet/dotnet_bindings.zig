@@ -81,23 +81,25 @@ const type_mappings = .{
             ,
         },
     },
+    .{ tb.CreateAccountStatus, TypeMapping{
+        .name = "CreateAccountStatus",
+        .visibility = .public,
+        .docs_link = "reference/requests/create_accounts#",
+    } },
+    .{ tb.CreateTransferStatus, TypeMapping{
+        .name = "CreateTransferStatus",
+        .visibility = .public,
+        .docs_link = "reference/requests/create_transfers#",
+    } },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
         .visibility = .public,
-        .docs_link = "reference/requests/create_accounts#",
+        .private_fields = &.{"reserved"},
     } },
     .{ tb.CreateTransferResult, TypeMapping{
         .name = "CreateTransferResult",
         .visibility = .public,
-        .docs_link = "reference/requests/create_transfers#",
-    } },
-    .{ tb.CreateAccountsResult, TypeMapping{
-        .name = "CreateAccountsResult",
-        .visibility = .public,
-    } },
-    .{ tb.CreateTransfersResult, TypeMapping{
-        .name = "CreateTransfersResult",
-        .visibility = .public,
+        .private_fields = &.{"reserved"},
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilter",
@@ -252,9 +254,13 @@ fn emit_enum(
                 i,
             });
         } else {
-            try buffer.writer().print("    {s} = {},\n\n", .{
+            const int_value = @intFromEnum(@field(Type, field.name));
+            try buffer.writer().print("    {s} = {s},\n\n", .{
                 to_case(field.name, .pascal),
-                @intFromEnum(@field(Type, field.name)),
+                if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                    std.fmt.comptimePrint("0x{X}", .{int_value})
+                else
+                    std.fmt.comptimePrint("{}", .{int_value}),
             });
         }
     }

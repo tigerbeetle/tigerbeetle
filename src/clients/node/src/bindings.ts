@@ -276,14 +276,14 @@ export type Transfer = {
 
 
 /**
-* See [CreateAccountError](https://docs.tigerbeetle.com/reference/requests/create_accounts#)
+* See [CreateAccountStatus](https://docs.tigerbeetle.com/reference/requests/create_accounts#)
 */
-export enum CreateAccountError {
+export enum CreateAccountStatus {
 
   /**
-  * See [ok](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  * See [created](https://docs.tigerbeetle.com/reference/requests/create_accounts#created)
   */
-  ok = 0,
+  created = 0xFFFFFFFF,
 
   /**
   * See [linked_event_failed](https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed)
@@ -418,14 +418,14 @@ export enum CreateAccountError {
 
 
 /**
-* See [CreateTransferError](https://docs.tigerbeetle.com/reference/requests/create_transfers#)
+* See [CreateTransferStatus](https://docs.tigerbeetle.com/reference/requests/create_transfers#)
 */
-export enum CreateTransferError {
+export enum CreateTransferStatus {
 
   /**
-  * See [ok](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  * See [created](https://docs.tigerbeetle.com/reference/requests/create_transfers#created)
   */
-  ok = 0,
+  created = 0xFFFFFFFF,
 
   /**
   * See [linked_event_failed](https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed)
@@ -763,14 +763,14 @@ export enum CreateTransferError {
   exceeds_debits = 55,
 }
 
-export type CreateAccountsError = {
-  index: number
-  result: CreateAccountError
+export type CreateAccountResult = {
+  timestamp: bigint
+  status: CreateAccountStatus
 }
 
-export type CreateTransfersError = {
-  index: number
-  result: CreateTransferError
+export type CreateTransferResult = {
+  timestamp: bigint
+  status: CreateTransferStatus
 }
 
 
@@ -912,13 +912,13 @@ export type AccountBalance = {
 export enum Operation {
   pulse = 128,
   get_change_events = 137,
-  create_accounts = 138,
-  create_transfers = 139,
   lookup_accounts = 140,
   lookup_transfers = 141,
   get_account_transfers = 142,
   get_account_balances = 143,
   query_accounts = 144,
   query_transfers = 145,
+  create_accounts = 146,
+  create_transfers = 147,
 }
 

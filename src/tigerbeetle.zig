@@ -147,11 +147,13 @@ pub const TransferFlags = packed struct(u16) {
     }
 };
 
-/// Error codes are ordered by descending precedence.
+/// Status codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
 /// the ordering matches struct field order.
-pub const CreateAccountResult = enum(u32) {
-    ok = 0,
+pub const CreateAccountStatus = enum(u32) {
+    deprecated_ok = 0,
+    created = std.math.maxInt(u32),
+
     linked_event_failed = 1,
     linked_event_chain_open = 2,
 
@@ -189,11 +191,11 @@ pub const CreateAccountResult = enum(u32) {
     imported_event_timestamp_must_not_regress = 26,
 
     comptime {
-        const values = std.enums.values(CreateAccountResult);
-        const BitSet = stdx.BitSetType(values.len);
+        const values = std.enums.values(CreateAccountStatus);
+        const BitSet = stdx.BitSetType(values.len - 1);
         var set: BitSet = .{};
-        for (0..values.len) |index| {
-            const result: CreateAccountResult = @enumFromInt(index);
+        for (0..values.len - 1) |index| {
+            const result: CreateAccountStatus = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
             assert(!set.is_set(index));
@@ -203,14 +205,22 @@ pub const CreateAccountResult = enum(u32) {
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
         assert(set.full());
+
+        // Except by the "created" result, which is represented as `maxInt`.
+        const max: CreateAccountStatus = @enumFromInt(
+            std.math.maxInt(std.meta.Tag(CreateAccountStatus)),
+        );
+        assert(max == .created);
     }
 };
 
-/// Error codes are ordered by descending precedence.
+/// Status codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
 /// the ordering matches struct field order.
-pub const CreateTransferResult = enum(u32) {
-    ok = 0,
+pub const CreateTransferStatus = enum(u32) {
+    deprecated_ok = 0,
+    created = std.math.maxInt(u32),
+
     linked_event_failed = 1,
     linked_event_chain_open = 2,
 
@@ -309,9 +319,9 @@ pub const CreateTransferResult = enum(u32) {
 
     /// Returns `true` if the error code depends on transient system status and retrying
     /// the same transfer with identical request data can produce different outcomes.
-    pub fn transient(result: CreateTransferResult) bool {
+    pub fn transient(result: CreateTransferStatus) bool {
         return switch (result) {
-            .ok => unreachable,
+            .created, .deprecated_ok => unreachable,
 
             .debit_account_not_found,
             .credit_account_not_found,
@@ -390,11 +400,11 @@ pub const CreateTransferResult = enum(u32) {
 
     comptime {
         @setEvalBranchQuota(2_000);
-        const values = std.enums.values(CreateTransferResult);
-        const BitSet = stdx.BitSetType(values.len);
+        const values = std.enums.values(CreateTransferStatus);
+        const BitSet = stdx.BitSetType(values.len - 1);
         var set: BitSet = .{};
-        for (0..values.len) |index| {
-            const result: CreateTransferResult = @enumFromInt(index);
+        for (0..values.len - 1) |index| {
+            const result: CreateTransferStatus = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
             assert(!set.is_set(index));
@@ -404,9 +414,15 @@ pub const CreateTransferResult = enum(u32) {
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
         assert(set.full());
+
+        // Except by the "created" result, which is represented as `maxInt`.
+        const max: CreateTransferStatus = @enumFromInt(
+            std.math.maxInt(std.meta.Tag(CreateTransferStatus)),
+        );
+        assert(max == .created);
     }
 
-    /// TODO(zig): CreateTransferResult is ordered by precedence, but it crashes
+    /// TODO(zig): CreateTransferStatus is ordered by precedence, but it crashes
     /// `EnumSet`, and `@setEvalBranchQuota()` isn't propagating correctly:
     /// https://godbolt.org/z/6a45bx6xs
     /// error: evaluation exceeded 1000 backwards branches
@@ -414,56 +430,87 @@ pub const CreateTransferResult = enum(u32) {
     ///
     /// As a workaround we generate a new Ordered enum to be used in this case.
     pub const Ordered = type: {
-        const values = std.enums.values(CreateTransferResult);
+        const values = std.enums.values(CreateTransferStatus);
         var fields: [values.len]std.builtin.Type.EnumField = undefined;
-        for (0..values.len) |index| {
-            const result: CreateTransferResult = @enumFromInt(index);
+        for (0..values.len - 1) |index| {
+            const result: CreateTransferStatus = @enumFromInt(index);
             fields[index] = .{
                 .name = @tagName(result),
                 .value = index,
             };
         }
+        fields[values.len - 1] = .{
+            .name = @tagName(CreateTransferStatus.created),
+            .value = @intFromEnum(CreateTransferStatus.created),
+        };
 
         var type_info = @typeInfo(enum {});
-        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferResult);
+        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferStatus);
         type_info.@"enum".fields = &fields;
         break :type @Type(type_info);
     };
 
-    pub fn to_ordered(value: CreateTransferResult) Ordered {
+    pub fn to_ordered(value: CreateTransferStatus) Ordered {
         return @enumFromInt(@intFromEnum(value));
     }
 
     comptime {
         const values = std.enums.values(Ordered);
-        assert(values.len == std.enums.values(CreateTransferResult).len);
-        for (0..values.len) |index| {
+        assert(values.len == std.enums.values(CreateTransferStatus).len);
+        for (0..values.len - 1) |index| {
             const value: Ordered = @enumFromInt(index);
             assert(value == values[index]);
 
-            const value_source: CreateTransferResult = @enumFromInt(index);
+            const value_source: CreateTransferStatus = @enumFromInt(index);
             assert(std.mem.eql(u8, @tagName(value_source), @tagName(value)));
         }
+        assert(@intFromEnum(Ordered.created) == @intFromEnum(CreateTransferStatus.created));
     }
 };
 
-pub const CreateAccountsResult = extern struct {
-    index: u32,
-    result: CreateAccountResult,
+pub const CreateAccountResult = extern struct {
+    timestamp: u64,
+    status: CreateAccountStatus,
+    reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateAccountsResult) == 8);
-        assert(stdx.no_padding(CreateAccountsResult));
+        assert(@sizeOf(CreateAccountResult) == 16);
+        assert(@alignOf(CreateAccountResult) == 8);
+        assert(stdx.no_padding(CreateAccountResult));
     }
 };
 
-pub const CreateTransfersResult = extern struct {
-    index: u32,
-    result: CreateTransferResult,
+pub const CreateTransferResult = extern struct {
+    timestamp: u64,
+    status: CreateTransferStatus,
+    reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateTransfersResult) == 8);
-        assert(stdx.no_padding(CreateTransfersResult));
+        assert(@sizeOf(CreateTransferResult) == 16);
+        assert(@alignOf(CreateTransferResult) == 8);
+        assert(stdx.no_padding(CreateTransferResult));
+    }
+};
+
+// Deprecated: sparse results containing only error codes.
+pub const CreateAccountErrorResult = extern struct {
+    index: u32,
+    result: CreateAccountStatus,
+
+    comptime {
+        assert(@sizeOf(CreateAccountErrorResult) == 8);
+        assert(stdx.no_padding(CreateAccountErrorResult));
+    }
+};
+
+// Deprecated: sparse results containing only error codes.
+pub const CreateTransferErrorResult = extern struct {
+    index: u32,
+    result: CreateTransferStatus,
+
+    comptime {
+        assert(@sizeOf(CreateTransferErrorResult) == 8);
+        assert(stdx.no_padding(CreateTransferErrorResult));
     }
 };
 
@@ -634,10 +681,11 @@ pub const ChangeEventsFilter = extern struct {
     }
 };
 
-// Looking to make backwards incompatible changes here? Make sure to check release.zig for
-// `release_triple_client_min`.
+/// Operations exported by TigerBeetle.
 pub const Operation = enum(u8) {
-    /// Operations exported by TigerBeetle:
+    // Looking to make backwards incompatible changes here?
+    // Make sure to check release.zig for `release_triple_client_min`.
+
     pulse = constants.vsr_operations_reserved + 0,
 
     // Deprecated operations not encoded as multi-batch:
@@ -652,14 +700,19 @@ pub const Operation = enum(u8) {
 
     get_change_events = constants.vsr_operations_reserved + 9,
 
-    create_accounts = constants.vsr_operations_reserved + 10,
-    create_transfers = constants.vsr_operations_reserved + 11,
+    // `create_*` operations that return sparse results containing only errors.
+    deprecated_create_accounts_sparse = constants.vsr_operations_reserved + 10,
+    deprecated_create_transfers_sparse = constants.vsr_operations_reserved + 11,
+
     lookup_accounts = constants.vsr_operations_reserved + 12,
     lookup_transfers = constants.vsr_operations_reserved + 13,
     get_account_transfers = constants.vsr_operations_reserved + 14,
     get_account_balances = constants.vsr_operations_reserved + 15,
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
+
+    create_accounts = constants.vsr_operations_reserved + 18,
+    create_transfers = constants.vsr_operations_reserved + 19,
 
     pub fn EventType(comptime operation: Operation) type {
         return switch (operation) {
@@ -673,6 +726,9 @@ pub const Operation = enum(u8) {
             .query_accounts => QueryFilter,
             .query_transfers => QueryFilter,
             .get_change_events => ChangeEventsFilter,
+
+            .deprecated_create_accounts_sparse => Account,
+            .deprecated_create_transfers_sparse => Transfer,
 
             .deprecated_create_accounts_unbatched => Account,
             .deprecated_create_transfers_unbatched => Transfer,
@@ -688,8 +744,8 @@ pub const Operation = enum(u8) {
     pub fn ResultType(comptime operation: Operation) type {
         return switch (operation) {
             .pulse => void,
-            .create_accounts => CreateAccountsResult,
-            .create_transfers => CreateTransfersResult,
+            .create_accounts => CreateAccountResult,
+            .create_transfers => CreateTransferResult,
             .lookup_accounts => Account,
             .lookup_transfers => Transfer,
             .get_account_transfers => Transfer,
@@ -698,8 +754,11 @@ pub const Operation = enum(u8) {
             .query_transfers => Transfer,
             .get_change_events => ChangeEvent,
 
-            .deprecated_create_accounts_unbatched => CreateAccountsResult,
-            .deprecated_create_transfers_unbatched => CreateTransfersResult,
+            .deprecated_create_accounts_sparse => CreateAccountErrorResult,
+            .deprecated_create_transfers_sparse => CreateTransferErrorResult,
+
+            .deprecated_create_accounts_unbatched => CreateAccountErrorResult,
+            .deprecated_create_transfers_unbatched => CreateTransferErrorResult,
             .deprecated_lookup_accounts_unbatched => Account,
             .deprecated_lookup_transfers_unbatched => Transfer,
             .deprecated_get_account_transfers_unbatched => Transfer,
@@ -741,6 +800,9 @@ pub const Operation = enum(u8) {
             .query_transfers => false,
             .get_change_events => false,
 
+            .deprecated_create_accounts_sparse => true,
+            .deprecated_create_transfers_sparse => true,
+
             .deprecated_create_accounts_unbatched => true,
             .deprecated_create_transfers_unbatched => true,
             .deprecated_lookup_accounts_unbatched => true,
@@ -769,6 +831,10 @@ pub const Operation = enum(u8) {
             => true,
 
             .get_change_events => false,
+
+            .deprecated_create_accounts_sparse,
+            .deprecated_create_transfers_sparse,
+            => true,
 
             .deprecated_create_accounts_unbatched,
             .deprecated_create_transfers_unbatched,
@@ -877,6 +943,8 @@ pub const Operation = enum(u8) {
             .create_transfers,
             .lookup_accounts,
             .lookup_transfers,
+            .deprecated_create_accounts_sparse,
+            .deprecated_create_transfers_sparse,
             .deprecated_create_accounts_unbatched,
             .deprecated_create_transfers_unbatched,
             .deprecated_lookup_accounts_unbatched,

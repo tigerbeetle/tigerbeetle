@@ -330,12 +330,12 @@ public struct Transfer
 
 }
 
-public enum CreateAccountResult : uint
+public enum CreateAccountStatus : uint
 {
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#ok
+    /// https://docs.tigerbeetle.com/reference/requests/create_accounts#created
     /// </summary>
-    Ok = 0,
+    Created = 0xFFFFFFFF,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_accounts#linked_event_failed
@@ -469,12 +469,12 @@ public enum CreateAccountResult : uint
 
 }
 
-public enum CreateTransferResult : uint
+public enum CreateTransferStatus : uint
 {
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#ok
+    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#created
     /// </summary>
-    Ok = 0,
+    Created = 0xFFFFFFFF,
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#linked_event_failed
@@ -814,34 +814,42 @@ public enum CreateTransferResult : uint
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-public struct CreateAccountsResult
+public struct CreateAccountResult
 {
-    public const int SIZE = 8;
+    public const int SIZE = 16;
 
 
-    private uint index;
+    private ulong timestamp;
 
-    private CreateAccountResult result;
+    private CreateAccountStatus status;
 
-    public uint Index { get => index; set => index = value; }
+    private uint reserved;
 
-    public CreateAccountResult Result { get => result; set => result = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
+
+    public CreateAccountStatus Status { get => status; set => status = value; }
+
+    internal uint Reserved { get => reserved; set => reserved = value; }
 
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-public struct CreateTransfersResult
+public struct CreateTransferResult
 {
-    public const int SIZE = 8;
+    public const int SIZE = 16;
 
 
-    private uint index;
+    private ulong timestamp;
 
-    private CreateTransferResult result;
+    private CreateTransferStatus status;
 
-    public uint Index { get => index; set => index = value; }
+    private uint reserved;
 
-    public CreateTransferResult Result { get => result; set => result = value; }
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
+
+    public CreateTransferStatus Status { get => status; set => status = value; }
+
+    internal uint Reserved { get => reserved; set => reserved = value; }
 
 }
 
@@ -1202,10 +1210,6 @@ internal enum TBOperation : byte
 
     GetChangeEvents = 137,
 
-    CreateAccounts = 138,
-
-    CreateTransfers = 139,
-
     LookupAccounts = 140,
 
     LookupTransfers = 141,
@@ -1217,6 +1221,10 @@ internal enum TBOperation : byte
     QueryAccounts = 144,
 
     QueryTransfers = 145,
+
+    CreateAccounts = 146,
+
+    CreateTransfers = 147,
 
 }
 
