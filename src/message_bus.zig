@@ -710,7 +710,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     });
                 },
                 .client => |client_id| {
-                    assert(client_id != 0);
+                    if (client_id == 0) return false;
 
                     // Allowed transitions:
                     // * unknown        → client
@@ -748,7 +748,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 },
 
                 .client_likely => |client_id| {
-                    assert(client_id != 0);
+                    if (client_id == 0) return false;
                     switch (connection.peer) {
                         .unknown => {
                             // If the peer transitions from unknown -> client_likely, either
