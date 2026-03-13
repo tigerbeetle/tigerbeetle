@@ -668,21 +668,21 @@ pub fn ReplType(comptime MessageBus: type) type {
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
 
+            var message_bus = try MessageBus.init(allocator, io, null, message_pool, .{
+                .process = .client,
+                .configuration = options.addresses,
+            });
+
             const client_id = stdx.unique_u128();
             const client = try Client.init(
                 allocator,
                 time,
-                message_pool,
+                &message_bus,
                 .{
                     .id = client_id,
                     .cluster = options.cluster_id,
                     .replica_count = @intCast(options.addresses.len),
                     .aof_recovery = false,
-                    .message_bus_options = .{
-                        .configuration = options.addresses,
-                        .io = io,
-                        .trace = null,
-                    },
                 },
             );
             errdefer client.deinit(allocator);

@@ -11,6 +11,7 @@
 //! 5. Lookup transfers (when verification is enabled).
 const std = @import("std");
 const builtin = @import("builtin");
+const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 const log = std.log.scoped(.benchmark);
@@ -86,54 +87,29 @@ pub fn main(
 
     const cluster_id: u128 = 0;
 
-    var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
-    defer for (message_pools.slice()) |*message_pool| message_pool.deinit(allocator);
+    var clients: []BenchmarkClient = try allocator.alloc(BenchmarkClient, cli_args.clients);
+    var clients_initialized: usize = 0;
+    defer {
+        for (clients[0..clients_initialized]) |*client| {
+            client.deinit(allocator);
+        }
+        allocator.free(clients);
+    }
 
-    for (0..cli_args.clients) |_| {
-        message_pools.push(try MessagePool.init(allocator, .client));
+    for (clients) |*client| {
+        try client.init(allocator, io, time, .{
+            .cluster = cluster_id,
+            .addresses = addresses,
+        });
+        clients_initialized += 1;
     }
 
     std.log.info("Benchmark running against {any}", .{addresses});
-
-    var clients = stdx.BoundedArrayType(Client, constants.clients_max){};
-    defer for (clients.slice()) |*client| client.deinit(allocator);
-
-    for (0..cli_args.clients) |i| {
-        clients.push(try Client.init(
-            allocator,
-            time,
-            &message_pools.slice()[i],
-            .{
-                .id = stdx.unique_u128(),
-                .cluster = cluster_id,
-                .replica_count = @intCast(addresses.len),
-                .aof_recovery = false,
-                .message_bus_options = .{ .configuration = addresses, .io = io, .trace = null },
-            },
-        ));
-    }
 
     // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10_000ms+.
     const request_latency_histogram = try allocator.alloc(u64, 10_001);
     @memset(request_latency_histogram, 0);
     defer allocator.free(request_latency_histogram);
-
-    const client_timeouts = try allocator.alloc(Benchmark.Timeout, clients.count());
-    defer allocator.free(client_timeouts);
-
-    const client_requests = try allocator.alignedAlloc(
-        [constants.message_body_size_max]u8,
-        constants.sector_size,
-        clients.count(),
-    );
-    defer allocator.free(client_requests);
-
-    const client_replies = try allocator.alignedAlloc(
-        [constants.message_body_size_max]u8,
-        constants.sector_size,
-        clients.count(),
-    );
-    defer allocator.free(client_replies);
 
     // If no seed was given, use a default seed for reproducibility.
     const seed = seed_from_arg: {
@@ -177,10 +153,7 @@ pub fn main(
         .prng = &prng,
         .timer = try std.time.Timer.start(),
         .output = std.io.getStdOut().writer().any(),
-        .clients = clients.slice(),
-        .client_timeouts = client_timeouts,
-        .client_requests = client_requests,
-        .client_replies = client_replies,
+        .clients = clients,
         .request_latency_histogram = request_latency_histogram,
         .account_id_permutation = account_id_permutation,
         .account_id_start = account_id_start,
@@ -309,7 +282,7 @@ const Benchmark = struct {
     prng: *stdx.PRNG,
     timer: std.time.Timer,
     output: std.io.AnyWriter,
-    clients: []Client,
+    clients: []BenchmarkClient,
 
     // Configuration:
     account_id_permutation: IdPermutation,
@@ -335,9 +308,6 @@ const Benchmark = struct {
     // State:
     clients_busy: stdx.BitSetType(constants.clients_max) = .{},
     clients_request_ns: [constants.clients_max]u64 = @splat(undefined),
-    client_requests: []align(constants.sector_size) [constants.message_body_size_max]u8,
-    client_replies: []align(constants.sector_size) [constants.message_body_size_max]u8,
-    client_timeouts: []Timeout,
     request_latency_histogram: []u64,
     request_index: u64 = 0,
     account_index: u64 = 0,
@@ -390,7 +360,7 @@ const Benchmark = struct {
         }
 
         while (b.stage != .idle) {
-            for (b.clients) |*client| client.tick();
+            for (b.clients) |*client| client.process.tick();
             try b.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
@@ -412,7 +382,7 @@ const Benchmark = struct {
         assert(!b.clients_busy.is_set(client_index));
 
         b.clients_busy.set(client_index);
-        b.clients[client_index].register(register_callback, @bitCast(RequestContext{
+        b.clients[client_index].process.register(register_callback, @bitCast(RequestContext{
             .benchmark = b,
             .client_index = @intCast(client_index),
             .request_index = undefined,
@@ -447,7 +417,7 @@ const Benchmark = struct {
         const accounts = stdx.bytes_as_slice(
             .exact,
             tb.Account,
-            &b.client_requests[client_index],
+            &b.clients[client_index].request,
         )[0..account_count];
         b.build_accounts(accounts);
         b.request(client_index, .create_accounts, .{
@@ -487,7 +457,7 @@ const Benchmark = struct {
         const transfers = stdx.bytes_as_slice(
             .exact,
             tb.Transfer,
-            &b.client_requests[client_index],
+            &b.clients[client_index].request,
         )[0..transfer_count];
         b.build_transfers(transfers);
         b.request(client_index, .create_transfers, .{
@@ -521,13 +491,13 @@ const Benchmark = struct {
             });
         }
 
-        b.client_timeouts[client_index] = .{ .benchmark = b, .client_index = client_index };
+        b.clients[client_index].timeout = .{ .benchmark = b, .client_index = client_index };
         b.clients_busy.set(client_index);
         b.io.timeout(
             *Timeout,
-            &b.client_timeouts[client_index],
+            &b.clients[client_index].timeout,
             create_transfers_next,
-            &b.client_timeouts[client_index].completion,
+            &b.clients[client_index].timeout.completion,
             @intCast(b.transfer_batch_delay.ns),
         );
     }
@@ -584,7 +554,7 @@ const Benchmark = struct {
         }
         b.query_index += 1;
 
-        const request_body = b.client_requests[client_index][0..@sizeOf(tb.AccountFilter)];
+        const request_body = b.clients[client_index].request[0..@sizeOf(tb.AccountFilter)];
         // Use hot accounts for queries to equalize the number of results
         // returned on each execution.
         const account_index = b.choose_account_index(.hot);
@@ -621,7 +591,7 @@ const Benchmark = struct {
 
         const filter: tb.AccountFilter = std.mem.bytesToValue(
             tb.AccountFilter,
-            b.client_requests[client_index][0..@sizeOf(tb.AccountFilter)],
+            b.clients[client_index].request[0..@sizeOf(tb.AccountFilter)],
         );
         const results = stdx.bytes_as_slice(.exact, tb.Transfer, result);
         for (results) |*transfer| {
@@ -659,12 +629,12 @@ const Benchmark = struct {
         const account_ids = stdx.bytes_as_slice(
             .exact,
             u128,
-            &b.client_requests[client_index],
+            &b.clients[client_index].request,
         )[0..account_count];
         const accounts = stdx.bytes_as_slice(
             .exact,
             tb.Account,
-            &b.client_replies[client_index],
+            &b.clients[client_index].reply,
         )[0..account_count];
         b.build_accounts(accounts);
         for (account_ids, accounts) |*account_id, account| account_id.* = account.id;
@@ -690,7 +660,7 @@ const Benchmark = struct {
 
             break :accounts_count b.account_batch_count;
         };
-        const accounts_expected_body = &b.client_replies[client_index];
+        const accounts_expected_body = &b.clients[client_index].reply;
         const accounts_expected = stdx.bytes_as_slice(
             .exact,
             tb.Account,
@@ -739,12 +709,12 @@ const Benchmark = struct {
         const transfer_ids = stdx.bytes_as_slice(
             .exact,
             u128,
-            &b.client_requests[client_index],
+            &b.clients[client_index].request,
         )[0..transfer_count];
         const transfers = stdx.bytes_as_slice(
             .exact,
             tb.Transfer,
-            &b.client_replies[client_index],
+            &b.clients[client_index].reply,
         )[0..transfer_count];
         b.build_transfers(transfers);
         for (transfer_ids, transfers) |*transfer_id, transfer| transfer_id.* = transfer.id;
@@ -773,7 +743,7 @@ const Benchmark = struct {
         const transfers_expected = stdx.bytes_as_slice(
             .exact,
             tb.Transfer,
-            &b.client_replies[client_index],
+            &b.clients[client_index].reply,
         )[0..transfers_count];
         const transfers_actual = stdx.bytes_as_slice(
             .exact,
@@ -837,13 +807,13 @@ const Benchmark = struct {
         b.request_index += 1;
 
         var encoder = vsr.multi_batch.MultiBatchEncoder.init(
-            &b.client_requests[client_index],
+            &b.clients[client_index].request,
             .{ .element_size = options.event_size },
         );
         encoder.add(options.batch_count * options.event_size);
         const bytes_written = encoder.finish();
 
-        b.clients[client_index].request(
+        b.clients[client_index].process.request(
             request_complete,
             @bitCast(RequestContext{
                 .benchmark = b,
@@ -851,7 +821,7 @@ const Benchmark = struct {
                 .request_index = @intCast(b.request_index - 1),
             }),
             operation,
-            b.client_requests[client_index][0..bytes_written],
+            b.clients[client_index].request[0..bytes_written],
         );
     }
 
@@ -1037,6 +1007,50 @@ const Benchmark = struct {
             .hot => index,
             .cold => index + b.account_count_hot,
         };
+    }
+};
+
+const BenchmarkClient = struct {
+    message_pool: MessagePool,
+    message_bus: MessageBus,
+    process: Client,
+
+    timeout: Benchmark.Timeout = undefined,
+    request: [constants.message_body_size_max]u8 align(constants.sector_size) = undefined,
+    reply: [constants.message_body_size_max]u8 align(constants.sector_size) = undefined,
+
+    pub fn init(client: *BenchmarkClient, gpa: Allocator, io: *IO, time: Time, options: struct {
+        cluster: u128,
+        addresses: []const std.net.Address,
+    }) !void {
+        client.message_pool = try MessagePool.init(gpa, .client);
+        errdefer client.message_pool.deinit(gpa);
+
+        client.message_bus = try MessageBus.init(gpa, io, null, &client.message_pool, .{
+            .process = .client,
+            .configuration = options.addresses,
+        });
+        errdefer client.mesage_bus.deinit(gpa);
+
+        client.process = try Client.init(
+            gpa,
+            time,
+            &client.message_bus,
+            .{
+                .id = stdx.unique_u128(),
+                .cluster = options.cluster,
+                .replica_count = @intCast(options.addresses.len),
+                .aof_recovery = false,
+            },
+        );
+        errdefer client.process.deinint(gpa);
+    }
+
+    pub fn deinit(client: *BenchmarkClient, gpa: Allocator) void {
+        client.process.deinit(gpa);
+        client.message_bus.deinit(gpa);
+        client.message_pool.deinit(gpa);
+        client.* = undefined;
     }
 };
 

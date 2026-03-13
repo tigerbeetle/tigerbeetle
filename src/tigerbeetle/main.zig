@@ -256,6 +256,14 @@ fn command_start(
     } });
     defer message_pool.deinit(gpa);
 
+    const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
+    var message_bus = try MessageBus.init(gpa, io, tracer, &message_pool, .{
+        .process = .replica,
+        .configuration = args.addresses.const_slice(),
+        .clients_limit = clients_limit,
+    });
+    defer message_bus.deinit(gpa);
+
     var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
         break :blk try AOF.init(io, aof_file.const_slice());
     } else null;
@@ -332,15 +340,12 @@ fn command_start(
     log.info("release_client_min={}", .{config.process.release_client_min});
     log.info("releases_bundled={any}", .{multiversion.releases_bundled().slice()});
     log.info("git_commit={?s}", .{config.process.git_commit});
-
-    const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
-
     var replica: Replica = undefined;
     replica.open(
         gpa,
         time,
         storage,
-        &message_pool,
+        &message_bus,
         .{
             .node_count = args.addresses.count_as(u8),
             .release = config.process.release,
@@ -363,12 +368,6 @@ fn command_start(
                 .cache_entries_transfers_pending = args.cache_transfers_pending,
                 .log_trace = args.log_trace,
                 .aof_recovery = args.aof_recovery,
-            },
-            .message_bus_options = .{
-                .configuration = args.addresses.const_slice(),
-                .io = io,
-                .clients_limit = clients_limit,
-                .trace = tracer,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .tracer = tracer,
@@ -521,22 +520,22 @@ fn command_reformat(
     var message_pool = try MessagePool.init(gpa, .client);
     defer message_pool.deinit(gpa);
 
+    var message_bus = try MessageBus.init(gpa, io, null, &message_pool, .{
+        .process = .client,
+        .configuration = args.addresses.const_slice(),
+    });
+    defer message_bus.deinit(gpa);
+
     var client = try Client.init(
         gpa,
         time,
-        &message_pool,
+        &message_bus,
         .{
             .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
             .aof_recovery = false,
 
-            .message_bus_options = .{
-                .configuration = args.addresses.const_slice(),
-                .io = io,
-                .clients_limit = null,
-                .trace = null,
-            },
             .eviction_callback = &reformat_client_eviction_callback,
         },
     );
