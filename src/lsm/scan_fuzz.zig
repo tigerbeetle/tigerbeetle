@@ -776,6 +776,9 @@ const Environment = struct {
             index_cardinality,
             indexes_in_queries,
         ) orelse return false;
+        // Simulate what prefetch does in the real state machine: ensure the old object is in
+        // the objects cache before calling update, which asserts its presence.
+        env.forest.grooves.things.objects_cache.upsert(old);
         env.forest.grooves.things.update(.{ .old = old, .new = &new });
         env.model.items[model_index] = new;
 
@@ -792,6 +795,9 @@ const Environment = struct {
 
         const thing = &env.model.items[model_index];
 
+        // Simulate what prefetch does in the real state machine: ensure the object is in
+        // the objects cache before calling remove, which asserts its presence.
+        env.forest.grooves.things.objects_cache.upsert(thing);
         env.forest.grooves.things.remove(thing.id);
 
         env.model_live.setValue(model_index, false);
