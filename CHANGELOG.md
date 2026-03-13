@@ -17,7 +17,7 @@ Released: 2026-03-13
 - [#3553](https://github.com/tigerbeetle/tigerbeetle/pull/3553)
 
   Optimize compaction performance by removing IO stalls at the end of each beat, allowing IO to
-  overlap with other work and increasing throughput by ~13%.
+  overlap with other work and increasing throughput by ~4%.
 
 - [#3567](https://github.com/tigerbeetle/tigerbeetle/pull/3567)
 
