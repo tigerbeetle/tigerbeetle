@@ -126,6 +126,13 @@ pub const IO = struct {
         var timer = try std.time.Timer.start();
         defer self.stats.now.time_run_for_ns.ns += timer.read();
 
+        var timeouts: usize = 0;
+        var etime = false;
+        if (self.completed.count() > 0) {
+            try self.flush(0, &timeouts, &etime);
+            return;
+        }
+
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
@@ -135,8 +142,6 @@ pub const IO = struct {
             .sec = current_ts.sec,
             .nsec = current_ts.nsec + nanoseconds,
         };
-        var timeouts: usize = 0;
-        var etime = false;
         while (!etime) {
             const timeout_sqe = self.ring.get_sqe() catch blk: {
                 // The submission queue is full, so flush submissions to make space:
