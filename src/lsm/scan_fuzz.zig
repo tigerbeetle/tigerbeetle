@@ -96,19 +96,19 @@ const ThingsGroove = GrooveType(
         },
         .batch_value_count_max = .{
             .id = batch_objects_max,
-            .index_01 = batch_objects_max,
-            .index_02 = batch_objects_max,
-            .index_03 = batch_objects_max,
-            .index_04 = batch_objects_max,
-            .index_05 = batch_objects_max,
-            .index_06 = batch_objects_max,
-            .index_07 = batch_objects_max,
-            .index_08 = batch_objects_max,
-            .index_09 = batch_objects_max,
-            .index_10 = batch_objects_max,
-            .index_11 = batch_objects_max,
-            .index_12 = batch_objects_max,
-            .index_13 = batch_objects_max,
+            .index_01 = 2 * batch_objects_max,
+            .index_02 = 2 * batch_objects_max,
+            .index_03 = 2 * batch_objects_max,
+            .index_04 = 2 * batch_objects_max,
+            .index_05 = 2 * batch_objects_max,
+            .index_06 = 2 * batch_objects_max,
+            .index_07 = 2 * batch_objects_max,
+            .index_08 = 2 * batch_objects_max,
+            .index_09 = 2 * batch_objects_max,
+            .index_10 = 2 * batch_objects_max,
+            .index_11 = 2 * batch_objects_max,
+            .index_12 = 2 * batch_objects_max,
+            .index_13 = 2 * batch_objects_max,
             .timestamp = batch_objects_max,
         },
         .ignored = &[_][]const u8{},
@@ -465,19 +465,19 @@ const Environment = struct {
             .tree_options_object = .{ .batch_value_count_limit = batch_objects_max },
             .tree_options_id = .{ .batch_value_count_limit = batch_objects_max },
             .tree_options_index = .{
-                .index_01 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_02 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_03 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_04 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_05 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_06 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_07 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_08 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_09 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_10 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_11 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_12 = .{ .batch_value_count_limit = batch_objects_max },
-                .index_13 = .{ .batch_value_count_limit = batch_objects_max },
+                .index_01 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_02 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_03 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_04 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_05 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_06 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_07 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_08 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_09 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_10 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_11 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_12 = .{ .batch_value_count_limit = 2 * batch_objects_max },
+                .index_13 = .{ .batch_value_count_limit = 2 * batch_objects_max },
             },
         },
     };
@@ -776,6 +776,9 @@ const Environment = struct {
             index_cardinality,
             indexes_in_queries,
         ) orelse return false;
+        // Simulate what prefetch does in the real state machine: ensure the old object is in
+        // the objects cache before calling update, which asserts its presence.
+        env.forest.grooves.things.objects_cache.upsert(old);
         env.forest.grooves.things.update(.{ .old = old, .new = &new });
         env.model.items[model_index] = new;
 
@@ -792,6 +795,9 @@ const Environment = struct {
 
         const thing = &env.model.items[model_index];
 
+        // Simulate what prefetch does in the real state machine: ensure the object is in
+        // the objects cache before calling remove, which asserts its presence.
+        env.forest.grooves.things.objects_cache.upsert(thing);
         env.forest.grooves.things.remove(thing.id);
 
         env.model_live.setValue(model_index, false);
