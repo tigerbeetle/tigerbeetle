@@ -33,7 +33,7 @@ Released: 2026-03-13
 - [#3572](https://github.com/tigerbeetle/tigerbeetle/pull/3572)
 
   Prepare the Rust client for release by removing dependencies (`anyhow`, `futures-channel`),
-  and setting up automated release builds again but don't enable yet.
+  and setting up automated release builds (not enabled yet).
 
 - [#3537](https://github.com/tigerbeetle/tigerbeetle/pull/3537)
 
@@ -47,13 +47,9 @@ Released: 2026-03-13
 
   Tighten units for IOPS, concurrency, and durations in config.
 
-- [#3571](https://github.com/tigerbeetle/tigerbeetle/pull/3571)
-
-  Remove a "coming soon" reference in docs to only speak about the past.
-
 - [#3576](https://github.com/tigerbeetle/tigerbeetle/pull/3576)
 
-  Fix worst case sizing and add prefetch in scan_fuzz (issue caught by the fuzzer itself).
+  Fix worst case sizing and add prefetch in the scan fuzzer, to mirror state machine logic.
 
 ### TigerTracks 🎧
 
