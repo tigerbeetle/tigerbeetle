@@ -7,7 +7,23 @@ const log = std.log.scoped(.vsr);
 // vsr.zig is the root of a zig package, reexport all public APIs.
 //
 // Note that we don't promise any stability of these interfaces yet.
-pub const cdc = @import("cdc/runner.zig");
+pub const cdc = struct {
+    // Transport abstraction
+    pub const Transport = @import("cdc/transport.zig").Transport;
+    pub const TransportType = @import("cdc/transport.zig").TransportType;
+    pub const CommonConfig = @import("cdc/transport.zig").CommonConfig;
+
+    // Generic runner (uses any transport)
+    pub const Runner = @import("cdc/generic_runner.zig").Runner;
+
+    // Transport implementations
+    pub const AmqpTransport = @import("cdc/amqp_transport.zig").AmqpTransport;
+    pub const NatsTransport = @import("cdc/nats_transport.zig").NatsTransport;
+
+    // Protocol implementations
+    pub const amqp = @import("cdc/amqp.zig");
+    pub const nats = @import("cdc/nats.zig");
+};
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");

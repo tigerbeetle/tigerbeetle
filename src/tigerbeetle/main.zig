@@ -171,6 +171,7 @@ pub fn main() !void {
             try stdout_buffer.flush();
         },
         .amqp => |*args| try command_amqp(gpa, time, args),
+        .nats => |*args| try command_nats(gpa, time, args),
     }
 }
 
@@ -592,35 +593,136 @@ fn command_repl(
 }
 
 fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
+    // Create IO for AMQP transport
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    const publish_exchange = args.publish_exchange orelse "";
+    const publish_routing_key = args.publish_routing_key orelse "";
+
+    // Create AMQP transport
+    var amqp_transport = try vsr.cdc.AmqpTransport.init(gpa, &io, .{
+        .host = args.host,
+        .user = args.user,
+        .password = args.password,
+        .vhost = args.vhost,
+        .publish_exchange = publish_exchange,
+        .publish_routing_key = publish_routing_key,
+        .common = .{
+            .cluster_id = args.cluster,
+            .message_count_max = args.event_count_max orelse 1000,
+            .message_body_size_max = 16 * 1024,
+            .reply_timeout_ticks = 30 * std.time.ms_per_s / vsr.constants.tick_ms,
+        },
+    });
+
+    // Create generic runner with AMQP transport
     var runner: vsr.cdc.Runner = undefined;
     try runner.init(
         gpa,
         time,
+        amqp_transport.transport(),
         .{
             .cluster_id = args.cluster,
             .addresses = args.addresses.const_slice(),
-            .host = args.host,
-            .user = args.user,
-            .password = args.password,
-            .vhost = args.vhost,
-            .publish_exchange = args.publish_exchange,
-            .publish_routing_key = args.publish_routing_key,
+            .routing_key = publish_routing_key,
             .event_count_max = args.event_count_max,
             .idle_interval_ms = args.idle_interval_ms,
             .requests_per_second_limit = args.requests_per_second_limit,
-            .amqp_timeout_seconds = args.amqp_timeout_seconds,
-            .tigerbeetle_timeout_seconds = args.tigerbeetle_timeout_seconds,
             .recovery_mode = if (args.timestamp_last) |timestamp_last|
                 .{ .override = timestamp_last }
             else
                 .recover,
         },
     );
-    defer runner.deinit();
+    defer runner.deinit(gpa);
 
     while (true) {
         runner.tick();
     }
+}
+
+fn command_nats(gpa: mem.Allocator, time: Time, args: *const cli.Command.NATS) !void {
+    // Create IO for NATS transport
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    // Parse NATS URL (format: nats://host:port or host:port)
+    const host = parseNatsUrl(args.url) catch |err| {
+        vsr.fatal(.cli, "invalid NATS URL '{}': {}", .{ std.zig.fmtEscapes(args.url), err });
+    };
+
+    // Create NATS transport
+    var nats_transport = try vsr.cdc.NatsTransport.init(gpa, &io, .{
+        .host = host,
+        .user = args.user,
+        .password = args.password,
+        .token = args.token,
+        .stream_name = args.stream_name,
+        .subject_prefix = args.subject_prefix,
+        .kv_bucket = args.kv_bucket,
+        .common = .{
+            .cluster_id = args.cluster,
+            .message_count_max = args.event_count_max orelse 1000,
+            .message_body_size_max = 16 * 1024,
+            .reply_timeout_ticks = 30 * std.time.ms_per_s / vsr.constants.tick_ms,
+        },
+    });
+
+    // Create generic runner with NATS transport
+    var runner: vsr.cdc.Runner = undefined;
+    try runner.init(
+        gpa,
+        time,
+        nats_transport.transport(),
+        .{
+            .cluster_id = args.cluster,
+            .addresses = args.addresses.const_slice(),
+            .routing_key = args.subject_prefix,
+            .event_count_max = args.event_count_max,
+            .idle_interval_ms = args.idle_interval_ms,
+            .requests_per_second_limit = args.requests_per_second_limit,
+            .recovery_mode = if (args.timestamp_last) |timestamp_last|
+                .{ .override = timestamp_last }
+            else
+                .recover,
+        },
+    );
+    defer runner.deinit(gpa);
+
+    while (true) {
+        runner.tick();
+    }
+}
+
+/// Parse NATS URL to extract host address.
+/// Supports formats: nats://host:port, tls://host:port, or host:port
+fn parseNatsUrl(url: []const u8) !std.net.Address {
+    var host_port = url;
+
+    // Strip protocol prefix
+    if (std.mem.startsWith(u8, host_port, "nats://")) {
+        host_port = host_port["nats://".len..];
+    } else if (std.mem.startsWith(u8, host_port, "tls://")) {
+        host_port = host_port["tls://".len..];
+    }
+
+    // Strip trailing path (e.g., "/foo")
+    if (std.mem.indexOfScalar(u8, host_port, '/')) |idx| {
+        host_port = host_port[0..idx];
+    }
+
+    // Parse host:port
+    const colon_idx = std.mem.lastIndexOfScalar(u8, host_port, ':') orelse
+        return error.PortMissing;
+
+    const host = host_port[0..colon_idx];
+    const port_str = host_port[colon_idx + 1 ..];
+    const port = std.fmt.parseUnsigned(u16, port_str, 10) catch
+        return error.PortInvalid;
+
+    return std.net.Address.parseIp4(host, port) catch
+        return error.HostInvalid;
 }
 
 fn print_value(

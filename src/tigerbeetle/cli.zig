@@ -328,6 +328,24 @@ const CLIArgs = union(enum) {
         verbose: bool = false,
     };
 
+    // CDC connector for NATS JetStream targets.
+    const NATS = struct {
+        addresses: []const u8,
+        cluster: u128,
+        url: []const u8 = "nats://127.0.0.1:4222",
+        user: ?[]const u8 = null,
+        password: ?[]const u8 = null,
+        token: ?[]const u8 = null,
+        stream: []const u8 = "TIGERBEETLE",
+        subject_prefix: []const u8 = "tigerbeetle.cdc",
+        kv_bucket: []const u8 = "tigerbeetle-cdc",
+        event_count_max: ?u32 = null,
+        idle_interval_ms: ?u32 = null,
+        requests_per_second_limit: ?u32 = null,
+        timestamp_last: ?u64 = null,
+        verbose: bool = false,
+    };
+
     format: Format,
     recover: Recover,
     start: Start,
@@ -337,6 +355,7 @@ const CLIArgs = union(enum) {
     inspect: Inspect,
     multiversion: Multiversion,
     amqp: AMQP,
+    nats: NATS,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -374,6 +393,8 @@ const CLIArgs = union(enum) {
         \\  repl       Enter the TigerBeetle client REPL.
         \\
         \\  amqp       CDC connector for AMQP targets.
+        \\
+        \\  nats       CDC connector for NATS JetStream targets.
         \\
         \\Options:
         \\
@@ -684,6 +705,23 @@ pub const Command = union(enum) {
         log_debug: bool,
     };
 
+    pub const NATS = struct {
+        addresses: Addresses,
+        cluster: u128,
+        url: []const u8,
+        user: ?[]const u8,
+        password: ?[]const u8,
+        token: ?[]const u8,
+        stream_name: []const u8,
+        subject_prefix: []const u8,
+        kv_bucket: []const u8,
+        event_count_max: ?u32,
+        idle_interval_ms: ?u32,
+        requests_per_second_limit: ?u32,
+        timestamp_last: ?u64,
+        log_debug: bool,
+    };
+
     format: Format,
     recover: Recover,
     start: Start,
@@ -693,6 +731,7 @@ pub const Command = union(enum) {
     inspect: Inspect,
     multiversion: Multiversion,
     amqp: AMQP,
+    nats: NATS,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -710,6 +749,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
         .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
+        .nats => |nats_args| .{ .nats = parse_args_nats(nats_args) },
     };
 }
 
@@ -1355,6 +1395,37 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         .amqp_timeout_seconds = amqp.amqp_timeout_seconds,
         .tigerbeetle_timeout_seconds = amqp.tigerbeetle_timeout_seconds,
         .log_debug = amqp.verbose,
+    };
+}
+
+fn parse_args_nats(nats_args: CLIArgs.NATS) Command.NATS {
+    const addresses = parse_addresses(nats_args.addresses, "--addresses", Command.Addresses);
+
+    if (nats_args.requests_per_second_limit) |requests_per_second_limit| {
+        if (requests_per_second_limit == 0) {
+            vsr.fatal(
+                .cli,
+                "--requests-per-second-limit must not be zero.",
+                .{},
+            );
+        }
+    }
+
+    return .{
+        .addresses = addresses,
+        .cluster = nats_args.cluster,
+        .url = nats_args.url,
+        .user = nats_args.user,
+        .password = nats_args.password,
+        .token = nats_args.token,
+        .stream_name = nats_args.stream,
+        .subject_prefix = nats_args.subject_prefix,
+        .kv_bucket = nats_args.kv_bucket,
+        .event_count_max = nats_args.event_count_max,
+        .idle_interval_ms = nats_args.idle_interval_ms,
+        .requests_per_second_limit = nats_args.requests_per_second_limit,
+        .timestamp_last = nats_args.timestamp_last,
+        .log_debug = nats_args.verbose,
     };
 }
 
