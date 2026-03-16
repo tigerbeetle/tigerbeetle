@@ -32,6 +32,8 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     version: []const u8,
     tigerbeetle: []const u8,
 }) !void {
+    if (true) return; // TODO: remove once Rust client is published.
+
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteTree(tmp_dir) catch {};
 
