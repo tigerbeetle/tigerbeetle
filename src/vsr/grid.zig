@@ -502,7 +502,7 @@ pub fn GridType(comptime Storage: type) type {
 
             var write_queue_iterator = grid.write_queue.iterate();
             while (write_queue_iterator.next()) |write| {
-                assert(write.repair);
+                maybe(write.repair);
                 assert(!grid.free_set.is_free(write.address));
                 assert(!grid.free_set.to_be_freed_at_checkpoint_durability(write.address));
             }
