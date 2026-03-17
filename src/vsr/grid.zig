@@ -1117,6 +1117,18 @@ pub fn GridType(comptime Storage: type) type {
 
             assert(read.address > 0);
 
+            // Check the write queue before checking the read queue, since otherwise:
+            // 1. Read block. (coherent=false, i.e. via repair)
+            // 2. Create block. (start)
+            // 3. Read block again. (coherent=true)
+            // We must ensure that the second read succeeds, so that it doesn't just queue up behind
+            // the first read.
+            if (grid.read_block_from_write_queues(read.address, read.checksum)) |block| {
+                grid.assert_coherent(read.address, read.checksum);
+                grid.read_block_resolve(read, .{ .valid = block });
+                return;
+            }
+
             // Check if a read is already processing/recovering and merge with it.
             for ([_]*const QueueType(Read){
                 &grid.read_queue,
@@ -1139,12 +1151,6 @@ pub fn GridType(comptime Storage: type) type {
                         }
                     }
                 }
-            }
-
-            if (grid.read_block_from_write_queues(read.address, read.checksum)) |block| {
-                grid.assert_coherent(read.address, read.checksum);
-                grid.read_block_resolve(read, .{ .valid = block });
-                return;
             }
 
             // When Read.cache_read is set, the caller of read_block()
