@@ -31,7 +31,7 @@ const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
 const QueueType = @import("../queue.zig").QueueType;
-const IOPSType = @import("../iops.zig").IOPSType;
+const IOPSType = stdx.IOPSType;
 
 const allocate_block = @import("./grid.zig").allocate_block;
 const GridType = @import("./grid.zig").GridType;

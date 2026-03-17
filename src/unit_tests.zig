@@ -11,7 +11,6 @@ comptime {
     _ = @import("ewah.zig");
     _ = @import("ewah_benchmark.zig");
     _ = @import("io/test.zig");
-    _ = @import("iops.zig");
     _ = @import("list.zig");
     _ = @import("lsm/binary_search.zig");
     _ = @import("lsm/binary_search_benchmark.zig");

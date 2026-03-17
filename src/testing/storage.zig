@@ -33,7 +33,7 @@ const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 
 const QueueType = @import("../queue.zig").QueueType;
-const IOPSType = @import("../iops.zig").IOPSType;
+const IOPSType = stdx.IOPSType;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
