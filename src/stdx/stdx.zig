@@ -9,6 +9,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 pub const BitSetType = @import("bit_set.zig").BitSetType;
+pub const IOPSType = @import("iops.zig").IOPSType;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
 pub const PRNG = @import("prng.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
@@ -1155,11 +1156,11 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
 }
 
 comptime {
-    _ = @import("huge_page_allocator.zig");
-    _ = @import("vendored/aegis.zig");
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
     _ = @import("flags.zig");
+    _ = @import("huge_page_allocator.zig");
+    _ = @import("iops.zig");
     _ = @import("prng.zig");
     _ = @import("radix.zig");
     _ = @import("ring_buffer.zig");
@@ -1168,5 +1169,6 @@ comptime {
     _ = @import("testing/snaptest.zig");
     _ = @import("time_units.zig");
     _ = @import("unshare.zig");
+    _ = @import("vendored/aegis.zig");
     _ = @import("zipfian.zig");
 }

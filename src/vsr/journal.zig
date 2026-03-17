@@ -9,7 +9,7 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
-const IOPSType = @import("../iops.zig").IOPSType;
+const IOPSType = stdx.IOPSType;
 
 const log = std.log.scoped(.journal);
 
