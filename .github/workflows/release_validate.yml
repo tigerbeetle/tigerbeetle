@@ -20,13 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: release
+          ref: lewis/release-validate-override
       # Run on the latest tag. The release branch is ahead of release tag over the weekend.
-      # NB: Temporarily overriden to cb22/release-validate-override - make sure to revert back
+      # NB: Temporarily overriden to lewis/release-validate-override - make sure to revert back
       # before the next release!
       - run: |
-          TAG=$(gh release list --limit 1 | cut -f1)
-          git fetch origin $TAG && git switch -d FETCH_HEAD
+          git fetch origin lewis/release-validate-override
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
