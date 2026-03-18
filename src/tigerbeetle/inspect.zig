@@ -413,7 +413,7 @@ fn print_objects(output: std.io.AnyWriter) !void {
         try print_size_count(output, size_total, 1);
 
         try print_header(output, 1, "object");
-        try print_size_count(output, object_size, 1);
+        try print_size_count(output, object_size, ObjectTree.Table.value_count_max);
 
         try print_header(output, 1, "id");
         try print_size_count(output, id_size, 1);
