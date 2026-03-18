@@ -42,12 +42,11 @@ pub fn MessageBusType(comptime IO: type) type {
         accept_address: ?Address = null,
         accept_completion: IO.Completion = undefined,
         /// The connection reserved for the currently in progress accept operation.
-        /// This is non-null exactly when an accept operation is submitted and a
-        /// free connection slot was available. When null but accept_in_progress is
-        /// true, the accept will reject (close) the incoming connection.
+        /// This is non-null exactly when an accept operation is submitted.
         accept_connection: ?*Connection = null,
-        /// True when an accept operation has been submitted to the IO layer.
-        accept_in_progress: bool = false,
+        /// Set when accept() can't find a free slot. Cleared when a slot becomes
+        /// available. Drives tick_accept_reclaim to evict the LRU connection.
+        accept_blocked: bool = false,
 
         /// The callback to be called when a message is received.
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
@@ -350,13 +349,12 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.accept();
         }
 
-        /// When all connection slots are full and an accept is pending,
-        /// terminate the least-recently-active client connection to free
-        /// a slot for the next accept.
+        /// When all connection slots are full and accept() couldn't proceed,
+        /// terminate the least-recently-active client connection to free a slot.
+        /// The incoming connection waits in the kernel backlog while the eviction
+        /// completes, then the next tick's accept() picks up the freed slot.
         fn tick_accept_reclaim(bus: *MessageBus) void {
-            if (!bus.accept_in_progress) return;
-            // Only reclaim when we had no free slot for the pending accept.
-            if (bus.accept_connection != null) return;
+            if (!bus.accept_blocked) return;
 
             // If there is already a connection being shut down, wait for it.
             for (bus.connections) |*connection| {
@@ -394,20 +392,22 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.process == .replica);
             assert(bus.accept_fd != null);
 
-            if (bus.accept_in_progress) return;
+            if (bus.accept_connection != null) return;
 
-            // Try to reserve a free connection slot for the incoming connection.
-            // If all slots are full, we still submit the accept so we can drain
-            // the kernel's TCP backlog and immediately close the fd. This gives
-            // the client a TCP RST so it can retry, instead of silently hanging.
+            // Wait for a free slot. If all slots are full, tick_accept_reclaim
+            // will evict the LRU connection to free one. The incoming connection
+            // waits in the kernel's TCP backlog until then.
             bus.accept_connection = for (bus.connections) |*connection| {
                 if (connection.state == .free) {
                     connection.state = .accepting;
                     break connection;
                 }
-            } else null;
+            } else {
+                bus.accept_blocked = true;
+                return;
+            };
+            bus.accept_blocked = false;
 
-            bus.accept_in_progress = true;
             bus.io.accept(
                 *MessageBus,
                 bus,
@@ -423,29 +423,17 @@ pub fn MessageBusType(comptime IO: type) type {
             result: IO.AcceptError!IO.socket_t,
         ) void {
             assert(bus.process == .replica);
-            assert(bus.accept_in_progress);
-            bus.accept_in_progress = false;
 
-            const fd = result catch |err| {
-                // Accept failed at the OS level.
-                if (bus.accept_connection) |connection| {
-                    assert(connection.state == .accepting);
-                    connection.state = .free;
-                    bus.accept_connection = null;
-                }
-                // TODO: some errors should probably be fatal
-                log.warn("{}: on_accept: {}", .{ bus.id, err });
-                return;
-            };
+            assert(bus.accept_connection != null);
+            const connection: *Connection = bus.accept_connection.?;
+            bus.accept_connection = null;
 
-            if (bus.accept_connection) |connection| {
-                // Normal path: we had a free slot reserved.
-                bus.accept_connection = null;
+            assert(connection.peer == .unknown);
+            assert(connection.fd == null);
+            assert(connection.state == .accepting);
+            defer assert(connection.state == .connected or connection.state == .free);
 
-                assert(connection.peer == .unknown);
-                assert(connection.fd == null);
-                assert(connection.state == .accepting);
-
+            if (result) |fd| {
                 connection.state = .connected;
                 connection.fd = fd;
                 connection.last_active_tick = bus.tick_counter;
@@ -458,12 +446,10 @@ pub fn MessageBusType(comptime IO: type) type {
                 // Don't start send loop yet --- on accept, we don't know which peer this is.
                 assert(connection.send_queue.empty());
                 assert(connection.state == .connected);
-            } else {
-                // All connection slots were full when the accept was submitted.
-                // Close the fd immediately so the client gets a TCP RST and can
-                // retry with backoff, instead of silently hanging forever.
-                log.info("{}: on_accept: connections full, rejecting", .{bus.id});
-                bus.io.close_socket(fd);
+            } else |err| {
+                connection.state = .free;
+                // TODO: some errors should probably be fatal
+                log.warn("{}: on_accept: {}", .{ bus.id, err });
             }
         }
 
