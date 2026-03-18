@@ -426,7 +426,7 @@ pub fn ContextType(
                             }
 
                             if (has_message_bus) {
-                                self.client.message_bus.terminate_all();
+                                self.client.message_bus.shutdown();
                             }
 
                             continue :phase .disconnecting;
@@ -496,7 +496,7 @@ pub fn ContextType(
         /// it is safe to free the client's resources.
         fn client_io_settled(self: *const Context) bool {
             if (has_message_bus) {
-                return self.client.message_bus.io_settled();
+                return self.client.message_bus.shutdown_complete();
             }
             return true;
         }

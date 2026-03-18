@@ -59,6 +59,7 @@ pub fn MessageBusType(comptime IO: type) type {
         }),
         resume_receive_completion: IO.Completion = undefined,
         resume_receive_submitted: bool = false,
+        shutdown_requested: bool = false,
 
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
@@ -260,8 +261,32 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.accept_address = accept_address;
         }
 
+        /// Initiates graceful termination of all active connections.
+        ///
+        /// Each connection's state machine drives itself to .free through
+        /// IO callbacks. Callers must continue running the IO loop until
+        /// `shutdown_complete()` returns true.
+        pub fn shutdown(bus: *MessageBus) void {
+            assert(!bus.shutdown_requested);
+            bus.shutdown_requested = true;
+
+            for (bus.connections) |*connection| {
+                if (connection.state != .free and connection.state != .terminating) {
+                    bus.terminate(connection, .shutdown);
+                }
+            }
+        }
+
+        /// Returns true when all IO operations have completed and it is
+        /// safe to free the message bus's resources.
+        pub fn shutdown_complete(bus: *const MessageBus) bool {
+            assert(bus.shutdown_requested);
+            return bus.connections_used == 0 and !bus.resume_receive_submitted;
+        }
+
         pub fn tick(bus: *MessageBus) void {
             assert(bus.process == .replica);
+            assert(!bus.shutdown_requested);
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
         }
@@ -291,26 +316,8 @@ pub fn MessageBusType(comptime IO: type) type {
         // to not add dead accept code to client libraries.
         pub fn tick_client(bus: *MessageBus) void {
             assert(bus.process == .client);
+            assert(!bus.shutdown_requested);
             bus.tick_connect();
-        }
-
-        /// Returns true when all IO operations have completed and it is
-        /// safe to free the message bus's resources.
-        pub fn io_settled(bus: *const MessageBus) bool {
-            return bus.connections_used == 0 and !bus.resume_receive_submitted;
-        }
-
-        /// Initiates graceful termination of all active connections.
-        ///
-        /// Each connection's state machine drives itself to .free through
-        /// IO callbacks. Callers must continue running the IO loop until
-        /// `io_settled()` returns true.
-        pub fn terminate_all(bus: *MessageBus) void {
-            for (bus.connections) |*connection| {
-                if (connection.state != .free and connection.state != .terminating) {
-                    bus.terminate(connection, .shutdown);
-                }
-            }
         }
 
         fn tick_connect(bus: *MessageBus) void {
@@ -827,6 +834,7 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
+            assert(!bus.shutdown_requested);
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (bus.process == .replica) assert(replica != bus.process.replica);
 
@@ -844,6 +852,7 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Try to send the message to the client with the given id.
         /// If the client is not currently connected, the message is silently dropped.
         pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
+            assert(!bus.shutdown_requested);
             assert(bus.process == .replica);
             assert(bus.clients.capacity() > 0);
 
