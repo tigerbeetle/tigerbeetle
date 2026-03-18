@@ -188,13 +188,11 @@ pub const Supervisor = struct {
 
     server_executables: [dependencies_count][]const u8,
     driver_executables: [dependencies_count][]const u8,
+    release_count: u32,
 
     output_directory: []const u8,
     replica_datafiles: []const []const u8,
     replicas: []*Replica,
-
-    release_index: u32,
-    release_count: u32,
 
     /// This represents the start timestamp of a period where we have an acceptable number of
     /// process faults, such that we require liveness (that requests are finished within a
@@ -287,10 +285,9 @@ pub const Supervisor = struct {
             .output_directory = output_directory,
             .server_executables = dependencies.server_executables,
             .driver_executables = dependencies.driver_executables,
+            .release_count = @intCast(dependencies.server_executables.len),
             .replicas = replicas,
             .replica_datafiles = replica_datafiles,
-            .release_index = 0,
-            .release_count = @intCast(dependencies.server_executables.len),
         };
         return supervisor;
     }
@@ -542,7 +539,8 @@ pub const Supervisor = struct {
     pub fn replica_format(supervisor: *Supervisor, replica_index: u8) !void {
         assert(supervisor.replicas[replica_index].state() == .terminated);
 
-        const server_executable = supervisor.server_executables[supervisor.release_index];
+        const release_index = supervisor.replicas[replica_index].executable_index;
+        const server_executable = supervisor.server_executables[release_index];
         supervisor.shell.exec(
             \\{tigerbeetle_executable} format
             \\    --cluster={cluster}
