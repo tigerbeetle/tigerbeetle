@@ -186,15 +186,7 @@ determines whether the given type of account is increased with a debit or a cred
 
 ## Want More Help Understanding Debits and Credits?
 
-### Ask the Community
-
-Have questions about debits and credits, TigerBeetle's data model, how to design your application on
-top of it, or anything else? Join our [Community Slack](https://slack.tigerbeetle.com/join) to ask 
-any and all of the questions you might have!
-
-### Solutions
-
-Would you like the TigerBeetle team to support you to design your chart of accounts and to leverage 
-the power of fully managed TigerBeetle in your architecture? Let us help you get it right. Contact us 
-at <sales@tigerbeetle.com> to set up a call. There is also a 
+The TigerBeetle team can support you to design your chart of accounts, and leverage 
+the power of fully managed TigerBeetle in your architecture. Contact us at 
+<sales@tigerbeetle.com> to set up a call. There is also a 
 [Startup Program](https://tigerbeetle.com/startup) for early-stage businesses.
