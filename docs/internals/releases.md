@@ -118,6 +118,32 @@ triple and is considered to be the "same" release from the perspective of the pr
 case, the git tag and the VSR release in the binary would differ. To make this kind of release,
 adjust `version_info.release_triple` manually in `release.zig`.
 
+### Validation Error Handling
+
+Sometimes, the release is perfectly fine, but the validation code is broken (e.g., a bug in a
+client's `validate_release`). This is the code that runs on a timer, and rebuilds the last released
+tag to compare it to the artifacts published.
+
+This workflow is triggered by `release_validate.yml` from the `main` branch, but once the workflow
+is running, it:
+
+- switches to the release branch,
+- and checks out the last published tag.
+
+That means that the code that is built and run by default will be from the broken release, and so
+it'll be pinned in time as broken. Pushing a fix to `main` or `release` *will not* fix the problem.
+
+Instead, create a new branch with the fix for the validation code. This should be branched straight
+off of the release tag. Then:
+
+- modify `release_validate.yml`'s `actions/checkout` to check out your branch and fetch full git
+  history,
+- remove the `run` that changes to the last release tag, and,
+- hard-code the `git_sha` of the last release in `src/scripts/ci.zig`.
+
+The last step is needed, since otherwise the compiled binary hashes won't match and validation will
+fail.
+
 ## What Is a Release?
 
 TigerBeetle is distributed in binary form. There are two main reasons for this:
