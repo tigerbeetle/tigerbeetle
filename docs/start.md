@@ -180,8 +180,6 @@ If you want to keep up to speed with recent TigerBeetle developments:
 
 - [Monthly Newsletter](https://tigerbeetle.com/newsletter) covers everything
   of importance that happened with TigerBeetle. It is a changelog director's cut!
-- [Slack](https://slack.tigerbeetle.com/join) is the place to hang out with users and developers
-  of TigerBeetle. We try to answer every question.
 - [YouTube](https://www.youtube.com/@tigerbeetledb) channel has most of the talks about TigerBeetle,
   as well as talks from the Systems Distributed conference. We also stream on
   [Twitch](https://www.twitch.tv/tigerbeetle), with recordings duplicated to YouTube.
