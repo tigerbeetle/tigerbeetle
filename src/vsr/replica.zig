@@ -312,7 +312,7 @@ pub fn ReplicaType(
 
         /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling
-        /// `on_message_from_bus()`.
+        /// `on_messages_from_bus()`.
         message_bus: MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
@@ -618,6 +618,11 @@ pub fn ReplicaType(
 
         trace: *Tracer,
         trace_emit_timeout: Timeout,
+
+        // Record the lowest and highest client releases that this replica has seen. These get reset
+        // every time they are emitted (by trace_emit_timeout).
+        release_seen_client_min: ?u32 = null,
+        release_seen_client_max: ?u32 = null,
 
         aof: ?*AOF,
         aof_recovery: bool,
@@ -1756,6 +1761,20 @@ pub fn ReplicaType(
                     message.header.cluster,
                 });
                 return;
+            }
+
+            switch (message.header.peer_type()) {
+                .client, .client_likely => {
+                    self.release_seen_client_min = @min(
+                        message.header.release.value,
+                        self.release_seen_client_min orelse message.header.release.value,
+                    );
+                    self.release_seen_client_max = @max(
+                        message.header.release.value,
+                        self.release_seen_client_max orelse message.header.release.value,
+                    );
+                },
+                else => {},
             }
 
             switch (self.syncing) {
@@ -3924,6 +3943,15 @@ pub fn ReplicaType(
                 .lsm_manifest_block_count,
                 self.superblock.working.vsr_state.checkpoint.manifest_block_count,
             );
+
+            if (self.release_seen_client_min) |release_seen_client_min| {
+                self.trace.gauge(.release_seen_client_min, release_seen_client_min);
+            }
+            if (self.release_seen_client_max) |release_seen_client_max| {
+                self.trace.gauge(.release_seen_client_max, release_seen_client_max);
+            }
+            self.release_seen_client_min = null;
+            self.release_seen_client_max = null;
 
             self.message_bus.trace_gauge();
 
