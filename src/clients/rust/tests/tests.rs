@@ -200,7 +200,7 @@ fn smoke() -> Result<()> {
                     flags: tb::AccountFlags::History,
                     timestamp: 0,
                 },
-            ]);
+            ])?;
             let result = assert_send(fut).await?;
 
             assert_eq!(result.len(), 0);
@@ -222,14 +222,14 @@ fn smoke() -> Result<()> {
                     code: TEST_CODE,
                     flags: tb::TransferFlags::default(),
                     timestamp: 0,
-                }])
+                }])?
                 .await?;
 
             assert_eq!(result.len(), 0);
         }
 
         {
-            let result = client.lookup_accounts(&[account_id1, account_id2]).await?;
+            let result = client.lookup_accounts(&[account_id1, account_id2])?.await?;
 
             assert_eq!(result.len(), 2);
             let res_account1 = result[0];
@@ -244,7 +244,7 @@ fn smoke() -> Result<()> {
         }
 
         {
-            let result = client.lookup_transfers(&[transfer_id1]).await?;
+            let result = client.lookup_transfers(&[transfer_id1])?.await?;
 
             assert_eq!(result.len(), 1);
             let res_transfer1 = result[0];
@@ -268,7 +268,7 @@ fn smoke() -> Result<()> {
                     timestamp_max: 0,
                     limit: 10,
                     flags: tb::AccountFilterFlags::Credits | tb::AccountFilterFlags::Debits,
-                })
+                })?
                 .await?;
 
             assert_eq!(result.len(), 1);
@@ -294,7 +294,7 @@ fn smoke() -> Result<()> {
                     timestamp_max: 0,
                     limit: 10,
                     flags: tb::AccountFilterFlags::Credits | tb::AccountFilterFlags::Debits,
-                })
+                })?
                 .await?;
 
             assert_eq!(result.len(), 1);
@@ -318,7 +318,7 @@ fn smoke() -> Result<()> {
                     timestamp_max: 0,
                     limit: 10,
                     flags: tb::QueryFilterFlags::default(),
-                })
+                })?
                 .await?;
 
             assert_eq!(result.len(), 1);
@@ -341,7 +341,7 @@ fn smoke() -> Result<()> {
                     timestamp_max: 0,
                     limit: 10,
                     flags: tb::QueryFilterFlags::default(),
-                })
+                })?
                 .await?;
 
             assert_eq!(result.len(), 1);
@@ -370,7 +370,7 @@ fn dtor() -> Result<()> {
 
     block_on(async {
         // Let's at least talk to the server before dropping
-        let _ = client.create_accounts(&[]).await?;
+        let _ = client.create_accounts(&[])?.await?;
         drop(client);
         Ok(())
     })
@@ -381,7 +381,7 @@ fn close() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let _ = client.create_accounts(&[]).await?;
+        let _ = client.create_accounts(&[])?.await?;
         client.close().await;
         Ok(())
     })
@@ -394,7 +394,7 @@ fn dtor_no_wait() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let _ = client.create_accounts(&[]);
+        let _ = client.create_accounts(&[])?;
         drop(client);
         Ok(())
     })
@@ -405,7 +405,7 @@ fn close_no_wait() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let _ = client.create_accounts(&[]);
+        let _ = client.create_accounts(&[])?;
         let _ = client.close();
         Ok(())
     })
@@ -423,7 +423,7 @@ fn client_drop_before_future_awaited() -> Result<()> {
             ..Default::default()
         };
 
-        let future = client.create_accounts(&[account]);
+        let future = client.create_accounts(&[account])?;
         drop(client);
         future
     };
@@ -452,7 +452,7 @@ fn client_drop_causes_shutdown_status() -> Result<()> {
                 code: TEST_CODE,
                 ..Default::default()
             };
-            futures.push(client.create_accounts(&[account]));
+            futures.push(client.create_accounts(&[account])?);
         }
 
         drop(client);
@@ -480,7 +480,7 @@ fn too_many_events() -> Result<()> {
 
     block_on(async {
         let accounts = lots_of_accounts();
-        let result = client.create_accounts(&accounts).await;
+        let result = client.create_accounts(&accounts)?.await;
 
         assert_eq!(result, Err(tb::PacketStatus::TooMuchData));
 
@@ -517,7 +517,7 @@ fn zero_events_create_accounts() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let result = client.create_accounts(&[]).await?;
+        let result = client.create_accounts(&[])?.await?;
 
         assert!(result.is_empty());
 
@@ -530,7 +530,7 @@ fn zero_events_create_transfers() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let result = client.create_transfers(&[]).await?;
+        let result = client.create_transfers(&[])?.await?;
 
         assert!(result.is_empty());
 
@@ -543,7 +543,7 @@ fn zero_events_lookup_accounts() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let result = client.lookup_accounts(&[]).await?;
+        let result = client.lookup_accounts(&[])?.await?;
 
         assert!(result.is_empty());
 
@@ -556,7 +556,7 @@ fn zero_events_lookup_transfers() -> Result<()> {
     let (client, _guard) = test_client()?;
 
     block_on(async {
-        let result = client.lookup_transfers(&[]).await?;
+        let result = client.lookup_transfers(&[])?.await?;
 
         assert!(result.is_empty());
 
@@ -597,7 +597,7 @@ fn multithread() -> Result<()> {
                                 code: TEST_CODE,
                                 flags: tb::AccountFlags::History,
                                 timestamp: 0,
-                            }])
+                            }])?
                             .await?;
 
                         assert_eq!(results.len(), 0);
@@ -647,7 +647,7 @@ fn concurrent_requests() -> Result<()> {
             code: TEST_CODE,
             flags: tb::AccountFlags::History,
             timestamp: 0,
-        }]);
+        }])?;
         responses.push(response);
     }
 
@@ -680,7 +680,7 @@ fn client_drop_loses_pending_transactions() -> Result<()> {
                 ledger: TEST_LEDGER,
                 code: TEST_CODE,
                 ..Default::default()
-            }]);
+            }])?;
             ids.push(id);
         }
     }
@@ -692,7 +692,7 @@ fn client_drop_loses_pending_transactions() -> Result<()> {
     ids.reverse();
 
     for next_ids in ids.chunks(8189) {
-        let results = block_on(client.lookup_accounts(next_ids))?;
+        let results = block_on(client.lookup_accounts(next_ids)?)?;
         if results.len() < next_ids.len() {
             // This is what we expect.
             return Ok(());
@@ -751,7 +751,7 @@ fn get_account_transfers_paged(
             }
             State::End => return None,
         };
-        let result_next = client.get_account_transfers(event).await;
+        let result_next = client.get_account_transfers(event).ok()?.await;
         match result_next {
             Ok(result_next) => {
                 let result_len = u32::try_from(result_next.len()).expect("u32");
@@ -829,11 +829,11 @@ fn make_paging_test_transfers(client: &tb::Client) -> Result<PagingTestParams> {
     .collect();
 
     block_on(async {
-        let account_results = client.create_accounts(&[account1, account2]).await?;
+        let account_results = client.create_accounts(&[account1, account2])?.await?;
         assert_eq!(account_results.len(), 0);
 
         for transfers in transfers.chunks(batch_size) {
-            let transfer_results = client.create_transfers(transfers).await?;
+            let transfer_results = client.create_transfers(transfers)?.await?;
             assert_eq!(transfer_results.len(), 0);
         }
 
@@ -917,7 +917,7 @@ fn example_create_accounts() -> std::result::Result<(), Box<dyn std::error::Erro
         client: &tb::Client,
         accounts: &[tb::Account],
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let create_accounts_results = client.create_accounts(accounts).await?;
+        let create_accounts_results = client.create_accounts(accounts)?.await?;
         let create_accounts_results_merged =
             merge_create_accounts_results(accounts, create_accounts_results);
         for (account, create_account_result) in create_accounts_results_merged {
@@ -1011,12 +1011,12 @@ fn example_create_accounts() -> std::result::Result<(), Box<dyn std::error::Erro
         make_create_accounts_request(&client, &gen_accounts()).await?;
 
         // Also test that the results are what we expect.
-        let results_actual = client.create_accounts(&gen_accounts()).await?;
+        let results_actual = client.create_accounts(&gen_accounts())?.await?;
         assert_eq!(results_expected, &results_actual[..]);
 
         // Test `merge_create_accounts_results`
         let accounts = gen_accounts();
-        let results_actual = client.create_accounts(&accounts).await?;
+        let results_actual = client.create_accounts(&accounts)?.await?;
         let results_merged: Vec<_> =
             merge_create_accounts_results(&accounts, results_actual).collect();
         let results_expected: Vec<(&tb::Account, tb::CreateAccountResult)> = accounts
@@ -1038,7 +1038,7 @@ fn example_create_transfers() -> std::result::Result<(), Box<dyn std::error::Err
         client: &tb::Client,
         transfers: &[tb::Transfer],
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let create_transfers_results = client.create_transfers(transfers).await?;
+        let create_transfers_results = client.create_transfers(transfers)?.await?;
         let create_transfers_results_merged =
             merge_create_transfers_results(transfers, create_transfers_results);
         for (transfer, create_transfer_result) in create_transfers_results_merged {
@@ -1104,7 +1104,7 @@ fn example_create_transfers() -> std::result::Result<(), Box<dyn std::error::Err
                 ..Default::default()
             },
         ];
-        client.create_accounts(&accounts).await?;
+        client.create_accounts(&accounts)?.await?;
 
         let gen_transfers = || {
             let duplicate_id = tb::id();
@@ -1154,7 +1154,7 @@ fn example_create_transfers() -> std::result::Result<(), Box<dyn std::error::Err
         make_create_transfers_request(&client, &gen_transfers()).await?;
 
         // Also test that the results are what we expect.
-        let results_actual = client.create_transfers(&gen_transfers()).await?;
+        let results_actual = client.create_transfers(&gen_transfers())?.await?;
         assert_eq!(results_expected, &results_actual[..]);
 
         Ok(())
@@ -1169,7 +1169,7 @@ fn example_lookup_accounts() -> std::result::Result<(), Box<dyn std::error::Erro
         client: &tb::Client,
         accounts: &[u128],
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let lookup_accounts_results = client.lookup_accounts(accounts).await?;
+        let lookup_accounts_results = client.lookup_accounts(accounts)?.await?;
         let lookup_accounts_results_merged =
             merge_lookup_accounts_results(accounts, lookup_accounts_results);
         for (account_id, maybe_account) in lookup_accounts_results_merged {
@@ -1247,13 +1247,13 @@ fn example_lookup_accounts() -> std::result::Result<(), Box<dyn std::error::Erro
 
         let (client, _guard) = test_client()?;
 
-        let _ = client.create_accounts(accounts).await?;
+        let _ = client.create_accounts(accounts)?.await?;
 
         // Test the example.
         make_lookup_accounts_request(&client, accounts_lookup).await?;
 
         // Also test that the results are what we expect.
-        let results_actual = client.lookup_accounts(accounts_lookup).await?;
+        let results_actual = client.lookup_accounts(accounts_lookup)?.await?;
         let results_actual: Vec<_> = results_actual
             .into_iter()
             .map(|account| tb::Account {
@@ -1280,7 +1280,7 @@ fn example_lookup_transfers() -> std::result::Result<(), Box<dyn std::error::Err
         client: &tb::Client,
         transfers: &[u128],
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let lookup_transfers_results = client.lookup_transfers(transfers).await?;
+        let lookup_transfers_results = client.lookup_transfers(transfers)?.await?;
         let lookup_transfers_results_merged =
             merge_lookup_transfers_results(transfers, lookup_transfers_results);
         for (transfer_id, maybe_transfer) in lookup_transfers_results_merged {
@@ -1380,14 +1380,14 @@ fn example_lookup_transfers() -> std::result::Result<(), Box<dyn std::error::Err
 
         let (client, _guard) = test_client()?;
 
-        let _ = client.create_accounts(accounts).await?;
-        let _ = client.create_transfers(transfers).await?;
+        let _ = client.create_accounts(accounts)?.await?;
+        let _ = client.create_transfers(transfers)?.await?;
 
         // Test the example.
         make_lookup_transfers_request(&client, transfers_lookup).await?;
 
         // Also test that the results are what we expect.
-        let results_actual = client.lookup_transfers(transfers_lookup).await?;
+        let results_actual = client.lookup_transfers(transfers_lookup)?.await?;
         let results_actual: Vec<_> = results_actual
             .into_iter()
             .map(|transfer| tb::Transfer {
@@ -1419,7 +1419,7 @@ fn client_evicted() -> Result<()> {
 
     let client_evict = tb::Client::new(0, &address)?;
 
-    let accounts = block_on(client_evict.lookup_accounts(&[tb::id()]))?;
+    let accounts = block_on(client_evict.lookup_accounts(&[tb::id()])?)?;
     assert_eq!(accounts.len(), 0);
 
     let mut handles = Vec::new();
@@ -1427,7 +1427,7 @@ fn client_evicted() -> Result<()> {
         let address = address.clone();
         handles.push(std::thread::spawn(move || {
             let client = tb::Client::new(0, &address).unwrap();
-            let accounts = block_on(client.lookup_accounts(&[tb::id()])).unwrap();
+            let accounts = block_on(client.lookup_accounts(&[tb::id()]).unwrap()).unwrap();
             assert_eq!(accounts.len(), 0);
         }));
     }
@@ -1437,8 +1437,13 @@ fn client_evicted() -> Result<()> {
     }
 
     // The original client should now be evicted.
-    let result = block_on(client_evict.lookup_accounts(&[tb::id()]));
+    let result = block_on(client_evict.lookup_accounts(&[tb::id()])?);
     assert_eq!(result, Err(tb::PacketStatus::ClientEvicted));
+
+    // After eviction, the client handle is invalidated. Subsequent
+    // submissions are rejected.
+    let result = client_evict.lookup_accounts(&[tb::id()]);
+    assert_eq!(result.err(), Some(tb::ClientClosed));
 
     Ok(())
 }

@@ -6,7 +6,7 @@ async fn assert_account_balances(
     debug_msg: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ids: Vec<u128> = expected_accounts.iter().map(|a| a.id).collect();
-    let found_accounts = client.lookup_accounts(&ids).await?;
+    let found_accounts = client.lookup_accounts(&ids)?.await?;
     assert_eq!(expected_accounts.len(), found_accounts.len(), "accounts");
 
     for found_account in &found_accounts {
@@ -72,7 +72,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 code: 1,
                 ..Default::default()
             },
-        ])
+        ])?
         .await?;
 
     for error in &account_errors {
@@ -134,7 +134,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    let transfer_errors = client.create_transfers(&transfers).await?;
+    let transfer_errors = client.create_transfers(&transfers)?.await?;
     for error in &transfer_errors {
         eprintln!("Error creating transfer: {:?}", error.result);
     }
@@ -177,7 +177,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])
+        }])?
         .await?;
 
     for error in &transfer_errors {
@@ -222,7 +222,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::VoidPendingTransfer,
             ..Default::default()
-        }])
+        }])?
         .await?;
 
     for error in &transfer_errors {
@@ -267,7 +267,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])
+        }])?
         .await?;
 
     for error in &transfer_errors {
@@ -312,7 +312,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::VoidPendingTransfer,
             ..Default::default()
-        }])
+        }])?
         .await?;
 
     for error in &transfer_errors {
@@ -357,7 +357,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])
+        }])?
         .await?;
 
     for error in &transfer_errors {

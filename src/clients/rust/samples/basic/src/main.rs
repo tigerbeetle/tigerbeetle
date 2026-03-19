@@ -23,7 +23,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 code: 1,
                 ..Default::default()
             },
-        ])
+        ])?
         .await?;
 
     for error in &account_errors {
@@ -40,7 +40,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ledger: 1,
             code: 1,
             ..Default::default()
-        }])
+        }])?
         .await?;
 
     for error in &transfer_errors {
@@ -49,7 +49,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     assert!(transfer_errors.is_empty());
 
     // Check the sums for both accounts
-    let accounts = client.lookup_accounts(&[1, 2]).await?;
+    let accounts = client.lookup_accounts(&[1, 2])?.await?;
     assert_eq!(accounts.len(), 2);
 
     for account in accounts {
