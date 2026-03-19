@@ -821,8 +821,31 @@ pub fn ContextType(
                 return;
             }
 
-            // Prevents IO thread starvation under heavy client load.
-            // Process only the minimal number of packets for the next pending request.
+            // After eviction, the io_thread drains pending/inflight packets
+            // with eviction errors and deinits the client. Any packets
+            // submitted after that point are cancelled here with eviction
+            // errors. The client is not safe to access past this point.
+            if (self.eviction_reason != null) {
+                while (true) {
+                    const packet: *Packet = pop: {
+                        self.interface.locker.lock();
+                        defer self.interface.locker.unlock();
+
+                        break :pop self.submitted.pop() orelse break;
+                    };
+                    packet.assert_phase(.submitted);
+                    self.packet_cancel(packet);
+                }
+                return;
+            }
+
+            self.drain_submitted_packets();
+        }
+
+        fn drain_submitted_packets(self: *Context) void {
+            assert(thread_caller == .io);
+            assert(self.eviction_reason == null);
+
             const enqueued_count = self.pending.count();
             const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
             for (0..safety_limit) |_| {
@@ -842,7 +865,7 @@ pub fn ContextType(
                 if (self.pending.count() > enqueued_count) break;
             }
 
-            // Defer this work to later,
+            // Defer remaining work to later,
             // allowing the IO thread to remain free for processing completions.
             const empty: bool = empty: {
                 self.interface.locker.lock();
