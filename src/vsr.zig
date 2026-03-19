@@ -40,6 +40,8 @@ pub const testing = .{
     .IdPermutation = @import("testing/id.zig").IdPermutation,
     .IO = @import("message_bus_fuzz.zig").IO,
     .parse_seed = @import("testing/fuzz.zig").parse_seed,
+    .fixtures = @import("testing/fixtures.zig"),
+    .time = @import("testing/time.zig"),
 };
 pub const ewah = @import("ewah.zig").ewah;
 pub const checkpoint_trailer = @import("vsr/checkpoint_trailer.zig");
