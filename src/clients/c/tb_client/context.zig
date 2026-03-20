@@ -187,16 +187,22 @@ pub fn ContextType(
         };
 
         const Phase = union(enum) {
-            running: void,
+            running: Running,
             disconnecting: void,
             settled: void,
 
-            /// Methods only valid during the running phase,
+            /// State and methods for the running phase,
             /// when the client is available for sending requests.
             const Running = struct {
+                batch_size_limit: ?u32,
+                pending: Packet.Queue,
+                previous_request_instant: ?stdx.Instant,
+                previous_request_latency: ?stdx.Duration,
+
                 /// Cancel the current inflight request (and the entire batched
                 /// linked list of packets), as it won't be replied anymore.
-                fn cancel_request_inflight(ctx: *Context) void {
+                fn cancel_request_inflight(self: *Running, ctx: *Context) void {
+                    _ = self;
                     assert(thread_caller == .io);
                     if (ctx.client.request_inflight) |*inflight| {
                         if (inflight.message.header.operation != .register) {
@@ -208,9 +214,9 @@ pub fn ContextType(
                     }
                 }
 
-                fn packet_enqueue(ctx: *Context, packet: *Packet) void {
+                fn packet_enqueue(self: *Running, ctx: *Context, packet: *Packet) void {
                     assert(thread_caller == .io);
-                    assert(ctx.batch_size_limit != null);
+                    assert(self.batch_size_limit != null);
                     packet.assert_phase(.submitted);
 
                     const operation: Operation = operation_from_int(packet.operation) orelse {
@@ -239,11 +245,11 @@ pub fn ContextType(
                         }
 
                         const event_count: u32 = @intCast(@divExact(slice.len, event_size));
-                        const event_max: u32 = operation.event_max(ctx.batch_size_limit.?);
+                        const event_max: u32 = operation.event_max(self.batch_size_limit.?);
                         if (event_count > event_max) {
                             return ctx.notify_completion(packet, error.TooMuchData);
                         }
-                        const result_max: u32 = operation.result_max(ctx.batch_size_limit.?);
+                        const result_max: u32 = operation.result_max(self.batch_size_limit.?);
                         const result_count_expected: u32 = operation.result_count_expected(slice);
                         if (result_count_expected > result_max) {
                             return ctx.notify_completion(packet, error.TooMuchData);
@@ -266,18 +272,18 @@ pub fn ContextType(
 
                     // Nothing inflight means the packet should be submitted right now.
                     if (ctx.client.request_inflight == null) {
-                        assert(ctx.pending.count() == 0);
+                        assert(self.pending.count() == 0);
                         packet.phase = .pending;
                         packet.multi_batch_time_monotonic = ctx.client.time.monotonic().ns;
                         packet.multi_batch_count = 1;
                         packet.multi_batch_event_count = @intCast(batch.event_count);
                         packet.multi_batch_result_count_expected =
                             @intCast(batch.result_count_expected);
-                        packet_send(ctx, packet);
+                        self.packet_send(ctx, packet);
                         return;
                     }
 
-                    var it = ctx.pending.iterate();
+                    var it = self.pending.iterate();
                     while (it.next()) |root| {
                         root.assert_phase(.pending);
 
@@ -293,7 +299,7 @@ pub fn ContextType(
                                 root.multi_batch_event_count;
                             break :size (event_count * batch.event_size) + trailer_size;
                         };
-                        if (request_size > ctx.batch_size_limit.?) continue;
+                        if (request_size > self.batch_size_limit.?) continue;
 
                         // Check if the reply has enough space for the maximum
                         // expected number of results:
@@ -334,14 +340,14 @@ pub fn ContextType(
                     packet.multi_batch_event_count = @intCast(batch.event_count);
                     packet.multi_batch_result_count_expected =
                         @intCast(batch.result_count_expected);
-                    ctx.pending.push(packet);
+                    self.pending.push(packet);
                 }
 
                 /// Sends the packet (the entire batched linked list of packets)
                 /// through the vsr client.
-                fn packet_send(ctx: *Context, packet_list: *Packet) void {
+                fn packet_send(self: *Running, ctx: *Context, packet_list: *Packet) void {
                     assert(thread_caller == .io);
-                    assert(ctx.batch_size_limit != null);
+                    assert(self.batch_size_limit != null);
                     packet_list.assert_phase(.pending);
 
                     // On eviction or shutdown, cancel this packet and any others batched onto it.
@@ -416,11 +422,11 @@ pub fn ContextType(
                         break :request_size message_encoder.finish();
                     };
                     assert(request_size % event_size == 0);
-                    assert(request_size <= ctx.batch_size_limit.?);
+                    assert(request_size <= self.batch_size_limit.?);
 
                     // Sending the request.
                     const previous_request_latency =
-                        ctx.previous_request_latency orelse stdx.Duration{ .ns = 0 };
+                        self.previous_request_latency orelse stdx.Duration{ .ns = 0 };
                     message.header.* = .{
                         .release = ctx.client.release,
                         .client = ctx.client.id,
@@ -435,9 +441,9 @@ pub fn ContextType(
                         )),
                     };
 
-                    assert((ctx.previous_request_instant == null) ==
-                        (ctx.previous_request_latency == null));
-                    ctx.previous_request_instant = .{
+                    assert((self.previous_request_instant == null) ==
+                        (self.previous_request_latency == null));
+                    self.previous_request_instant = .{
                         .ns = packet_list.multi_batch_time_monotonic,
                     };
 
@@ -453,11 +459,11 @@ pub fn ContextType(
                     assert(message.header.request != 0);
                 }
 
-                fn drain_submitted_packets(ctx: *Context) void {
+                fn drain_submitted_packets(self: *Running, ctx: *Context) void {
                     assert(thread_caller == .io);
                     assert(ctx.client_is_available());
 
-                    const enqueued_count = ctx.pending.count();
+                    const enqueued_count = self.pending.count();
                     // Avoid unbounded loop in case of invalid packets.
                     const safety_limit = 8 * 1024;
                     for (0..safety_limit) |_| {
@@ -467,14 +473,14 @@ pub fn ContextType(
 
                             break :pop ctx.submitted.pop() orelse return;
                         };
-                        packet_enqueue(ctx, packet);
+                        self.packet_enqueue(ctx, packet);
 
                         // Packets can be processed without increasing `pending.count`:
                         // - If the packet is invalid.
                         // - If there's no in-flight request, the packet is sent immediately without
                         //   using the pending queue.
                         // - If the packet can be batched with another previously enqueued packet.
-                        if (ctx.pending.count() > enqueued_count) break;
+                        if (self.pending.count() > enqueued_count) break;
                     }
 
                     // Defer remaining work to later,
@@ -539,22 +545,16 @@ pub fn ContextType(
         message_pool: MessagePool,
         client: Client,
 
-        batch_size_limit: ?u32,
-
         completion_callback: CompletionCallback,
         completion_context: usize,
 
         interface: *ClientInterface,
         submitted: Packet.Queue,
-        pending: Packet.Queue,
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
         phase: Phase,
         thread: std.Thread,
-
-        previous_request_instant: stdx.Instant,
-        previous_request_latency: ?stdx.Duration = null,
 
         pub fn init(
             root_allocator: std.mem.Allocator,
@@ -700,20 +700,23 @@ pub fn ContextType(
                 .name = null,
                 .verify_push = builtin.is_test,
             });
-            context.pending = Packet.Queue.init(.{
-                .name = null,
-                .verify_push = builtin.is_test,
-            });
             context.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
-            context.phase = .running;
+            context.phase = .{ .running = .{
+                .batch_size_limit = null,
+                .pending = Packet.Queue.init(.{
+                    .name = null,
+                    .verify_push = builtin.is_test,
+                }),
+                .previous_request_instant = null,
+                .previous_request_latency = null,
+            } };
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.signal_notify_callback);
             errdefer context.signal.deinit();
 
-            context.previous_request_instant = context.client.time.monotonic();
             context.client.register(client_register_callback, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
@@ -753,17 +756,17 @@ pub fn ContextType(
             main: while (true) {
                 const should_stop = self.signal.status() == .shutdown_completed;
 
-                self.phase = phase: switch (self.phase) {
+                switch (self.phase) {
                     // Normal operation. Initiate graceful disconnection on
                     // eviction or shutdown: terminate all message_bus connections,
                     // which closes sockets (releasing server resources) while
                     // keeping message_bus's Connection memory valid for pending IO
                     // completions to land on.
-                    .running => {
+                    .running => |*running| {
                         if (self.eviction_reason != null or should_stop) {
-                            Phase.Running.cancel_request_inflight(self);
+                            running.cancel_request_inflight(self);
 
-                            while (self.pending.pop()) |packet| {
+                            while (running.pending.pop()) |packet| {
                                 packet.assert_phase(.pending);
                                 self.packet_cancel(packet);
                             }
@@ -772,28 +775,24 @@ pub fn ContextType(
                                 self.client.message_bus.shutdown();
                             }
 
-                            continue :phase .disconnecting;
+                            self.phase = .disconnecting;
+                            continue :main;
                         }
 
                         assert(self.eviction_reason == null);
                         self.client.tick();
-                        break :phase .running;
                     },
 
                     // Once all connections have fully terminated (no pending
                     // IO on any Connection memory), it is safe to deinit the
                     // client which frees the message_bus's connections array.
                     .disconnecting => {
-                        // NB: packet_enqueue prevents submit->pending transitions
-                        // during disconnection.
-                        assert(self.pending.count() == 0);
-
                         if (Phase.Disconnecting.client_io_settled(self)) {
                             self.client.deinit(self.gpa.allocator());
                             self.message_pool.deinit(self.gpa.allocator());
-                            continue :phase .settled;
+                            self.phase = .settled;
+                            continue :main;
                         }
-                        break :phase .disconnecting;
                     },
 
                     // Exit only after the vsr client has been deinited
@@ -806,13 +805,9 @@ pub fn ContextType(
                             self.signal.stop();
                         }
 
-                        if (should_stop) {
-                            self.phase = .settled;
-                            break :main;
-                        }
-                        break :phase .settled;
+                        if (should_stop) break :main;
                     },
-                };
+                }
 
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
@@ -827,16 +822,7 @@ pub fn ContextType(
 
             // Drain any remaining submitted packets, still under the lock
             // as this thread may not have been the last to take it.
-            while (true) {
-                const packet: *Packet = packet: {
-                    self.interface.locker.lock();
-                    defer self.interface.locker.unlock();
-
-                    break :packet self.submitted.pop() orelse break;
-                };
-                packet.assert_phase(.submitted);
-                self.packet_cancel(packet);
-            }
+            self.cancel_submitted_packets();
 
             self.signal.deinit();
             self.io.deinit();
@@ -890,31 +876,45 @@ pub fn ContextType(
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
             assert(self.signal.status() != .shutdown_completed);
 
-            // Don't send any requests until registration completes.
-            // Submitted packets will be drained by client_register_callback
-            // or by the io_thread shutdown path.
-            if (self.batch_size_limit == null) {
-                maybe(self.eviction_reason != null);
-                return;
+            switch (self.phase) {
+                .running => |*running| {
+                    // Don't send any requests until registration completes.
+                    // Submitted packets will be drained by client_register_callback
+                    // or by the io_thread shutdown path.
+                    if (running.batch_size_limit == null) {
+                        maybe(self.eviction_reason != null);
+                        return;
+                    }
+
+                    // If the client is not available (eviction pending),
+                    // cancel any submitted packets without accessing the client.
+                    if (!self.client_is_available()) {
+                        self.cancel_submitted_packets();
+                        return;
+                    }
+
+                    running.drain_submitted_packets(self);
+                },
+                .disconnecting, .settled => {
+                    // Client may have been deinited. Cancel submitted packets directly.
+                    self.cancel_submitted_packets();
+                },
             }
+        }
 
-            // If the client is not available (phase transitioned or eviction pending),
-            // cancel any submitted packets directly without accessing the client.
-            if (!self.client_is_available()) {
-                while (true) {
-                    const packet: *Packet = pop: {
-                        self.interface.locker.lock();
-                        defer self.interface.locker.unlock();
+        /// Drain and cancel all submitted packets. Safe to call in any phase
+        /// since it does not access the client.
+        fn cancel_submitted_packets(self: *Context) void {
+            while (true) {
+                const packet: *Packet = pop: {
+                    self.interface.locker.lock();
+                    defer self.interface.locker.unlock();
 
-                        break :pop self.submitted.pop() orelse break;
-                    };
-                    packet.assert_phase(.submitted);
-                    self.packet_cancel(packet);
-                }
-                return;
+                    break :pop self.submitted.pop() orelse break;
+                };
+                packet.assert_phase(.submitted);
+                self.packet_cancel(packet);
             }
-
-            Phase.Running.drain_submitted_packets(self);
         }
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
@@ -923,19 +923,28 @@ pub fn ContextType(
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.eviction_reason == null);
             assert(self.client.request_inflight == null);
-            assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
 
-            const current_timestamp = self.client.time.monotonic();
-            self.previous_request_latency =
-                current_timestamp.duration_since(self.previous_request_instant);
+            switch (self.phase) {
+                .running => |*running| {
+                    assert(running.batch_size_limit == null);
 
-            // The client might have a smaller message size limit.
-            maybe(constants.message_body_size_max < result.batch_size_limit);
-            self.batch_size_limit = @min(result.batch_size_limit, constants.message_body_size_max);
+                    const current_timestamp = self.client.time.monotonic();
+                    running.previous_request_latency =
+                        current_timestamp.duration_since(running.previous_request_instant.?);
 
-            // Some requests may have queued up while the client was registering.
-            signal_notify_callback(&self.signal);
+                    // The client might have a smaller message size limit.
+                    maybe(constants.message_body_size_max < result.batch_size_limit);
+                    running.batch_size_limit = @min(
+                        result.batch_size_limit,
+                        constants.message_body_size_max,
+                    );
+
+                    // Some requests may have queued up while the client was registering.
+                    signal_notify_callback(&self.signal);
+                },
+                .disconnecting, .settled => unreachable,
+            }
         }
 
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
@@ -982,14 +991,16 @@ pub fn ContextType(
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
 
+            const running: *Phase.Running = &self.phase.running;
+
             const current_timestamp = self.client.time.monotonic();
-            self.previous_request_latency =
-                current_timestamp.duration_since(self.previous_request_instant);
+            running.previous_request_latency =
+                current_timestamp.duration_since(running.previous_request_instant.?);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
-            while (self.pending.pop()) |packet_next| {
-                Phase.Running.packet_send(self, packet_next);
+            while (running.pending.pop()) |packet_next| {
+                running.packet_send(self, packet_next);
                 if (self.client.request_inflight != null) break;
             }
 
