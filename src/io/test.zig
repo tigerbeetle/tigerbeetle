@@ -49,7 +49,7 @@ test "open/write/read/close/statx" {
 
             var completion: IO.Completion = undefined;
 
-            if (builtin.target.os.tag == .linux) {
+            if (builtin.target.os.tag == .linux or builtin.target.os.tag.isDarwin()) {
                 self.io.openat(
                     *Context,
                     &self,

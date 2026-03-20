@@ -219,6 +219,12 @@ pub const IO = struct {
         fsync: struct {
             fd: fd_t,
         },
+        openat: struct {
+            dir_fd: fd_t,
+            file_path: [*:0]const u8,
+            flags: posix.O,
+            mode: posix.mode_t,
+        },
         read: struct {
             fd: fd_t,
             buf: [*]u8,
@@ -495,6 +501,72 @@ pub const IO = struct {
     }
 
     pub const OpenatError = posix.OpenError || posix.UnexpectedError;
+
+    pub fn openat(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: OpenatError!fd_t,
+        ) void,
+        completion: *Completion,
+        dir_fd: fd_t,
+        file_path: [*:0]const u8,
+        flags: posix.O,
+        mode: posix.mode_t,
+    ) void {
+        var new_flags = flags;
+        new_flags.CLOEXEC = true;
+
+        self.submit(
+            context,
+            callback,
+            completion,
+            .openat,
+            .{
+                .dir_fd = dir_fd,
+                .file_path = file_path,
+                .flags = new_flags,
+                .mode = mode,
+            },
+            struct {
+                fn do_operation(op: anytype) OpenatError!fd_t {
+                    while (true) {
+                        const rc = posix.system.openat(op.dir_fd, op.file_path, op.flags, op.mode);
+                        return switch (posix.errno(rc)) {
+                            .SUCCESS => @intCast(rc),
+                            .INTR => continue,
+                            .FAULT => unreachable,
+                            .INVAL => unreachable,
+                            .BADF => unreachable,
+                            .ACCES => error.AccessDenied,
+                            .FBIG => error.FileTooBig,
+                            .OVERFLOW => error.FileTooBig,
+                            .ISDIR => error.IsDir,
+                            .LOOP => error.SymLinkLoop,
+                            .MFILE => error.ProcessFdQuotaExceeded,
+                            .NAMETOOLONG => error.NameTooLong,
+                            .NFILE => error.SystemFdQuotaExceeded,
+                            .NODEV => error.NoDevice,
+                            .NOENT => error.FileNotFound,
+                            .NOMEM => error.SystemResources,
+                            .NOSPC => error.NoSpaceLeft,
+                            .NOTDIR => error.NotDir,
+                            .PERM => error.AccessDenied,
+                            .EXIST => error.PathAlreadyExists,
+                            .BUSY => error.DeviceBusy,
+                            .OPNOTSUPP => error.FileLocksNotSupported,
+                            .AGAIN => error.WouldBlock,
+                            .TXTBSY => error.FileBusy,
+                            else => |err| stdx.unexpected_errno("openat", err),
+                        };
+                    }
+                }
+            },
+        );
+    }
 
     pub const ReadError = error{
         WouldBlock,
