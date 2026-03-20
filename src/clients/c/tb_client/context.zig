@@ -490,6 +490,14 @@ pub fn ContextType(
 
             self.signal.deinit();
             self.io.deinit();
+
+            // Copy GPA to the stack before freeing the Context that contains it,
+            // since the allocator holds a pointer back to the GPA.
+            var gpa = self.gpa;
+            const allocator = gpa.allocator();
+            allocator.free(self.addresses_owned);
+            allocator.destroy(self);
+            _ = gpa.deinit();
         }
 
         /// Returns true when all client IO operations have completed and
