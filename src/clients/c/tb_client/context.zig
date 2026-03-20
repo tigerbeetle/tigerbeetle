@@ -533,6 +533,14 @@ pub fn ContextType(
             _ = gpa.deinit();
         }
 
+        /// Returns true when the client is safe to access for processing packets.
+        /// False when the phase has transitioned past running, or when eviction
+        /// has been detected during io.run_for_ns but the main loop hasn't
+        /// transitioned yet.
+        fn client_is_available(self: *const Context) bool {
+            return self.phase == .running and self.eviction_reason == null;
+        }
+
         /// Returns true when all client IO operations have completed and
         /// it is safe to free the client's resources.
         fn client_io_settled(self: *const Context) bool {
@@ -634,8 +642,8 @@ pub fn ContextType(
             maybe(batch.result_count_expected == 0);
 
             // packet_enqueue is only reachable from drain_submitted_packets,
-            // which is guarded by signal_notify_callback's phase/eviction check.
-            assert(self.phase == .running);
+            // which is guarded by signal_notify_callback's client_is_available check.
+            assert(self.client_is_available());
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
@@ -714,9 +722,7 @@ pub fn ContextType(
             packet_list.assert_phase(.pending);
 
             // On eviction or shutdown, cancel this packet and any others batched onto it.
-            // The eviction_reason guard covers the timing gap between eviction
-            // (during io.run_for_ns) and the next phase transition in the main loop.
-            if (self.phase != .running or self.eviction_reason != null) {
+            if (!self.client_is_available()) {
                 return self.packet_cancel(packet_list);
             }
 
@@ -832,11 +838,9 @@ pub fn ContextType(
                 return;
             }
 
-            // Outside the running phase, the client may have been deinited.
-            // Cancel any submitted packets directly without accessing the client.
-            // The eviction_reason guard covers the timing gap between eviction
-            // (during io.run_for_ns) and the next phase transition in the main loop.
-            if (self.phase != .running or self.eviction_reason != null) {
+            // If the client is not available (phase transitioned or eviction pending),
+            // cancel any submitted packets directly without accessing the client.
+            if (!self.client_is_available()) {
                 while (true) {
                     const packet: *Packet = pop: {
                         self.interface.locker.lock();
@@ -855,8 +859,7 @@ pub fn ContextType(
 
         fn drain_submitted_packets(self: *Context) void {
             assert(thread_caller == .io);
-            assert(self.phase == .running);
-            assert(self.eviction_reason == null);
+            assert(self.client_is_available());
 
             const enqueued_count = self.pending.count();
             const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
@@ -950,8 +953,7 @@ pub fn ContextType(
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
-            assert(self.phase == .running);
-            assert(self.eviction_reason == null);
+            assert(self.client_is_available());
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
