@@ -601,9 +601,8 @@ pub fn ContextType(
             maybe(batch.event_count == 0);
             maybe(batch.result_count_expected == 0);
 
-            // Avoid making a packet inflight by cancelling it if the client was shutdown.
-            if (self.signal.status() != .running) {
-                maybe(self.eviction_reason != null);
+            // Avoid making a packet inflight by cancelling it if not in the running phase.
+            if (self.phase != .running) {
                 self.packet_cancel(packet);
                 return;
             }
@@ -685,10 +684,11 @@ pub fn ContextType(
             packet_list.assert_phase(.pending);
 
             // On eviction or shutdown, cancel this packet and any others batched onto it.
-            if (self.eviction_reason != null or self.signal.status() != .running) {
+            // The eviction_reason guard covers the timing gap between eviction
+            // (during io.run_for_ns) and the next phase transition in the main loop.
+            if (self.phase != .running or self.eviction_reason != null) {
                 return self.packet_cancel(packet_list);
             }
-            assert(self.eviction_reason == null);
 
             assert(self.client.request_inflight == null);
 
@@ -804,11 +804,11 @@ pub fn ContextType(
                 return;
             }
 
-            // After eviction, the io_thread drains pending/inflight packets
-            // with eviction errors and deinits the client. Any packets
-            // submitted after that point are cancelled here with eviction
-            // errors. The client is not safe to access past this point.
-            if (self.eviction_reason != null) {
+            // Outside the running phase, the client may have been deinited.
+            // Cancel any submitted packets directly without accessing the client.
+            // The eviction_reason guard covers the timing gap between eviction
+            // (during io.run_for_ns) and the next phase transition in the main loop.
+            if (self.phase != .running or self.eviction_reason != null) {
                 while (true) {
                     const packet: *Packet = pop: {
                         self.interface.locker.lock();
@@ -827,6 +827,7 @@ pub fn ContextType(
 
         fn drain_submitted_packets(self: *Context) void {
             assert(thread_caller == .io);
+            assert(self.phase == .running);
             assert(self.eviction_reason == null);
 
             const enqueued_count = self.pending.count();
@@ -917,6 +918,7 @@ pub fn ContextType(
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
+            assert(self.phase == .running);
             assert(self.eviction_reason == null);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
