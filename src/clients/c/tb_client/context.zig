@@ -633,11 +633,9 @@ pub fn ContextType(
             maybe(batch.event_count == 0);
             maybe(batch.result_count_expected == 0);
 
-            // Avoid making a packet inflight by cancelling it if not in the running phase.
-            if (self.phase != .running) {
-                self.packet_cancel(packet);
-                return;
-            }
+            // packet_enqueue is only reachable from drain_submitted_packets,
+            // which is guarded by signal_notify_callback's phase/eviction check.
+            assert(self.phase == .running);
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
