@@ -198,12 +198,13 @@ pub fn ContextType(
 
         const Phase = union(enum) {
             running: Running,
-            disconnecting: void,
+            disconnecting: Disconnecting,
             settled: void,
 
             /// State and methods for the running phase,
             /// when the client is available for sending requests.
             const Running = struct {
+                client_state: *ClientState,
                 batch_size_limit: ?u32,
                 pending: Packet.Queue,
                 previous_request_instant: ?stdx.Instant,
@@ -212,9 +213,8 @@ pub fn ContextType(
                 /// Cancel the current inflight request (and the entire batched
                 /// linked list of packets), as it won't be replied anymore.
                 fn cancel_request_inflight(self: *Running, ctx: *Context) void {
-                    _ = self;
                     assert(thread_caller == .io);
-                    if (ctx.client_state.client.request_inflight) |*inflight| {
+                    if (self.client_state.client.request_inflight) |*inflight| {
                         if (inflight.message.header.operation != .register) {
                             const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
                             packet.assert_phase(.sent);
@@ -280,10 +280,10 @@ pub fn ContextType(
                     assert(ctx.client_is_available());
 
                     // Nothing inflight means the packet should be submitted right now.
-                    if (ctx.client_state.client.request_inflight == null) {
+                    if (self.client_state.client.request_inflight == null) {
                         assert(self.pending.count() == 0);
                         packet.phase = .pending;
-                        packet.multi_batch_time_monotonic = ctx.client_state.client.time.monotonic().ns;
+                        packet.multi_batch_time_monotonic = self.client_state.client.time.monotonic().ns;
                         packet.multi_batch_count = 1;
                         packet.multi_batch_event_count = @intCast(batch.event_count);
                         packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -341,7 +341,7 @@ pub fn ContextType(
 
                     // Couldn't batch with existing packet so push to pending directly.
                     packet.phase = .pending;
-                    packet.multi_batch_time_monotonic = ctx.client_state.client.time.monotonic().ns;
+                    packet.multi_batch_time_monotonic = self.client_state.client.time.monotonic().ns;
                     packet.multi_batch_count = 1;
                     packet.multi_batch_event_count = @intCast(batch.event_count);
                     packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -359,11 +359,11 @@ pub fn ContextType(
                         return ctx.packet_cancel(packet_list);
                     }
 
-                    assert(ctx.client_state.client.request_inflight == null);
+                    assert(self.client_state.client.request_inflight == null);
 
-                    const message = ctx.client_state.client.get_message().build(.request);
+                    const message = self.client_state.client.get_message().build(.request);
                     defer {
-                        ctx.client_state.client.release_message(message.base());
+                        self.client_state.client.release_message(message.base());
                         packet_list.assert_phase(.sent);
                     }
 
@@ -430,10 +430,10 @@ pub fn ContextType(
                     const previous_request_latency =
                         self.previous_request_latency orelse stdx.Duration{ .ns = 0 };
                     message.header.* = .{
-                        .release = ctx.client_state.client.release,
-                        .client = ctx.client_state.client.id,
+                        .release = self.client_state.client.release,
+                        .client = self.client_state.client.id,
                         .request = 0, // Set by client.raw_request.
-                        .cluster = ctx.client_state.client.cluster,
+                        .cluster = self.client_state.client.cluster,
                         .command = .request,
                         .operation = operation.to_vsr(),
                         .size = @sizeOf(vsr.Header) + request_size,
@@ -448,7 +448,7 @@ pub fn ContextType(
                     self.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
 
                     packet_list.phase = .sent;
-                    ctx.client_state.client.raw_request(
+                    self.client_state.client.raw_request(
                         Context.client_result_callback,
                         @bitCast(UserData{
                             .self = ctx,
@@ -496,14 +496,16 @@ pub fn ContextType(
                 }
             };
 
-            /// Methods only valid during the disconnecting phase,
+            /// State and methods for the disconnecting phase,
             /// when the client is alive but shutting down connections.
             const Disconnecting = struct {
+                client_state: *ClientState,
+
                 /// Returns true when all client IO operations have completed and
                 /// it is safe to free the client's resources.
-                fn client_io_settled(ctx: *const Context) bool {
+                fn client_io_settled(self: *const Disconnecting) bool {
                     if (has_message_bus) {
-                        return ctx.client_state.client.message_bus.shutdown_complete();
+                        return self.client_state.client.message_bus.shutdown_complete();
                     }
                     return true;
                 }
@@ -537,11 +539,6 @@ pub fn ContextType(
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
-
-        // The client state is only accessed on the I/O thread.
-        // It is deinitialized after disconnecting from the server,
-        // which allows the server to release the session.
-        client_state: *ClientState,
 
         completion_callback: CompletionCallback,
         completion_context: usize,
@@ -666,8 +663,6 @@ pub fn ContextType(
             };
             errdefer client_state.client.deinit(allocator);
 
-            context.client_state = client_state;
-
             ClientInterface.init(client_out, context, comptime &.{
                 .submit_fn = &vtable_submit_fn,
                 .completion_context_fn = &vtable_completion_context_fn,
@@ -683,6 +678,7 @@ pub fn ContextType(
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
             context.phase = .{ .running = .{
+                .client_state = client_state,
                 .batch_size_limit = null,
                 .pending = Packet.Queue.init(.{
                     .name = null,
@@ -751,26 +747,28 @@ pub fn ContextType(
                             }
 
                             if (has_message_bus) {
-                                self.client_state.client.message_bus.shutdown();
+                                running.client_state.client.message_bus.shutdown();
                             }
 
-                            self.phase = .disconnecting;
+                            self.phase = .{ .disconnecting = .{
+                                .client_state = running.client_state,
+                            } };
                             continue :main;
                         }
 
                         assert(self.eviction_reason == null);
-                        self.client_state.client.tick();
+                        running.client_state.client.tick();
                     },
 
                     // Once all connections have fully terminated (no pending
                     // IO on any Connection memory), it is safe to deinit the
                     // client which frees the message_bus's connections array.
-                    .disconnecting => {
-                        if (Phase.Disconnecting.client_io_settled(self)) {
+                    .disconnecting => |*disconnecting| {
+                        if (disconnecting.client_io_settled()) {
                             const allocator = self.gpa.allocator();
-                            self.client_state.client.deinit(allocator);
-                            self.client_state.message_pool.deinit(allocator);
-                            allocator.destroy(self.client_state);
+                            disconnecting.client_state.client.deinit(allocator);
+                            disconnecting.client_state.message_pool.deinit(allocator);
+                            allocator.destroy(disconnecting.client_state);
                             self.phase = .settled;
                             continue :main;
                         }
@@ -897,11 +895,11 @@ pub fn ContextType(
 
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.eviction_reason == null);
-            assert(self.client_state.client.request_inflight == null);
             assert(result.batch_size_limit > 0);
 
             switch (self.phase) {
                 .running => |*running| {
+                    assert(running.client_state.client.request_inflight == null);
                     assert(running.batch_size_limit == null);
 
                     // The client might have a smaller message size limit.
@@ -962,15 +960,15 @@ pub fn ContextType(
 
             const running: *Phase.Running = &self.phase.running;
 
-            const current_timestamp = self.client_state.client.time.monotonic();
+            const current_timestamp = running.client_state.client.time.monotonic();
             running.previous_request_latency =
                 current_timestamp.duration_since(running.previous_request_instant.?);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
-            assert(self.client_state.client.request_inflight == null);
+            assert(running.client_state.client.request_inflight == null);
             while (running.pending.pop()) |packet_next| {
                 running.packet_send(self, packet_next);
-                if (self.client_state.client.request_inflight != null) break;
+                if (running.client_state.client.request_inflight != null) break;
             }
 
             // The callback should never be called with an operation not in `allowed_operations`.
