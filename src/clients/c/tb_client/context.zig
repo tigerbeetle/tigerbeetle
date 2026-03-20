@@ -186,6 +186,8 @@ pub fn ContextType(
             }
         };
 
+        const Phase = enum { running, disconnecting, settled };
+
         const PacketError = error{
             TooMuchData,
             ClientShutdown,
@@ -230,7 +232,8 @@ pub fn ContextType(
         pending: Packet.Queue,
 
         signal: Signal,
-        eviction_reason: ?vsr.Header.Eviction.Reason = null,
+        eviction_reason: ?vsr.Header.Eviction.Reason,
+        phase: Phase,
         thread: std.Thread,
 
         previous_request_instant: stdx.Instant,
@@ -375,6 +378,19 @@ pub fn ContextType(
                 .deinit_fn = &vtable_deinit_fn,
                 .init_parameters_fn = &vtable_init_parameters_fn,
             });
+            context.interface = client_out;
+            context.submitted = Packet.Queue.init(.{
+                .name = null,
+                .verify_push = builtin.is_test,
+            });
+            context.pending = Packet.Queue.init(.{
+                .name = null,
+                .verify_push = builtin.is_test,
+            });
+            context.completion_context = completion_ctx;
+            context.completion_callback = completion_callback;
+            context.eviction_reason = null;
+            context.phase = .running;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.signal_notify_callback);
@@ -417,13 +433,10 @@ pub fn ContextType(
             thread_caller = .{ .io = std.Thread.getCurrentId() };
             defer thread_caller = .user;
 
-            const Phase = enum { running, disconnecting, settled };
-            var phase: Phase = .running;
-
             main: while (true) {
                 const should_stop = self.signal.status() == .shutdown_completed;
 
-                phase = phase: switch (phase) {
+                self.phase = phase: switch (self.phase) {
                     // Normal operation. Initiate graceful disconnection on
                     // eviction or shutdown: terminate all message_bus connections,
                     // which closes sockets (releasing server resources) while
@@ -477,7 +490,7 @@ pub fn ContextType(
                         }
 
                         if (should_stop) {
-                            phase = .settled;
+                            self.phase = .settled;
                             break :main;
                         }
                         break :phase .settled;
@@ -493,7 +506,7 @@ pub fn ContextType(
                 };
             }
 
-            assert(phase == .settled);
+            assert(self.phase == .settled);
 
             // Drain any remaining submitted packets, still under the lock
             // as this thread may not have been the last to take it.
