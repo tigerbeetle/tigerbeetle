@@ -545,11 +545,7 @@ pub const AccountingAuditor = struct {
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
-        for (accounts, results, 0..) |
-            *account,
-            *result,
-            i,
-        | {
+        for (accounts, results, 0..) |*account, *result, i| {
             assert(result.reserved == 0);
             const account_timestamp = timestamp - accounts.len + i + 1;
 

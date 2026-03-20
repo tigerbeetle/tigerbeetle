@@ -25,7 +25,7 @@ An array containing the result for each account in the event batch.
 Create results are sparse, containing only failed events and the `index`
 of the account within the events batch.
 
-The network protocol does not include an [`created`](#created) result for successfully
+The network protocol does not include a [`created`](#created) result for successfully
 created accounts.
 
 </details>

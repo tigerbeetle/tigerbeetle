@@ -27,7 +27,7 @@ An array containing the result for each transfer in the events batch.
 Create results are sparse, containing only failed events and the `index`
 of the transfer within the events batch.
 
-The network protocol does not include an [`created`](#created) result for successfully
+The network protocol does not include a [`created`](#created) result for successfully
 created transfers.
 
 </details>
