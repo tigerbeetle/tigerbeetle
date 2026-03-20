@@ -149,10 +149,10 @@ public class IntegrationTest {
         final var account2Id = UInt128.id();
         final var accounts = generateAccounts(account1Id, account2Id);
 
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertEquals(2, lookupAccounts.getLength());
@@ -171,11 +171,11 @@ public class IntegrationTest {
         final var zeroedAccounts = new AccountBatch(1);
         zeroedAccounts.add();
 
-        final var accountsResults = client.createAccounts(zeroedAccounts);
-        assertHeader(zeroedAccounts, accountsResults);
-        assertTrue(accountsResults.getLength() == 1);
-        assertTrue(accountsResults.next());
-        assertEquals(CreateAccountStatus.IdMustNotBeZero, accountsResults.getStatus());
+        final var accountResults = client.createAccounts(zeroedAccounts);
+        assertHeader(zeroedAccounts, accountResults);
+        assertTrue(accountResults.getLength() == 1);
+        assertTrue(accountResults.next());
+        assertEquals(CreateAccountStatus.IdMustNotBeZero, accountResults.getStatus());
     }
 
     @Test
@@ -184,15 +184,15 @@ public class IntegrationTest {
         final var account2Id = UInt128.id();
         final var accounts = generateAccounts(account1Id, account2Id);
 
-        CompletableFuture<CreateAccountResultBatch> accountsResultsFuture =
+        CompletableFuture<CreateAccountResultBatch> accountResultsFuture =
                 client.createAccountsAsync(accounts);
 
-        final var accountsResults = accountsResultsFuture.get();
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        while (accountsResults.next()) {
-            assertTrue(accountsResults.getTimestamp() > 0);
-            assertEquals(CreateAccountStatus.Created, accountsResults.getStatus());
+        final var accountResults = accountResultsFuture.get();
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        while (accountResults.next()) {
+            assertTrue(accountResults.getTimestamp() > 0);
+            assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
         }
 
         CompletableFuture<AccountBatch> lookupFuture =
@@ -220,10 +220,10 @@ public class IntegrationTest {
         final var accounts = generateAccounts(account1Id, account2Id);
 
         // Creating the accounts.
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         // Creating a transfer.
         final var transfers = new TransferBatch(2);
@@ -237,10 +237,10 @@ public class IntegrationTest {
         transfers.setFlags(TransferFlags.NONE);
         transfers.setAmount(100);
 
-        final var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        final var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up the accounts.
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -290,15 +290,15 @@ public class IntegrationTest {
         final var accounts = generateAccounts(account1Id, account2Id);
 
         // Creating the accounts.
-        CompletableFuture<CreateAccountResultBatch> accountsResultsFuture =
+        CompletableFuture<CreateAccountResultBatch> accountResultsFuture =
                 client.createAccountsAsync(accounts);
 
-        final var accountsResults = accountsResultsFuture.get();
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        while (accountsResults.next()) {
-            assertTrue(accountsResults.getTimestamp() > 0);
-            assertEquals(CreateAccountStatus.Created, accountsResults.getStatus());
+        final var accountResults = accountResultsFuture.get();
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        while (accountResults.next()) {
+            assertTrue(accountResults.getTimestamp() > 0);
+            assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
         }
 
         // Creating a transfer.
@@ -312,14 +312,14 @@ public class IntegrationTest {
         transfers.setCode(1);
         transfers.setAmount(100);
 
-        CompletableFuture<CreateTransferResultBatch> transfersResultsFuture =
+        CompletableFuture<CreateTransferResultBatch> transferResultsFuture =
                 client.createTransfersAsync(transfers);
-        final var transfersResults = transfersResultsFuture.get();
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        while (transfersResults.next()) {
-            assertTrue(transfersResults.getTimestamp() > 0);
-            assertEquals(CreateTransferStatus.Created, transfersResults.getStatus());
+        final var transferResults = transferResultsFuture.get();
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        while (transferResults.next()) {
+            assertTrue(transferResults.getTimestamp() > 0);
+            assertEquals(CreateTransferStatus.Created, transferResults.getStatus());
         }
 
 
@@ -370,11 +370,11 @@ public class IntegrationTest {
         final var zeroedTransfers = new TransferBatch(1);
         zeroedTransfers.add();
 
-        final var transfersResults = client.createTransfers(zeroedTransfers);
-        assertHeader(zeroedTransfers, transfersResults);
-        assertTrue(transfersResults.getLength() == 1);
-        assertTrue(transfersResults.next());
-        assertEquals(CreateTransferStatus.IdMustNotBeZero, transfersResults.getStatus());
+        final var transferResults = client.createTransfers(zeroedTransfers);
+        assertHeader(zeroedTransfers, transferResults);
+        assertTrue(transferResults.getLength() == 1);
+        assertTrue(transferResults.next());
+        assertEquals(CreateTransferStatus.IdMustNotBeZero, transferResults.getStatus());
     }
 
     @Test
@@ -387,10 +387,10 @@ public class IntegrationTest {
         final var accounts = generateAccounts(account1Id, account2Id);
 
         // Creating the accounts.
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         // Creating a pending transfer.
         final var transfers = new TransferBatch(1);
@@ -405,10 +405,10 @@ public class IntegrationTest {
         transfers.setFlags(TransferFlags.PENDING);
         transfers.setTimeout(Integer.MAX_VALUE);
 
-        var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up the accounts.
         var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -459,10 +459,10 @@ public class IntegrationTest {
         confirmTransfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
         confirmTransfers.setPendingId(transfer1Id);
 
-        transfersResults = client.createTransfers(confirmTransfers);
-        assertHeader(confirmTransfers, transfersResults);
-        assertEquals(confirmTransfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        transferResults = client.createTransfers(confirmTransfers);
+        assertHeader(confirmTransfers, transferResults);
+        assertEquals(confirmTransfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up the accounts again for the updated balance.
         lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -511,10 +511,10 @@ public class IntegrationTest {
         final var accounts = generateAccounts(account1Id, account2Id);
 
         // Creating the accounts.
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         // Creating a pending transfer.
         final var transfers = new TransferBatch(1);
@@ -529,10 +529,10 @@ public class IntegrationTest {
         transfers.setFlags(TransferFlags.PENDING);
         transfers.setTimeout(Integer.MAX_VALUE);
 
-        var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up the accounts.
         var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -583,10 +583,10 @@ public class IntegrationTest {
         voidTransfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
         voidTransfers.setPendingId(transfer1Id);
 
-        transfersResults = client.createTransfers(voidTransfers);
-        assertHeader(voidTransfers, transfersResults);
-        assertEquals(voidTransfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        transferResults = client.createTransfers(voidTransfers);
+        assertHeader(voidTransfers, transferResults);
+        assertEquals(voidTransfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up the accounts again for the updated balance.
         lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -636,10 +636,10 @@ public class IntegrationTest {
         final var accounts = generateAccounts(account1Id, account2Id);
 
         // Creating the accounts.
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         // Creating a pending transfer.
         final var transfers = new TransferBatch(1);
@@ -654,10 +654,10 @@ public class IntegrationTest {
         transfers.setFlags(TransferFlags.PENDING);
         transfers.setTimeout(1);
 
-        var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up the accounts.
         var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -743,12 +743,12 @@ public class IntegrationTest {
         voidTransfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
         voidTransfers.setPendingId(transfer1Id);
 
-        transfersResults = client.createTransfers(voidTransfers);
-        assertHeader(voidTransfers, transfersResults);
-        assertEquals(voidTransfers.getLength(), transfersResults.getLength());
-        assertTrue(transfersResults.next());
-        assertTrue(transfersResults.getTimestamp() > 0);
-        assertEquals(CreateTransferStatus.PendingTransferExpired, transfersResults.getStatus());
+        transferResults = client.createTransfers(voidTransfers);
+        assertHeader(voidTransfers, transferResults);
+        assertEquals(voidTransfers.getLength(), transferResults.getLength());
+        assertTrue(transferResults.next());
+        assertTrue(transferResults.getTimestamp() > 0);
+        assertEquals(CreateTransferStatus.PendingTransferExpired, transferResults.getStatus());
     }
 
     @Test
@@ -760,10 +760,10 @@ public class IntegrationTest {
 
         final var accounts = generateAccounts(account1Id, account2Id);
 
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         final var transfers = new TransferBatch(2);
         transfers.add();
@@ -784,10 +784,10 @@ public class IntegrationTest {
         transfers.setAmount(49);
         transfers.setFlags(TransferFlags.NONE);
 
-        final var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        final var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertEquals(2, lookupAccounts.getLength());
@@ -837,10 +837,10 @@ public class IntegrationTest {
 
         final var accounts = generateAccounts(account1Id, account2Id);
 
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         var transfers = new TransferBatch(1);
         transfers.add();
@@ -853,10 +853,10 @@ public class IntegrationTest {
         transfers.setFlags(
                 TransferFlags.CLOSING_CREDIT | TransferFlags.CLOSING_DEBIT | TransferFlags.PENDING);
 
-        var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertEquals(2, lookupAccounts.getLength());
@@ -880,10 +880,10 @@ public class IntegrationTest {
         transfers.setPendingId(closingTransferId);
         transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
-        transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertEquals(2, lookupAccounts.getLength());
@@ -1047,34 +1047,34 @@ public class IntegrationTest {
     @Test
     public void testZeroLengthCreateAccounts() throws Throwable {
         final var accounts = new AccountBatch(1); // Capacity 1 but zero items.
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertTrue(accountsResults.getLength() == 0);
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertTrue(accountResults.getLength() == 0);
     }
 
     @Test
     public void testZeroLengthCreateAccountsAsync() throws Throwable {
         final var accounts = new AccountBatch(1); // Capacity 1 but zero items.
-        final var accountsResultsFuture = client.createAccountsAsync(accounts);
-        final var accountsResults = accountsResultsFuture.get();
-        assertHeader(accounts, accountsResults);
-        assertTrue(accountsResults.getLength() == 0);
+        final var accountResultsFuture = client.createAccountsAsync(accounts);
+        final var accountResults = accountResultsFuture.get();
+        assertHeader(accounts, accountResults);
+        assertTrue(accountResults.getLength() == 0);
     }
 
     @Test
     public void testZeroLengthCreateTransfers() throws Throwable {
         final var transfers = new TransferBatch(0);
-        final var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertTrue(transfersResults.getLength() == 0);
+        final var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertTrue(transferResults.getLength() == 0);
     }
 
     @Test
     public void testZeroLengthCreateTransfersAsync() throws Throwable {
         final var transfers = new TransferBatch(0);
-        final var transfersResultsFuture = client.createTransfersAsync(transfers);
-        final var transfersResults = transfersResultsFuture.get();
-        assertTrue(transfersResults.getLength() == 0);
+        final var transferResultsFuture = client.createTransfersAsync(transfers);
+        final var transferResults = transferResultsFuture.get();
+        assertTrue(transferResults.getLength() == 0);
     }
 
     @Test
@@ -1120,10 +1120,10 @@ public class IntegrationTest {
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
 
             final var tasks = new TransferTask[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i++) {
@@ -1177,10 +1177,10 @@ public class IntegrationTest {
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
 
             final var tasks = new TransferTask[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i++) {
@@ -1234,10 +1234,10 @@ public class IntegrationTest {
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
 
             final var tasks = new TransferTask[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i++) {
@@ -1300,10 +1300,10 @@ public class IntegrationTest {
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
 
             // Closing the client.
             client.close();
@@ -1372,10 +1372,10 @@ public class IntegrationTest {
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
 
             final var tasks = new CompletableFuture[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i += 2) {
@@ -1487,10 +1487,10 @@ public class IntegrationTest {
             accounts.beforeFirst();
 
             // Creating the accounts.
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
         }
 
         {
@@ -1515,10 +1515,10 @@ public class IntegrationTest {
                 transfers.setAmount(100);
             }
 
-            final var transfersResults = client.createTransfers(transfers);
-            assertHeader(transfers, transfersResults);
-            assertEquals(transfers.getLength(), transfersResults.getLength());
-            assertTrue(createSuccess(transfersResults));
+            final var transferResults = client.createTransfers(transfers);
+            assertHeader(transfers, transferResults);
+            assertEquals(transfers.getLength(), transferResults.getLength());
+            assertTrue(createSuccess(transferResults));
         }
 
         {
@@ -1886,10 +1886,10 @@ public class IntegrationTest {
                 accounts.setFlags(TransferFlags.NONE);
             }
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
         }
 
         {
@@ -2024,10 +2024,10 @@ public class IntegrationTest {
             // Creating the accounts.
             final var accounts = generateAccounts(account1Id, account2Id);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
         }
 
         {
@@ -2057,10 +2057,10 @@ public class IntegrationTest {
                 transfers.setAmount(100);
             }
 
-            final var transfersResults = client.createTransfers(transfers);
-            assertHeader(transfers, transfersResults);
-            assertEquals(transfers.getLength(), transfersResults.getLength());
-            assertTrue(createSuccess(transfersResults));
+            final var transferResults = client.createTransfers(transfers);
+            assertHeader(transfers, transferResults);
+            assertEquals(transfers.getLength(), transferResults.getLength());
+            assertTrue(createSuccess(transferResults));
         }
 
         {
@@ -2270,10 +2270,10 @@ public class IntegrationTest {
             accounts.setCode(1);
             accounts.setLedger(720);
 
-            final var accountsResults = client.createAccounts(accounts);
-            assertHeader(accounts, accountsResults);
-            assertEquals(accounts.getLength(), accountsResults.getLength());
-            assertTrue(createSuccess(accountsResults));
+            final var accountResults = client.createAccounts(accounts);
+            assertHeader(accounts, accountResults);
+            assertEquals(accounts.getLength(), accountResults.getLength());
+            assertTrue(createSuccess(accountResults));
 
             final var transfers = new TransferBatch(1);
             transfers.add();
@@ -2285,10 +2285,10 @@ public class IntegrationTest {
             transfers.setCode((short) 1);
             transfers.setAmount(100);
 
-            final var transfersResults = client.createTransfers(transfers);
-            assertHeader(transfers, transfersResults);
-            assertEquals(transfers.getLength(), transfersResults.getLength());
-            assertTrue(createSuccess(transfersResults));
+            final var transferResults = client.createTransfers(transfers);
+            assertHeader(transfers, transferResults);
+            assertEquals(transfers.getLength(), transferResults.getLength());
+            assertTrue(createSuccess(transferResults));
         }
 
         final class Tasks {
@@ -2374,10 +2374,10 @@ public class IntegrationTest {
         accounts.beforeFirst();
 
         // Creating the accounts.
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         // Creating a transfer.
         final var transfers = new TransferBatch(1);
@@ -2392,10 +2392,10 @@ public class IntegrationTest {
         transfers.setAmount(100);
         transfers.setTimestamp(timestamp + accounts.getLength() + 1);
 
-        final var transfersResults = client.createTransfers(transfers);
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        final var transferResults = client.createTransfers(transfers);
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up and asserting the transfer.
         final var lookupTransfers = client.lookupTransfers(new IdBatch(transferId));
@@ -2426,15 +2426,15 @@ public class IntegrationTest {
         accounts.beforeFirst();
 
         // Creating the accounts.
-        CompletableFuture<CreateAccountResultBatch> accountsResultsFuture =
+        CompletableFuture<CreateAccountResultBatch> accountResultsFuture =
                 client.createAccountsAsync(accounts);
 
-        final var accountsResults = accountsResultsFuture.get();
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        while (accountsResults.next()) {
-            assertTrue(accountsResults.getTimestamp() > 0);
-            assertEquals(CreateAccountStatus.Created, accountsResults.getStatus());
+        final var accountResults = accountResultsFuture.get();
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        while (accountResults.next()) {
+            assertTrue(accountResults.getTimestamp() > 0);
+            assertEquals(CreateAccountStatus.Created, accountResults.getStatus());
         }
 
         // Creating a transfer.
@@ -2450,12 +2450,12 @@ public class IntegrationTest {
         transfers.setFlags(TransferFlags.IMPORTED);
         transfers.setTimestamp(timestamp + accounts.getLength() + 1);
 
-        CompletableFuture<CreateTransferResultBatch> transfersResultsFuture =
+        CompletableFuture<CreateTransferResultBatch> transferResultsFuture =
                 client.createTransfersAsync(transfers);
-        final var transfersResults = transfersResultsFuture.get();
-        assertHeader(transfers, transfersResults);
-        assertEquals(transfers.getLength(), transfersResults.getLength());
-        assertTrue(createSuccess(transfersResults));
+        final var transferResults = transferResultsFuture.get();
+        assertHeader(transfers, transferResults);
+        assertEquals(transfers.getLength(), transferResults.getLength());
+        assertTrue(createSuccess(transferResults));
 
         // Looking up and asserting the transfer.
         CompletableFuture<TransferBatch> lookupTransfersFuture =
@@ -2500,10 +2500,10 @@ public class IntegrationTest {
         final var id = UInt128.id();
         final var accounts = generateAccounts(id);
 
-        final var accountsResults = client.createAccounts(accounts);
-        assertHeader(accounts, accountsResults);
-        assertEquals(accounts.getLength(), accountsResults.getLength());
-        assertTrue(createSuccess(accountsResults));
+        final var accountResults = client.createAccounts(accounts);
+        assertHeader(accounts, accountResults);
+        assertEquals(accounts.getLength(), accountResults.getLength());
+        assertTrue(createSuccess(accountResults));
 
         final var lookupAccounts = client.lookupAccounts(new IdBatch(id));
         assertEquals(1, lookupAccounts.getLength());
@@ -2548,13 +2548,13 @@ public class IntegrationTest {
             var hasError = false;
             while (batch.next()) {
                 if (batch instanceof CreateAccountResultBatch) {
-                    final var createAccountResults = (CreateAccountResultBatch) batch;
-                    assertTrue(createAccountResults.getTimestamp() > 0);
-                    hasError |= createAccountResults.getStatus() != CreateAccountStatus.Created;
+                    final var accountResults = (CreateAccountResultBatch) batch;
+                    assertTrue(accountResults.getTimestamp() > 0);
+                    hasError |= accountResults.getStatus() != CreateAccountStatus.Created;
                 } else if (batch instanceof CreateTransferResultBatch) {
-                    final var createTransfersResults = (CreateTransferResultBatch) batch;
-                    assertTrue(createTransfersResults.getTimestamp() > 0);
-                    hasError |= createTransfersResults.getStatus() != CreateTransferStatus.Created;
+                    final var transferResults = (CreateTransferResultBatch) batch;
+                    assertTrue(transferResults.getTimestamp() > 0);
+                    hasError |= transferResults.getStatus() != CreateTransferStatus.Created;
                 } else
                     assert false;
             }

@@ -109,7 +109,7 @@ const account = {
   timestamp: 0n,
 };
 
-const accounts_results = await client.createAccounts([account]);
+const account_results = await client.createAccounts([account]);
 // Results handling omitted.
 ```
 
@@ -167,7 +167,7 @@ const account1 = {
   flags: AccountFlags.history,
 };
 
-const accounts_results = await client.createAccounts([account0, account1]);
+const account_results = await client.createAccounts([account0, account1]);
 // Results handling omitted.
 ```
 
@@ -232,17 +232,17 @@ const account2 = {
   flags: 0,
 };
 
-const accounts_results = await client.createAccounts([account0, account1, account2]);
-for (let i = 0; i < accounts_results.length; i++) {
-  switch (accounts_results[i].status) {
+const account_results = await client.createAccounts([account0, account1, account2]);
+for (let i = 0; i < account_results.length; i++) {
+  switch (account_results[i].status) {
     case CreateAccountStatus.created:
-      console.error(`Batch account at ${i} successfully created with timestamp ${accounts_results[i].timestamp}.`);
+      console.error(`Batch account at ${i} successfully created with timestamp ${account_results[i].timestamp}.`);
       break;
     case CreateAccountStatus.exists:
-      console.error(`Batch account at ${i} already exists with timestamp ${accounts_results[i].timestamp}.`);
+      console.error(`Batch account at ${i} already exists with timestamp ${account_results[i].timestamp}.`);
       break;
     default:
-      console.error(`Batch account at ${i} failed to create: ${accounts_results[i].status}`);
+      console.error(`Batch account at ${i} failed to create: ${account_results[i].status}`);
       break;
   }
 }
@@ -793,7 +793,7 @@ for (let index = 0; i < historical_accounts.length; i++) {
   accounts.push(account);
 }
 
-const accounts_results = await client.createAccounts(accounts);
+const account_results = await client.createAccounts(accounts);
 // Results handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.

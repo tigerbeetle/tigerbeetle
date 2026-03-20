@@ -15,7 +15,7 @@ const client = createClient({
 
 async function main() {
   // Create two accounts.
-  let accountsResults = await client.createAccounts([
+  let accountResults = await client.createAccounts([
     {
       id: 1n,
       debits_pending: 0n,
@@ -47,9 +47,9 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(accountsResults.length, 2);
-  assert.strictEqual(accountsResults[0].status, CreateAccountStatus.created);
-  assert.strictEqual(accountsResults[1].status, CreateAccountStatus.created);
+  assert.strictEqual(accountResults.length, 2);
+  assert.strictEqual(accountResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountResults[1].status, CreateAccountStatus.created);
 
   // Start five pending transfer.
   let transfers = [
@@ -129,9 +129,9 @@ async function main() {
       timestamp: 0n,
     },
   ];
-  let transfersResults = await client.createTransfers(transfers);
-  assert.strictEqual(transfersResults.length, transfers.length);
-  for (const result of transfersResults) {
+  let transferResults = await client.createTransfers(transfers);
+  assert.strictEqual(transferResults.length, transfers.length);
+  for (const result of transferResults) {
     assert.strictEqual(result.status, CreateTransferStatus.created);
   }
 
@@ -156,7 +156,7 @@ async function main() {
   }
 
   // Create a 6th transfer posting the 1st transfer.
-  transfersResults = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 6n,
       debit_account_id: 1n,
@@ -173,8 +173,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after posting 1st pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -196,7 +196,7 @@ async function main() {
   }
 
   // Create a 7th transfer voiding the 2nd transfer.
-  transfersResults = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 7n,
       debit_account_id: 1n,
@@ -213,8 +213,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after voiding 2nd pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -236,7 +236,7 @@ async function main() {
   }
 
   // Create a 8th transfer posting the 3rd transfer.
-  transfersResults = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 8n,
       debit_account_id: 1n,
@@ -253,8 +253,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after posting 3rd pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -276,7 +276,7 @@ async function main() {
   }
 
   // Create a 9th transfer voiding the 4th transfer.
-  transfersResults = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 9n,
       debit_account_id: 1n,
@@ -293,8 +293,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after voiding 4th pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
@@ -316,7 +316,7 @@ async function main() {
   }
 
   // Create a 10th transfer posting the 5th transfer.
-  transfersResults = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 10n,
       debit_account_id: 1n,
@@ -333,8 +333,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate account balances after posting 5th pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);

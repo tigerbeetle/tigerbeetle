@@ -88,27 +88,27 @@ test('range check `code` on Account to be u16', async (): Promise<void> => {
 })
 
 test('can create accounts', async (): Promise<void> => {
-  const accounts_results = await client.createAccounts([accountA])
-  assert.deepStrictEqual(accounts_results.length, 1)
-  assert.ok(accounts_results[0].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.created)
+  const account_results = await client.createAccounts([accountA])
+  assert.deepStrictEqual(account_results.length, 1)
+  assert.ok(account_results[0].timestamp > 0)
+  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
 })
 
 test('can return error on account', async (): Promise<void> => {
-  const accounts_results = await client.createAccounts([accountA, accountB])
-  assert.deepStrictEqual(accounts_results.length, 2)
-  assert.ok(accounts_results[0].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.exists)
-  assert.ok(accounts_results[1].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[1].status, CreateAccountStatus.created)
+  const account_results = await client.createAccounts([accountA, accountB])
+  assert.deepStrictEqual(account_results.length, 2)
+  assert.ok(account_results[0].timestamp > 0)
+  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.exists)
+  assert.ok(account_results[1].timestamp > 0)
+  assert.deepStrictEqual(account_results[1].status, CreateAccountStatus.created)
 })
 
 test('error if timestamp is not set to 0n on account', async (): Promise<void> => {
   const account = { ...accountA, timestamp: 2n, id: 3n }
-  const accounts_results = await client.createAccounts([account])
-  assert.deepStrictEqual(accounts_results.length, 1)
-  assert.ok(accounts_results[0].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.timestamp_must_be_zero)
+  const account_results = await client.createAccounts([account])
+  assert.deepStrictEqual(account_results.length, 1)
+  assert.ok(account_results[0].timestamp > 0)
+  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.timestamp_must_be_zero)
 })
 
 test('batch max size', async (): Promise<void> => {
@@ -561,10 +561,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFlags.history,
     timestamp: 0n
   }
-  const accounts_results = await client.createAccounts([accountC])
-  assert.deepStrictEqual(accounts_results.length, 1)
-  assert.ok(accounts_results[0].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.created)
+  const account_results = await client.createAccounts([accountC])
+  assert.deepStrictEqual(account_results.length, 1)
+  assert.ok(account_results[0].timestamp > 0)
+  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
 
   var transfers_created : Transfer[] = [];
   // Create transfers where the new account is either the debit or credit account:
@@ -951,9 +951,9 @@ test('can query accounts', async (): Promise<void> => {
       })
     }
 
-    const accounts_results = await client.createAccounts(accounts)
-    assert.deepStrictEqual(accounts_results.length, accounts.length)
-    for (const result of accounts_results) {
+    const account_results = await client.createAccounts(accounts)
+    assert.deepStrictEqual(account_results.length, accounts.length)
+    for (const result of account_results) {
       assert.ok(result.timestamp > 0)
       assert.deepStrictEqual(result.status, CreateAccountStatus.created)
     }
@@ -1127,10 +1127,10 @@ test('can query transfers', async (): Promise<void> => {
       flags: AccountFlags.none,
       timestamp: 0n
     }
-    const accounts_results = await client.createAccounts([account])
-    assert.deepStrictEqual(accounts_results.length, 1)
-    assert.ok(accounts_results[0].timestamp > 0)
-    assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.created)
+    const account_results = await client.createAccounts([account])
+    assert.deepStrictEqual(account_results.length, 1)
+    assert.ok(account_results[0].timestamp > 0)
+    assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
 
     var transfers_created : Transfer[] = [];
     // Create transfers:
@@ -1404,10 +1404,10 @@ test('can import accounts and transfers', async (): Promise<void> => {
     flags: 0,
     timestamp: 0n // this will be set correctly by the TigerBeetle server
   }
-  let accounts_results = await client.createAccounts([accountTmp])
-  assert.deepStrictEqual(accounts_results.length, 1)
-  assert.ok(accounts_results[0].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.created)
+  let account_results = await client.createAccounts([accountTmp])
+  assert.deepStrictEqual(account_results.length, 1)
+  assert.ok(account_results[0].timestamp > 0)
+  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
 
   let accountLookup = await client.lookupAccounts([accountTmp.id])
   assert.strictEqual(accountLookup.length, 1)
@@ -1447,12 +1447,12 @@ test('can import accounts and transfers', async (): Promise<void> => {
     flags: AccountFlags.imported,
     timestamp: timestampMax + 2n // user-defined timestamp
   }
-  accounts_results = await client.createAccounts([accountA, accountB])
-  assert.deepStrictEqual(accounts_results.length, 2)
-  assert.ok(accounts_results[0].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[0].status, CreateAccountStatus.created)
-  assert.ok(accounts_results[1].timestamp > 0)
-  assert.deepStrictEqual(accounts_results[1].status, CreateAccountStatus.created)
+  account_results = await client.createAccounts([accountA, accountB])
+  assert.deepStrictEqual(account_results.length, 2)
+  assert.ok(account_results[0].timestamp > 0)
+  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
+  assert.ok(account_results[1].timestamp > 0)
+  assert.deepStrictEqual(account_results[1].status, CreateAccountStatus.created)
 
   accountLookup = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accountLookup.length, 2)
@@ -1486,8 +1486,8 @@ test('can import accounts and transfers', async (): Promise<void> => {
 })
 
 test('accept zero-length create_accounts', async (): Promise<void> => {
-  const accounts_results = await client.createAccounts([])
-  assert.deepStrictEqual(accounts_results.length, 0)
+  const account_results = await client.createAccounts([])
+  assert.deepStrictEqual(account_results.length, 0)
 })
 
 test('accept zero-length create_transfers', async (): Promise<void> => {

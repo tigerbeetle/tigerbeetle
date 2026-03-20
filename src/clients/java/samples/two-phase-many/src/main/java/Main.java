@@ -24,15 +24,15 @@ public final class Main {
             accounts.setLedger(1);
             accounts.setCode(1);
 
-            CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
-            while (accountsResults.next()) {
-                switch (accountsResults.getStatus()) {
+            CreateAccountResultBatch accountResults = client.createAccounts(accounts);
+            while (accountResults.next()) {
+                switch (accountResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating account %d: %s\n",
-                                accountsResults.getPosition(),
-                                accountsResults.getStatus());
+                                accountResults.getPosition(),
+                                accountResults.getStatus());
                         assert false;
                 }
             }
@@ -84,15 +84,15 @@ public final class Main {
             transfers.setAmount(500);
             transfers.setFlags(TransferFlags.PENDING);
 
-            CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
-            while (transfersResults.next()) {
-                switch (transfersResults.getStatus()) {
+            CreateTransferResultBatch transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transfersResults.getPosition(),
-                                transfersResults.getStatus());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }
@@ -136,15 +136,15 @@ public final class Main {
             transfers.setAmount(100);
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
-            transfersResults = client.createTransfers(transfers);
-            while (transfersResults.next()) {
-                switch (transfersResults.getStatus()) {
+            transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transfersResults.getPosition(),
-                                transfersResults.getStatus());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }
@@ -185,15 +185,15 @@ public final class Main {
             transfers.setAmount(200);
             transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
-            transfersResults = client.createTransfers(transfers);
-            while (transfersResults.next()) {
-                switch (transfersResults.getStatus()) {
+            transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transfersResults.getPosition(),
-                                transfersResults.getStatus());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }
@@ -234,15 +234,15 @@ public final class Main {
             transfers.setAmount(300);
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
-            transfersResults = client.createTransfers(transfers);
-            while (transfersResults.next()) {
-                switch (transfersResults.getStatus()) {
+            transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transfersResults.getPosition(),
-                                transfersResults.getStatus());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }
@@ -283,15 +283,15 @@ public final class Main {
             transfers.setAmount(400);
             transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
-            transfersResults = client.createTransfers(transfers);
-            while (transfersResults.next()) {
-                switch (transfersResults.getStatus()) {
+            transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transfersResults.getPosition(),
-                                transfersResults.getStatus());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }
@@ -332,15 +332,15 @@ public final class Main {
             transfers.setAmount(100);
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
-            transfersResults = client.createTransfers(transfers);
-            while (transfersResults.next()) {
-                switch (transfersResults.getStatus()) {
+            transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transfersResults.getPosition(),
-                                transfersResults.getStatus());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }

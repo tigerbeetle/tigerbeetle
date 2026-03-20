@@ -854,9 +854,9 @@ def test_query_accounts(client):
             timestamp=0,
         ))
 
-    accounts_results = client.create_accounts(accounts)
-    assert len(accounts) == len(accounts_results)
-    for result in accounts_results:
+    account_results = client.create_accounts(accounts)
+    assert len(accounts) == len(account_results)
+    for result in account_results:
         assert result.timestamp > 0
         assert result.status == tb.CreateAccountStatus.CREATED
 
@@ -1011,10 +1011,10 @@ def test_query_transfers(client):
         flags=tb.AccountFlags.NONE,
         timestamp=0
     )
-    accounts_results = client.create_accounts([account])
-    assert len(accounts_results) == 1
-    accounts_results[0].timestamp > 0
-    accounts_results[0].status == tb.CreateAccountStatus.CREATED
+    account_results = client.create_accounts([account])
+    assert len(account_results) == 1
+    account_results[0].timestamp > 0
+    account_results[0].status == tb.CreateAccountStatus.CREATED
 
     transfers_created = []
     # Create transfers:
@@ -1267,12 +1267,12 @@ def test_import_accounts_and_transfers(client):
         flags=0,
         timestamp=0
     )
-    accounts_results = client.create_accounts([account_tmp])
-    assert len(accounts_results) == 1
-    accounts_results[0].timestamp > 0
-    accounts_results[0].status == tb.CreateAccountStatus.CREATED
+    account_results = client.create_accounts([account_tmp])
+    assert len(account_results) == 1
+    account_results[0].timestamp > 0
+    account_results[0].status == tb.CreateAccountStatus.CREATED
 
-    timestamp_max = accounts_results[0].timestamp
+    timestamp_max = account_results[0].timestamp
 
     # Wait 10 ms so we can use the account's timestamp as the reference for past time
     # after the last object inserted.
@@ -1306,12 +1306,12 @@ def test_import_accounts_and_transfers(client):
         flags=tb.AccountFlags.IMPORTED,
         timestamp=timestamp_max + 2 # user-defined timestamp
     )
-    accounts_results = client.create_accounts([account_a, account_b])
-    assert len(accounts_results) == 2
-    accounts_results[0].timestamp == account_a.timestamp
-    accounts_results[0].status == tb.CreateAccountStatus.CREATED
-    accounts_results[1].timestamp == account_b.timestamp
-    accounts_results[1].status == tb.CreateAccountStatus.CREATED
+    account_results = client.create_accounts([account_a, account_b])
+    assert len(account_results) == 2
+    account_results[0].timestamp == account_a.timestamp
+    account_results[0].status == tb.CreateAccountStatus.CREATED
+    account_results[1].timestamp == account_b.timestamp
+    account_results[1].status == tb.CreateAccountStatus.CREATED
 
     account_lookup = client.lookup_accounts([account_a.id, account_b.id])
     assert len(account_lookup) == 2

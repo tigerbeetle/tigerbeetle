@@ -15,7 +15,7 @@ const client = createClient({
 
 async function main() {
   // Create two accounts
-  let accountsResults = await client.createAccounts([
+  let accountResults = await client.createAccounts([
     {
       id: 1n,
       debits_pending: 0n,
@@ -47,12 +47,12 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(accountsResults.length, 2);
-  assert.strictEqual(accountsResults[0].status, CreateAccountStatus.created);
-  assert.strictEqual(accountsResults[1].status, CreateAccountStatus.created);
+  assert.strictEqual(accountResults.length, 2);
+  assert.strictEqual(accountResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountResults[1].status, CreateAccountStatus.created);
 
   // Start a pending transfer
-  let transfersResults = await client.createTransfers([
+  let transferResults = await client.createTransfers([
     {
       id: 1n,
       debit_account_id: 1n,
@@ -69,8 +69,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
   let accounts = await client.lookupAccounts([1n, 2n]);
@@ -92,7 +92,7 @@ async function main() {
   }
 
   // Create a second transfer simply posting the first transfer
-  transfersResults = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 2n,
       debit_account_id: 1n,
@@ -109,8 +109,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.strictEqual(transfersResults.length, 1);
-  assert.strictEqual(transfersResults[0].status, CreateTransferStatus.created);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate the contents of all transfers
   let transfers = await client.lookupTransfers([1n, 2n]);

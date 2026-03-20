@@ -110,8 +110,8 @@ const runBenchmark = async () => {
   for (let i = 0; i < transfers.length; i++) {
     const ms1 = Date.now()
 
-    const transfersResults = await client.createTransfers(transfers[i])
-    assert(transfersResults.length === transfers[i].length)
+    const transferResults = await client.createTransfers(transfers[i])
+    assert(transferResults.length === transfers[i].length)
 
     const ms2 = Date.now()
     const createTransferLatency = ms2 - ms1
@@ -120,8 +120,8 @@ const runBenchmark = async () => {
     }
 
     if (IS_TWO_PHASE_TRANSFER) {
-      const postTransfersResults = await client.createTransfers(posts[i])
-      assert(postTransfersResults.length === posts[i].length)
+      const postTransferResults = await client.createTransfers(posts[i])
+      assert(postTransferResults.length === posts[i].length)
 
       const ms3 = Date.now()
       const commitTransferLatency = ms3 - ms2

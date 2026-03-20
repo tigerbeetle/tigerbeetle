@@ -34,7 +34,7 @@ public final class Main {
                 accounts.setFlags(AccountFlags.NONE);
                 accounts.setTimestamp(0);
 
-                CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                CreateAccountResultBatch accountResults = client.createAccounts(accounts);
                 // Results handling omitted.
                 // endsection:create-accounts
             } catch (Throwable any) {}
@@ -55,7 +55,7 @@ public final class Main {
                 accounts.setCode(718);
                 accounts.setFlags(AccountFlags.HISTORY);
 
-                CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                CreateAccountResultBatch accountResults = client.createAccounts(accounts);
                 // Results handling omitted.
                 // endsection:account-flags
             } catch (Throwable any) {}
@@ -82,20 +82,20 @@ public final class Main {
                 accounts.setCode(718);
                 accounts.setFlags(AccountFlags.NONE);
 
-                CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
-                while (accountsResults.next()) {
-                    switch (accountsResults.getStatus()) {
+                CreateAccountResultBatch accountResults = client.createAccounts(accounts);
+                while (accountResults.next()) {
+                    switch (accountResults.getStatus()) {
                         case Created:
                             System.out.printf("Batch account at %d successfully created with timestamp %d.\n",
-                                    accountsResults.getPosition(), accountsResults.getTimestamp());
+                                    accountResults.getPosition(), accountResults.getTimestamp());
                             break;
                         case Exists:
                             System.err.printf("Batch account at %d already exists with timestamp %d.\n",
-                                    accountsResults.getPosition(), accountsResults.getTimestamp());
+                                    accountResults.getPosition(), accountResults.getTimestamp());
                             break;
                         default:
                             System.err.printf("Batch account at %d failed to create: %s.\n",
-                                    accountsResults.getPosition(), accountsResults.getStatus());
+                                    accountResults.getPosition(), accountResults.getStatus());
                             break;
                     }
                 }
@@ -130,7 +130,7 @@ public final class Main {
                 transfers.setFlags(TransferFlags.NONE);
                 transfers.setTimeout(0);
 
-                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
                 // endsection:create-transfers
             } catch (Throwable any) {}
@@ -163,20 +163,20 @@ public final class Main {
                 transfers.setLedger(1);
                 transfers.setCode(1);
 
-                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
-                while (transfersResults.next()) {
-                    switch (transfersResults.getStatus()) {
+                CreateTransferResultBatch transferResults = client.createTransfers(transfers);
+                while (transferResults.next()) {
+                    switch (transferResults.getStatus()) {
                         case Created:
                             System.out.printf("Batch transfer at %d successfully created with timestamp %d.\n",
-                                    transfersResults.getPosition(), transfersResults.getTimestamp());
+                                    transferResults.getPosition(), transferResults.getTimestamp());
                             break;
                         case Exists:
                             System.err.printf("Batch transfer at %d already exists with timestamp %d.\n",
-                                    transfersResults.getPosition(), transfersResults.getTimestamp());
+                                    transferResults.getPosition(), transferResults.getTimestamp());
                             break;
                         default:
                             System.err.printf("Batch transfer at %d failed to create: %s\n",
-                                    transfersResults.getPosition(), transfersResults.getStatus());
+                                    transferResults.getPosition(), transferResults.getStatus());
                             break;
                     }
                 }
@@ -199,7 +199,7 @@ public final class Main {
                     batch.setCode(dataSource.getInt("code"));
 
                     if (batch.getLength() == BATCH_SIZE) {
-                        CreateTransferResultBatch transfersResults = client.createTransfers(batch);
+                        CreateTransferResultBatch transferResults = client.createTransfers(batch);
                         // Results handling omitted.
 
                         // Reset the batch for the next iteration.
@@ -209,7 +209,7 @@ public final class Main {
 
                 if (batch.getLength() > 0) {
                     // Send the remaining items.
-                    CreateTransferResultBatch transfersResults = client.createTransfers(batch);
+                    CreateTransferResultBatch transferResults = client.createTransfers(batch);
                     // Results handling omitted.
                 }
 
@@ -239,7 +239,7 @@ public final class Main {
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.NONE);
 
-                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
                 // endsection:transfer-flags-link
             } catch (Throwable any) {}
@@ -257,7 +257,7 @@ public final class Main {
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.PENDING);
 
-                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
 
                 transfers = new TransferBatch(1);
@@ -268,7 +268,7 @@ public final class Main {
                 transfers.setPendingId(6);
                 transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
-                transfersResults = client.createTransfers(transfers);
+                transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
                 // endsection:transfer-flags-post
             } catch (Throwable any) {}
@@ -286,7 +286,7 @@ public final class Main {
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.PENDING);
 
-                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
 
                 transfers = new TransferBatch(1);
@@ -297,7 +297,7 @@ public final class Main {
                 transfers.setPendingId(8);
                 transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
-                transfersResults = client.createTransfers(transfers);
+                transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
                 // endsection:transfer-flags-void
             } catch (Throwable any) {}
@@ -439,7 +439,7 @@ public final class Main {
                 // ... rest of transfer ...
                 transfers.setFlags(TransferFlags.NONE);
 
-                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                 // Results handling omitted.
                 // endsection:linked-events
             } catch (Throwable any) {}
@@ -473,7 +473,7 @@ public final class Main {
                     } else {
                         accounts.setFlags(AccountFlags.IMPORTED);
 
-                        CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                        CreateAccountResultBatch accountResults = client.createAccounts(accounts);
                         // Results handling omitted.
 
                         // Reset the batch for the next iteration.
@@ -483,7 +483,7 @@ public final class Main {
 
                 if (accounts.getLength() > 0) {
                     // Send the remaining items.
-                    CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                    CreateAccountResultBatch accountResults = client.createAccounts(accounts);
                     // Results handling omitted.
                 }
 
@@ -510,7 +510,7 @@ public final class Main {
                     } else {
                         transfers.setFlags(TransferFlags.IMPORTED);
 
-                        CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                        CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                         // Results handling omitted.
 
                         // Reset the batch for the next iteration.
@@ -520,7 +520,7 @@ public final class Main {
 
                 if (transfers.getLength() > 0) {
                     // Send the remaining items.
-                    CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                    CreateTransferResultBatch transferResults = client.createTransfers(transfers);
                     // Results handling omitted.
                 }
 

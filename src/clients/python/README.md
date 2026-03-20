@@ -108,7 +108,7 @@ account = tb.Account(
     timestamp=0,
 )
 
-accounts_results = client.create_accounts([account])
+account_results = client.create_accounts([account])
 # Results handling omitted.
 ```
 
@@ -163,7 +163,7 @@ account1 = tb.Account(
     flags=tb.AccountFlags.HISTORY,
 )
 
-accounts_results = client.create_accounts([account0, account1])
+account_results = client.create_accounts([account0, account1])
 # Results handling omitted.
 ```
 
@@ -225,8 +225,8 @@ account2 = tb.Account(
     flags=0,
 )
 
-accounts_results = client.create_accounts([account0, account1, account2])
-for i, result in enumerate(accounts_results):
+account_results = client.create_accounts([account0, account1, account2])
+for i, result in enumerate(account_results):
     if result.status == tb.CreateAccountStatus.CREATED:
         print(f"Batch account at {i} successfully created with timestamp {result.timestamp}.")
     elif result.status == tb.CreateAccountStatus.EXISTS:
@@ -767,7 +767,7 @@ for index, account in enumerate(historical_accounts):
 
     accounts.append(account)
 
-accounts_results = client.create_accounts(accounts)
+account_results = client.create_accounts(accounts)
 # Results handling omitted.
 
 # The, load and import all transfers with their timestamps from the historical source.

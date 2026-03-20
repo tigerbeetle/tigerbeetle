@@ -4,7 +4,7 @@ import tigerbeetle as tb
 
 with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
     # Create two accounts.
-    accounts_results = client.create_accounts([
+    account_results = client.create_accounts([
         tb.Account(
             id=1,
             ledger=1,
@@ -17,10 +17,10 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         ),
     ])
 
-    print(accounts_results)
-    assert len(accounts_results) == 2
-    assert accounts_results[0].status == tb.CreateAccountStatus.CREATED
-    assert accounts_results[1].status == tb.CreateAccountStatus.CREATED
+    print(account_results)
+    assert len(account_results) == 2
+    assert account_results[0].status == tb.CreateAccountStatus.CREATED
+    assert account_results[1].status == tb.CreateAccountStatus.CREATED
 
     # Start five pending transfers.
     transfers = [

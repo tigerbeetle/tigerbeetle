@@ -427,21 +427,21 @@ impl Client {
     /// async fn make_create_accounts_request(
     ///     client: &tb::Client,
     ///     accounts: &[tb::Account],
-    /// ) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let create_accounts_results = client.create_accounts(accounts).await?;
-    ///     assert_eq!(accounts.len(), create_accounts_results.len());
+    /// ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    ///     let account_results = client.create_accounts(accounts).await?;
+    ///     assert_eq!(accounts.len(), account_results.len());
     ///     let it = accounts
     ///         .iter()
     ///         .enumerate()
-    ///         .map(move |(i, account)| (account, create_accounts_results[i]));
+    ///         .map(move |(i, account)| (account, account_results[i]));
     ///
-    ///     for (account, create_account_result) in it {
-    ///         match create_account_result.status {
+    ///     for (account, account_result) in it {
+    ///         match account_result.status {
     ///             tb::CreateAccountStatus::Created | tb::CreateAccountStatus::Exists => {
-    ///                 handle_create_account_success(account, create_account_result).await?;
+    ///                 handle_create_account_success(account, account_result).await?;
     ///             }
     ///             _ => {
-    ///                 handle_create_account_failure(account, create_account_result).await?;
+    ///                 handle_create_account_failure(account, account_result).await?;
     ///             }
     ///         }
     ///     }
@@ -533,19 +533,19 @@ impl Client {
     /// async fn make_create_transfers_request(
     ///     client: &tb::Client,
     ///     transfers: &[tb::Transfer],
-    /// ) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let results = client.create_transfers(transfers).await?;
+    /// ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    ///     let transfer_results = client.create_transfers(transfers).await?;
     ///     let it = transfers
     ///         .iter()
     ///         .enumerate()
-    ///         .map(move |(i, transfer)| (transfer, results[i]));
-    ///     for (transfer, create_transfer_result) in it {
-    ///         match create_transfer_result.status {
+    ///         .map(move |(i, transfer)| (transfer, transfer_results[i]));
+    ///     for (transfer, transfer_result) in it {
+    ///         match transfer_result.status {
     ///             tb::CreateTransferStatus::Created | tb::CreateTransferStatus::Exists => {
-    ///                 handle_create_transfer_success(transfer, create_transfer_result).await?;
+    ///                 handle_create_transfer_success(transfer, transfer_result).await?;
     ///             }
     ///             _ => {
-    ///                 handle_create_transfer_failure(transfer, create_transfer_result).await?;
+    ///                 handle_create_transfer_failure(transfer, transfer_result).await?;
     ///             }
     ///         }
     ///     }

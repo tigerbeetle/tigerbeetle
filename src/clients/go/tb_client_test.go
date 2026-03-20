@@ -1589,7 +1589,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		}
 		assertCreateAccountsOK(t, accountResults, 2)
 
-		transfersResults, err := client.CreateTransfers([]Transfer{
+		transferResults, err := client.CreateTransfers([]Transfer{
 			{
 				ID:              transferA,
 				CreditAccountID: accountA,
@@ -1606,7 +1606,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertCreateTransfersOK(t, transfersResults, 1)
+		assertCreateTransfersOK(t, transferResults, 1)
 
 		accounts, err := client.LookupAccounts([]Uint128{accountA, accountB})
 		if err != nil {

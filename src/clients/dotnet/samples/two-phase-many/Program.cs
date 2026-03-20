@@ -26,13 +26,13 @@ using (var client = new Client(
     },
     };
 
-    var accountsResults = client.CreateAccounts(accounts);
-    Debug.Assert(accountsResults.Length == 2);
-    Debug.Assert(accountsResults[0].Status == CreateAccountStatus.Created);
-    Debug.Assert(accountsResults[1].Status == CreateAccountStatus.Created);
+    var accountResults = client.CreateAccounts(accounts);
+    Debug.Assert(accountResults.Length == 2);
+    Debug.Assert(accountResults[0].Status == CreateAccountStatus.Created);
+    Debug.Assert(accountResults[1].Status == CreateAccountStatus.Created);
 
     // Start five pending transfers.
-    var transfersResults = client.CreateTransfers(new[] {
+    var transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 1,
@@ -84,8 +84,8 @@ using (var client = new Client(
         Flags = TransferFlags.Pending,
     }
     });
-    Debug.Assert(transfersResults.Length == 5);
-    foreach (var result in transfersResults)
+    Debug.Assert(transferResults.Length == 5);
+    foreach (var result in transferResults)
     {
         Debug.Assert(result.Status == CreateTransferStatus.Created);
     }
@@ -117,7 +117,7 @@ using (var client = new Client(
     }
 
     // Create a 6th transfer posting the 1st transfer.
-    transfersResults = client.CreateTransfers(new[] {
+    transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 6,
@@ -130,8 +130,8 @@ using (var client = new Client(
         Flags = TransferFlags.PostPendingTransfer,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate account balances after posting 1st pending transfer.
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -159,7 +159,7 @@ using (var client = new Client(
     }
 
     // Create a 7th transfer voiding the 2nd transfer.
-    transfersResults = client.CreateTransfers(new[] {
+    transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 7,
@@ -172,8 +172,8 @@ using (var client = new Client(
         Flags = TransferFlags.VoidPendingTransfer,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate account balances after voiding 2nd pending transfer.
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -201,7 +201,7 @@ using (var client = new Client(
     }
 
     // Create an 8th transfer posting the 3rd transfer.
-    transfersResults = client.CreateTransfers(new[] {
+    transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 8,
@@ -214,8 +214,8 @@ using (var client = new Client(
         Flags = TransferFlags.PostPendingTransfer,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate account balances after posting 3rd pending transfer.
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -243,7 +243,7 @@ using (var client = new Client(
     }
 
     // Create a 9th transfer voiding the 4th transfer.
-    transfersResults = client.CreateTransfers(new[] {
+    transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 9,
@@ -256,8 +256,8 @@ using (var client = new Client(
         Flags = TransferFlags.VoidPendingTransfer,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate account balances after voiding 4th pending transfer.
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -285,7 +285,7 @@ using (var client = new Client(
     }
 
     // Create a 10th transfer posting the 5th transfer.
-    transfersResults = client.CreateTransfers(new[] {
+    transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 10,
@@ -298,8 +298,8 @@ using (var client = new Client(
         Flags = TransferFlags.PostPendingTransfer,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate account balances after posting 5th pending transfer.
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });

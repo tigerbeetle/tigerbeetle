@@ -26,13 +26,13 @@ using (var client = new Client(
     },
     };
 
-    var accountsResults = client.CreateAccounts(accounts);
-    Debug.Assert(accountsResults.Length == 2);
-    Debug.Assert(accountsResults[0].Status == CreateAccountStatus.Created);
-    Debug.Assert(accountsResults[1].Status == CreateAccountStatus.Created);
+    var accountResults = client.CreateAccounts(accounts);
+    Debug.Assert(accountResults.Length == 2);
+    Debug.Assert(accountResults[0].Status == CreateAccountStatus.Created);
+    Debug.Assert(accountResults[1].Status == CreateAccountStatus.Created);
 
     // Start a pending transfer
-    var transfersResults = client.CreateTransfers(new[] {
+    var transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 1,
@@ -44,8 +44,8 @@ using (var client = new Client(
         Flags = TransferFlags.Pending,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -73,7 +73,7 @@ using (var client = new Client(
     }
 
     // Create a second transfer simply posting the first transfer
-    transfersResults = client.CreateTransfers(new[] {
+    transferResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 2,
@@ -86,8 +86,8 @@ using (var client = new Client(
         Flags = TransferFlags.PostPendingTransfer,
     }
     });
-    Debug.Assert(transfersResults.Length == 1);
-    Debug.Assert(transfersResults[0].Status == CreateTransferStatus.Created);
+    Debug.Assert(transferResults.Length == 1);
+    Debug.Assert(transferResults[0].Status == CreateTransferStatus.Created);
 
     // Validate the contents of all transfers
     var transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
