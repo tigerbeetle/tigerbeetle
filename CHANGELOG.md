@@ -3,9 +3,50 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.78
+
+Released: 2026-03-20
+
+### Safety And Performance
+
+- [#3581](https://github.com/tigerbeetle/tigerbeetle/pull/3581)
+
+  Fix an over-tight assert -- we may still be writing non-repair blocks at the start of
+  checkpointing.
+
+- [#3586](https://github.com/tigerbeetle/tigerbeetle/pull/3586)
+
+  Fix a potential liveness issue where we try to repair a block while simultaneously writing to it.
+
+### Internals
+
+- [#3585](https://github.com/tigerbeetle/tigerbeetle/pull/3585)
+
+  `tigerbeetle inspect constants` now prints out the number of Transfers per table.
+
+- [#3579](https://github.com/tigerbeetle/tigerbeetle/pull/3579),
+  [#3589](https://github.com/tigerbeetle/tigerbeetle/pull/3589),
+  [#3591](https://github.com/tigerbeetle/tigerbeetle/pull/3591),
+  [#3584](https://github.com/tigerbeetle/tigerbeetle/pull/3584),
+  [#3594](https://github.com/tigerbeetle/tigerbeetle/pull/3594)
+
+  Fix the CI release validation job.
+
+- [#3583](https://github.com/tigerbeetle/tigerbeetle/pull/3583)
+
+  Refactor our iops.zig to a more approriate home in stdx.
+
+### TigerTracks 🎧
+
+- [Rage Room](https://open.spotify.com/track/1EDaSjhCkBMJ8RI2Xc6k4H)
+
 ## TigerBeetle 0.16.77
 
 Released: 2026-03-13
+
+Note: it is advisable to skip 0.16.77 and upgrade directly to 0.16.78, due to potential liveness
+issues (see [#3581](https://github.com/tigerbeetle/tigerbeetle/pull/3581) and
+[#3586](https://github.com/tigerbeetle/tigerbeetle/pull/3586)).
 
 ### Safety And Performance
 
