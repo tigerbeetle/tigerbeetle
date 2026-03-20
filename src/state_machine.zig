@@ -2924,7 +2924,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             // importing events with past timestamp.
             const batch_imported = events.len > 0 and events[0].flags.imported;
             for (events, 0..) |*event, index| {
-                const result_code, const timestamp_actual = result: {
+                const result_status, const timestamp_actual = result: {
                     const timestamp_event = timestamp - events.len + index + 1;
                     assert(TimestampRange.valid(timestamp_event));
                     if (event.flags.linked) {
@@ -3006,11 +3006,11 @@ pub fn StateMachineType(comptime Storage: type) type {
                         @tagName(operation),
                         index + 1,
                         events.len,
-                        result_code,
+                        result_status,
                         event,
                     });
                 }
-                if (result_code != .created) {
+                if (result_status != .created) {
                     if (chain) |chain_start_index| {
                         if (!chain_broken) {
                             chain_broken = true;
@@ -3041,8 +3041,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                                 }
                             }
                         } else {
-                            assert(result_code == .linked_event_failed or
-                                result_code == .linked_event_chain_open);
+                            assert(result_status == .linked_event_failed or
+                                result_status == .linked_event_chain_open);
                         }
                     }
 
@@ -3054,7 +3054,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         => {
                             results[count] = .{
                                 .index = @intCast(index),
-                                .result = result_code,
+                                .result = result_status,
                             };
                             count += 1;
                         },
@@ -3066,7 +3066,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         },
                         else => comptime unreachable,
                     }
-                    self.transient_error(operation, event.id, result_code);
+                    self.transient_error(operation, event.id, result_status);
                 }
 
                 switch (operation) {
@@ -3075,7 +3075,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     => {
                         results[count] = .{
                             .timestamp = timestamp_actual,
-                            .status = result_code,
+                            .status = result_status,
                         };
                         count += 1;
                     },
@@ -3091,7 +3091,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 }
 
                 if (chain != null and
-                    (!event.flags.linked or result_code == .linked_event_chain_open))
+                    (!event.flags.linked or result_status == .linked_event_chain_open))
                 {
                     if (!chain_broken) {
                         // We've finished this linked chain, and all events have applied
@@ -3113,7 +3113,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             comptime operation: Operation,
             id: u128,
-            result_code: switch (operation) {
+            result_status: switch (operation) {
                 .create_accounts,
                 .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
@@ -3125,7 +3125,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 else => unreachable,
             },
         ) void {
-            assert(result_code != .created);
+            assert(result_status != .created);
 
             switch (operation) {
                 // The `create_accounts` error codes do not depend on transient system status.
@@ -3141,7 +3141,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .create_transfers,
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
-                => if (result_code.transient()) {
+                => if (result_status.transient()) {
                     self.forest.grooves.transfers.insert_orphaned_id(id);
                 },
                 else => comptime unreachable,
