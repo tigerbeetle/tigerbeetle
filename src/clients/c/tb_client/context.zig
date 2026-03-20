@@ -186,6 +186,16 @@ pub fn ContextType(
             }
         };
 
+        /// Heap-allocated container for the VSR client and message pool.
+        /// Decouples client storage from Context layout, allowing @fieldParentPtr
+        /// in the eviction callback to recover *Context via the backref pointer
+        /// instead of requiring client to be embedded directly in Context.
+        const ClientState = struct {
+            message_pool: MessagePool,
+            client: Client,
+            context: *Context,
+        };
+
         const Phase = union(enum) {
             running: Running,
             disconnecting: void,
@@ -204,7 +214,7 @@ pub fn ContextType(
                 fn cancel_request_inflight(self: *Running, ctx: *Context) void {
                     _ = self;
                     assert(thread_caller == .io);
-                    if (ctx.client.request_inflight) |*inflight| {
+                    if (ctx.client_state.client.request_inflight) |*inflight| {
                         if (inflight.message.header.operation != .register) {
                             const user_data: UserData = @bitCast(inflight.user_data);
                             const packet: *Packet = user_data.packet;
@@ -271,10 +281,11 @@ pub fn ContextType(
                     assert(ctx.client_is_available());
 
                     // Nothing inflight means the packet should be submitted right now.
-                    if (ctx.client.request_inflight == null) {
+                    if (ctx.client_state.client.request_inflight == null) {
                         assert(self.pending.count() == 0);
                         packet.phase = .pending;
-                        packet.multi_batch_time_monotonic = ctx.client.time.monotonic().ns;
+                        packet.multi_batch_time_monotonic =
+                            ctx.client_state.client.time.monotonic().ns;
                         packet.multi_batch_count = 1;
                         packet.multi_batch_event_count = @intCast(batch.event_count);
                         packet.multi_batch_result_count_expected =
@@ -335,7 +346,7 @@ pub fn ContextType(
 
                     // Couldn't batch with existing packet so push to pending directly.
                     packet.phase = .pending;
-                    packet.multi_batch_time_monotonic = ctx.client.time.monotonic().ns;
+                    packet.multi_batch_time_monotonic = ctx.client_state.client.time.monotonic().ns;
                     packet.multi_batch_count = 1;
                     packet.multi_batch_event_count = @intCast(batch.event_count);
                     packet.multi_batch_result_count_expected =
@@ -355,11 +366,11 @@ pub fn ContextType(
                         return ctx.packet_cancel(packet_list);
                     }
 
-                    assert(ctx.client.request_inflight == null);
+                    assert(ctx.client_state.client.request_inflight == null);
 
-                    const message = ctx.client.get_message().build(.request);
+                    const message = ctx.client_state.client.get_message().build(.request);
                     defer {
-                        ctx.client.release_message(message.base());
+                        ctx.client_state.client.release_message(message.base());
                         packet_list.assert_phase(.sent);
                     }
 
@@ -428,10 +439,10 @@ pub fn ContextType(
                     const previous_request_latency =
                         self.previous_request_latency orelse stdx.Duration{ .ns = 0 };
                     message.header.* = .{
-                        .release = ctx.client.release,
-                        .client = ctx.client.id,
+                        .release = ctx.client_state.client.release,
+                        .client = ctx.client_state.client.id,
                         .request = 0, // Set by client.raw_request.
-                        .cluster = ctx.client.cluster,
+                        .cluster = ctx.client_state.client.cluster,
                         .command = .request,
                         .operation = operation.to_vsr(),
                         .size = @sizeOf(vsr.Header) + request_size,
@@ -448,7 +459,7 @@ pub fn ContextType(
                     };
 
                     packet_list.phase = .sent;
-                    ctx.client.raw_request(
+                    ctx.client_state.client.raw_request(
                         Context.client_result_callback,
                         @bitCast(UserData{
                             .self = ctx,
@@ -504,7 +515,7 @@ pub fn ContextType(
                 /// it is safe to free the client's resources.
                 fn client_io_settled(ctx: *const Context) bool {
                     if (has_message_bus) {
-                        return ctx.client.message_bus.shutdown_complete();
+                        return ctx.client_state.client.message_bus.shutdown_complete();
                     }
                     return true;
                 }
@@ -539,11 +550,10 @@ pub fn ContextType(
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max) = .{},
         io: IO,
 
-        // The client and message pool are only accessed on the I/O thread.
-        // They are deinitialized after disconnecting from the server,
+        // The client state is only accessed on the I/O thread.
+        // It is deinitialized after disconnecting from the server,
         // which allows the server to release the session.
-        message_pool: MessagePool,
-        client: Client,
+        client_state: *ClientState,
 
         completion_callback: CompletionCallback,
         completion_context: usize,
@@ -653,19 +663,23 @@ pub fn ContextType(
             };
             errdefer context.io.deinit();
 
-            log.debug("{}: init: initializing MessagePool", .{context.client_id});
-            context.message_pool = try MessagePool.init(allocator, .client);
-            errdefer context.message_pool.deinit(allocator);
+            log.debug("{}: init: initializing ClientState", .{context.client_id});
+            const client_state = try allocator.create(ClientState);
+            errdefer allocator.destroy(client_state);
+
+            client_state.context = context;
+            client_state.message_pool = try MessagePool.init(allocator, .client);
+            errdefer client_state.message_pool.deinit(allocator);
 
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
                 cluster_id,
                 context.addresses.const_slice(),
             });
-            context.client = Client.init(
+            client_state.client = Client.init(
                 allocator,
                 time,
-                &context.message_pool,
+                &client_state.message_pool,
                 .{
                     .id = context.client_id,
                     .cluster = cluster_id,
@@ -687,7 +701,9 @@ pub fn ContextType(
                     error.OutOfMemory => error.OutOfMemory,
                 };
             };
-            errdefer context.client.deinit(allocator);
+            errdefer client_state.client.deinit(allocator);
+
+            context.client_state = client_state;
 
             ClientInterface.init(client_out, context, comptime &.{
                 .submit_fn = &vtable_submit_fn,
@@ -717,7 +733,7 @@ pub fn ContextType(
             try context.signal.init(&context.io, Context.signal_notify_callback);
             errdefer context.signal.deinit();
 
-            context.client.register(client_register_callback, @intFromPtr(context));
+            client_state.client.register(client_register_callback, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
             context.thread = std.Thread.spawn(
@@ -772,7 +788,7 @@ pub fn ContextType(
                             }
 
                             if (has_message_bus) {
-                                self.client.message_bus.shutdown();
+                                self.client_state.client.message_bus.shutdown();
                             }
 
                             self.phase = .disconnecting;
@@ -780,7 +796,7 @@ pub fn ContextType(
                         }
 
                         assert(self.eviction_reason == null);
-                        self.client.tick();
+                        self.client_state.client.tick();
                     },
 
                     // Once all connections have fully terminated (no pending
@@ -788,8 +804,10 @@ pub fn ContextType(
                     // client which frees the message_bus's connections array.
                     .disconnecting => {
                         if (Phase.Disconnecting.client_io_settled(self)) {
-                            self.client.deinit(self.gpa.allocator());
-                            self.message_pool.deinit(self.gpa.allocator());
+                            const allocator = self.gpa.allocator();
+                            self.client_state.client.deinit(allocator);
+                            self.client_state.message_pool.deinit(allocator);
+                            allocator.destroy(self.client_state);
                             self.phase = .settled;
                             continue :main;
                         }
@@ -922,7 +940,7 @@ pub fn ContextType(
 
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.eviction_reason == null);
-            assert(self.client.request_inflight == null);
+            assert(self.client_state.client.request_inflight == null);
             assert(result.batch_size_limit > 0);
 
             switch (self.phase) {
@@ -950,7 +968,8 @@ pub fn ContextType(
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             assert(thread_caller == .io);
 
-            const self: *Context = @fieldParentPtr("client", client);
+            const cs: *ClientState = @fieldParentPtr("client", client);
+            const self: *Context = cs.context;
             assert(self.eviction_reason == null);
 
             log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
@@ -993,15 +1012,15 @@ pub fn ContextType(
 
             const running: *Phase.Running = &self.phase.running;
 
-            const current_timestamp = self.client.time.monotonic();
+            const current_timestamp = self.client_state.client.time.monotonic();
             running.previous_request_latency =
                 current_timestamp.duration_since(running.previous_request_instant.?);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
-            assert(self.client.request_inflight == null);
+            assert(self.client_state.client.request_inflight == null);
             while (running.pending.pop()) |packet_next| {
                 running.packet_send(self, packet_next);
-                if (self.client.request_inflight != null) break;
+                if (self.client_state.client.request_inflight != null) break;
             }
 
             // The callback should never be called with an operation not in `allowed_operations`.
