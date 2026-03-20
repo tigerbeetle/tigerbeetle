@@ -186,7 +186,313 @@ pub fn ContextType(
             }
         };
 
-        const Phase = enum { running, disconnecting, settled };
+        const Phase = union(enum) {
+            running: void,
+            disconnecting: void,
+            settled: void,
+
+            /// Methods only valid during the running phase,
+            /// when the client is available for sending requests.
+            const Running = struct {
+                /// Cancel the current inflight request (and the entire batched
+                /// linked list of packets), as it won't be replied anymore.
+                fn cancel_request_inflight(ctx: *Context) void {
+                    assert(thread_caller == .io);
+                    if (ctx.client.request_inflight) |*inflight| {
+                        if (inflight.message.header.operation != .register) {
+                            const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                            packet.assert_phase(.sent);
+                            ctx.packet_cancel(packet);
+                        }
+                    }
+                }
+
+                fn packet_enqueue(ctx: *Context, packet: *Packet) void {
+                    assert(thread_caller == .io);
+                    assert(ctx.batch_size_limit != null);
+                    packet.assert_phase(.submitted);
+
+                    const operation: Operation = operation_from_int(packet.operation) orelse {
+                        return ctx.notify_completion(packet, error.InvalidOperation);
+                    };
+
+                    // Make sure the packet.data wouldn't overflow a request,
+                    // and that the corresponding results won't overflow a reply.
+                    const batch: struct {
+                        event_size: u32,
+                        result_size: u32,
+                        event_count: u32,
+                        result_count_expected: u32,
+                    } = batch: {
+                        const event_size: u32 = operation.event_size();
+                        assert(event_size > 0);
+
+                        const result_size: u32 = operation.result_size();
+                        assert(result_size > 0);
+
+                        const slice: []const u8 = packet.slice();
+                        assert(slice.len == packet.data_size);
+                        maybe(slice.len == 0);
+                        if (slice.len % event_size != 0) {
+                            return ctx.notify_completion(packet, error.InvalidDataSize);
+                        }
+
+                        const event_count: u32 = @intCast(@divExact(slice.len, event_size));
+                        const event_max: u32 = operation.event_max(ctx.batch_size_limit.?);
+                        if (event_count > event_max) {
+                            return ctx.notify_completion(packet, error.TooMuchData);
+                        }
+                        const result_max: u32 = operation.result_max(ctx.batch_size_limit.?);
+                        const result_count_expected: u32 = operation.result_count_expected(slice);
+                        if (result_count_expected > result_max) {
+                            return ctx.notify_completion(packet, error.TooMuchData);
+                        }
+
+                        break :batch .{
+                            .event_size = event_size,
+                            .result_size = result_size,
+                            .event_count = @intCast(@divExact(slice.len, event_size)),
+                            .result_count_expected = result_count_expected,
+                        };
+                    };
+                    assert(packet.data_size == batch.event_count * batch.event_size);
+                    maybe(batch.event_count == 0);
+                    maybe(batch.result_count_expected == 0);
+
+                    // packet_enqueue is only reachable from drain_submitted_packets,
+                    // which is guarded by signal_notify_callback's client_is_available check.
+                    assert(ctx.client_is_available());
+
+                    // Nothing inflight means the packet should be submitted right now.
+                    if (ctx.client.request_inflight == null) {
+                        assert(ctx.pending.count() == 0);
+                        packet.phase = .pending;
+                        packet.multi_batch_time_monotonic = ctx.client.time.monotonic().ns;
+                        packet.multi_batch_count = 1;
+                        packet.multi_batch_event_count = @intCast(batch.event_count);
+                        packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
+                        packet_send(ctx, packet);
+                        return;
+                    }
+
+                    var it = ctx.pending.iterate();
+                    while (it.next()) |root| {
+                        root.assert_phase(.pending);
+
+                        if (root.operation != packet.operation) continue;
+
+                        // Check if the message has enough space for the submitted number of events:
+                        const request_size: u32 = size: {
+                            const trailer_size = vsr.multi_batch.trailer_total_size(.{
+                                .element_size = batch.event_size,
+                                .batch_count = root.multi_batch_count + 1,
+                            });
+                            const event_count: u32 = batch.event_count +
+                                root.multi_batch_event_count;
+                            break :size (event_count * batch.event_size) + trailer_size;
+                        };
+                        if (request_size > ctx.batch_size_limit.?) continue;
+
+                        // Check if the reply has enough space for the maximum expected number of results:
+                        const reply_size_expected: u32 = size: {
+                            const trailer_size = vsr.multi_batch.trailer_total_size(.{
+                                .element_size = batch.result_size,
+                                .batch_count = root.multi_batch_count + 1,
+                            });
+                            const event_count: u32 = batch.result_count_expected +
+                                root.multi_batch_result_count_expected;
+                            break :size (event_count * batch.result_size) + trailer_size;
+                        };
+                        if (reply_size_expected > constants.message_body_size_max) continue;
+
+                        packet.phase = .batched;
+                        if (root.multi_batch_next == null) {
+                            assert(root.multi_batch_tail == null);
+                            assert(root.multi_batch_count == 1);
+                            root.multi_batch_next = packet;
+                            root.multi_batch_tail = packet;
+                        } else {
+                            assert(root.multi_batch_tail != null);
+                            assert(root.multi_batch_count > 1);
+                            root.multi_batch_tail.?.multi_batch_next = packet;
+                            root.multi_batch_tail = packet;
+                        }
+                        root.multi_batch_count += 1;
+                        root.multi_batch_event_count += @intCast(batch.event_count);
+                        root.multi_batch_result_count_expected += @intCast(batch.result_count_expected);
+                        return;
+                    }
+
+                    // Couldn't batch with existing packet so push to pending directly.
+                    packet.phase = .pending;
+                    packet.multi_batch_time_monotonic = ctx.client.time.monotonic().ns;
+                    packet.multi_batch_count = 1;
+                    packet.multi_batch_event_count = @intCast(batch.event_count);
+                    packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
+                    ctx.pending.push(packet);
+                }
+
+                /// Sends the packet (the entire batched linked list of packets) through the vsr client.
+                fn packet_send(ctx: *Context, packet_list: *Packet) void {
+                    assert(thread_caller == .io);
+                    assert(ctx.batch_size_limit != null);
+                    packet_list.assert_phase(.pending);
+
+                    // On eviction or shutdown, cancel this packet and any others batched onto it.
+                    if (!ctx.client_is_available()) {
+                        return ctx.packet_cancel(packet_list);
+                    }
+
+                    assert(ctx.client.request_inflight == null);
+
+                    const message = ctx.client.get_message().build(.request);
+                    defer {
+                        ctx.client.release_message(message.base());
+                        packet_list.assert_phase(.sent);
+                    }
+
+                    const operation: Operation = operation_from_int(packet_list.operation).?;
+                    const event_size: u32 = operation.event_size();
+                    const request_size: u32 = request_size: {
+                        if (!operation.is_multi_batch()) {
+                            assert(packet_list.multi_batch_next == null);
+                            const source: []const u8 = packet_list.slice();
+                            stdx.copy_disjoint(
+                                .inexact,
+                                u8,
+                                message.buffer[@sizeOf(Header)..],
+                                source,
+                            );
+                            break :request_size @intCast(source.len);
+                        }
+                        assert(operation.is_multi_batch());
+
+                        var message_encoder = MultiBatchEncoder.init(message.buffer[@sizeOf(Header)..], .{
+                            .element_size = event_size,
+                        });
+
+                        var it: ?*Packet = packet_list;
+                        var multi_batch_events_count: u16 = 0;
+                        while (it) |batched| {
+                            if (batched != packet_list) batched.assert_phase(.batched);
+                            it = batched.multi_batch_next;
+
+                            const source: []const u8 = batched.slice();
+                            const target = message_encoder.writable().?;
+                            assert(target.len >= source.len);
+                            stdx.copy_disjoint(
+                                .exact,
+                                u8,
+                                target[0..source.len],
+                                source,
+                            );
+                            message_encoder.add(@intCast(source.len));
+
+                            const events_count: u16 = @intCast(@divExact(source.len, event_size));
+                            multi_batch_events_count += events_count;
+                        }
+                        assert(multi_batch_events_count == packet_list.multi_batch_event_count);
+                        assert(message_encoder.batch_count == packet_list.multi_batch_count);
+
+                        // Check if the reply has enough space for the maximum expected number of results.
+                        const result_size: u32 = operation.result_size();
+                        const trailer_size = vsr.multi_batch.trailer_total_size(.{
+                            .element_size = result_size,
+                            .batch_count = packet_list.multi_batch_count,
+                        });
+                        const reply_size_max: u32 = (result_size *
+                            packet_list.multi_batch_result_count_expected) + trailer_size;
+                        assert(reply_size_max % result_size == 0);
+                        assert(reply_size_max <= constants.message_body_size_max);
+
+                        break :request_size message_encoder.finish();
+                    };
+                    assert(request_size % event_size == 0);
+                    assert(request_size <= ctx.batch_size_limit.?);
+
+                    // Sending the request.
+                    const previous_request_latency =
+                        ctx.previous_request_latency orelse stdx.Duration{ .ns = 0 };
+                    message.header.* = .{
+                        .release = ctx.client.release,
+                        .client = ctx.client.id,
+                        .request = 0, // Set by client.raw_request.
+                        .cluster = ctx.client.cluster,
+                        .command = .request,
+                        .operation = operation.to_vsr(),
+                        .size = @sizeOf(vsr.Header) + request_size,
+                        .previous_request_latency = @intCast(@min(
+                            previous_request_latency.ns,
+                            std.math.maxInt(u32),
+                        )),
+                    };
+
+                    assert((ctx.previous_request_instant == null) ==
+                        (ctx.previous_request_latency == null));
+                    ctx.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
+
+                    packet_list.phase = .sent;
+                    ctx.client.raw_request(
+                        Context.client_result_callback,
+                        @bitCast(UserData{
+                            .self = ctx,
+                            .packet = packet_list,
+                        }),
+                        message.ref(),
+                    );
+                    assert(message.header.request != 0);
+                }
+
+                fn drain_submitted_packets(ctx: *Context) void {
+                    assert(thread_caller == .io);
+                    assert(ctx.client_is_available());
+
+                    const enqueued_count = ctx.pending.count();
+                    const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
+                    for (0..safety_limit) |_| {
+                        const packet: *Packet = pop: {
+                            ctx.interface.locker.lock();
+                            defer ctx.interface.locker.unlock();
+
+                            break :pop ctx.submitted.pop() orelse return;
+                        };
+                        packet_enqueue(ctx, packet);
+
+                        // Packets can be processed without increasing `pending.count`:
+                        // - If the packet is invalid.
+                        // - If there's no in-flight request, the packet is sent immediately without
+                        //   using the pending queue.
+                        // - If the packet can be batched with another previously enqueued packet.
+                        if (ctx.pending.count() > enqueued_count) break;
+                    }
+
+                    // Defer remaining work to later,
+                    // allowing the IO thread to remain free for processing completions.
+                    const empty: bool = empty: {
+                        ctx.interface.locker.lock();
+                        defer ctx.interface.locker.unlock();
+
+                        break :empty ctx.submitted.empty();
+                    };
+                    if (!empty) {
+                        ctx.signal.notify();
+                    }
+                }
+            };
+
+            /// Methods only valid during the disconnecting phase,
+            /// when the client is alive but shutting down connections.
+            const Disconnecting = struct {
+                /// Returns true when all client IO operations have completed and
+                /// it is safe to free the client's resources.
+                fn client_io_settled(ctx: *const Context) bool {
+                    if (has_message_bus) {
+                        return ctx.client.message_bus.shutdown_complete();
+                    }
+                    return true;
+                }
+            };
+        };
 
         const PacketError = error{
             TooMuchData,
@@ -419,7 +725,7 @@ pub fn ContextType(
                     // completions to land on.
                     .running => {
                         if (self.eviction_reason != null or should_stop) {
-                            self.cancel_request_inflight();
+                            Phase.Running.cancel_request_inflight(self);
 
                             while (self.pending.pop()) |packet| {
                                 packet.assert_phase(.pending);
@@ -446,7 +752,7 @@ pub fn ContextType(
                         // during disconnection.
                         assert(self.pending.count() == 0);
 
-                        if (self.client_io_settled()) {
+                        if (Phase.Disconnecting.client_io_settled(self)) {
                             self.client.deinit(self.gpa.allocator());
                             self.message_pool.deinit(self.gpa.allocator());
                             continue :phase .settled;
@@ -509,27 +815,6 @@ pub fn ContextType(
             return self.phase == .running and self.eviction_reason == null;
         }
 
-        /// Returns true when all client IO operations have completed and
-        /// it is safe to free the client's resources.
-        fn client_io_settled(self: *const Context) bool {
-            if (has_message_bus) {
-                return self.client.message_bus.shutdown_complete();
-            }
-            return true;
-        }
-
-        /// Cancel the current inflight request (and the entire batched linked list of packets),
-        /// as it won't be replied anymore.
-        fn cancel_request_inflight(self: *Context) void {
-            assert(thread_caller == .io);
-            if (self.client.request_inflight) |*inflight| {
-                if (inflight.message.header.operation != .register) {
-                    const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                    packet.assert_phase(.sent);
-                    self.packet_cancel(packet);
-                }
-            }
-        }
 
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
@@ -555,243 +840,6 @@ pub fn ContextType(
                 it = batched.multi_batch_next;
                 self.notify_completion(batched, result);
             }
-        }
-
-        fn packet_enqueue(self: *Context, packet: *Packet) void {
-            assert(thread_caller == .io);
-            assert(self.batch_size_limit != null);
-            packet.assert_phase(.submitted);
-
-            const operation: Operation = operation_from_int(packet.operation) orelse {
-                return self.notify_completion(packet, error.InvalidOperation);
-            };
-
-            // Make sure the packet.data wouldn't overflow a request,
-            // and that the corresponding results won't overflow a reply.
-            const batch: struct {
-                event_size: u32,
-                result_size: u32,
-                event_count: u32,
-                result_count_expected: u32,
-            } = batch: {
-                const event_size: u32 = operation.event_size();
-                assert(event_size > 0);
-
-                const result_size: u32 = operation.result_size();
-                assert(result_size > 0);
-
-                const slice: []const u8 = packet.slice();
-                assert(slice.len == packet.data_size);
-                maybe(slice.len == 0);
-                if (slice.len % event_size != 0) {
-                    return self.notify_completion(packet, error.InvalidDataSize);
-                }
-
-                const event_count: u32 = @intCast(@divExact(slice.len, event_size));
-                const event_max: u32 = operation.event_max(self.batch_size_limit.?);
-                if (event_count > event_max) {
-                    return self.notify_completion(packet, error.TooMuchData);
-                }
-                const result_max: u32 = operation.result_max(self.batch_size_limit.?);
-                const result_count_expected: u32 = operation.result_count_expected(slice);
-                if (result_count_expected > result_max) {
-                    return self.notify_completion(packet, error.TooMuchData);
-                }
-
-                break :batch .{
-                    .event_size = event_size,
-                    .result_size = result_size,
-                    .event_count = @intCast(@divExact(slice.len, event_size)),
-                    .result_count_expected = result_count_expected,
-                };
-            };
-            assert(packet.data_size == batch.event_count * batch.event_size);
-            maybe(batch.event_count == 0);
-            maybe(batch.result_count_expected == 0);
-
-            // packet_enqueue is only reachable from drain_submitted_packets,
-            // which is guarded by signal_notify_callback's client_is_available check.
-            assert(self.client_is_available());
-
-            // Nothing inflight means the packet should be submitted right now.
-            if (self.client.request_inflight == null) {
-                assert(self.pending.count() == 0);
-                packet.phase = .pending;
-                packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
-                packet.multi_batch_count = 1;
-                packet.multi_batch_event_count = @intCast(batch.event_count);
-                packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
-                self.packet_send(packet);
-                return;
-            }
-
-            var it = self.pending.iterate();
-            while (it.next()) |root| {
-                root.assert_phase(.pending);
-
-                if (root.operation != packet.operation) continue;
-
-                // Check if the message has enough space for the submitted number of events:
-                const request_size: u32 = size: {
-                    const trailer_size = vsr.multi_batch.trailer_total_size(.{
-                        .element_size = batch.event_size,
-                        .batch_count = root.multi_batch_count + 1,
-                    });
-                    const event_count: u32 = batch.event_count +
-                        root.multi_batch_event_count;
-                    break :size (event_count * batch.event_size) + trailer_size;
-                };
-                if (request_size > self.batch_size_limit.?) continue;
-
-                // Check if the reply has enough space for the maximum expected number of results:
-                const reply_size_expected: u32 = size: {
-                    const trailer_size = vsr.multi_batch.trailer_total_size(.{
-                        .element_size = batch.result_size,
-                        .batch_count = root.multi_batch_count + 1,
-                    });
-                    const event_count: u32 = batch.result_count_expected +
-                        root.multi_batch_result_count_expected;
-                    break :size (event_count * batch.result_size) + trailer_size;
-                };
-                if (reply_size_expected > constants.message_body_size_max) continue;
-
-                packet.phase = .batched;
-                if (root.multi_batch_next == null) {
-                    assert(root.multi_batch_tail == null);
-                    assert(root.multi_batch_count == 1);
-                    root.multi_batch_next = packet;
-                    root.multi_batch_tail = packet;
-                } else {
-                    assert(root.multi_batch_tail != null);
-                    assert(root.multi_batch_count > 1);
-                    root.multi_batch_tail.?.multi_batch_next = packet;
-                    root.multi_batch_tail = packet;
-                }
-                root.multi_batch_count += 1;
-                root.multi_batch_event_count += @intCast(batch.event_count);
-                root.multi_batch_result_count_expected += @intCast(batch.result_count_expected);
-                return;
-            }
-
-            // Couldn't batch with existing packet so push to pending directly.
-            packet.phase = .pending;
-            packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
-            packet.multi_batch_count = 1;
-            packet.multi_batch_event_count = @intCast(batch.event_count);
-            packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
-            self.pending.push(packet);
-        }
-
-        /// Sends the packet (the entire batched linked list of packets) through the vsr client.
-        /// Always called by the io thread.
-        fn packet_send(self: *Context, packet_list: *Packet) void {
-            assert(thread_caller == .io);
-            assert(self.batch_size_limit != null);
-            packet_list.assert_phase(.pending);
-
-            // On eviction or shutdown, cancel this packet and any others batched onto it.
-            if (!self.client_is_available()) {
-                return self.packet_cancel(packet_list);
-            }
-
-            assert(self.client.request_inflight == null);
-
-            const message = self.client.get_message().build(.request);
-            defer {
-                self.client.release_message(message.base());
-                packet_list.assert_phase(.sent);
-            }
-
-            const operation: Operation = operation_from_int(packet_list.operation).?;
-            const event_size: u32 = operation.event_size();
-            const request_size: u32 = request_size: {
-                if (!operation.is_multi_batch()) {
-                    assert(packet_list.multi_batch_next == null);
-                    const source: []const u8 = packet_list.slice();
-                    stdx.copy_disjoint(
-                        .inexact,
-                        u8,
-                        message.buffer[@sizeOf(Header)..],
-                        source,
-                    );
-                    break :request_size @intCast(source.len);
-                }
-                assert(operation.is_multi_batch());
-
-                var message_encoder = MultiBatchEncoder.init(message.buffer[@sizeOf(Header)..], .{
-                    .element_size = event_size,
-                });
-
-                var it: ?*Packet = packet_list;
-                var multi_batch_events_count: u16 = 0;
-                while (it) |batched| {
-                    if (batched != packet_list) batched.assert_phase(.batched);
-                    it = batched.multi_batch_next;
-
-                    const source: []const u8 = batched.slice();
-                    const target = message_encoder.writable().?;
-                    assert(target.len >= source.len);
-                    stdx.copy_disjoint(
-                        .exact,
-                        u8,
-                        target[0..source.len],
-                        source,
-                    );
-                    message_encoder.add(@intCast(source.len));
-
-                    const events_count: u16 = @intCast(@divExact(source.len, event_size));
-                    multi_batch_events_count += events_count;
-                }
-                assert(multi_batch_events_count == packet_list.multi_batch_event_count);
-                assert(message_encoder.batch_count == packet_list.multi_batch_count);
-
-                // Check if the reply has enough space for the maximum expected number of results.
-                const result_size: u32 = operation.result_size();
-                const trailer_size = vsr.multi_batch.trailer_total_size(.{
-                    .element_size = result_size,
-                    .batch_count = packet_list.multi_batch_count,
-                });
-                const reply_size_max: u32 = (result_size *
-                    packet_list.multi_batch_result_count_expected) + trailer_size;
-                assert(reply_size_max % result_size == 0);
-                assert(reply_size_max <= constants.message_body_size_max);
-
-                break :request_size message_encoder.finish();
-            };
-            assert(request_size % event_size == 0);
-            assert(request_size <= self.batch_size_limit.?);
-
-            // Sending the request.
-            const previous_request_latency =
-                self.previous_request_latency orelse stdx.Duration{ .ns = 0 };
-            message.header.* = .{
-                .release = self.client.release,
-                .client = self.client.id,
-                .request = 0, // Set by client.raw_request.
-                .cluster = self.client.cluster,
-                .command = .request,
-                .operation = operation.to_vsr(),
-                .size = @sizeOf(vsr.Header) + request_size,
-                .previous_request_latency = @intCast(@min(
-                    previous_request_latency.ns,
-                    std.math.maxInt(u32),
-                )),
-            };
-
-            assert((self.previous_request_instant == null) ==
-                (self.previous_request_latency == null));
-            self.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
-
-            packet_list.phase = .sent;
-            self.client.raw_request(
-                Context.client_result_callback,
-                @bitCast(UserData{
-                    .self = self,
-                    .packet = packet_list,
-                }),
-                message.ref(),
-            );
-            assert(message.header.request != 0);
         }
 
         fn signal_notify_callback(signal: *Signal) void {
@@ -824,43 +872,7 @@ pub fn ContextType(
                 return;
             }
 
-            self.drain_submitted_packets();
-        }
-
-        fn drain_submitted_packets(self: *Context) void {
-            assert(thread_caller == .io);
-            assert(self.client_is_available());
-
-            const enqueued_count = self.pending.count();
-            const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
-            for (0..safety_limit) |_| {
-                const packet: *Packet = pop: {
-                    self.interface.locker.lock();
-                    defer self.interface.locker.unlock();
-
-                    break :pop self.submitted.pop() orelse return;
-                };
-                self.packet_enqueue(packet);
-
-                // Packets can be processed without increasing `pending.count`:
-                // - If the packet is invalid.
-                // - If there's no in-flight request, the packet is sent immediately without
-                //   using the pending queue.
-                // - If the packet can be batched with another previously enqueued packet.
-                if (self.pending.count() > enqueued_count) break;
-            }
-
-            // Defer remaining work to later,
-            // allowing the IO thread to remain free for processing completions.
-            const empty: bool = empty: {
-                self.interface.locker.lock();
-                defer self.interface.locker.unlock();
-
-                break :empty self.submitted.empty();
-            };
-            if (!empty) {
-                self.signal.notify();
-            }
+            Phase.Running.drain_submitted_packets(self);
         }
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
@@ -931,7 +943,7 @@ pub fn ContextType(
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
             while (self.pending.pop()) |packet_next| {
-                self.packet_send(packet_next);
+                Phase.Running.packet_send(self, packet_next);
                 if (self.client.request_inflight != null) break;
             }
 
