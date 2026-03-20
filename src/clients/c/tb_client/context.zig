@@ -210,6 +210,15 @@ pub fn ContextType(
                 previous_request_instant: ?stdx.Instant,
                 previous_request_latency: ?stdx.Duration,
 
+                /// Returns true when the client is safe to access for processing
+                /// packets. False when eviction has been detected during
+                /// io.run_for_ns but the main loop hasn't transitioned yet.
+                /// The phase check is structural: having *Running means we're
+                /// in the running phase.
+                fn client_is_available(ctx: *const Context) bool {
+                    return ctx.eviction_reason == null;
+                }
+
                 /// Cancel the current inflight request (and the entire batched
                 /// linked list of packets), as it won't be replied anymore.
                 fn cancel_request_inflight(self: *Running, ctx: *Context) void {
@@ -278,7 +287,7 @@ pub fn ContextType(
 
                     // packet_enqueue is only reachable from drain_submitted_packets,
                     // which is guarded by signal_notify_callback's client_is_available check.
-                    assert(ctx.client_is_available());
+                    assert(client_is_available(ctx));
 
                     // Nothing inflight means the packet should be submitted right now.
                     if (self.client_state.client.request_inflight == null) {
@@ -363,7 +372,7 @@ pub fn ContextType(
                     packet_list.assert_phase(.pending);
 
                     // On eviction or shutdown, cancel this packet and any others batched onto it.
-                    if (!ctx.client_is_available()) {
+                    if (!client_is_available(ctx)) {
                         return ctx.packet_cancel(packet_list);
                     }
 
@@ -473,7 +482,7 @@ pub fn ContextType(
 
                 fn drain_submitted_packets(self: *Running, ctx: *Context) void {
                     assert(thread_caller == .io);
-                    assert(ctx.client_is_available());
+                    assert(client_is_available(ctx));
 
                     const enqueued_count = self.pending.count();
                     // Avoid unbounded loop in case of invalid packets.
@@ -853,14 +862,6 @@ pub fn ContextType(
             _ = gpa.deinit();
         }
 
-        /// Returns true when the client is safe to access for processing packets.
-        /// False when the phase has transitioned past running, or when eviction
-        /// has been detected during io.run_for_ns but the main loop hasn't
-        /// transitioned yet.
-        fn client_is_available(self: *const Context) bool {
-            return self.phase == .running and self.eviction_reason == null;
-        }
-
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
         fn packet_cancel(self: *Context, packet_list: *Packet) void {
@@ -905,7 +906,7 @@ pub fn ContextType(
 
                     // If the client is not available (eviction pending),
                     // cancel any submitted packets without accessing the client.
-                    if (!self.client_is_available()) {
+                    if (!Phase.Running.client_is_available(self)) {
                         self.cancel_submitted_packets();
                         return;
                     }
@@ -1004,12 +1005,11 @@ pub fn ContextType(
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
-            assert(self.client_is_available());
+            const running: *Phase.Running = &self.phase.running;
+            assert(Phase.Running.client_is_available(self));
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
-
-            const running: *Phase.Running = &self.phase.running;
 
             const current_timestamp = running.client_state.client.time.monotonic();
             running.previous_request_latency =
