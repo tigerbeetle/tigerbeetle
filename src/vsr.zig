@@ -76,7 +76,6 @@ pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
 pub const Routing = @import("vsr/routing.zig");
 pub const FaultDetector = @import("vsr/fault_detector.zig");
 pub const CountingAllocator = @import("counting_allocator.zig");
-pub const IOPSType = @import("iops.zig").IOPSType;
 pub const StackType = @import("stack.zig").StackType;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
