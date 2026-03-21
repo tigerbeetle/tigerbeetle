@@ -553,6 +553,21 @@ pub fn ContextType(
             }
         }
 
+        /// Drain and cancel all submitted packets. Safe to call in any phase
+        /// since it does not access the client.
+        fn cancel_submitted_packets(self: *Context) void {
+            while (true) {
+                const packet: *Packet = pop: {
+                    self.interface.locker.lock();
+                    defer self.interface.locker.unlock();
+
+                    break :pop self.submitted.pop() orelse break;
+                };
+                packet.assert_phase(.submitted);
+                self.packet_cancel(packet);
+            }
+        }
+
         fn signal_notify_callback(signal: *Signal) void {
             assert(thread_caller == .io);
 
@@ -582,21 +597,6 @@ pub fn ContextType(
                     // Client may have been deinited. Cancel submitted packets directly.
                     self.cancel_submitted_packets();
                 },
-            }
-        }
-
-        /// Drain and cancel all submitted packets. Safe to call in any phase
-        /// since it does not access the client.
-        fn cancel_submitted_packets(self: *Context) void {
-            while (true) {
-                const packet: *Packet = pop: {
-                    self.interface.locker.lock();
-                    defer self.interface.locker.unlock();
-
-                    break :pop self.submitted.pop() orelse break;
-                };
-                packet.assert_phase(.submitted);
-                self.packet_cancel(packet);
             }
         }
 
