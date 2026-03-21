@@ -307,7 +307,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
     });
 
-    // zig build vortex -- supervisor --replica-count=3 --test-duration=1m
+    // zig build vortex -- --replica-count=3 --test-duration=1m
     build_vortex(b, .{
         .vortex_build = build_steps.vortex_build,
         .vortex_run = build_steps.vortex,
