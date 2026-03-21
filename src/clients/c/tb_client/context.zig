@@ -362,7 +362,7 @@ pub fn ContextType(
                         .io = &context.io,
                         .trace = null,
                     },
-                    .eviction_callback = client_eviction_callback,
+                    .eviction_callback = callback_client_eviction,
                 },
             ) catch |err| {
                 log.err("{}: failed to initialize Client: {s}", .{
@@ -401,10 +401,10 @@ pub fn ContextType(
             } };
 
             log.debug("{}: init: initializing signal", .{context.client_id});
-            try context.signal.init(&context.io, Context.signal_notify_callback);
+            try context.signal.init(&context.io, Context.callback_signal_notify);
             errdefer context.signal.deinit();
 
-            client_state.client.register(client_register_callback, @intFromPtr(context));
+            client_state.client.register(callback_client_register, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
             context.thread = std.Thread.spawn(
@@ -568,7 +568,7 @@ pub fn ContextType(
             }
         }
 
-        fn signal_notify_callback(signal: *Signal) void {
+        fn callback_signal_notify(signal: *Signal) void {
             assert(thread_caller == .io);
 
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
@@ -577,7 +577,7 @@ pub fn ContextType(
             switch (self.phase) {
                 .running => |*running| {
                     // Don't send any requests until registration completes.
-                    // Submitted packets will be drained by client_register_callback
+                    // Submitted packets will be drained by callback_client_register
                     // or by the io_thread shutdown path.
                     if (running.batch_size_limit == null) {
                         maybe(self.eviction_reason != null);
@@ -600,7 +600,7 @@ pub fn ContextType(
             }
         }
 
-        fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
+        fn callback_client_register(user_data: u128, result: *const vsr.RegisterResult) void {
             assert(thread_caller == .io);
 
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
@@ -624,13 +624,13 @@ pub fn ContextType(
                     );
 
                     // Some requests may have queued up while the client was registering.
-                    signal_notify_callback(&self.signal);
+                    callback_signal_notify(&self.signal);
                 },
                 .disconnecting, .settled => unreachable,
             }
         }
 
-        fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
+        fn callback_client_eviction(client: *Client, eviction: *const Message.Eviction) void {
             assert(thread_caller == .io);
 
             const cs: *ClientState = @fieldParentPtr("client", client);
@@ -638,7 +638,7 @@ pub fn ContextType(
             assert(self.phase == .running);
             assert(self.eviction_reason == null);
 
-            log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
+            log.debug("{}: callback_client_eviction: reason={?s} reason_int={}", .{
                 self.client_id,
                 std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
                 @intFromEnum(eviction.header.reason),
@@ -659,7 +659,7 @@ pub fn ContextType(
             self.eviction_reason = eviction.header.reason;
         }
 
-        fn client_result_callback(
+        fn callback_client_result(
             raw_user_data: u128,
             operation_vsr: vsr.Operation,
             timestamp: u64,
@@ -953,7 +953,7 @@ fn PhaseType(comptime Context: type) type {
                 maybe(batch.result_count_expected == 0);
 
                 // packet_enqueue is only reachable from drain_submitted_packets,
-                // which is guarded by signal_notify_callback's client_is_available check.
+                // which is guarded by callback_signal_notify's client_is_available check.
                 assert(client_is_available(ctx));
 
                 // Nothing inflight means the packet should be submitted right now.
@@ -1133,7 +1133,7 @@ fn PhaseType(comptime Context: type) type {
 
                 packet_list.phase = .sent;
                 self.client_state.client.raw_request(
-                    Context.client_result_callback,
+                    Context.callback_client_result,
                     @bitCast(Context.UserData{
                         .self = ctx,
                         .packet = packet_list,
