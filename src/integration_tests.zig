@@ -15,6 +15,7 @@ const Shell = @import("./shell.zig");
 const Snap = stdx.Snap;
 const snap = Snap.snap_fn("src");
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
+const Supervisor = @import("./testing/vortex/supervisor.zig").Supervisor;
 
 const stdx = @import("stdx");
 const ratio = stdx.PRNG.ratio;
@@ -369,71 +370,71 @@ test "help/version smoke" {
 }
 
 test "in-place upgrade" {
-    // Smoke test that in-place upgrades work.
-    //
-    // Starts a cluster of three replicas using the previous release of TigerBeetle and then
-    // replaces the binaries on disk with a new version.
-    //
-    // Against this upgrading cluster, we are running a benchmark load and checking that it finishes
-    // with a zero status.
-    //
-    // To spice things up, replicas are periodically killed and restarted.
+    const level = std.testing.log_level;
+    std.testing.log_level = std.log.Level.info;
+    defer std.testing.log_level = level;
 
     if (builtin.target.os.tag == .windows) {
-        return error.SkipZigTest; // Coming soon!
+        return error.SkipZigTest;
     }
 
-    const replica_count = TmpCluster.replica_count;
+    const replica_count = 3;
+    const duration_max = stdx.Duration.seconds(150);
+    const tick_ms = 10;
+    const ticks_max = duration_max.to_ms() / tick_ms;
 
-    var cluster = try TmpCluster.init();
-    defer cluster.deinit();
+    var supervisor = try Supervisor.create(std.testing.allocator, .{
+        .seed = std.testing.random_seed,
+        .replica_count = replica_count,
+        .faulty = false,
+        .log_debug = false,
+    });
+    defer supervisor.destroy();
+
+    assert(supervisor.release_count > 0);
+    const release_past = supervisor.release_count - 2;
+    const release_current = supervisor.release_count - 1;
 
     for (0..replica_count) |replica_index| {
-        try cluster.replica_install(replica_index, .past);
-        try cluster.replica_format(replica_index);
+        try supervisor.replica_install(@intCast(replica_index), release_past);
+        try supervisor.replica_format(@intCast(replica_index));
     }
-    try cluster.workload_start(.{ .transfer_count = 2_000_000 });
+    try supervisor.workload_start(.{ .release = release_past }, .{ .transfer_count = 1_000_000 });
 
     for (0..replica_count) |replica_index| {
-        try cluster.replica_spawn(replica_index);
+        try supervisor.replica_start(@intCast(replica_index));
     }
 
-    const ticks_max = 50;
-    var upgrade_tick: [replica_count]u8 = @splat(0);
+    // Schedule the replica upgrades.
+    var upgrade_tick: [replica_count]u64 = @splat(0);
     for (0..replica_count) |replica_index| {
-        upgrade_tick[replica_index] = cluster.prng.int_inclusive(u8, ticks_max - 1);
+        upgrade_tick[replica_index] = supervisor.prng.int_inclusive(u64, ticks_max / 2);
     }
 
     for (0..ticks_max) |tick| {
-        std.time.sleep(2 * std.time.ns_per_s);
+        try supervisor.tick();
 
         for (0..replica_count) |replica_index| {
             if (tick == upgrade_tick[replica_index]) {
-                assert(!cluster.replica_upgraded[replica_index]);
-                try cluster.replica_upgrade(replica_index);
-                assert(cluster.replica_upgraded[replica_index]);
+                try supervisor.replica_install(@intCast(replica_index), release_current);
             }
         }
 
-        const replica_index = cluster.prng.index(cluster.replicas);
-        const crash = cluster.prng.chance(ratio(1, 4));
-        const restart = cluster.prng.chance(ratio(1, 2));
+        const early = tick < ticks_max / 2;
+        const replica_index = supervisor.prng.index(supervisor.replicas);
+        const crash = early and supervisor.prng.chance(ratio(1, 400));
+        const restart = (!early) or supervisor.prng.chance(ratio(1, 200));
 
-        if (cluster.replicas[replica_index] == null and restart) {
-            try cluster.replica_spawn(replica_index);
-        } else if (cluster.replicas[replica_index] != null and crash) {
-            try cluster.replica_kill(replica_index);
+        if (supervisor.replicas[replica_index].state() == .terminated and restart) {
+            try supervisor.replica_start(@intCast(replica_index));
+        } else if (supervisor.replicas[replica_index].state() == .running and crash) {
+            try supervisor.replica_terminate(@intCast(replica_index));
         }
     }
 
-    for (0..replica_count) |replica_index| {
-        assert(cluster.replica_upgraded[replica_index]);
-        if (cluster.replicas[replica_index] == null) {
-            try cluster.replica_spawn(replica_index);
-        }
+    if (!supervisor.workload_done()) {
+        return error.WorkloadIncomplete;
     }
-
-    cluster.workload_finish();
 }
 
 test "recover smoke" {
@@ -492,7 +493,6 @@ const TmpCluster = struct {
     replicas: [replica_count]?std.process.Child = @splat(null),
     replica_exe: [replica_count][]const u8,
     replica_datafile: [replica_count][]const u8,
-    replica_upgraded: [replica_count]bool = @splat(false),
 
     workload_thread: ?std.Thread = null,
     workload_exit_ok: bool = false,
@@ -596,28 +596,6 @@ const TmpCluster = struct {
             .addresses = addresses,
             .datafile = cluster.replica_datafile[replica_index],
         });
-    }
-
-    fn replica_upgrade(cluster: *TmpCluster, replica_index: usize) !void {
-        assert(!cluster.replica_upgraded[replica_index]);
-
-        const upgrade_requires_restart = builtin.os.tag != .linux;
-        if (upgrade_requires_restart) {
-            if (cluster.replicas[replica_index] != null) {
-                try cluster.replica_kill(replica_index);
-            }
-            assert(cluster.replicas[replica_index] == null);
-        }
-
-        cluster.shell.cwd.deleteFile(cluster.replica_exe[replica_index]) catch {};
-        try cluster.replica_install(replica_index, .current);
-        cluster.replica_upgraded[replica_index] = true;
-
-        if (upgrade_requires_restart) {
-            assert(cluster.replicas[replica_index] == null);
-            try cluster.replica_spawn(replica_index);
-            assert(cluster.replicas[replica_index] != null);
-        }
     }
 
     fn replica_spawn(cluster: *TmpCluster, replica_index: usize) !void {
