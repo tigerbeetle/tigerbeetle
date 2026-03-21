@@ -653,7 +653,7 @@ pub fn ContextType(
 
             // The callback should never be called with an operation not in `allowed_operations`.
             // This also guards from sending an unsupported operation.
-            assert(operation_from_int(@intFromEnum(operation)) != null);
+            assert(Phase.operation_from_int(@intFromEnum(operation)) != null);
 
             if (!operation.is_multi_batch()) {
                 assert(packet_list.multi_batch_next == null);
@@ -807,14 +807,6 @@ pub fn ContextType(
             out_parameters.addresses_len = self.addresses_owned.len;
         }
 
-        fn operation_from_int(op: u8) ?Operation {
-            inline for (allowed_operations) |operation| {
-                if (op == @intFromEnum(operation)) {
-                    return operation;
-                }
-            }
-            return null;
-        }
     };
 }
 
@@ -822,12 +814,22 @@ pub fn ContextType(
 /// Extracted from ContextType for readability.
 fn PhaseType(comptime Context: type) type {
     const Client = Context.Client;
+    const Operation = Context.Operation;
     const has_message_bus = @hasField(Client, "message_bus");
 
     return union(enum) {
         running: Running,
         disconnecting: Disconnecting,
         settled: void,
+
+        fn operation_from_int(op: u8) ?Operation {
+            inline for (Context.allowed_operations) |operation| {
+                if (op == @intFromEnum(operation)) {
+                    return operation;
+                }
+            }
+            return null;
+        }
 
         /// State and methods for the running phase,
         /// when the client is available for sending requests.
@@ -866,7 +868,7 @@ fn PhaseType(comptime Context: type) type {
                 assert(self.batch_size_limit != null);
                 packet.assert_phase(.submitted);
 
-                const operation: Context.Operation = Context.operation_from_int(packet.operation) orelse {
+                const operation: Operation = operation_from_int(packet.operation) orelse {
                     return ctx.notify_completion(packet, error.InvalidOperation);
                 };
 
@@ -1012,7 +1014,7 @@ fn PhaseType(comptime Context: type) type {
                     packet_list.assert_phase(.sent);
                 }
 
-                const operation: Context.Operation = Context.operation_from_int(packet_list.operation).?;
+                const operation: Operation = operation_from_int(packet_list.operation).?;
                 const event_size: u32 = operation.event_size();
                 const request_size: u32 = request_size: {
                     if (!operation.is_multi_batch()) {
