@@ -135,6 +135,92 @@ pub const ClientInterface = extern struct {
     }
 };
 
+/// Thread-local variable to track whether the current thread is
+/// the IO thread or a user thread.
+/// Used to assert that certain functions are only called from the
+/// correct thread.
+threadlocal var thread_caller: union(enum) {
+    user,
+    io: std.Thread.Id,
+} = .user;
+
+/// Fields accessed by both the IO thread and client threads.
+/// Vtable functions receive `*Shared` (not the full IO-thread context),
+/// limiting client thread access to only these fields.
+const Shared = struct {
+    signal: Signal,
+    submitted: Packet.Queue,
+    completion_context: usize,
+    thread: std.Thread,
+    cluster_id: u128,
+    client_id: u128,
+    addresses_owned: []const u8,
+};
+
+// VTable functions called by `ClientInterface`, which are thread-safe.
+
+fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
+    assert(thread_caller == .user);
+
+    const shared: *Shared = @ptrCast(@alignCast(context));
+
+    // Packet is caller-allocated to enable elastic intrusive-link-list-based
+    // memory management. However, some of Packet's fields are essentially private.
+    // Initialize them here to avoid threading default fields through FFI boundary.
+    const packet: *Packet = packet_extern.cast();
+    packet.* = .{
+        .user_data = packet_extern.user_data,
+        .operation = packet_extern.operation,
+        .data_size = packet_extern.data_size,
+        .data = packet_extern.data,
+        .user_tag = packet_extern.user_tag,
+        .status = .ok,
+        .link = .{},
+        .multi_batch_time_monotonic = 0,
+        .multi_batch_next = null,
+        .multi_batch_tail = null,
+        .multi_batch_count = 0,
+        .multi_batch_event_count = 0,
+        .multi_batch_result_count_expected = 0,
+        .phase = .submitted,
+    };
+
+    // Enqueue the packet and notify the IO thread to process it asynchronously.
+    assert(shared.signal.status() == .running);
+    shared.submitted.push(packet);
+    shared.signal.notify();
+}
+
+fn vtable_completion_context_fn(context: *anyopaque) usize {
+    const shared: *Shared = @ptrCast(@alignCast(context));
+    return shared.completion_context;
+}
+
+fn vtable_deinit_fn(context: *anyopaque) void {
+    assert(thread_caller == .user);
+
+    const shared: *Shared = @ptrCast(@alignCast(context));
+
+    // Copy the thread handle here, since stopping the I/O thread deinitializes
+    // the context and invalidates the `shared` pointer.
+    const thread = shared.thread;
+    defer thread.join();
+
+    shared.signal.stop();
+}
+
+fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
+    assert(thread_caller == .user);
+
+    const shared: *Shared = @ptrCast(@alignCast(context));
+    assert(shared.signal.status() == .running);
+
+    out_parameters.cluster_id = shared.cluster_id;
+    out_parameters.client_id = shared.client_id;
+    out_parameters.addresses_ptr = shared.addresses_owned.ptr;
+    out_parameters.addresses_len = shared.addresses_owned.len;
+}
+
 /// The function pointer called by the IO thread when a request is completed or fails.
 /// The memory referenced by `result` is only valid for the duration of this callback.
 /// `result_ptr` is `null` for unsuccessful requests. See `packet.status` for more details.
@@ -207,28 +293,6 @@ pub fn ContextType(
             ClientReleaseTooHigh,
             InvalidOperation,
             InvalidDataSize,
-        };
-
-        /// Thread-local variable to track whether the current thread is
-        /// the IO thread or a user thread.
-        /// Used to assert that certain functions are only called from the
-        /// correct thread.
-        threadlocal var thread_caller: union(enum) {
-            user,
-            io: std.Thread.Id,
-        } = .user;
-
-        /// Fields accessed by both the IO thread and client threads.
-        /// Vtable functions receive `*Shared` (not `*Context`), limiting
-        /// client thread access to only these fields.
-        const Shared = struct {
-            signal: Signal,
-            submitted: Packet.Queue,
-            completion_context: usize,
-            thread: std.Thread,
-            cluster_id: u128,
-            client_id: u128,
-            addresses_owned: []const u8,
         };
 
         gpa: GPA,
@@ -773,70 +837,6 @@ pub fn ContextType(
                 @intCast(result.reply.len),
             );
         }
-
-        // VTable functions called by `ClientInterface`, which are thread-safe.
-
-        fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
-            assert(thread_caller == .user);
-
-            const shared: *Shared = @ptrCast(@alignCast(context));
-
-            // Packet is caller-allocated to enable elastic intrusive-link-list-based
-            // memory management. However, some of Packet's fields are essentially private.
-            // Initialize them here to avoid threading default fields through FFI boundary.
-            const packet: *Packet = packet_extern.cast();
-            packet.* = .{
-                .user_data = packet_extern.user_data,
-                .operation = packet_extern.operation,
-                .data_size = packet_extern.data_size,
-                .data = packet_extern.data,
-                .user_tag = packet_extern.user_tag,
-                .status = .ok,
-                .link = .{},
-                .multi_batch_time_monotonic = 0,
-                .multi_batch_next = null,
-                .multi_batch_tail = null,
-                .multi_batch_count = 0,
-                .multi_batch_event_count = 0,
-                .multi_batch_result_count_expected = 0,
-                .phase = .submitted,
-            };
-
-            // Enqueue the packet and notify the IO thread to process it asynchronously.
-            assert(shared.signal.status() == .running);
-            shared.submitted.push(packet);
-            shared.signal.notify();
-        }
-
-        fn vtable_completion_context_fn(context: *anyopaque) usize {
-            const shared: *Shared = @ptrCast(@alignCast(context));
-            return shared.completion_context;
-        }
-
-        fn vtable_deinit_fn(context: *anyopaque) void {
-            assert(thread_caller == .user);
-
-            const shared: *Shared = @ptrCast(@alignCast(context));
-
-            // Copy the thread handle here, since stopping the I/O thread deinitializes
-            // the context and invalidates the `shared` pointer.
-            const thread = shared.thread;
-            defer thread.join();
-
-            shared.signal.stop();
-        }
-
-        fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
-            assert(thread_caller == .user);
-
-            const shared: *Shared = @ptrCast(@alignCast(context));
-            assert(shared.signal.status() == .running);
-
-            out_parameters.cluster_id = shared.cluster_id;
-            out_parameters.client_id = shared.client_id;
-            out_parameters.addresses_ptr = shared.addresses_owned.ptr;
-            out_parameters.addresses_len = shared.addresses_owned.len;
-        }
     };
 }
 
@@ -882,7 +882,7 @@ fn PhaseType(comptime Context: type) type {
             /// Cancel the current inflight request (and the entire batched
             /// linked list of packets), as it won't be replied anymore.
             fn cancel_request_inflight(self: *Running, ctx: *Context) void {
-                assert(Context.thread_caller == .io);
+                assert(thread_caller == .io);
                 if (self.client_state.client.request_inflight) |*inflight| {
                     if (inflight.message.header.operation != .register) {
                         const user_data: Context.UserData = @bitCast(inflight.user_data);
@@ -894,7 +894,7 @@ fn PhaseType(comptime Context: type) type {
             }
 
             fn packet_enqueue(self: *Running, ctx: *Context, packet: *Packet) void {
-                assert(Context.thread_caller == .io);
+                assert(thread_caller == .io);
                 packet.assert_phase(.submitted);
 
                 const operation: Operation = operation_from_int(packet.operation) orelse {
@@ -1020,7 +1020,7 @@ fn PhaseType(comptime Context: type) type {
 
             /// Sends the packet (the entire batched linked list of packets) through the vsr client.
             fn packet_send(self: *Running, ctx: *Context, packet_list: *Packet) void {
-                assert(Context.thread_caller == .io);
+                assert(thread_caller == .io);
                 assert(ctx.eviction_reason == null);
                 packet_list.assert_phase(.pending);
 
@@ -1129,7 +1129,7 @@ fn PhaseType(comptime Context: type) type {
             }
 
             fn drain_submitted_packets(self: *Running, ctx: *Context) void {
-                assert(Context.thread_caller == .io);
+                assert(thread_caller == .io);
                 assert(ctx.eviction_reason == null);
 
                 const enqueued_count = self.pending.count();
