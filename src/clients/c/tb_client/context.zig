@@ -201,6 +201,15 @@ pub fn ContextType(
             disconnecting: Disconnecting,
             settled: void,
 
+            fn operation_from_int(op: u8) ?Operation {
+                inline for (allowed_operations) |operation| {
+                    if (op == @intFromEnum(operation)) {
+                        return operation;
+                    }
+                }
+                return null;
+            }
+
             /// State and methods for the running phase,
             /// when the client is available for sending requests.
             const Running = struct {
@@ -1024,7 +1033,7 @@ pub fn ContextType(
 
             // The callback should never be called with an operation not in `allowed_operations`.
             // This also guards from sending an unsupported operation.
-            assert(operation_from_int(@intFromEnum(operation)) != null);
+            assert(Phase.operation_from_int(@intFromEnum(operation)) != null);
 
             if (!operation.is_multi_batch()) {
                 assert(packet_list.multi_batch_next == null);
@@ -1177,18 +1186,8 @@ pub fn ContextType(
             out_parameters.addresses_ptr = self.addresses_owned.ptr;
             out_parameters.addresses_len = self.addresses_owned.len;
         }
-
-        fn operation_from_int(op: u8) ?Operation {
-            inline for (allowed_operations) |operation| {
-                if (op == @intFromEnum(operation)) {
-                    return operation;
-                }
-            }
-            return null;
-        }
     };
 }
-
 /// Implements the `Mutex` API as an `extern` struct, based on `std.Thread.Futex`.
 /// Vendored from `std.Thread.Mutex.FutexImpl`.
 const Locker = extern struct {
