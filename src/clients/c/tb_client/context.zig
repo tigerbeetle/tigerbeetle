@@ -635,6 +635,7 @@ pub fn ContextType(
 
             const cs: *ClientState = @fieldParentPtr("client", client);
             const self: *Context = cs.context;
+            assert(self.phase == .running);
             assert(self.eviction_reason == null);
 
             log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
@@ -670,6 +671,7 @@ pub fn ContextType(
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
+            assert(self.phase == .running);
             const running: *Phase.Running = &self.phase.running;
             assert(Phase.Running.client_is_available(self));
             assert(packet_list.operation == @intFromEnum(operation));
