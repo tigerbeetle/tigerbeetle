@@ -4,13 +4,12 @@
 //! * a workload that runs commands and queries against the cluster, verifying its correctness
 //!   (whatever that means is up to the workload)
 //!
-//! The replicas and workload run as child processes, while the supervisor restarts terminated
+//! The replicas and driver run as child processes, while the supervisor restarts terminated
 //! replicas and injects crashes and network faults. After some configurable amount of time, the
-//! supervisor terminates the workload and replicas, unless the workload exits on its own or if
+//! supervisor terminates the driver and replicas, unless the driver exits on its own or if
 //! any of the replicas exit unexpectedly.
 //!
-//! If the workload exits successfully, or is actively terminated, the whole vortex exits
-//! successfully.
+//! If no replicas (or the driver) crash, the vortex exits successfully.
 //!
 //! To launch a one-second smoke test, run this command from the repository root:
 //!
@@ -18,7 +17,7 @@
 //!
 //! If you need more control, you can run this program directly.
 //!
-//!     $ zig build vortex -- supervisor
+//!     $ zig build vortex
 //!
 //! Other options:
 //!
@@ -44,7 +43,6 @@ const RingBufferType = stdx.RingBufferType;
 const LoggedProcess = @import("./logged_process.zig");
 const Network = @import("./faulty_network.zig").Network;
 const constants = @import("constants.zig");
-const Progress = @import("./workload.zig").Progress;
 const ratio = stdx.PRNG.ratio;
 const Shell = @import("../../shell.zig");
 
@@ -94,7 +92,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.warn("vortex may encounter port collisions non-Linux OS", .{});
     }
 
-    if (dependencies_count == 1) {
+    if (dependencies_count == 1 or args.disable_faults or args.driver_command != null) {
         log.warn("not testing upgrades", .{});
     }
 
@@ -104,7 +102,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     // Even if we have past versions available, only use them sometimes.
     const release_min = prng.range_inclusive(
         u32,
-        if (args.disable_faults) dependencies_count - 1 else 0,
+        if (args.disable_faults or args.driver_command != null) dependencies_count - 1 else 0,
         dependencies_count - 1,
     );
 
@@ -126,23 +124,30 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         try supervisor.replica_format(@intCast(replica_index));
         try supervisor.replica_start(@intCast(replica_index));
     }
-    try supervisor.workload_start(.{
-        .release = supervisor.prng.range_inclusive(u32, 0, release_min),
-        .transfer_count = std.math.maxInt(u64),
-    });
+    try supervisor.workload_start(
+        if (args.driver_command) |driver_command|
+            .{ .command = driver_command }
+        else
+            .{ .release = supervisor.prng.range_inclusive(u32, 0, release_min) },
+        .{ .transfer_count = std.math.maxInt(u32) },
+    );
 
     const test_deadline = std.time.nanoTimestamp() + args.test_duration.ns;
     while (std.time.nanoTimestamp() < test_deadline) {
         try supervisor.tick();
-
-        if (supervisor.workload.?.process.state == .terminated) {
-            fatal(.workload_exit_early, "workload terminated by itself", .{});
-        }
     }
 
     log.info("workload: terminating due to max duration", .{});
-    try supervisor.workload_terminate();
-    log.info("workload: terminated as requested", .{});
+    log.info("workload: created accounts={}", .{supervisor.workload.?.model.accounts.count()});
+    log.info("workload: created transfers={}", .{supervisor.workload.?.model.transfers_created});
+    for (std.enums.values(Workload.Command)) |command| {
+        log.info("workload: completed command={s} count={}", .{
+            @tagName(command),
+            supervisor.workload.?.requests_finished_count.getAssertContains(command),
+        });
+    }
+    supervisor.workload_terminate();
+    log.info("done", .{});
 }
 
 /// Executables are ordered from oldest to newest.
@@ -294,9 +299,6 @@ pub const Supervisor = struct {
 
     pub fn destroy(supervisor: *Supervisor) void {
         if (supervisor.workload) |workload| {
-            if (workload.process.state == .running) {
-                _ = workload.process.terminate() catch {};
-            }
             workload.destroy(supervisor.allocator);
         }
 
@@ -348,16 +350,6 @@ pub const Supervisor = struct {
                     } else {
                         fatal(.replica_exit_result, "replica exited with: {}", .{term});
                     }
-                }
-            }
-        }
-
-        if (supervisor.workload) |workload| {
-            if (workload.process.wait_nonblocking()) |term| {
-                if (std.meta.eql(term, .{ .Exited = 0 })) {
-                    log.info("workload complete", .{});
-                } else {
-                    fatal(.workload_exit_result, "workload error: term={}", .{term});
                 }
             }
         }
@@ -454,16 +446,16 @@ pub const Supervisor = struct {
         const minute_ticks = 60 * (std.time.ms_per_s / constants.vsr.tick_ms);
         switch (supervisor.prng.enum_weighted(Action, .{
             .none = 2 * minute_ticks,
-            .replica_terminate = if (replicas_running.len > 0) 4 else 0,
-            .replica_restart = if (replicas_terminated.len > 0) 3 else 0,
-            .replica_pause = if (replicas_running.len > 0) 3 else 0,
+            .replica_terminate = if (replicas_running.len > 0) 2 else 0,
+            .replica_restart = if (replicas_terminated.len > 0) 4 else 0,
+            .replica_pause = if (replicas_running.len > 0) 2 else 0,
             .replica_resume = if (replicas_paused.len > 0) 10 else 0,
-            .replica_upgrade = if (supervisor.cluster_upgrading() != null) 15 else 0,
+            .replica_upgrade = if (supervisor.cluster_upgrading()) |_| 15 else 0,
             .cluster_upgrade = if (cluster_release_ + 1 < supervisor.release_count) 2 else 0,
-            .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
-            .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
+            .network_delay = if (supervisor.network.faults.delay == null) 2 else 0,
+            .network_corrupt = if (supervisor.network.faults.corrupt == null) 2 else 0,
             .network_heal = if (supervisor.network.faults.is_healed()) 0 else 10,
-            .heal = 2,
+            .heal = 10,
         })) {
             .none => {},
             .replica_terminate => {
@@ -484,11 +476,13 @@ pub const Supervisor = struct {
             .cluster_upgrade => {
                 assert(cluster_release_ + 1 < supervisor.release_count);
                 const release_max = supervisor.release_count - 1;
-                const release_target = prng.range_inclusive(u32, cluster_release_, release_max);
+                const release_target = prng.range_inclusive(u32, cluster_release_ + 1, release_max);
                 log.info("upgrading cluster to {}..{}", .{ cluster_release_, release_target });
 
-                const replica = prng.int_inclusive(u8, @intCast(supervisor.replicas.len));
-                try supervisor.replica_install(replica, release_target);
+                try supervisor.replica_install(
+                    @intCast(prng.index(supervisor.replicas)),
+                    release_target,
+                );
             },
             .network_delay => {
                 const time_ms = prng.range_inclusive(u32, 10, 500);
@@ -645,10 +639,14 @@ pub const Supervisor = struct {
         }
     }
 
-    pub fn workload_start(supervisor: *Supervisor, options: struct {
-        release: u32,
-        transfer_count: u64,
-    }) !void {
+    pub fn workload_start(
+        supervisor: *Supervisor,
+        driver: union(enum) {
+            command: []const u8,
+            release: u32,
+        },
+        options: struct { transfer_count: u32 },
+    ) !void {
         assert(supervisor.workload == null);
 
         var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
@@ -658,27 +656,32 @@ pub const Supervisor = struct {
         const proxy_ports = proxy_ports_all[0..supervisor.options.replica_count];
 
         // TODO Take client_release_min into account for driver.
-        const workload_driver = supervisor.driver_executables[options.release];
+        const workload_driver = switch (driver) {
+            .command => |command| command,
+            .release => |release| supervisor.driver_executables[release],
+        };
         log.info("launching workload with driver: {s}", .{workload_driver});
 
-        const workload = try Workload.spawn(
+        const workload = try Workload.create(
             supervisor.allocator,
             supervisor.io,
             proxy_ports,
             workload_driver,
-            .{ .transfer_count = options.transfer_count },
+            .{ .seed = supervisor.prng.int(u64) },
         );
         errdefer workload.destroy(supervisor.allocator);
 
+        try workload.start(.{ .transfer_count = options.transfer_count });
         supervisor.workload = workload;
     }
 
-    pub fn workload_terminate(supervisor: *Supervisor) !void {
-        const workload = supervisor.workload.?;
-        const workload_result = try workload.process.terminate();
-        if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.KILL })) {
-            fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
-        }
+    pub fn workload_done(supervisor: *Supervisor) bool {
+        return supervisor.workload.?.done();
+    }
+
+    pub fn workload_terminate(supervisor: *Supervisor) void {
+        supervisor.workload.?.destroy(supervisor.allocator);
+        supervisor.workload = null;
     }
 };
 
@@ -774,7 +777,9 @@ const Replica = struct {
 };
 
 const Workload = struct {
-    pub const State = enum(u8) { running, terminated };
+    const Model = @import("./workload.zig").Model;
+    const Generator = @import("./workload.zig").Generator;
+    const Command = @import("./workload.zig").Command;
 
     const RequestInfo = struct {
         timestamp_start_micros: u64,
@@ -784,113 +789,254 @@ const Workload = struct {
     const Requests = RingBufferType(RequestInfo, .{ .array = 1024 * 16 });
 
     io: *IO,
-    process: *LoggedProcess,
+    model: Model,
+    generator: Generator,
+    driver: std.process.Child,
 
-    read_buffer: [@sizeOf(Progress)]u8 = undefined,
-    read_completion: IO.Completion = undefined,
+    status: union(enum) {
+        idle,
+        busy: struct { transfers_max: u32 },
+    } = .idle,
+
+    command: ?Command = null,
+    request_buffer: []u8,
+    request_written: ?u32 = null,
+    request_size: ?u32 = null,
+    request_start: ?stdx.InstantUnix = null,
+    reply_buffer: []u8,
+
+    completion: IO.Completion = undefined,
     read_progress: usize = 0,
 
     requests_finished: Requests = Requests.init(),
+    requests_finished_count: std.enums.EnumMap(Command, u32) = .initFull(0),
 
-    pub fn spawn(
+    pub fn create(
         allocator: std.mem.Allocator,
         io: *IO,
         proxy_ports: []const u16,
         driver_command: []const u8,
-        options: struct {
-            transfer_count: u64,
-        },
+        options: struct { seed: u64 },
     ) !*Workload {
-        var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-        const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
+        assert(std.mem.indexOfScalar(u8, driver_command, '"') == null);
 
-        var driver_command_arg_buffer: [std.fs.max_path_bytes]u8 = undefined;
-        const driver_command_arg = try std.fmt.bufPrint(
-            &driver_command_arg_buffer,
-            "--driver-command={s}",
-            .{driver_command},
-        );
-
-        const proxy_addresses = try comma_separate_ports(allocator, proxy_ports);
-        defer allocator.free(proxy_addresses);
-
-        const arg_addresses =
-            try std.fmt.allocPrint(allocator, "--addresses={s}", .{proxy_addresses});
+        const arg_addresses = try comma_separate_ports(allocator, proxy_ports);
         defer allocator.free(arg_addresses);
 
-        const arg_transfer_count =
-            try std.fmt.allocPrint(allocator, "--transfer-count={d}", .{options.transfer_count});
-        defer allocator.free(arg_transfer_count);
-
-        const argv = &.{
-            vortex_path,
-            "workload",
-            std.fmt.comptimePrint("--cluster={d}", .{constants.vortex.cluster_id}),
+        var driver = std.process.Child.init(&.{
+            driver_command,
+            std.fmt.comptimePrint("{d}", .{constants.vortex.cluster_id}),
             arg_addresses,
-            arg_transfer_count,
-            driver_command_arg,
-        };
+        }, allocator);
+        driver.stdin_behavior = .Pipe;
+        driver.stdout_behavior = .Pipe;
+        driver.stderr_behavior = .Inherit;
+        try driver.spawn();
+        errdefer _ = driver.kill() catch {};
+
+        var model = try Model.init(allocator);
+        errdefer model.deinit(allocator);
+
+        const buffer_size = @sizeOf(u8) + @sizeOf(u32) + Generator.buffer_size;
+        const request_buffer = try allocator.alloc(u8, buffer_size);
+        errdefer allocator.free(request_buffer);
+
+        const reply_buffer = try allocator.alloc(u8, buffer_size);
+        errdefer allocator.free(reply_buffer);
 
         const workload = try allocator.create(Workload);
         errdefer allocator.destroy(workload);
 
-        const process = try LoggedProcess.spawn(allocator, argv, .{ .stdout_behavior = .Pipe });
-        errdefer process.destroy(allocator);
-
-        workload.* = .{ .io = io, .process = process };
-
-        // Kick off read loop.
-        workload.read();
-
+        workload.* = .{
+            .io = io,
+            .model = model,
+            .generator = Generator.init(options.seed),
+            .driver = driver,
+            .request_buffer = request_buffer,
+            .reply_buffer = reply_buffer,
+        };
         return workload;
     }
 
     pub fn destroy(workload: *Workload, allocator: std.mem.Allocator) void {
-        assert(workload.process.state == .terminated);
-        workload.process.destroy(allocator);
+        const workload_result = workload.driver.kill() catch |err| {
+            fatal(.workload_exit_result, "workload: error killing driver: {any}", .{err});
+        };
+        if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.TERM })) {
+            fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
+        }
+
+        allocator.free(workload.reply_buffer);
+        allocator.free(workload.request_buffer);
+        workload.model.deinit(allocator);
         allocator.destroy(workload);
     }
 
-    fn read(workload: *Workload) void {
-        assert(workload.process.state == .running);
+    pub fn done(workload: *Workload) bool {
+        return workload.status == .idle;
+    }
 
-        workload.io.read(
+    pub fn start(workload: *Workload, options: struct { transfer_count: u32 }) !void {
+        assert(workload.status == .idle);
+
+        workload.status = .{ .busy = .{ .transfers_max = options.transfer_count } };
+        workload.driver_request();
+    }
+
+    fn driver_request(workload: *Workload) void {
+        assert(workload.status == .busy);
+        assert(workload.command == null);
+        assert(workload.request_written == null);
+        assert(workload.request_size == null);
+        assert(workload.request_start == null);
+
+        const command = workload.generator.random_command(&workload.model);
+        const operation = command.operation();
+        var stream = std.io.fixedBufferStream(workload.request_buffer);
+        stream.writer().writeInt(u8, @intFromEnum(operation), .little) catch unreachable;
+
+        const request_body_size = workload.generator.random_request(
+            &workload.model,
+            command,
+            workload.request_buffer[stream.pos + @sizeOf(u32) ..],
+        );
+        const request_body_events_count: u32 =
+            @intCast(@divExact(request_body_size, operation.event_size()));
+        stream.writer().writeInt(u32, request_body_events_count, .little) catch unreachable;
+
+        log.debug(
+            "workload: request start: command={s} body={}",
+            .{ @tagName(command), request_body_size },
+        );
+
+        workload.command = command;
+        workload.request_written = 0;
+        workload.request_size = @intCast(stream.pos + request_body_size);
+        workload.request_start = stdx.InstantUnix.now();
+        workload.driver_request_write();
+    }
+
+    fn driver_request_write(workload: *Workload) void {
+        assert(workload.status == .busy);
+        assert(workload.command != null);
+        assert(workload.request_written.? < workload.request_size.?);
+
+        workload.io.write(
             *Workload,
             workload,
-            on_read,
-            &workload.read_completion,
-            workload.process.child.stdout.?.handle,
-            workload.read_buffer[workload.read_progress..workload.read_buffer.len],
+            driver_request_write_callback,
+            &workload.completion,
+            workload.driver.stdin.?.handle,
+            workload.request_buffer[workload.request_written.?..workload.request_size.?],
             0,
         );
     }
 
-    fn on_read(workload: *Workload, _: *IO.Completion, result: IO.ReadError!usize) void {
-        if (workload.process.state != .running) return;
+    fn driver_request_write_callback(
+        workload: *Workload,
+        completion: *IO.Completion,
+        result: IO.WriteError!usize,
+    ) void {
+        assert(workload.status == .busy);
+        assert(&workload.completion == completion);
+        assert(workload.command != null);
+        assert(workload.read_progress == 0);
 
-        const count = result catch |err| {
-            fatal(.workload_read_error, "couldn't read from workload stdout: {}", .{err});
+        const bytes_written = result catch |err| {
+            fatal(.driver_request_error, "error sending to driver: {}", .{err});
         };
+        workload.request_written.? += @intCast(bytes_written);
 
-        workload.read_progress += count;
+        assert(workload.request_written.? <= workload.request_size.?);
+        if (workload.request_written.? == workload.request_size.?) {
+            workload.request_written = null;
+            workload.driver_response_read();
+        } else {
+            workload.driver_request_write();
+        }
+    }
 
-        if (workload.read_progress >= workload.read_buffer.len) {
-            const progress = std.mem.bytesAsValue(Progress, workload.read_buffer[0..]);
-            const request_info: RequestInfo = .{
-                .timestamp_start_micros = progress.timestamp_start_micros,
-                .timestamp_end_micros = progress.timestamp_end_micros,
-            };
-            workload.read_progress = 0;
-            workload.requests_finished.push(request_info) catch
-                log.warn("requests_finished is full", .{});
+    fn driver_response_read(workload: *Workload) void {
+        assert(workload.status == .busy);
+        assert(workload.command != null);
 
-            log.debug("workload: request done duration={}us events={}", .{
-                progress.timestamp_end_micros - progress.timestamp_start_micros,
-                progress.event_count,
-            });
+        workload.io.read(
+            *Workload,
+            workload,
+            driver_response_read_callback,
+            &workload.completion,
+            workload.driver.stdout.?.handle,
+            workload.reply_buffer[workload.read_progress..],
+            0,
+        );
+    }
+
+    fn driver_response_read_callback(
+        workload: *Workload,
+        completion: *IO.Completion,
+        result: IO.ReadError!usize,
+    ) void {
+        assert(workload.status == .busy);
+        assert(workload.command != null);
+        assert(&workload.completion == completion);
+
+        const read_size = result catch |err| {
+            fatal(.driver_response_error, "error receiving from driver: {}", .{err});
+        };
+        workload.read_progress += read_size;
+
+        const read_buffer = workload.reply_buffer[0..workload.read_progress];
+        var read_stream = std.io.fixedBufferStream(read_buffer);
+        const reader = read_stream.reader();
+
+        if (workload.read_progress < @sizeOf(u32)) return workload.driver_response_read();
+        const results_count = reader.readInt(u32, .little) catch unreachable;
+        const results_size = results_count * workload.command.?.operation().result_size();
+        if (workload.read_progress < read_stream.pos + results_size) {
+            return workload.driver_response_read();
         }
 
-        workload.read();
+        const results_buffer = workload.reply_buffer[read_stream.pos..][0..results_size];
+        workload.model.reconcile(
+            workload.command.?,
+            workload.request_buffer[(@sizeOf(u8) + @sizeOf(u32))..workload.request_size.?],
+            results_buffer,
+        ) catch |err| {
+            fatal(.workload_reconcile, "model reconcile error: {}", .{err});
+        };
+
+        const request_commence_us = workload.request_start.?.ns / std.time.ns_per_us;
+        const request_complete_us = stdx.InstantUnix.now().ns / std.time.ns_per_us;
+        workload.requests_finished.push(.{
+            .timestamp_start_micros = request_commence_us,
+            .timestamp_end_micros = request_complete_us,
+        }) catch log.warn("requests_finished is full", .{});
+
+        workload.requests_finished_count.put(
+            workload.command.?,
+            workload.requests_finished_count.getAssertContains(workload.command.?) + 1,
+        );
+
+        log.info(
+            "workload: request done: command={s} duration={}us " ++
+                "(accounts_created={d} transfers_created={d})",
+            .{
+                @tagName(workload.command.?),
+                request_complete_us -| request_commence_us,
+                workload.model.accounts.count(),
+                workload.model.transfers_created,
+            },
+        );
+
+        workload.command = null;
+        workload.request_size = null;
+        workload.request_start = null;
+        workload.read_progress = 0;
+        if (workload.model.transfers_created < workload.status.busy.transfers_max) {
+            workload.driver_request();
+        } else {
+            workload.status = .idle;
+        }
     }
 
     fn find_slow_request_since(workload: *const Workload, start_ns: u64) ?RequestInfo {
@@ -913,9 +1059,12 @@ const FatalReason = enum(u8) {
     workload_exit_early = 10,
     workload_exit_result = 11,
     workload_read_error = 12,
-    replica_exit_result = 13,
-    liveness = 14,
-    request_slow = 15,
+    workload_reconcile = 13,
+    replica_exit_result = 14,
+    driver_request_error = 15,
+    driver_response_error = 16,
+    liveness = 17,
+    request_slow = 18,
 
     pub fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);

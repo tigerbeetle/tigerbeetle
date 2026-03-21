@@ -475,7 +475,7 @@ test "vortex smoke" {
     defer shell.destroy();
 
     try shell.exec(
-        "{vortex_exe} supervisor --test-duration=1s --replica-count=1",
+        "{vortex_exe} --test-duration=1s --replica-count=1",
         .{ .vortex_exe = vortex_exe },
     );
 }
