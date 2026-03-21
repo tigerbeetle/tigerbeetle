@@ -1238,17 +1238,21 @@ fn build_vortex_options(
 ) *std.Build.Step.Options {
     const vortex_options = b.addOptions();
     const vortex_upgrades_max = 1; // TODO Pack more releases into Debug builds.
-    vortex_options.addOptionPath("dependencies_path", b.path("./zig-out/vortex"));
+    const vortex_dir = b.fmt("vortex/{s}", .{@tagName(options.mode)});
+    vortex_options.addOptionPath(
+        "dependencies_path",
+        b.path(b.fmt("./zig-out/{s}", .{vortex_dir})),
+    );
     vortex_options.addOption(u32, "dependencies_count", vortex_upgrades_max + 1);
 
     // TODO Include 65535.0.1 build, to test upgrading _from_ the latest version too.
     vortex_options.step.dependOn(&b.addInstallBinFile(
         options.tigerbeetle_test,
-        "../vortex/tigerbeetle-0",
+        b.fmt("../{s}/tigerbeetle-0", .{vortex_dir}),
     ).step);
     vortex_options.step.dependOn(&b.addInstallBinFile(
         options.vortex_driver_zig,
-        "../vortex/vortex-driver-zig-0",
+        b.fmt("../{s}/vortex-driver-zig-0", .{vortex_dir}),
     ).step);
 
     var tags_iterator = release_history(b);
@@ -1258,11 +1262,11 @@ fn build_vortex_options(
 
         vortex_options.step.dependOn(&b.addInstallBinFile(
             fetch_release(b, tag, options.target, options.mode),
-            b.fmt("../vortex/tigerbeetle-{d}", .{tags_index + 1}),
+            b.fmt("../{s}/tigerbeetle-{d}", .{ vortex_dir, tags_index + 1 }),
         ).step);
         vortex_options.step.dependOn(&b.addInstallBinFile(
             fetch_vortex_driver_zig(b, tag, options.target, options.mode),
-            b.fmt("../vortex/vortex-driver-zig-{d}", .{tags_index + 1}),
+            b.fmt("../{s}/vortex-driver-zig-{d}", .{ vortex_dir, tags_index + 1 }),
         ).step);
     }
     return vortex_options;
@@ -1270,7 +1274,7 @@ fn build_vortex_options(
 
 fn release_history(b: *std.Build) std.mem.SplitIterator(u8, .scalar) {
     const tags_string = b.run(&.{
-        "git", "tag",
+        "git",      "tag",
         // Only list ancestors of the current commit.
         // Use "HEAD^" instead of "HEAD" so that if our current commit is a release commit, we don't
         // include that release, since it is already tigerbeetle-0.
