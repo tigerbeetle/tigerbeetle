@@ -26,6 +26,7 @@ pub const IO = struct {
     io_pending: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_pending" }),
 
     stats: common.Stats = .{},
+    yield_requested: bool = false,
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -82,9 +83,17 @@ pub const IO = struct {
 
         // Loop until our timeout completion is processed above, which sets timed_out to true.
         // LLVM shouldn't be able to cache timed_out's value here since its address escapes above.
-        while (!timed_out) {
+        while (!timed_out and !self.yield_requested) {
             try self.flush(true);
         }
+        if (!timed_out) {
+            self.timeouts.remove(&completion);
+        }
+        self.yield_requested = false;
+    }
+
+    pub fn yield(self: *IO) void {
+        self.yield_requested = true;
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {

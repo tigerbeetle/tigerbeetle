@@ -36,6 +36,7 @@ pub const IO = struct {
     ios_in_kernel: u32 = 0,
 
     stats: common.Stats = .{},
+    yield_requested: bool = false,
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -108,7 +109,7 @@ pub const IO = struct {
         };
         var timeouts: usize = 0;
         var etime = false;
-        while (!etime) {
+        while (!etime and !self.yield_requested) {
             const timeout_sqe = self.ring.get_sqe() catch blk: {
                 // The submission queue is full, so flush submissions to make space:
                 try self.flush_submissions(0, &timeouts, &etime);
@@ -126,10 +127,15 @@ pub const IO = struct {
             // The amount of time this call will block is bounded by the timeout we just submitted:
             try self.flush(1, &timeouts, &etime);
         }
+        self.yield_requested = false;
         // Reap any remaining timeouts, which reference the timespec in the current stack frame.
         // The busy loop here is required to avoid a potential deadlock, as the kernel determines
         // when the timeouts are pushed to the completion queue, not us.
         while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
+    }
+
+    pub fn yield(self: *IO) void {
+        self.yield_requested = true;
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
