@@ -469,8 +469,6 @@ pub fn ContextType(
                                 .previous_request_instant = null,
                                 .previous_request_latency = null,
                             } };
-                            // Drain packets that queued up during registration.
-                            callback_signal_notify(&self.signal);
                             continue :main;
                         }
 
@@ -504,12 +502,15 @@ pub fn ContextType(
 
                         assert(self.eviction_reason == null);
                         running.client_state.client.tick();
+                        running.drain_submitted_packets(self);
                     },
 
                     // Once all connections have fully terminated (no pending
                     // IO on any Connection memory), it is safe to deinit the
                     // client which frees the message_bus's connections array.
                     .disconnecting => |*disconnecting| {
+                        self.cancel_submitted_packets();
+
                         if (disconnecting.client_io_settled()) {
                             const allocator = self.gpa.allocator();
                             disconnecting.client_state.client.deinit(allocator);
@@ -526,6 +527,8 @@ pub fn ContextType(
                     // was already nulled), so no stop signal will arrive from the
                     // user thread. Send it ourselves.
                     .settled => {
+                        self.cancel_submitted_packets();
+
                         if (self.eviction_reason != null) {
                             self.signal.stop();
                         }
@@ -608,24 +611,7 @@ pub fn ContextType(
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
             assert(self.signal.status() != .shutdown_completed);
 
-            switch (self.phase) {
-                .registering => {
-                    // Packets will be drained when transitioning to running
-                    // or cancelled by the io_thread shutdown path.
-                    maybe(self.eviction_reason != null);
-                },
-                .running => |*running| {
-                    if (!Phase.Running.client_is_available(self)) {
-                        self.cancel_submitted_packets();
-                        return;
-                    }
-
-                    running.drain_submitted_packets(self);
-                },
-                .disconnecting, .settled => {
-                    self.cancel_submitted_packets();
-                },
-            }
+            self.io.yield();
         }
 
         fn callback_client_register(user_data: u128, result: *const vsr.RegisterResult) void {
@@ -679,6 +665,7 @@ pub fn ContextType(
             // and pending packets, terminate connections, and deinit the
             // client once all connection IO has settled.
             self.eviction_reason = eviction.header.reason;
+            self.io.yield();
         }
 
         fn callback_client_result(
@@ -695,7 +682,7 @@ pub fn ContextType(
             const operation = operation_vsr.cast(Client.Operation);
             assert(self.phase == .running);
             const running: *Phase.Running = &self.phase.running;
-            assert(Phase.Running.client_is_available(self));
+            assert(self.eviction_reason == null);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
@@ -908,15 +895,6 @@ fn PhaseType(comptime Context: type) type {
             previous_request_instant: ?stdx.Instant,
             previous_request_latency: ?stdx.Duration,
 
-            /// Returns true when the client is safe to access for processing
-            /// packets. False when eviction has been detected during
-            /// io.run_for_ns but the main loop hasn't transitioned yet.
-            /// The phase check is structural: having *Running means we're
-            /// in the running phase.
-            fn client_is_available(ctx: *const Context) bool {
-                return ctx.eviction_reason == null;
-            }
-
             /// Cancel the current inflight request (and the entire batched
             /// linked list of packets), as it won't be replied anymore.
             fn cancel_request_inflight(self: *Running, ctx: *Context) void {
@@ -982,9 +960,7 @@ fn PhaseType(comptime Context: type) type {
                 maybe(batch.event_count == 0);
                 maybe(batch.result_count_expected == 0);
 
-                // packet_enqueue is only reachable from drain_submitted_packets,
-                // which is guarded by callback_signal_notify's client_is_available check.
-                assert(client_is_available(ctx));
+                assert(ctx.eviction_reason == null);
 
                 // Nothing inflight means the packet should be submitted right now.
                 if (self.client_state.client.request_inflight == null) {
@@ -1061,12 +1037,8 @@ fn PhaseType(comptime Context: type) type {
             /// Sends the packet (the entire batched linked list of packets) through the vsr client.
             fn packet_send(self: *Running, ctx: *Context, packet_list: *Packet) void {
                 assert(Context.thread_caller == .io);
+                assert(ctx.eviction_reason == null);
                 packet_list.assert_phase(.pending);
-
-                // On eviction or shutdown, cancel this packet and any others batched onto it.
-                if (!client_is_available(ctx)) {
-                    return ctx.packet_cancel(packet_list);
-                }
 
                 assert(self.client_state.client.request_inflight == null);
 
@@ -1174,7 +1146,7 @@ fn PhaseType(comptime Context: type) type {
 
             fn drain_submitted_packets(self: *Running, ctx: *Context) void {
                 assert(Context.thread_caller == .io);
-                assert(client_is_available(ctx));
+                assert(ctx.eviction_reason == null);
 
                 const enqueued_count = self.pending.count();
                 const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
