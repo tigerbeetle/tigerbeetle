@@ -26,6 +26,7 @@ pub const IO = struct {
     run_for_ns_active: bool = false,
 
     stats: common.Stats = .{},
+    yield_requested: bool = false,
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -86,9 +87,17 @@ pub const IO = struct {
         var completion: Completion = undefined;
         self.timeout(*bool, &timed_out, Callback.on_timeout, &completion, nanoseconds);
 
-        while (!timed_out) {
+        while (!timed_out and !self.yield_requested) {
             try self.flush(.blocking);
         }
+        if (!timed_out) {
+            self.timeouts.remove(&completion);
+        }
+        self.yield_requested = false;
+    }
+
+    pub fn yield(self: *IO) void {
+        self.yield_requested = true;
     }
 
     const FlushMode = enum {

@@ -33,6 +33,7 @@ pub const IO = struct {
     ios_in_kernel: u32 = 0,
 
     stats: common.Stats = .{},
+    yield_requested: bool = false,
 
     time_os: TimeOS = .{},
 
@@ -103,7 +104,7 @@ pub const IO = struct {
         var now = self.time_os.monotonic();
         const deadline = now.add(.{ .ns = nanoseconds });
 
-        while (now.ns < deadline.ns) : (now = self.time_os.monotonic()) {
+        while (now.ns < deadline.ns and !self.yield_requested) : (now = self.time_os.monotonic()) {
             // If there are callbacks ready to run, don't wait in the kernel: the callbacks may
             // queue more work, which should be submitted as soon as possible.
             const block_ns = if (self.completed.count() == 0) deadline.ns -| now.ns else 0;
@@ -113,9 +114,14 @@ pub const IO = struct {
 
             try self.run_callback();
         }
+        self.yield_requested = false;
 
         // Ditto the optimization in `run()`.
         try self.flush_submissions(0);
+    }
+
+    pub fn yield(self: *IO) void {
+        self.yield_requested = true;
     }
 
     fn flush_submissions(self: *IO, wait_duration_ns: u63) !void {
