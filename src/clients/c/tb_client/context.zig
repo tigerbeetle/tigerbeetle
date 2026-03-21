@@ -218,25 +218,31 @@ pub fn ContextType(
             io: std.Thread.Id,
         } = .user;
 
+        /// Fields accessed by both the IO thread and client threads.
+        /// Vtable functions receive `*Shared` (not `*Context`), limiting
+        /// client thread access to only these fields.
+        const Shared = struct {
+            signal: Signal,
+            submitted: Packet.Queue,
+            completion_context: usize,
+            thread: std.Thread,
+            cluster_id: u128,
+            client_id: u128,
+            addresses_owned: []const u8,
+        };
+
         gpa: GPA,
-        time_os: TimeOS = .{},
-        client_id: u128,
-        cluster_id: u128,
-        addresses_owned: []const u8,
+        time_os: TimeOS,
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max) = .{},
         io: IO,
 
         completion_callback: CompletionCallback,
-        completion_context: usize,
-
         interface: *ClientInterface,
-        submitted: Packet.Queue,
 
-        signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
         phase: Phase,
-        thread: std.Thread,
+        shared: Shared,
 
         pub fn init(
             root_allocator: std.mem.Allocator,
@@ -270,40 +276,17 @@ pub fn ContextType(
             }
 
             const allocator = context.gpa.allocator();
-
-            context.* = .{
-                .gpa = context.gpa,
-
-                .client_id = stdx.unique_u128(),
-                .cluster_id = cluster_id,
-
-                .completion_callback = completion_callback,
-                .completion_context = completion_ctx,
-
-                .interface = client_out,
-                .submitted = Packet.Queue.init(.{
-                    .name = null,
-                    .verify_push = builtin.is_test,
-                }),
-                .pending = Packet.Queue.init(.{
-                    .name = null,
-                    .verify_push = builtin.is_test,
-                }),
-
-                .addresses_owned = undefined,
-                .io = undefined,
-                .message_pool = undefined,
-                .client = undefined,
-                .signal = undefined,
-                .thread = undefined,
-                .previous_request_instant = undefined,
-            };
-            context.addresses_owned = try allocator.dupe(u8, addresses);
-            errdefer allocator.free(context.addresses_owned);
+            context.shared.client_id = stdx.unique_u128();
+            context.shared.cluster_id = cluster_id;
+            context.shared.addresses_owned = try allocator.dupe(u8, addresses);
+            errdefer allocator.free(context.shared.addresses_owned);
 
             const time = context.time_os.time();
 
-            log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
+            log.debug("{}: init: parsing vsr addresses: {s}", .{
+                context.shared.client_id,
+                addresses,
+            });
             context.addresses = .{};
             const addresses_parsed = vsr.parse_addresses(
                 addresses,
@@ -321,10 +304,10 @@ pub fn ContextType(
             assert(addresses_parsed.len <= constants.replicas_max);
             context.addresses.resize(addresses_parsed.len) catch unreachable;
 
-            log.debug("{}: init: initializing IO", .{context.client_id});
+            log.debug("{}: init: initializing IO", .{context.shared.client_id});
             context.io = IO.init(32, 0) catch |err| {
                 log.err("{}: failed to initialize IO: {s}", .{
-                    context.client_id,
+                    context.shared.client_id,
                     @errorName(err),
                 });
                 return switch (err) {
@@ -335,7 +318,7 @@ pub fn ContextType(
             };
             errdefer context.io.deinit();
 
-            log.debug("{}: init: initializing ClientState", .{context.client_id});
+            log.debug("{}: init: initializing ClientState", .{context.shared.client_id});
             const client_state = try allocator.create(ClientState);
             errdefer allocator.destroy(client_state);
 
@@ -344,7 +327,7 @@ pub fn ContextType(
             errdefer client_state.message_pool.deinit(allocator);
 
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
-                context.client_id,
+                context.shared.client_id,
                 cluster_id,
                 context.addresses.const_slice(),
             });
@@ -353,7 +336,7 @@ pub fn ContextType(
                 time,
                 &client_state.message_pool,
                 .{
-                    .id = context.client_id,
+                    .id = context.shared.client_id,
                     .cluster = cluster_id,
                     .replica_count = context.addresses.count_as(u8),
                     .aof_recovery = false,
@@ -366,7 +349,7 @@ pub fn ContextType(
                 },
             ) catch |err| {
                 log.err("{}: failed to initialize Client: {s}", .{
-                    context.client_id,
+                    context.shared.client_id,
                     @errorName(err),
                 });
                 return switch (err) {
@@ -375,18 +358,18 @@ pub fn ContextType(
             };
             errdefer client_state.client.deinit(allocator);
 
-            ClientInterface.init(client_out, context, comptime &.{
+            ClientInterface.init(client_out, &context.shared, comptime &.{
                 .submit_fn = &vtable_submit_fn,
                 .completion_context_fn = &vtable_completion_context_fn,
                 .deinit_fn = &vtable_deinit_fn,
                 .init_parameters_fn = &vtable_init_parameters_fn,
             });
             context.interface = client_out;
-            context.submitted = Packet.Queue.init(.{
+            context.shared.submitted = Packet.Queue.init(.{
                 .name = null,
                 .verify_push = builtin.is_test,
             });
-            context.completion_context = completion_ctx;
+            context.shared.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
             context.phase = .{ .registering = .{
@@ -398,20 +381,20 @@ pub fn ContextType(
                 }),
             } };
 
-            log.debug("{}: init: initializing signal", .{context.client_id});
-            try context.signal.init(&context.io, Context.callback_signal_notify);
-            errdefer context.signal.deinit();
+            log.debug("{}: init: initializing signal", .{context.shared.client_id});
+            try context.shared.signal.init(&context.io, Context.callback_signal_notify);
+            errdefer context.shared.signal.deinit();
 
             client_state.client.register(callback_client_register, @intFromPtr(context));
 
-            log.debug("{}: init: spawning thread", .{context.client_id});
-            context.thread = std.Thread.spawn(
+            log.debug("{}: init: spawning thread", .{context.shared.client_id});
+            context.shared.thread = std.Thread.spawn(
                 .{ .stack_size = io_thread_stack_size },
                 Context.io_thread,
                 .{context},
             ) catch |err| {
                 log.err("{}: failed to spawn thread: {s}", .{
-                    context.client_id,
+                    context.shared.client_id,
                     @errorName(err),
                 });
                 return switch (err) {
@@ -439,7 +422,7 @@ pub fn ContextType(
             defer thread_caller = .user;
 
             main: while (true) {
-                const should_stop = self.signal.status() == .shutdown_completed;
+                const should_stop = self.shared.signal.status() == .shutdown_completed;
 
                 switch (self.phase) {
                     // Registration in progress. Wait for the callback to set
@@ -530,7 +513,7 @@ pub fn ContextType(
                         self.cancel_submitted_packets();
 
                         if (self.eviction_reason != null) {
-                            self.signal.stop();
+                            self.shared.signal.stop();
                         }
 
                         if (should_stop) break :main;
@@ -539,7 +522,7 @@ pub fn ContextType(
 
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
-                        self.client_id,
+                        self.shared.client_id,
                         @errorName(err),
                     });
                     @panic("IO.run() failed");
@@ -552,14 +535,14 @@ pub fn ContextType(
             // as this thread may not have been the last to take it.
             self.cancel_submitted_packets();
 
-            self.signal.deinit();
+            self.shared.signal.deinit();
             self.io.deinit();
 
             // Copy GPA to the stack before freeing the Context that contains it,
             // since the allocator holds a pointer back to the GPA.
             var gpa = self.gpa;
             const allocator = gpa.allocator();
-            allocator.free(self.addresses_owned);
+            allocator.free(self.shared.addresses_owned);
             allocator.destroy(self);
             _ = gpa.deinit();
         }
@@ -578,7 +561,7 @@ pub fn ContextType(
                 .client_release_too_high => error.ClientReleaseTooHigh,
                 else => error.ClientEvicted,
             } else result: {
-                assert(self.signal.status() != .running);
+                assert(self.shared.signal.status() != .running);
                 break :result error.ClientShutdown;
             };
 
@@ -598,7 +581,7 @@ pub fn ContextType(
                     self.interface.locker.lock();
                     defer self.interface.locker.unlock();
 
-                    break :pop self.submitted.pop() orelse break;
+                    break :pop self.shared.submitted.pop() orelse break;
                 };
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
@@ -608,8 +591,9 @@ pub fn ContextType(
         fn callback_signal_notify(signal: *Signal) void {
             assert(thread_caller == .io);
 
-            const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
-            assert(self.signal.status() != .shutdown_completed);
+            const shared: *Shared = @alignCast(@fieldParentPtr("signal", signal));
+            const self: *Context = @fieldParentPtr("shared", shared);
+            assert(shared.signal.status() != .shutdown_completed);
 
             self.io.yield();
         }
@@ -647,7 +631,7 @@ pub fn ContextType(
             assert(self.eviction_reason == null);
 
             log.debug("{}: callback_client_eviction: reason={?s} reason_int={}", .{
-                self.client_id,
+                self.shared.client_id,
                 std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
                 @intFromEnum(eviction.header.reason),
             });
@@ -769,7 +753,7 @@ pub fn ContextType(
 
                 // The packet completed with an error.
                 self.completion_callback(
-                    self.completion_context,
+                    self.shared.completion_context,
                     packet.cast(),
                     0,
                     null,
@@ -782,7 +766,7 @@ pub fn ContextType(
             assert(packet.status == .ok);
             packet.phase = .complete;
             self.completion_callback(
-                self.completion_context,
+                self.shared.completion_context,
                 packet.cast(),
                 result.timestamp,
                 result.reply.ptr,
@@ -795,7 +779,7 @@ pub fn ContextType(
         fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
             assert(thread_caller == .user);
 
-            const self: *Context = @ptrCast(@alignCast(context));
+            const shared: *Shared = @ptrCast(@alignCast(context));
 
             // Packet is caller-allocated to enable elastic intrusive-link-list-based
             // memory management. However, some of Packet's fields are essentially private.
@@ -819,39 +803,39 @@ pub fn ContextType(
             };
 
             // Enqueue the packet and notify the IO thread to process it asynchronously.
-            assert(self.signal.status() == .running);
-            self.submitted.push(packet);
-            self.signal.notify();
+            assert(shared.signal.status() == .running);
+            shared.submitted.push(packet);
+            shared.signal.notify();
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
-            const self: *Context = @ptrCast(@alignCast(context));
-            return self.completion_context;
+            const shared: *Shared = @ptrCast(@alignCast(context));
+            return shared.completion_context;
         }
 
         fn vtable_deinit_fn(context: *anyopaque) void {
             assert(thread_caller == .user);
 
-            const self: *Context = @ptrCast(@alignCast(context));
+            const shared: *Shared = @ptrCast(@alignCast(context));
 
             // Copy the thread handle here, since stopping the I/O thread deinitializes
-            // the context and invalidates the `self` pointer.
-            const thread = self.thread;
+            // the context and invalidates the `shared` pointer.
+            const thread = shared.thread;
             defer thread.join();
 
-            self.signal.stop();
+            shared.signal.stop();
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
             assert(thread_caller == .user);
 
-            const self: *Context = @ptrCast(@alignCast(context));
-            assert(self.signal.status() == .running);
+            const shared: *Shared = @ptrCast(@alignCast(context));
+            assert(shared.signal.status() == .running);
 
-            out_parameters.cluster_id = self.cluster_id;
-            out_parameters.client_id = self.client_id;
-            out_parameters.addresses_ptr = self.addresses_owned.ptr;
-            out_parameters.addresses_len = self.addresses_owned.len;
+            out_parameters.cluster_id = shared.cluster_id;
+            out_parameters.client_id = shared.client_id;
+            out_parameters.addresses_ptr = shared.addresses_owned.ptr;
+            out_parameters.addresses_len = shared.addresses_owned.len;
         }
     };
 }
@@ -1155,7 +1139,7 @@ fn PhaseType(comptime Context: type) type {
                         ctx.interface.locker.lock();
                         defer ctx.interface.locker.unlock();
 
-                        break :pop ctx.submitted.pop() orelse return;
+                        break :pop ctx.shared.submitted.pop() orelse return;
                     };
                     self.packet_enqueue(ctx, packet);
 
@@ -1173,10 +1157,10 @@ fn PhaseType(comptime Context: type) type {
                     ctx.interface.locker.lock();
                     defer ctx.interface.locker.unlock();
 
-                    break :empty ctx.submitted.empty();
+                    break :empty ctx.shared.submitted.empty();
                 };
                 if (!empty) {
-                    ctx.signal.notify();
+                    ctx.shared.signal.notify();
                 }
             }
         };
