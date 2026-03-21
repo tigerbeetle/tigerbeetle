@@ -553,6 +553,59 @@ pub const Supervisor = struct {
         };
     }
 
+    pub fn replica_reformat(supervisor: *Supervisor, replica_index: u8) !void {
+        assert(supervisor.replicas[replica_index].state() == .terminated);
+
+        supervisor.shell.cwd.deleteFile(supervisor.replica_datafiles[replica_index]) catch |err| {
+            log.err("{}: failed deleting datafile: {}", .{ replica_index, err });
+            return err;
+        };
+
+        const release_index = supervisor.replicas[replica_index].executable_index;
+        const server_executable = supervisor.server_executables[release_index];
+        const child = supervisor.shell.spawn(.{ .stderr_behavior = .Inherit },
+            \\{tigerbeetle} recover
+            \\    --cluster={cluster_id}
+            \\    --replica={replica}
+            \\    --replica-count={replica_count}
+            \\    --addresses={addresses}
+            \\    {datafile}
+        , .{
+            .tigerbeetle = server_executable,
+            .cluster_id = constants.vortex.cluster_id,
+            .replica = replica_index,
+            .replica_count = supervisor.replicas.len,
+            .addresses = supervisor.replicas[replica_index].addresses,
+            .datafile = supervisor.replica_datafiles[replica_index],
+        }) catch |err| {
+            log.err("{}: failed reformatting datafile: {}", .{ replica_index, err });
+            return err;
+        };
+
+        // Tick supervisor since reformatting requires network progress.
+        // (The tick limit is an arbitrary safety counter.)
+        const ticks_max = 1500;
+        for (0..ticks_max) |_| {
+            const result = std.posix.waitpid(child.id, std.posix.W.NOHANG);
+            if (result.pid == 0) {
+                try supervisor.tick();
+            } else {
+                assert(result.pid == child.id);
+
+                const status = stdx.term_from_status(result.status);
+                if (std.meta.eql(status, .{ .Exited = 0 })) {
+                    break;
+                } else {
+                    log.err("{}: reformat failed: {}", .{ replica_index, status });
+                    return error.ReformatFailed;
+                }
+            }
+        } else {
+            log.err("{}: reformat did not complete within {} ticks", .{ replica_index, ticks_max });
+            return error.ReformatFailed;
+        }
+    }
+
     pub fn replica_start(supervisor: *Supervisor, replica_index: u8) !void {
         log.info("{}: starting replica", .{replica_index});
 
@@ -560,15 +613,12 @@ pub const Supervisor = struct {
         assert(replica.state() == .terminated);
         defer assert(replica.state() == .running);
 
-        const replica_addresses = try comma_separate_ports(
-            supervisor.allocator,
-            replica.replica_ports[0..supervisor.options.replica_count],
-        );
-        defer supervisor.allocator.free(replica_addresses);
-
         var addresses_buffer: [128]u8 = undefined;
-        const addresses_arg =
-            try std.fmt.bufPrint(addresses_buffer[0..], "--addresses={s}", .{replica_addresses});
+        const addresses_arg = try std.fmt.bufPrint(
+            addresses_buffer[0..],
+            "--addresses={s}",
+            .{supervisor.replicas[replica_index].addresses},
+        );
 
         var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
         argv.push_slice(&.{ replica.executable_target, "start" });
@@ -729,6 +779,7 @@ const Replica = struct {
     replica_count: u8,
     replica_index: u8,
     replica_ports: [constants.vsr.replicas_max]u16,
+    addresses: []const u8,
     process: ?*LoggedProcess,
 
     pub fn create(
@@ -741,6 +792,9 @@ const Replica = struct {
         assert(replica_index < replica_count);
         assert(std.fs.path.isAbsolute(executable_target));
 
+        const addresses = try comma_separate_ports(allocator, replica_ports[0..replica_count]);
+        errdefer allocator.free(addresses);
+
         const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
 
@@ -751,6 +805,7 @@ const Replica = struct {
             .replica_count = replica_count,
             .replica_index = replica_index,
             .replica_ports = replica_ports,
+            .addresses = addresses,
             .process = null,
         };
         return self;
@@ -762,6 +817,7 @@ const Replica = struct {
         if (self.process) |process| {
             process.destroy(allocator);
         }
+        allocator.free(self.addresses);
         allocator.destroy(self);
     }
 
