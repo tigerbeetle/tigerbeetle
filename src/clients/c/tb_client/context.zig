@@ -240,12 +240,13 @@ pub const InitError = std.mem.Allocator.Error || error{
     NetworkSubsystemFailed,
 };
 
-/// Implements a `ClientInterface` with specialized `vsr.Client` and `StateMachine` types.
-pub fn ContextType(
+/// Provides an I/O event loop thread to back the ClientInterface,
+/// generic over the internal vsr Client.
+pub fn IoThreadType(
     comptime Client_: type,
 ) type {
     return struct {
-        const Context = @This();
+        const IoThread = @This();
         const Client = Client_;
         const GPA = std.heap.GeneralPurposeAllocator(.{
             .thread_safe = true,
@@ -265,7 +266,7 @@ pub fn ContextType(
         };
 
         const UserData = extern struct {
-            self: *Context,
+            self: *IoThread,
             packet: *Packet,
 
             comptime {
@@ -274,16 +275,16 @@ pub fn ContextType(
         };
 
         /// Heap-allocated container for the VSR client and message pool.
-        /// Decouples client storage from Context layout, allowing @fieldParentPtr
-        /// in the eviction callback to recover *Context via the backref pointer
-        /// instead of requiring client to be embedded directly in Context.
+        /// Decouples client storage from IoThread layout, allowing @fieldParentPtr
+        /// in the eviction callback to recover *IoThread via the backref pointer
+        /// instead of requiring client to be embedded directly in IoThread.
         const ClientState = struct {
             message_pool: MessagePool,
             client: Client,
-            context: *Context,
+            context: *IoThread,
         };
 
-        const Phase = PhaseType(Context);
+        const Phase = PhaseType(IoThread);
 
         const PacketError = error{
             TooMuchData,
@@ -316,7 +317,7 @@ pub fn ContextType(
             completion_ctx: usize,
             completion_callback: CompletionCallback,
         ) InitError!void {
-            var context: *Context = context: {
+            var context: *IoThread = context: {
                 // Wrap the root allocator - usually heap.c_allocator when built as a library - in
                 // a GPA to keep maximum compatibility while gaining the extra safety. As a library,
                 // libtbclient is running inside another process's address space.
@@ -325,7 +326,7 @@ pub fn ContextType(
                 };
                 errdefer assert(gpa.deinit() == .ok);
 
-                const context = try gpa.allocator().create(Context);
+                const context = try gpa.allocator().create(IoThread);
 
                 // Moving the GPA is safe, since we don't have any live reference to `allocator`.
                 context.gpa = gpa;
@@ -446,7 +447,7 @@ pub fn ContextType(
             } };
 
             log.debug("{}: init: initializing signal", .{context.shared.client_id});
-            try context.shared.signal.init(&context.io, Context.callback_signal_notify);
+            try context.shared.signal.init(&context.io, IoThread.callback_signal_notify);
             errdefer context.shared.signal.deinit();
 
             client_state.client.register(callback_client_register, @intFromPtr(context));
@@ -454,7 +455,7 @@ pub fn ContextType(
             log.debug("{}: init: spawning thread", .{context.shared.client_id});
             context.shared.thread = std.Thread.spawn(
                 .{ .stack_size = io_thread_stack_size },
-                Context.io_thread,
+                IoThread.io_thread,
                 .{context},
             ) catch |err| {
                 log.err("{}: failed to spawn thread: {s}", .{
@@ -479,7 +480,7 @@ pub fn ContextType(
 
         const has_message_bus = @hasField(Client, "message_bus");
 
-        fn io_thread(self: *Context) void {
+        fn io_thread(self: *IoThread) void {
             // Initializing the flag as the IO thread.
             assert(thread_caller == .user);
             thread_caller = .{ .io = std.Thread.getCurrentId() };
@@ -602,7 +603,7 @@ pub fn ContextType(
             self.shared.signal.deinit();
             self.io.deinit();
 
-            // Copy GPA to the stack before freeing the Context that contains it,
+            // Copy GPA to the stack before freeing the IoThread that contains it,
             // since the allocator holds a pointer back to the GPA.
             var gpa = self.gpa;
             const allocator = gpa.allocator();
@@ -613,7 +614,7 @@ pub fn ContextType(
 
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
-        fn packet_cancel(self: *Context, packet_list: *Packet) void {
+        fn packet_cancel(self: *IoThread, packet_list: *Packet) void {
             assert(thread_caller == .io);
             assert(packet_list.link.next == null);
             assert(packet_list.phase != .complete);
@@ -639,7 +640,7 @@ pub fn ContextType(
 
         /// Drain and cancel all submitted packets. Safe to call in any phase
         /// since it does not access the client.
-        fn cancel_submitted_packets(self: *Context) void {
+        fn cancel_submitted_packets(self: *IoThread) void {
             while (true) {
                 const packet: *Packet = pop: {
                     self.interface.locker.lock();
@@ -656,7 +657,7 @@ pub fn ContextType(
             assert(thread_caller == .io);
 
             const shared: *Shared = @alignCast(@fieldParentPtr("signal", signal));
-            const self: *Context = @fieldParentPtr("shared", shared);
+            const self: *IoThread = @fieldParentPtr("shared", shared);
             assert(shared.signal.status() != .shutdown_completed);
 
             self.io.yield();
@@ -665,7 +666,7 @@ pub fn ContextType(
         fn callback_client_register(user_data: u128, result: *const vsr.RegisterResult) void {
             assert(thread_caller == .io);
 
-            const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            const self: *IoThread = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.eviction_reason == null);
             assert(result.batch_size_limit > 0);
 
@@ -690,7 +691,7 @@ pub fn ContextType(
             assert(thread_caller == .io);
 
             const cs: *ClientState = @fieldParentPtr("client", client);
-            const self: *Context = cs.context;
+            const self: *IoThread = cs.context;
             assert(self.phase == .registering or self.phase == .running);
             assert(self.eviction_reason == null);
 
@@ -725,7 +726,7 @@ pub fn ContextType(
             assert(thread_caller == .io);
 
             const user_data: UserData = @bitCast(raw_user_data);
-            const self: *Context = user_data.self;
+            const self: *IoThread = user_data.self;
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.Operation);
             assert(self.phase == .running);
@@ -793,7 +794,7 @@ pub fn ContextType(
         }
 
         fn notify_completion(
-            self: *Context,
+            self: *IoThread,
             packet: *Packet,
             completion: PacketError!struct {
                 timestamp: u64,
@@ -840,11 +841,11 @@ pub fn ContextType(
     };
 }
 
-/// The IO thread phase state machine, parameterized by the Context type.
-/// Extracted from ContextType for readability.
-fn PhaseType(comptime Context: type) type {
-    const Client = Context.Client;
-    const Operation = Context.Operation;
+/// The IO thread phase state machine, parameterized by the IoThread type.
+/// Extracted from IoThreadType for readability.
+fn PhaseType(comptime IoThread: type) type {
+    const Client = IoThread.Client;
+    const Operation = IoThread.Operation;
     const has_message_bus = @hasField(Client, "message_bus");
 
     return union(enum) {
@@ -854,7 +855,7 @@ fn PhaseType(comptime Context: type) type {
         settled: void,
 
         fn operation_from_int(op: u8) ?Operation {
-            inline for (Context.allowed_operations) |operation| {
+            inline for (IoThread.allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {
                     return operation;
                 }
@@ -865,7 +866,7 @@ fn PhaseType(comptime Context: type) type {
         /// State for the registering phase, before the client has completed
         /// registration with the cluster.
         const Registering = struct {
-            client_state: *Context.ClientState,
+            client_state: *IoThread.ClientState,
             batch_size_limit: ?u32,
             pending: Packet.Queue,
         };
@@ -873,7 +874,7 @@ fn PhaseType(comptime Context: type) type {
         /// State and methods for the running phase,
         /// when the client is available for sending requests.
         const Running = struct {
-            client_state: *Context.ClientState,
+            client_state: *IoThread.ClientState,
             batch_size_limit: u32,
             pending: Packet.Queue,
             previous_request_instant: ?stdx.Instant,
@@ -881,19 +882,19 @@ fn PhaseType(comptime Context: type) type {
 
             /// Cancel the current inflight request (and the entire batched
             /// linked list of packets), as it won't be replied anymore.
-            fn cancel_request_inflight(self: *Running, ctx: *Context) void {
+            fn cancel_request_inflight(self: *Running, ctx: *IoThread) void {
                 assert(thread_caller == .io);
                 if (self.client_state.client.request_inflight) |*inflight| {
                     if (inflight.message.header.operation != .register) {
-                        const user_data: Context.UserData = @bitCast(inflight.user_data);
-                        const packet: *Packet = user_data.packet;
+                        const ud: IoThread.UserData = @bitCast(inflight.user_data);
+                        const packet: *Packet = ud.packet;
                         packet.assert_phase(.sent);
                         ctx.packet_cancel(packet);
                     }
                 }
             }
 
-            fn packet_enqueue(self: *Running, ctx: *Context, packet: *Packet) void {
+            fn packet_enqueue(self: *Running, ctx: *IoThread, packet: *Packet) void {
                 assert(thread_caller == .io);
                 packet.assert_phase(.submitted);
 
@@ -1019,7 +1020,7 @@ fn PhaseType(comptime Context: type) type {
             }
 
             /// Sends the packet (the entire batched linked list of packets) through the vsr client.
-            fn packet_send(self: *Running, ctx: *Context, packet_list: *Packet) void {
+            fn packet_send(self: *Running, ctx: *IoThread, packet_list: *Packet) void {
                 assert(thread_caller == .io);
                 assert(ctx.eviction_reason == null);
                 packet_list.assert_phase(.pending);
@@ -1118,8 +1119,8 @@ fn PhaseType(comptime Context: type) type {
 
                 packet_list.phase = .sent;
                 self.client_state.client.raw_request(
-                    Context.callback_client_result,
-                    @bitCast(Context.UserData{
+                    IoThread.callback_client_result,
+                    @bitCast(IoThread.UserData{
                         .self = ctx,
                         .packet = packet_list,
                     }),
@@ -1128,7 +1129,7 @@ fn PhaseType(comptime Context: type) type {
                 assert(message.header.request != 0);
             }
 
-            fn drain_submitted_packets(self: *Running, ctx: *Context) void {
+            fn drain_submitted_packets(self: *Running, ctx: *IoThread) void {
                 assert(thread_caller == .io);
                 assert(ctx.eviction_reason == null);
 
@@ -1168,7 +1169,7 @@ fn PhaseType(comptime Context: type) type {
         /// State and methods for the disconnecting phase,
         /// when the client is alive but shutting down connections.
         const Disconnecting = struct {
-            client_state: *Context.ClientState,
+            client_state: *IoThread.ClientState,
 
             /// Returns true when all client IO operations have completed and
             /// it is safe to free the client's resources.
