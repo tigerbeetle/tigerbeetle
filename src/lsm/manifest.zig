@@ -526,7 +526,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 manifest_level_b,
                 snapshot_latest,
                 growth_factor,
-            ) orelse return null;
+            );
             assert(least_overlap_table.range.tables.count() <= growth_factor);
 
             const compaction_table_range = CompactionTableRange{
