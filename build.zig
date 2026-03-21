@@ -268,7 +268,6 @@ pub fn build(b: *std.Build) !void {
         .vsr_module_test = vsr_module_test,
         .vsr_options_test = vsr_options_test,
         .tigerbeetle_test = tigerbeetle_test,
-        .tigerbeetle_test_previous = tigerbeetle_test_previous,
         .vortex_options = vortex_options,
     });
 
@@ -846,7 +845,6 @@ fn build_test(
         vsr_module_test: *std.Build.Module,
         vsr_options_test: *std.Build.Step.Options,
         tigerbeetle_test: std.Build.LazyPath,
-        tigerbeetle_test_previous: std.Build.LazyPath,
         vortex_options: *std.Build.Step.Options,
     },
 ) !void {
@@ -910,7 +908,6 @@ fn build_test(
         .vsr_module_test = options.vsr_module_test,
         .vsr_options_test = options.vsr_options_test,
         .tigerbeetle_test = options.tigerbeetle_test,
-        .tigerbeetle_test_previous = options.tigerbeetle_test_previous,
         .vortex_options = options.vortex_options,
     });
 
@@ -940,7 +937,6 @@ fn build_test_integration(
         vsr_module_test: *std.Build.Module,
         vsr_options_test: *std.Build.Step.Options,
         tigerbeetle_test: std.Build.LazyPath,
-        tigerbeetle_test_previous: std.Build.LazyPath,
         vortex_options: *std.Build.Step.Options,
     },
 ) void {
@@ -956,10 +952,6 @@ fn build_test_integration(
 
     const integration_tests_options = b.addOptions();
     integration_tests_options.addOptionPath("tigerbeetle_exe", options.tigerbeetle_test);
-    integration_tests_options.addOptionPath(
-        "tigerbeetle_exe_past",
-        options.tigerbeetle_test_previous,
-    );
     integration_tests_options.addOptionPath("vortex_exe", vortex_artifact.emitted_bin.?);
     const integration_tests = b.addTest(.{
         .name = "test-integration",
