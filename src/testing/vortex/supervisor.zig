@@ -54,6 +54,7 @@ const dependencies_path: []const u8 = @import("vortex_options").dependencies_pat
 const dependencies_count: u32 = @import("vortex_options").dependencies_count;
 
 /// Executables are ordered from oldest to newest.
+/// All paths are absolute.
 fn configuration() struct {
     server_executables: [dependencies_count][]const u8,
     driver_executables: [dependencies_count][]const u8,
@@ -79,6 +80,9 @@ fn configuration() struct {
         }
         break :array executables;
     };
+
+    for (server_executables) |path| assert(std.fs.path.isAbsolute(path));
+    for (driver_executables) |path| assert(std.fs.path.isAbsolute(path));
     return .{
         .server_executables = server_executables,
         .driver_executables = driver_executables,
@@ -118,9 +122,6 @@ pub const Supervisor = struct {
     pub fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
         const dependencies = configuration();
         assert(dependencies.server_executables.len == dependencies.driver_executables.len);
-        for (dependencies.server_executables) |path| assert(std.fs.path.isAbsolute(path));
-        for (dependencies.driver_executables) |path| assert(std.fs.path.isAbsolute(path));
-
         assert(options.replica_count > 0);
 
         const shell = try Shell.create(allocator);
@@ -745,7 +746,7 @@ const Workload = struct {
         timestamp_end_micros: u64,
     };
 
-    const Requests = RingBufferType(RequestInfo, .{ .array = 1024 * 16 });
+    const RequestsFinished = RingBufferType(RequestInfo, .slice);
 
     io: *IO,
     model: Model,
@@ -759,15 +760,15 @@ const Workload = struct {
 
     command: ?Command = null,
     request_buffer: []u8,
-    request_written: ?u32 = null,
     request_size: ?u32 = null,
+    request_written: ?u32 = null,
     request_start: ?stdx.InstantUnix = null,
     reply_buffer: []u8,
 
     completion: IO.Completion = undefined,
     read_progress: usize = 0,
 
-    requests_finished: Requests = Requests.init(),
+    requests_finished: RequestsFinished,
     requests_finished_count: std.enums.EnumMap(Command, u32) = .initFull(0),
 
     pub fn create(
@@ -803,6 +804,9 @@ const Workload = struct {
         const reply_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(reply_buffer);
 
+        var requests_finished = try RequestsFinished.init(allocator, 1024 * 16);
+        errdefer requests_finished.deinit(allocator);
+
         const workload = try allocator.create(Workload);
         errdefer allocator.destroy(workload);
 
@@ -813,6 +817,7 @@ const Workload = struct {
             .driver = driver,
             .request_buffer = request_buffer,
             .reply_buffer = reply_buffer,
+            .requests_finished = requests_finished,
         };
         return workload;
     }
@@ -825,6 +830,7 @@ const Workload = struct {
             fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
         }
 
+        workload.requests_finished.deinit(allocator);
         allocator.free(workload.reply_buffer);
         allocator.free(workload.request_buffer);
         workload.model.deinit(allocator);
@@ -900,6 +906,7 @@ const Workload = struct {
         assert(&workload.completion == completion);
         assert(workload.command != null);
         assert(workload.read_progress == 0);
+        assert(workload.request_written.? < workload.request_size.?);
 
         const bytes_written = result catch |err| {
             fatal(.driver_request_error, "error sending to driver: {}", .{err});

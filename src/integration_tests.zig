@@ -463,7 +463,7 @@ test "recover smoke" {
         try supervisor.replica_start(@intCast(replica_index));
     }
     try supervisor.workload_start(.{ .release = release_current }, .{ .transfer_count = 200_000 });
-    for (0..(2_000 / 10)) |_| try supervisor.tick();
+    for (0..200) |_| try supervisor.tick();
 
     try supervisor.replica_terminate(2);
     try supervisor.replica_reformat(2);
