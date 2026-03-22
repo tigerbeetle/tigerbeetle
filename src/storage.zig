@@ -5,7 +5,6 @@ const log = std.log.scoped(.storage);
 
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
-const QueueType = vsr.queue.QueueType;
 const constants = vsr.constants;
 const Tracer = vsr.trace.Tracer;
 
@@ -86,24 +85,14 @@ pub fn StorageType(comptime IO: type) type {
             start: ?stdx.Instant,
         };
 
-        pub const NextTick = struct {
-            link: QueueType(NextTick).Link = .{},
-            source: NextTickSource,
-            callback: *const fn (next_tick: *NextTick) void,
-        };
+        pub const NextTick = IO.Completion;
 
-        pub const NextTickSource = enum { lsm, vsr };
+        pub const NextTickSource = IO.NextTickSource;
 
         io: *IO,
         tracer: *Tracer,
         dir_fd: IO.fd_t,
         fd: IO.fd_t,
-
-        next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
-            .name = "storage_next_tick",
-        }),
-        next_tick_completion_scheduled: bool = false,
-        next_tick_completion: IO.Completion = undefined,
 
         pub fn init(io: *IO, tracer: *Tracer, options: struct {
             path: []const u8,
@@ -137,7 +126,6 @@ pub fn StorageType(comptime IO: type) type {
         }
 
         pub fn deinit(storage: *Storage) void {
-            assert(storage.next_tick_queue.empty());
             assert(storage.fd != IO.INVALID_FILE);
             assert(storage.dir_fd != IO.INVALID_FILE);
 
@@ -158,58 +146,33 @@ pub fn StorageType(comptime IO: type) type {
         pub fn on_next_tick(
             storage: *Storage,
             source: NextTickSource,
-            callback: *const fn (next_tick: *Storage.NextTick) void,
+            callback: *const fn (*Storage.NextTick) void,
             next_tick: *Storage.NextTick,
         ) void {
-            next_tick.* = .{
-                .source = source,
-                .callback = callback,
-            };
-
-            storage.next_tick_queue.push(next_tick);
-
-            if (!storage.next_tick_completion_scheduled) {
-                storage.next_tick_completion_scheduled = true;
-                storage.io.timeout(
-                    *Storage,
-                    storage,
-                    timeout_callback,
-                    &storage.next_tick_completion,
-                    0, // 0ns timeout means to resolve as soon as possible - like a yield
-                );
-            }
+            // Do a bit of pointer trickery to keep the grid on_next_tick interface the same for
+            // now.
+            storage.io.next_tick(
+                ?*anyopaque,
+                @ptrCast(@constCast(callback)),
+                struct {
+                    fn adapter(
+                        ctx: ?*anyopaque,
+                        completion: *IO.Completion,
+                        _: IO.NextTickResult,
+                    ) void {
+                        const callback_original: *const fn (*NextTick) void = @ptrCast(
+                            @alignCast(ctx.?),
+                        );
+                        callback_original(completion);
+                    }
+                }.adapter,
+                next_tick,
+                source,
+            );
         }
 
         pub fn reset_next_tick_lsm(storage: *Storage) void {
-            var next_tick_iterator = storage.next_tick_queue;
-            storage.next_tick_queue.reset();
-
-            while (next_tick_iterator.pop()) |next_tick| {
-                if (next_tick.source != .lsm) storage.next_tick_queue.push(next_tick);
-            }
-        }
-
-        fn timeout_callback(
-            storage: *Storage,
-            completion: *IO.Completion,
-            result: IO.TimeoutError!void,
-        ) void {
-            assert(completion == &storage.next_tick_completion);
-            _ = result catch |e| switch (e) {
-                error.Canceled => unreachable,
-                error.Unexpected => unreachable,
-            };
-
-            // Reset the scheduled flag after processing all tick entries
-            assert(storage.next_tick_completion_scheduled);
-            defer {
-                assert(storage.next_tick_completion_scheduled);
-                storage.next_tick_completion_scheduled = false;
-            }
-
-            while (storage.next_tick_queue.pop()) |next_tick| {
-                next_tick.callback(next_tick);
-            }
+            storage.io.reset_next_tick(.lsm);
         }
 
         pub fn read_sectors(

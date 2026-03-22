@@ -161,14 +161,17 @@ pub const Stats = struct {
     const Timings = struct {
         time_callbacks: stdx.Duration = .ms(0),
         time_run_for_ns: stdx.Duration = .ms(0),
+        time_kernel: stdx.Duration = .ms(0),
 
         pub fn time_since(now: Timings, earlier: Timings) Timings {
             assert(now.time_callbacks.ns >= earlier.time_callbacks.ns);
             assert(now.time_run_for_ns.ns >= earlier.time_run_for_ns.ns);
+            assert(now.time_kernel.ns >= earlier.time_kernel.ns);
 
             return .{
                 .time_callbacks = now.time_callbacks.subtract(earlier.time_callbacks),
                 .time_run_for_ns = now.time_run_for_ns.subtract(earlier.time_run_for_ns),
+                .time_kernel = now.time_kernel.subtract(earlier.time_kernel),
             };
         }
     };
@@ -177,6 +180,8 @@ pub const Stats = struct {
     earlier: Timings = .{},
     tracer: ?*Tracer = null,
 
+    syscalls: u64 = 0,
+
     pub fn trace(stats: *Stats) void {
         if (stats.tracer) |tracer| {
             const timings_delta = stats.now.time_since(stats.earlier);
@@ -184,6 +189,8 @@ pub const Stats = struct {
 
             tracer.timing(.loop_run_for_ns, timings_delta.time_run_for_ns);
             tracer.timing(.loop_callbacks, timings_delta.time_callbacks);
+            tracer.timing(.loop_kernel, timings_delta.time_kernel);
+            tracer.gauge(.loop_syscalls, stats.syscalls);
         }
     }
 };
