@@ -348,12 +348,14 @@ TOCTOUs
 toolchain
 Tornow
 tprt
+triaged
 Troosh
 Tunables
 Uber
 ULIDs
 ulimits
 ulong
+unactionable
 untriaged
 untrusted
 upgradability
