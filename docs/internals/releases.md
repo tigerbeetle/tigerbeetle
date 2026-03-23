@@ -82,14 +82,19 @@ The motivation for specific steps follows after.
 1. On Monday (different release manager!) check that there are no VOPR failures on the release
    branch.
 
-2. Trigger the release workflow via
+2. If there are any untriaged issues on DevHub, triage them:
+   - if possible, address the issue immediately,
+   - otherwise, if it is unactionable, close with a comment or apply triaged label,
+   - otherwise, redirect the issue towards someone who can triage it.
+
+3. Trigger the release workflow via
    [GitHub web interface](https://github.com/tigerbeetle/tigerbeetle/actions/workflows/release.yml).
    Be sure to trigger workflow from the `release` branch, otherwise the release will fail due to
    permissions.
 
-3. Ask someone else to approve the GitHub workflow.
+4. Ask someone else to approve the GitHub workflow.
 
-4. Add the new release sketch to the corresponding release page on
+5. Add the new release sketch to the corresponding release page on
     <https://github.com/tigerbeetle/tigerbeetle/releases>.
 
 ### Error Handling
@@ -239,6 +244,6 @@ answer is to skip. Skipping is cheap!
 If the release is skipped, the changelog is still written and merged on Monday, using the following
 header: `## TigerBeetle (unreleased)`.
 
-For the next release, you should (1) manually set the next valid version number and (2) merge all 
-previously unreleased changes into a single, versioned changelog entry to inform users 
+For the next release, you should (1) manually set the next valid version number and (2) merge all
+previously unreleased changes into a single, versioned changelog entry to inform users
 who are upgrading.
