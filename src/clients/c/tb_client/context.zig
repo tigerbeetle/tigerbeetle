@@ -494,17 +494,13 @@ pub fn IoThreadType(
                     // batch_size_limit, then transition to running.
                     .registering => |*reg| {
                         if (self.eviction_reason != null or should_stop) {
-                            while (reg.pending.pop()) |packet| {
-                                packet.assert_phase(.pending);
-                                self.packet_cancel(packet);
-                            }
-
                             if (has_message_bus) {
                                 reg.client_state.client.message_bus.shutdown();
                             }
 
                             self.phase = .{ .disconnecting = .{
                                 .client_state = reg.client_state,
+                                .pending = reg.pending,
                             } };
                             continue :main;
                         }
@@ -531,19 +527,13 @@ pub fn IoThreadType(
                     // completions to land on.
                     .running => |*running| {
                         if (self.eviction_reason != null or should_stop) {
-                            running.cancel_request_inflight(self);
-
-                            while (running.pending.pop()) |packet| {
-                                packet.assert_phase(.pending);
-                                self.packet_cancel(packet);
-                            }
-
                             if (has_message_bus) {
                                 running.client_state.client.message_bus.shutdown();
                             }
 
                             self.phase = .{ .disconnecting = .{
                                 .client_state = running.client_state,
+                                .pending = running.pending,
                             } };
                             continue :main;
                         }
@@ -553,11 +543,24 @@ pub fn IoThreadType(
                         running.drain_submitted_packets(self);
                     },
 
+                    // All cancellation happens here. On entry, the pending
+                    // queue is transferred from registering/running, and the
+                    // inflight request (if any) needs cancellation on
+                    // shutdown. On eviction, the inflight was already
+                    // canceled in callback_client_eviction.
+                    //
                     // Once all connections have fully terminated (no pending
                     // IO on any Connection memory), it is safe to deinit the
                     // client which frees the message_bus's connections array.
                     .disconnecting => |*disconnecting| {
-                        self.cancel_submitted_packets();
+                        disconnecting.cancel_inflight(self);
+
+                        while (disconnecting.pending.pop()) |packet| {
+                            packet.assert_phase(.pending);
+                            disconnecting.packet_cancel(self, packet);
+                        }
+
+                        disconnecting.cancel_submitted(self);
 
                         if (disconnecting.client_io_settled()) {
                             const allocator = self.gpa.allocator();
@@ -575,8 +578,6 @@ pub fn IoThreadType(
                     // was already nulled), so no stop signal will arrive from the
                     // user thread. Send it ourselves.
                     .settled => {
-                        self.cancel_submitted_packets();
-
                         if (self.eviction_reason != null) {
                             self.shared.signal.stop();
                         }
@@ -595,11 +596,6 @@ pub fn IoThreadType(
             }
 
             assert(self.phase == .settled);
-
-            // Drain any remaining submitted packets, still under the lock
-            // as this thread may not have been the last to take it.
-            self.cancel_submitted_packets();
-
             self.shared.signal.deinit();
             self.io.deinit();
 
@@ -610,47 +606,6 @@ pub fn IoThreadType(
             allocator.free(self.shared.addresses_owned);
             allocator.destroy(self);
             _ = gpa.deinit();
-        }
-
-        /// Calls the user callback when a packet (the entire batched linked list of packets)
-        /// is canceled due to the client being either evicted or shutdown.
-        fn packet_cancel(self: *IoThread, packet_list: *Packet) void {
-            assert(thread_caller == .io);
-            assert(packet_list.link.next == null);
-            assert(packet_list.phase != .complete);
-            packet_list.assert_phase(packet_list.phase);
-
-            const result = if (self.eviction_reason) |reason| switch (reason) {
-                .reserved => unreachable,
-                .client_release_too_low => error.ClientReleaseTooLow,
-                .client_release_too_high => error.ClientReleaseTooHigh,
-                else => error.ClientEvicted,
-            } else result: {
-                assert(self.shared.signal.status() != .running);
-                break :result error.ClientShutdown;
-            };
-
-            var it: ?*Packet = packet_list;
-            while (it) |batched| {
-                if (batched != packet_list) batched.assert_phase(.batched);
-                it = batched.multi_batch_next;
-                self.notify_completion(batched, result);
-            }
-        }
-
-        /// Drain and cancel all submitted packets. Safe to call in any phase
-        /// since it does not access the client.
-        fn cancel_submitted_packets(self: *IoThread) void {
-            while (true) {
-                const packet: *Packet = pop: {
-                    self.interface.locker.lock();
-                    defer self.interface.locker.unlock();
-
-                    break :pop self.shared.submitted.pop() orelse break;
-                };
-                packet.assert_phase(.submitted);
-                self.packet_cancel(packet);
-            }
         }
 
         fn callback_signal_notify(signal: *Signal) void {
@@ -710,7 +665,7 @@ pub fn IoThreadType(
             self.interface.context = .{ .ptr = null };
 
             // Set the eviction reason. The io_thread main loop will detect
-            // this and initiate graceful disconnection: cancel all inflight
+            // this and initiate graceful disconnection: cancel the inflight
             // and pending packets, terminate connections, and deinit the
             // client once all connection IO has settled.
             self.eviction_reason = eviction.header.reason;
@@ -879,20 +834,6 @@ fn PhaseType(comptime IoThread: type) type {
             pending: Packet.Queue,
             previous_request_instant: ?stdx.Instant,
             previous_request_latency: ?stdx.Duration,
-
-            /// Cancel the current inflight request (and the entire batched
-            /// linked list of packets), as it won't be replied anymore.
-            fn cancel_request_inflight(self: *Running, ctx: *IoThread) void {
-                assert(thread_caller == .io);
-                if (self.client_state.client.request_inflight) |*inflight| {
-                    if (inflight.message.header.operation != .register) {
-                        const ud: IoThread.UserData = @bitCast(inflight.user_data);
-                        const packet: *Packet = ud.packet;
-                        packet.assert_phase(.sent);
-                        ctx.packet_cancel(packet);
-                    }
-                }
-            }
 
             fn packet_enqueue(self: *Running, ctx: *IoThread, packet: *Packet) void {
                 assert(thread_caller == .io);
@@ -1168,8 +1109,71 @@ fn PhaseType(comptime IoThread: type) type {
 
         /// State and methods for the disconnecting phase,
         /// when the client is alive but shutting down connections.
+        /// All packet cancellation is consolidated here.
         const Disconnecting = struct {
             client_state: *IoThread.ClientState,
+            pending: Packet.Queue,
+            inflight_canceled: bool = false,
+
+            /// Calls the user callback when a packet (the entire batched
+            /// linked list of packets) is canceled due to eviction or shutdown.
+            fn packet_cancel(_: *const Disconnecting, ctx: *IoThread, packet_list: *Packet) void {
+                assert(thread_caller == .io);
+                assert(packet_list.link.next == null);
+                assert(packet_list.phase != .complete);
+                packet_list.assert_phase(packet_list.phase);
+
+                const result = if (ctx.eviction_reason) |reason| switch (reason) {
+                    .reserved => unreachable,
+                    .client_release_too_low => error.ClientReleaseTooLow,
+                    .client_release_too_high => error.ClientReleaseTooHigh,
+                    else => error.ClientEvicted,
+                } else result: {
+                    assert(ctx.shared.signal.status() != .running);
+                    break :result error.ClientShutdown;
+                };
+
+                var it: ?*Packet = packet_list;
+                while (it) |batched| {
+                    if (batched != packet_list) batched.assert_phase(.batched);
+                    it = batched.multi_batch_next;
+                    ctx.notify_completion(batched, result);
+                }
+            }
+
+            /// Cancel the inflight user packet. The VSR client does not
+            /// call the result callback after eviction or after
+            /// connections are shut down, so the packet must be canceled
+            /// here. Skips .register operations (no user packet).
+            /// Must only run once: after cancellation the packet is
+            /// returned to the user and the memory may be freed.
+            fn cancel_inflight(self: *Disconnecting, ctx: *IoThread) void {
+                assert(thread_caller == .io);
+                if (self.inflight_canceled) return;
+                self.inflight_canceled = true;
+
+                const inflight = &(self.client_state.client.request_inflight orelse return);
+                if (inflight.message.header.operation == .register) return;
+
+                const ud: IoThread.UserData = @bitCast(inflight.user_data);
+                const packet: *Packet = ud.packet;
+                packet.assert_phase(.sent);
+                self.packet_cancel(ctx, packet);
+            }
+
+            /// Drain and cancel all submitted packets.
+            fn cancel_submitted(self: *Disconnecting, ctx: *IoThread) void {
+                while (true) {
+                    const packet: *Packet = pop: {
+                        ctx.interface.locker.lock();
+                        defer ctx.interface.locker.unlock();
+
+                        break :pop ctx.shared.submitted.pop() orelse break;
+                    };
+                    packet.assert_phase(.submitted);
+                    self.packet_cancel(ctx, packet);
+                }
+            }
 
             /// Returns true when all client IO operations have completed and
             /// it is safe to free the client's resources.
