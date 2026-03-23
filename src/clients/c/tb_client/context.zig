@@ -298,7 +298,6 @@ pub fn IoThreadType(
         };
 
         gpa: GPA,
-        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
 
         completion_callback: CompletionCallback,
@@ -349,10 +348,13 @@ pub fn IoThreadType(
                 context.shared.client_id,
                 addresses,
             });
-            context.addresses = .{};
+            var parsed_addresses: stdx.BoundedArrayType(
+                std.net.Address,
+                constants.replicas_max,
+            ) = .{};
             const addresses_parsed = vsr.parse_addresses(
                 addresses,
-                context.addresses.unused_capacity_slice(),
+                parsed_addresses.unused_capacity_slice(),
             ) catch |err| return switch (err) {
                 error.AddressLimitExceeded => error.AddressLimitExceeded,
                 error.AddressHasMoreThanOneColon,
@@ -364,7 +366,7 @@ pub fn IoThreadType(
             };
             assert(addresses_parsed.len > 0);
             assert(addresses_parsed.len <= constants.replicas_max);
-            context.addresses.resize(addresses_parsed.len) catch unreachable;
+            parsed_addresses.resize(addresses_parsed.len) catch unreachable;
 
             log.debug("{}: init: initializing IO", .{context.shared.client_id});
             context.io = IO.init(32, 0) catch |err| {
@@ -392,7 +394,7 @@ pub fn IoThreadType(
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.shared.client_id,
                 cluster_id,
-                context.addresses.const_slice(),
+                parsed_addresses.const_slice(),
             });
             client_state.client = Client.init(
                 allocator,
@@ -401,10 +403,10 @@ pub fn IoThreadType(
                 .{
                     .id = context.shared.client_id,
                     .cluster = cluster_id,
-                    .replica_count = context.addresses.count_as(u8),
+                    .replica_count = parsed_addresses.count_as(u8),
                     .aof_recovery = false,
                     .message_bus_options = .{
-                        .configuration = context.addresses.const_slice(),
+                        .configuration = parsed_addresses.const_slice(),
                         .io = &context.io,
                         .trace = null,
                     },
