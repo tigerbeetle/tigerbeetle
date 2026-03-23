@@ -468,7 +468,14 @@ pub fn ContextType(
 
                     // Exit only after the vsr client has been deinited
                     // and we have received the stop signal from the client threads.
+                    // On eviction, deinit returns ClientInvalid (the context pointer
+                    // was already nulled), so no stop signal will arrive from the
+                    // user thread. Send it ourselves.
                     .settled => {
+                        if (self.eviction_reason != null) {
+                            self.signal.stop();
+                        }
+
                         if (should_stop) {
                             phase = .settled;
                             break :main;
