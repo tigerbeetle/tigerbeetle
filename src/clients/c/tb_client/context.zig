@@ -938,7 +938,7 @@ fn PhaseType(comptime IoThread: type) type {
                     break :batch .{
                         .event_size = event_size,
                         .result_size = result_size,
-                        .event_count = @intCast(@divExact(slice.len, event_size)),
+                        .event_count = event_count,
                         .result_count_expected = result_count_expected,
                     };
                 };
