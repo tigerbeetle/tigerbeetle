@@ -279,6 +279,7 @@ pub fn IoThreadType(
         /// in the eviction callback to recover *IoThread via the backref pointer
         /// instead of requiring client to be embedded directly in IoThread.
         const ClientState = struct {
+            time_os: TimeOS,
             message_pool: MessagePool,
             client: Client,
             context: *IoThread,
@@ -297,9 +298,7 @@ pub fn IoThreadType(
         };
 
         gpa: GPA,
-        time_os: TimeOS,
-
-        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max) = .{},
+        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
 
         completion_callback: CompletionCallback,
@@ -346,8 +345,6 @@ pub fn IoThreadType(
             context.shared.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.shared.addresses_owned);
 
-            const time = context.time_os.time();
-
             log.debug("{}: init: parsing vsr addresses: {s}", .{
                 context.shared.client_id,
                 addresses,
@@ -388,6 +385,7 @@ pub fn IoThreadType(
             errdefer allocator.destroy(client_state);
 
             client_state.context = context;
+            client_state.time_os = .{};
             client_state.message_pool = try MessagePool.init(allocator, .client);
             errdefer client_state.message_pool.deinit(allocator);
 
@@ -398,7 +396,7 @@ pub fn IoThreadType(
             });
             client_state.client = Client.init(
                 allocator,
-                time,
+                client_state.time_os.time(),
                 &client_state.message_pool,
                 .{
                     .id = context.shared.client_id,
