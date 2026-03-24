@@ -108,7 +108,7 @@ let account_results = client
         ledger: 1,
         code: 718,
         ..Default::default()
-    }])
+    }])?
     .await?;
 // Result handling omitted.
 ```
@@ -151,7 +151,7 @@ let account1 = tb::Account {
     ..Default::default()
 };
 
-let account_results = client.create_accounts(&[account0, account1]).await?;
+let account_results = client.create_accounts(&[account0, account1])?.await?;
 // Result handling omitted.
 ```
 
@@ -190,7 +190,7 @@ let account2 = tb::Account {
 };
 
 let account_results = client
-    .create_accounts(&[account0, account1, account2])
+    .create_accounts(&[account0, account1, account2])?
     .await?;
 
 assert!(account_results.len() == 3);
@@ -230,7 +230,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```rust
-let accounts = client.lookup_accounts(&[100, 101]).await?;
+let accounts = client.lookup_accounts(&[100, 101])?.await?;
 ```
 
 ## Create Transfers
@@ -251,7 +251,7 @@ let transfers = vec![tb::Transfer {
     ..Default::default()
 }];
 
-let transfer_results = client.create_transfers(&transfers).await?;
+let transfer_results = client.create_transfers(&transfers)?.await?;
 // Result handling omitted.
 ```
 
@@ -303,7 +303,7 @@ let transfers = vec![
     },
 ];
 
-let transfer_results = client.create_transfers(&transfers).await?;
+let transfer_results = client.create_transfers(&transfers)?.await?;
 assert!(transfer_results.len() == transfers.len());
 for (index, result) in transfer_results.into_iter().enumerate() {
     match result.status {
@@ -349,7 +349,7 @@ The maximum batch size is set in the TigerBeetle server. The default is 8189.
 let transfers: Vec<tb::Transfer> = vec![];
 const BATCH_SIZE: usize = 8189;
 for batch in transfers.chunks(BATCH_SIZE) {
-    let transfer_results = client.create_transfers(batch).await?;
+    let transfer_results = client.create_transfers(batch)?.await?;
     // Result handling omitted.
 }
 ```
@@ -401,7 +401,7 @@ let transfer1 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_results = client.create_transfers(&[transfer0, transfer1]).await?;
+let transfer_results = client.create_transfers(&[transfer0, transfer1])?.await?;
 // Result handling omitted.
 ```
 
@@ -432,7 +432,7 @@ let transfer0 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_results = client.create_transfers(&[transfer0]).await?;
+let transfer_results = client.create_transfers(&[transfer0])?.await?;
 // Result handling omitted.
 
 let transfer1 = tb::Transfer {
@@ -443,7 +443,7 @@ let transfer1 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_results = client.create_transfers(&[transfer1]).await?;
+let transfer_results = client.create_transfers(&[transfer1])?.await?;
 // Result handling omitted.
 ```
 
@@ -466,7 +466,7 @@ let transfer0 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_results = client.create_transfers(&[transfer0]).await?;
+let transfer_results = client.create_transfers(&[transfer0])?.await?;
 // Result handling omitted.
 
 let transfer1 = tb::Transfer {
@@ -477,7 +477,7 @@ let transfer1 = tb::Transfer {
     ..Default::default()
 };
 
-let transfer_results = client.create_transfers(&[transfer1]).await?;
+let transfer_results = client.create_transfers(&[transfer1])?.await?;
 // Result handling omitted.
 ```
 
@@ -496,7 +496,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```rust
-let transfers = client.lookup_transfers(&[1, 2]).await?;
+let transfers = client.lookup_transfers(&[1, 2])?.await?;
 ```
 
 ## Get Account Transfers
@@ -526,7 +526,7 @@ let filter = tb::AccountFilter {
         | tb::AccountFilterFlags::Reversed,
 };
 
-let transfers = client.get_account_transfers(filter).await?;
+let transfers = client.get_account_transfers(filter)?.await?;
 ```
 
 ## Get Account Balances
@@ -560,7 +560,7 @@ let filter = tb::AccountFilter {
         | tb::AccountFilterFlags::Reversed,
 };
 
-let account_balances = client.get_account_balances(filter).await?;
+let account_balances = client.get_account_balances(filter)?.await?;
 ```
 
 ## Query Accounts
@@ -587,7 +587,7 @@ let filter = tb::QueryFilter {
     flags: tb::QueryFilterFlags::Reversed,
 };
 
-let accounts = client.query_accounts(filter).await?;
+let accounts = client.query_accounts(filter)?.await?;
 ```
 
 ## Query Transfers
@@ -614,7 +614,7 @@ let filter = tb::QueryFilter {
     flags: tb::QueryFilterFlags::Reversed,
 };
 
-let transfers = client.query_transfers(filter).await?;
+let transfers = client.query_transfers(filter)?.await?;
 ```
 
 ## Linked Events
@@ -695,7 +695,7 @@ batch.push(tb::Transfer {
     ..Default::default()
 });
 
-let transfer_results = client.create_transfers(&batch).await?;
+let transfer_results = client.create_transfers(&batch)?.await?;
 // Result handling omitted.
 ```
 
@@ -734,7 +734,7 @@ for (index, mut account) in historical_accounts.into_iter().enumerate() {
     accounts_batch.push(account);
 }
 
-let account_results = client.create_accounts(&accounts_batch).await?;
+let account_results = client.create_accounts(&accounts_batch)?.await?;
 // Result handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
@@ -753,7 +753,7 @@ for (index, mut transfer) in historical_transfers.into_iter().enumerate() {
     transfers_batch.push(transfer);
 }
 
-let transfer_results = client.create_transfers(&transfers_batch).await?;
+let transfer_results = client.create_transfers(&transfers_batch)?.await?;
 // Result handling omitted.
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
