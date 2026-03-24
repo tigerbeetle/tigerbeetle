@@ -55,7 +55,7 @@ fn parse_enum_value(text: &str) -> u32 {
 
     // At this point expr should either be an uint or "uint << uint" for flags.
     if !expr.contains("<<") {
-        match expr.parse() {
+        match parse_dec_or_hex(expr) {
             Ok(val) => val,
             Err(_) => {
                 panic!("enum text '{text}' didn't parse as u32");
@@ -78,6 +78,14 @@ fn parse_enum_value(text: &str) -> u32 {
             .parse()
             .expect(&format!("enum arg1 in '{text}' didn't parse as u32"));
         arg1 << arg2
+    }
+}
+
+fn parse_dec_or_hex(s: &str) -> Result<u32, std::num::ParseIntError> {
+    if let Some(hex) = s.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+    } else {
+        s.parse()
     }
 }
 
@@ -122,20 +130,20 @@ fn round_trip_test<RustType, CType>(
 
 #[test]
 fn round_trip_create_account_result() {
-    round_trip_test::<tb::CreateAccountResult, u32>(
-        "TB_CREATE_ACCOUNT_RESULT",
+    round_trip_test::<tb::CreateAccountStatus, u32>(
+        "TB_CREATE_ACCOUNT_STATUS",
         &[],
-        |c_value| tb::CreateAccountResult::from(c_value),
+        |c_value| tb::CreateAccountStatus::from(c_value),
         |rust_value| u32::from(rust_value),
     );
 }
 
 #[test]
 fn round_trip_create_transfer_result() {
-    round_trip_test::<tb::CreateTransferResult, u32>(
-        "TB_CREATE_TRANSFER_RESULT",
+    round_trip_test::<tb::CreateTransferStatus, u32>(
+        "TB_CREATE_TRANSFER_STATUS",
         &[],
-        |c_value| tb::CreateTransferResult::from(c_value),
+        |c_value| tb::CreateTransferStatus::from(c_value),
         |rust_value| u32::from(rust_value),
     );
 }

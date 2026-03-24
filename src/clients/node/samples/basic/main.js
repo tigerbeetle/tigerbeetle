@@ -3,8 +3,8 @@ const process = require("process");
 
 const {
     createClient,
-    CreateAccountError,
-    CreateTransferError,
+    CreateAccountStatus,
+    CreateTransferStatus,
 } = require("tigerbeetle-node");
 
 const client = createClient({
@@ -13,7 +13,7 @@ const client = createClient({
 });
 
 async function main() {
-  let accountErrors = await client.createAccounts([
+  let accountResults = await client.createAccounts([
     {
       id: 1n,
       debits_pending: 0n,
@@ -45,12 +45,11 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  for (const error of accountErrors) {
-    console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
-  }
-  assert.strictEqual(accountErrors.length, 0);
+  assert.strictEqual(accountResults.length, 2);
+  assert.strictEqual(accountResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountResults[1].status, CreateAccountStatus.created);
 
-  let transferErrors = await client.createTransfers([
+  let transferResults = await client.createTransfers([
     {
       id: 1n,
       debit_account_id: 1n,
@@ -67,10 +66,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  for (const error of transferErrors) {
-    console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
-  }
-  assert.strictEqual(transferErrors.length, 0);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   let accounts = await client.lookupAccounts([1n, 2n]);
   assert.strictEqual(accounts.length, 2);
@@ -85,8 +82,6 @@ async function main() {
       assert.fail("Unexpected account: " + JSON.stringify(account, null, 2));
     }
   }
-
-  console.log('ok');
 }
 
 main().then(() => {

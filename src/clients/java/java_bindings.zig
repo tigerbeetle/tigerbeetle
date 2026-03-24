@@ -112,21 +112,23 @@ const type_mappings = .{
             ,
         },
     },
-    .{ tb.CreateAccountResult, TypeMapping{
-        .name = "CreateAccountResult",
+    .{ tb.CreateAccountStatus, TypeMapping{
+        .name = "CreateAccountStatus",
         .docs_link = "reference/requests/create_accounts#",
     } },
-    .{ tb.CreateTransferResult, TypeMapping{
-        .name = "CreateTransferResult",
+    .{ tb.CreateTransferStatus, TypeMapping{
+        .name = "CreateTransferStatus",
         .docs_link = "reference/requests/create_transfers#",
     } },
-    .{ tb.CreateAccountsResult, TypeMapping{
+    .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResultBatch",
-        .readonly_fields = &.{ "index", "result" },
+        .private_fields = &.{"reserved"},
+        .readonly_fields = &.{ "timestamp", "status" },
     } },
-    .{ tb.CreateTransfersResult, TypeMapping{
+    .{ tb.CreateTransferResult, TypeMapping{
         .name = "CreateTransferResultBatch",
-        .readonly_fields = &.{ "index", "result" },
+        .private_fields = &.{"reserved"},
+        .readonly_fields = &.{ "timestamp", "status" },
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilterBatch",
@@ -269,13 +271,17 @@ fn emit_enum(
             });
         }
 
+        const int_value = @intFromEnum(@field(Type, field.name));
         try buffer.writer().print(
-            \\    {[enum_name]s}(({[int_type]s}) {[value]d}){[separator]c}
+            \\    {[enum_name]s}(({[int_type]s}) {[value]s}){[separator]c}
             \\
         , .{
             .enum_name = to_case(field.name, .pascal),
             .int_type = int_type,
-            .value = @intFromEnum(@field(Type, field.name)),
+            .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                std.fmt.comptimePrint("0x{X}", .{int_value})
+            else
+                std.fmt.comptimePrint("{}", .{int_value}),
             .separator = if (i == fields.len - 1) ';' else ',',
         });
     }
@@ -297,12 +303,16 @@ fn emit_enum(
     });
 
     inline for (fields) |field| {
+        const int_value = @intFromEnum(@field(Type, field.name));
         try buffer.writer().print(
-            \\            case {[value]d}: return {[enum_name]s};
+            \\            case {[value]s}: return {[enum_name]s};
             \\
         , .{
             .enum_name = to_case(field.name, .pascal),
-            .value = @intFromEnum(@field(Type, field.name)),
+            .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                std.fmt.comptimePrint("0x{X}", .{int_value})
+            else
+                std.fmt.comptimePrint("{}", .{int_value}),
         });
     }
 

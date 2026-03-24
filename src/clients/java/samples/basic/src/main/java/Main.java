@@ -1,6 +1,9 @@
 package com.tigerbeetle.samples;
 
 import java.util.Arrays;
+
+import static com.tigerbeetle.AssertionError.assertTrue;
+
 import java.math.BigInteger;
 
 import com.tigerbeetle.*;
@@ -24,13 +27,15 @@ public final class Main {
             accounts.setLedger(1);
             accounts.setCode(1);
 
-            CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-            while (accountErrors.next()) {
-                switch (accountErrors.getResult()) {
+            CreateAccountResultBatch accountResults = client.createAccounts(accounts);
+            while (accountResults.next()) {
+                switch (accountResults.getStatus()) {
+                    case Created:
+                        break;
                     default:
                         System.err.printf("Error creating account %d: %s\n",
-                                accountErrors.getIndex(),
-                                accountErrors.getResult());
+                                accountResults.getPosition(),
+                                accountResults.getStatus());
                         assert false;
                 }
             }
@@ -44,13 +49,15 @@ public final class Main {
             transfers.setCode(1);
             transfers.setAmount(10);
 
-            CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-            while (transferErrors.next()) {
-                switch (transferErrors.getResult()) {
+            CreateTransferResultBatch transferResults = client.createTransfers(transfers);
+            while (transferResults.next()) {
+                switch (transferResults.getStatus()) {
+                    case Created:
+                        break;
                     default:
                         System.err.printf("Error creating transfer %d: %s\n",
-                                transferErrors.getIndex(),
-                                transferErrors.getResult());
+                                transferResults.getPosition(),
+                                transferResults.getStatus());
                         assert false;
                 }
             }

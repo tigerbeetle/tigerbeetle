@@ -3,8 +3,8 @@ const process = require("process");
 
 const {
     createClient,
-    CreateAccountError,
-    CreateTransferError,
+    CreateAccountStatus,
+    CreateTransferStatus,
     TransferFlags,
 } = require("tigerbeetle-node");
 
@@ -15,7 +15,7 @@ const client = createClient({
 
 async function main() {
   // Create two accounts
-  let accountErrors = await client.createAccounts([
+  let accountResults = await client.createAccounts([
     {
       id: 1n,
       debits_pending: 0n,
@@ -47,13 +47,12 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  for (const error of accountErrors) {
-    console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
-  }
-  assert.strictEqual(accountErrors.length, 0);
+  assert.strictEqual(accountResults.length, 2);
+  assert.strictEqual(accountResults[0].status, CreateAccountStatus.created);
+  assert.strictEqual(accountResults[1].status, CreateAccountStatus.created);
 
   // Start a pending transfer
-  let transferErrors = await client.createTransfers([
+  let transferResults = await client.createTransfers([
     {
       id: 1n,
       debit_account_id: 1n,
@@ -70,10 +69,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  for (const error of transferErrors) {
-    console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
-  }
-  assert.strictEqual(transferErrors.length, 0);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
   let accounts = await client.lookupAccounts([1n, 2n]);
@@ -95,7 +92,7 @@ async function main() {
   }
 
   // Create a second transfer simply posting the first transfer
-  transferErrors = await client.createTransfers([
+  transferResults = await client.createTransfers([
     {
       id: 2n,
       debit_account_id: 1n,
@@ -112,10 +109,8 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  for (const error of transferErrors) {
-    console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
-  }
-  assert.strictEqual(transferErrors.length, 0);
+  assert.strictEqual(transferResults.length, 1);
+  assert.strictEqual(transferResults[0].status, CreateTransferStatus.created);
 
   // Validate the contents of all transfers
   let transfers = await client.lookupTransfers([1n, 2n]);
@@ -148,8 +143,6 @@ async function main() {
       assert.fail("Unexpected account: " + account.id);
     }
   }
-
-  console.log('ok');
 }
 
 main().then(() => {
