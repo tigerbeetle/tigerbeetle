@@ -111,7 +111,7 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account).
 
 ```go
-accountsRes, err := client.CreateAccounts([]Account{
+accountResults, err := client.CreateAccounts([]Account{
 	{
 		ID:          ID(), // TigerBeetle time-based ID.
 		UserData128: ToUint128(0),
@@ -173,7 +173,7 @@ account1 := Account{
 	}.ToUint16(),
 }
 
-accountsRes, err := client.CreateAccounts([]Account{account0, account1})
+accountResults, err := client.CreateAccounts([]Account{account0, account1})
 // Results handling omitted.
 ```
 
@@ -211,13 +211,13 @@ account2 := Account{
 	Flags:  0,
 }
 
-accountsRes, err := client.CreateAccounts([]Account{account0, account1, account2})
+accountResults, err := client.CreateAccounts([]Account{account0, account1, account2})
 if err != nil {
 	log.Printf("Error creating accounts: %s", err)
 	return
 }
 
-for i, result := range accountsRes {
+for i, result := range accountResults {
 	switch result.Status {
 	case AccountCreated:
 		log.Printf("Batch account at %d successfully created with timestamp %d.", i, result.Timestamp)
@@ -263,7 +263,7 @@ transfers := []Transfer{{
 	Timestamp:       0,
 }}
 
-transfersRes, err := client.CreateTransfers(transfers)
+transferResults, err := client.CreateTransfers(transfers)
 // Results handling omitted.
 ```
 
@@ -311,13 +311,13 @@ transfers := []Transfer{{
 	Flags:           0,
 }}
 
-transfersRes, err := client.CreateTransfers(transfers)
+transferResults, err := client.CreateTransfers(transfers)
 if err != nil {
 	log.Printf("Error creating transfers: %s", err)
 	return
 }
 
-for i, result := range transfersRes {
+for i, result := range transferResults {
 	switch result.Status {
 	case TransferCreated:
 		log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, result.Timestamp)
@@ -353,9 +353,9 @@ for i := 0; i < len(batch); i += BATCH_SIZE {
 	if i+BATCH_SIZE > len(batch) {
 		size = len(batch) - i
 	}
-	transfersRes, err := client.CreateTransfers(batch[i : i+size])
+	transferResults, err := client.CreateTransfers(batch[i : i+size])
 	// Results handling omitted.
-	_, _ = transfersRes, err
+	_, _ = transferResults, err
 }
 ```
 
@@ -404,7 +404,7 @@ transfer1 := Transfer{
 	Flags:           0,
 }
 
-transfersRes, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
+transferResults, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
 // Results handling omitted.
 ```
 
@@ -435,7 +435,7 @@ transfer0 := Transfer{
 	Flags:           0,
 }
 
-transfersRes, err := client.CreateTransfers([]Transfer{transfer0})
+transferResults, err := client.CreateTransfers([]Transfer{transfer0})
 // Results handling omitted.
 
 transfer1 := Transfer{
@@ -446,7 +446,7 @@ transfer1 := Transfer{
 	Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
 }
 
-transfersRes, err = client.CreateTransfers([]Transfer{transfer1})
+transferResults, err = client.CreateTransfers([]Transfer{transfer1})
 // Results handling omitted.
 ```
 
@@ -470,7 +470,7 @@ transfer0 := Transfer{
 	Flags:           0,
 }
 
-transfersRes, err := client.CreateTransfers([]Transfer{transfer0})
+transferResults, err := client.CreateTransfers([]Transfer{transfer0})
 // Results handling omitted.
 
 transfer1 := Transfer{
@@ -480,7 +480,7 @@ transfer1 := Transfer{
 	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
 }
 
-transfersRes, err = client.CreateTransfers([]Transfer{transfer1})
+transferResults, err = client.CreateTransfers([]Transfer{transfer1})
 // Results handling omitted.
 ```
 
@@ -667,7 +667,7 @@ batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */})
 batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
 batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
 
-transfersRes, err := client.CreateTransfers(batch)
+transferResults, err := client.CreateTransfers(batch)
 // Results handling omitted.
 ```
 
@@ -708,7 +708,7 @@ for index, account := range historicalAccounts {
 	accountsBatch = append(accountsBatch, account)
 }
 
-accountsRes, err := client.CreateAccounts(accountsBatch)
+accountResults, err := client.CreateAccounts(accountsBatch)
 // Results handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
@@ -729,7 +729,7 @@ for index, transfer := range historicalTransfers {
 	transfersBatch = append(transfersBatch, transfer)
 }
 
-transfersRes, err := client.CreateTransfers(transfersBatch)
+transferResults, err := client.CreateTransfers(transfersBatch)
 // Results handling omitted..
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.

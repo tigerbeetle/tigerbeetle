@@ -28,7 +28,7 @@ func main() {
 
 	{
 		// section:create-accounts
-		accountsRes, err := client.CreateAccounts([]Account{
+		accountResults, err := client.CreateAccounts([]Account{
 			{
 				ID:          ID(), // TigerBeetle time-based ID.
 				UserData128: ToUint128(0),
@@ -42,7 +42,7 @@ func main() {
 		})
 		// Results handling omitted.
 		// endsection:create-accounts
-		_, _ = accountsRes, err
+		_, _ = accountResults, err
 	}
 
 	{
@@ -65,10 +65,10 @@ func main() {
 			}.ToUint16(),
 		}
 
-		accountsRes, err := client.CreateAccounts([]Account{account0, account1})
+		accountResults, err := client.CreateAccounts([]Account{account0, account1})
 		// Results handling omitted.
 		// endsection:account-flags
-		_, _ = accountsRes, err
+		_, _ = accountResults, err
 	}
 
 	{
@@ -92,13 +92,13 @@ func main() {
 			Flags:  0,
 		}
 
-		accountsRes, err := client.CreateAccounts([]Account{account0, account1, account2})
+		accountResults, err := client.CreateAccounts([]Account{account0, account1, account2})
 		if err != nil {
 			log.Printf("Error creating accounts: %s", err)
 			return
 		}
 
-		for i, result := range accountsRes {
+		for i, result := range accountResults {
 			switch result.Status {
 			case AccountCreated:
 				log.Printf("Batch account at %d successfully created with timestamp %d.", i, result.Timestamp)
@@ -131,10 +131,10 @@ func main() {
 			Timestamp:       0,
 		}}
 
-		transfersRes, err := client.CreateTransfers(transfers)
+		transferResults, err := client.CreateTransfers(transfers)
 		// Results handling omitted.
 		// endsection:create-transfers
-		_, _ = transfersRes, err
+		_, _ = transferResults, err
 	}
 
 	{
@@ -165,13 +165,13 @@ func main() {
 			Flags:           0,
 		}}
 
-		transfersRes, err := client.CreateTransfers(transfers)
+		transferResults, err := client.CreateTransfers(transfers)
 		if err != nil {
 			log.Printf("Error creating transfers: %s", err)
 			return
 		}
 
-		for i, result := range transfersRes {
+		for i, result := range transferResults {
 			switch result.Status {
 			case TransferCreated:
 				log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, result.Timestamp)
@@ -193,9 +193,9 @@ func main() {
 			if i+BATCH_SIZE > len(batch) {
 				size = len(batch) - i
 			}
-			transfersRes, err := client.CreateTransfers(batch[i : i+size])
+			transferResults, err := client.CreateTransfers(batch[i : i+size])
 			// Results handling omitted.
-			_, _ = transfersRes, err
+			_, _ = transferResults, err
 		}
 		// endsection:batch
 	}
@@ -221,10 +221,10 @@ func main() {
 			Flags:           0,
 		}
 
-		transfersRes, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
+		transferResults, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
 		// Results handling omitted.
 		// endsection:transfer-flags-link
-		_, _ = transfersRes, err
+		_, _ = transferResults, err
 	}
 
 	{
@@ -239,7 +239,7 @@ func main() {
 			Flags:           0,
 		}
 
-		transfersRes, err := client.CreateTransfers([]Transfer{transfer0})
+		transferResults, err := client.CreateTransfers([]Transfer{transfer0})
 		// Results handling omitted.
 
 		transfer1 := Transfer{
@@ -250,10 +250,10 @@ func main() {
 			Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
 		}
 
-		transfersRes, err = client.CreateTransfers([]Transfer{transfer1})
+		transferResults, err = client.CreateTransfers([]Transfer{transfer1})
 		// Results handling omitted.
 		// endsection:transfer-flags-post
-		_, _ = transfersRes, err
+		_, _ = transferResults, err
 	}
 
 	{
@@ -269,7 +269,7 @@ func main() {
 			Flags:           0,
 		}
 
-		transfersRes, err := client.CreateTransfers([]Transfer{transfer0})
+		transferResults, err := client.CreateTransfers([]Transfer{transfer0})
 		// Results handling omitted.
 
 		transfer1 := Transfer{
@@ -279,10 +279,10 @@ func main() {
 			Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
 		}
 
-		transfersRes, err = client.CreateTransfers([]Transfer{transfer1})
+		transferResults, err = client.CreateTransfers([]Transfer{transfer1})
 		// Results handling omitted.
 		// endsection:transfer-flags-void
-		_, _ = transfersRes, err
+		_, _ = transferResults, err
 	}
 
 	{
@@ -406,10 +406,10 @@ func main() {
 		batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
 		batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
 
-		transfersRes, err := client.CreateTransfers(batch)
+		transferResults, err := client.CreateTransfers(batch)
 		// Results handling omitted.
 		// endsection:linked-events
-		_, _ = transfersRes, err
+		_, _ = transferResults, err
 	}
 
 	{
@@ -437,7 +437,7 @@ func main() {
 			accountsBatch = append(accountsBatch, account)
 		}
 
-		accountsRes, err := client.CreateAccounts(accountsBatch)
+		accountResults, err := client.CreateAccounts(accountsBatch)
 		// Results handling omitted.
 
 		// Then, load and import all transfers with their timestamps from the historical source.
@@ -458,12 +458,12 @@ func main() {
 			transfersBatch = append(transfersBatch, transfer)
 		}
 
-		transfersRes, err := client.CreateTransfers(transfersBatch)
+		transferResults, err := client.CreateTransfers(transfersBatch)
 		// Results handling omitted..
 		// Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 		// with the same historical timestamps without regressing the cluster timestamp.
 		// endsection:imported-events
-		_, _, _ = accountsRes, transfersRes, err
+		_, _, _ = accountResults, transferResults, err
 	}
 
 	// section:imports

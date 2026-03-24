@@ -63,7 +63,7 @@ func main() {
 	defer client.Close()
 
 	// Create two accounts.
-	accountsRes, err := client.CreateAccounts([]Account{
+	accountResults, err := client.CreateAccounts([]Account{
 		{
 			ID:     ToUint128(1),
 			Ledger: 1,
@@ -79,8 +79,8 @@ func main() {
 		log.Fatalf("Error creating accounts: %s", err)
 	}
 
-	assert(len(accountsRes), 2, "accountsRes")
-	for i, result := range accountsRes {
+	assert(len(accountResults), 2, "accountResults")
+	for i, result := range accountResults {
 		switch result.Status {
 		case AccountCreated:
 		default:
@@ -136,13 +136,13 @@ func main() {
 			Flags:           TransferFlags{Pending: true}.ToUint16(),
 		},
 	}
-	transfersRes, err := client.CreateTransfers(transfers)
+	transferResults, err := client.CreateTransfers(transfers)
 	if err != nil {
 		log.Fatalf("Error creating transfer: %s", err)
 	}
 
-	assert(len(transfersRes), len(transfers), "transfersRes")
-	for i, result := range transfersRes {
+	assert(len(transferResults), len(transfers), "transferResults")
+	for i, result := range transferResults {
 		switch result.Status {
 		case TransferCreated:
 		default:
@@ -169,7 +169,7 @@ func main() {
 	}, "after starting 5 pending transfers")
 
 	// Create a 6th transfer posting the 1st transfer.
-	transfersRes, err = client.CreateTransfers([]Transfer{
+	transferResults, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(6),
 			DebitAccountID:  ToUint128(1),
@@ -185,8 +185,8 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	assert(len(transfersRes), 1, "transfersRes")
-	for i, result := range transfersRes {
+	assert(len(transferResults), 1, "transferResults")
+	for i, result := range transferResults {
 		switch result.Status {
 		case TransferCreated:
 		default:
@@ -213,7 +213,7 @@ func main() {
 	}, "after completing 1 pending transfer")
 
 	// Create a 7th transfer voiding the 2nd transfer.
-	transfersRes, err = client.CreateTransfers([]Transfer{
+	transferResults, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(7),
 			DebitAccountID:  ToUint128(1),
@@ -229,8 +229,8 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	assert(len(transfersRes), 1, "transfersRes")
-	for i, result := range transfersRes {
+	assert(len(transferResults), 1, "transferResults")
+	for i, result := range transferResults {
 		switch result.Status {
 		case TransferCreated:
 		default:
@@ -257,7 +257,7 @@ func main() {
 	}, "after completing 2 pending transfers")
 
 	// Create a 8th transfer posting the 3rd transfer.
-	transfersRes, err = client.CreateTransfers([]Transfer{
+	transferResults, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(8),
 			DebitAccountID:  ToUint128(1),
@@ -273,8 +273,8 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	assert(len(transfersRes), 1, "transfersRes")
-	for i, result := range transfersRes {
+	assert(len(transferResults), 1, "transferResults")
+	for i, result := range transferResults {
 		switch result.Status {
 		case TransferCreated:
 		default:
@@ -301,7 +301,7 @@ func main() {
 	}, "after completing 3 pending transfers")
 
 	// Create a 9th transfer voiding the 4th transfer.
-	transfersRes, err = client.CreateTransfers([]Transfer{
+	transferResults, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(9),
 			DebitAccountID:  ToUint128(1),
@@ -317,8 +317,8 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	assert(len(transfersRes), 1, "transfersRes")
-	for i, result := range transfersRes {
+	assert(len(transferResults), 1, "transferResults")
+	for i, result := range transferResults {
 		switch result.Status {
 		case TransferCreated:
 		default:
@@ -345,7 +345,7 @@ func main() {
 	}, "after completing 4 pending transfers")
 
 	// Create a 10th transfer posting the 5th transfer.
-	transfersRes, err = client.CreateTransfers([]Transfer{
+	transferResults, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(10),
 			DebitAccountID:  ToUint128(1),
@@ -361,8 +361,8 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	assert(len(transfersRes), 1, "transfersRes")
-	for i, result := range transfersRes {
+	assert(len(transferResults), 1, "transferResults")
+	for i, result := range transferResults {
 		switch result.Status {
 		case TransferCreated:
 		default:
