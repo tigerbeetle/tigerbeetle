@@ -1,3 +1,91 @@
+//! tb_client context: the bridge between user threads and the VSR client.
+//!
+//! A tb_client instance runs the VSR replication client on a dedicated IO thread,
+//! exposing a thread-safe API to user code. The architecture has three layers:
+//!
+//! 1. ClientInterface - a fixed-layout extern struct allocated by the caller (the
+//!    language binding). It holds a Locker (futex-based mutex), a vtable, and a
+//!    context pointer. All user-facing operations (submit, deinit, etc.) go through
+//!    this struct's methods, which acquire the lock and dispatch through the vtable.
+//!    The fixed ABI layout lets C, Rust, Java, etc. embed it without knowing the
+//!    internal types.
+//!
+//! 2. Shared - the fields that both user threads and the IO thread touch. The vtable
+//!    trampolines receive `*Shared` (not the full IoThread), restricting what client
+//!    threads can access. Contains the submitted-packet queue (lock-protected),
+//!    the Signal (cross-thread wakeup via eventfd), the join handle, and identity
+//!    fields (client_id, cluster_id, addresses).
+//!
+//! 3. IoThread - the IO-thread-private state. Owns the IO event loop, the GPA,
+//!    the eviction flag, and the phase state machine. The phase union
+//!    (registering/running/disconnecting/settled) carries all phase-specific data
+//!    so that fields only exist in phases that use them. The VSR Client and
+//!    MessagePool live in a heap-allocated ClientState, threaded only through
+//!    the phases that use them.
+//!
+//! ## Locking
+//!
+//! The only lock is the Locker inside ClientInterface. It serializes
+//! user-thread operations, protects the submitted-packet queue, and serializes
+//! the context-pointer null that gates all cross-thread access. The IO thread
+//! acquires it only to pop from the submitted queue or to check if it is empty.
+//! All other IO-thread state is single-threaded. The Signal provides the
+//! cross-thread wakeup: user threads call signal.notify() after pushing a packet,
+//! which triggers an eventfd write that breaks the IO thread out of run_for_ns.
+//! The Signal is thread-safe via its own atomics; the Locker does not protect it
+//! directly, but by serializing the context-pointer null it ensures no new
+//! signal.notify() calls occur after shutdown begins.
+//!
+//! ## Shutdown
+//!
+//! The user calls ClientInterface.deinit, which nulls the context pointer
+//! (rejecting further submissions) and calls signal.stop(). The IO thread detects
+//! shutdown_completed and breaks out of the main loop. On eviction, the server sends
+//! an eviction message; the callback nulls the context pointer and sets
+//! eviction_reason. The IO thread self-stops the signal since no user-initiated
+//! deinit will arrive.
+//!
+//! ## Eviction
+//!
+//! A rare but subtle case. The server evicts a client by removing
+//! its session and replying with an eviction message instead of the normal
+//! result. Subsequent requests from the evicted client receive fresh eviction
+//! responses.
+//!
+//! On the client side, the eviction callback fires once during run_for_ns.
+//! It nulls the context pointer (rejecting new submissions), sets
+//! eviction_reason, and yields. The main loop sees eviction_reason, enters
+//! the disconnecting phase (which cancels inflight, pending, and submitted packets
+//! with the eviction error), then settles. Subsequent requests from the client thread
+//! immediately return ClientInvalid. Because deinit checks the context
+//! pointer (already null), it returns ClientInvalid. The IO thread self-stops
+//! the signal and exits on its own.
+//!
+//! There are multiple footguns to be aware of here:
+//!
+//! 1. Callers must handle ClientInvalid in all cases.
+//! 2. It is possible to be silently evicted during registration.
+//!    Subsequent calls, including the dtor, will return ClientInvalid.
+//!    Caller never knows they were evicted.
+//! 3. It is possible that multiple requests get evicted packet statuses,
+//!    because all enqueued requests are purged on eviction.
+//! 3. After eviction the tb_client_deinit function will report failure
+//!    (though it has already shutdown and freed resources).
+//!    It is not possible to successfully destruct after eviction.
+//!
+//! ## File organization
+//!
+//! This file is organized top down and is intended to read
+//! intuitively following the parallel-concurrent data flow.
+//! Types are used for data hiding to prevent maintenence errors
+//! on this historically difficult code.
+//!
+//! - ClientInterface               - user-facing ABI types
+//! - Shared, vtable trampolines    - cross-thread shared state and dispatch
+//! - IoThreadType                  - the isolated IO thread and its callbacks
+//! - PhaseType                     - the state machine phases and their isolated methods
+//! - Locker                        - the shared locking mechanism
+
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
@@ -34,9 +122,14 @@ pub const InitParameters = extern struct {
     addresses_len: u64,
 };
 
-/// Thread-safe client interface allocated by the user.
-/// Contains the `VTable` with function pointers to the StateMachine-specific implementation
-/// and the synchronization status.
+/// Fixed-layout handle allocated by the caller / language binding.
+///
+/// This is the public API surface exposed through the C ABI. Its layout is
+/// fixed at 32 bytes / 8-byte so that C headers and FFI bindings can
+/// embed it without knowing internal types. The `context` pointer targets the
+/// Shared struct; it is nulled on deinit or eviction to atomically reject
+/// further submissions. All methods acquire the Locker before touching state.
+///
 /// Safe to call from multiple threads, even after `deinit` is called.
 pub const ClientInterface = extern struct {
     pub const Error = error{ClientInvalid};
@@ -148,7 +241,9 @@ const Shared = struct {
     addresses_owned: []const u8,
 };
 
-// VTable functions called by `ClientInterface`, which are thread-safe.
+// VTable trampolines: called by ClientInterface methods on user threads.
+// Each receives `*Shared` via the context pointer and operates
+// under the ClientInterface Locker.
 
 fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
     const shared: *Shared = @ptrCast(@alignCast(context));
@@ -206,9 +301,10 @@ fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameter
     out_parameters.addresses_len = shared.addresses_owned.len;
 }
 
-/// The function pointer called by the IO thread when a request is completed or fails.
-/// The memory referenced by `result` is only valid for the duration of this callback.
-/// `result_ptr` is `null` for unsuccessful requests. See `packet.status` for more details.
+/// Called by the IO thread when a request completes or fails.
+///
+/// `result` points to the reply body and is only valid for the duration of
+/// this callback. It is null for unsuccessful requests (see `packet.status`).
 pub const CompletionCallback = *const fn (
     context: usize,
     packet: *Packet.Extern,
@@ -225,8 +321,13 @@ pub const InitError = std.mem.Allocator.Error || error{
     NetworkSubsystemFailed,
 };
 
-/// Provides an I/O event loop thread to back the ClientInterface,
-/// generic over the internal vsr Client.
+/// IO-thread-private state backing a ClientInterface, generic over the VSR Client type.
+///
+/// `init` allocates the IoThread, sets up the VSR client and IO subsystem, spawns
+/// the IO thread, and wires the ClientInterface vtable to the Shared fields.
+/// The IO thread runs `io_thread`, a straight-line event loop that switches on
+/// `self.phase` each tick. VSR callbacks (register, eviction, result) fire within
+/// `io.run_for_ns` and set flags or data that the main loop acts on next iteration.
 pub fn IoThreadType(
     comptime Client_: type,
 ) type {
@@ -259,10 +360,13 @@ pub fn IoThreadType(
             }
         };
 
-        /// Heap-allocated container for the VSR client and message pool.
-        /// Decouples client storage from IoThread layout, allowing @fieldParentPtr
-        /// in the eviction callback to recover *IoThread via the backref pointer
-        /// instead of requiring client to be embedded directly in IoThread.
+        /// Heap-allocated VSR client and its dependencies.
+        ///
+        /// Separate from IoThread so that @fieldParentPtr("client") in callbacks
+        /// recovers *ClientState (and thus *IoThread via the backref), without
+        /// requiring Client to be embedded at a fixed offset in IoThread.
+        /// Threaded through phase variants: whoever owns the current phase owns
+        /// the ClientState pointer.
         const ClientState = struct {
             time_os: TimeOS,
             message_pool: MessagePool,
@@ -465,13 +569,30 @@ pub fn IoThreadType(
 
         const has_message_bus = @hasField(Client, "message_bus");
 
+        /// Main event loop running on the dedicated IO thread.
+        ///
+        /// Each iteration: check phase, do phase-specific work, then call
+        /// io.run_for_ns to process IO completions and wait for the next tick.
+        /// VSR callbacks (register, eviction, result, signal) fire inside
+        /// run_for_ns; they set flags/data that the next loop iteration acts on.
+        ///
+        /// Some callbacks call io.yield in order to return quickly to the event loop
+        /// without waiting for the wait_for_ns timeout. This allows the state
+        /// transition logic to be entirely encoded directly in the event loop
+        /// without extra induced latency.
+        ///
+        /// ### Safety note re io.yield ###
+        ///
+        /// io.yield may dispatch additional callbacks between the yield
+        /// call and the actual return to the event loop. This means that within each phase,
+        /// even after yielding, additional callbacks in that phase continue to be observed.
+        /// Yielding only eliminates latency, it doesn't sequence control flow in
+        /// in the way you might expect and want.
         fn io_thread(self: *IoThread) void {
             main: while (true) {
                 const should_stop = self.shared.signal.status() == .shutdown_completed;
 
                 switch (self.phase) {
-                    // Registration in progress. Wait for the callback to set
-                    // batch_size_limit, then transition to running.
                     .registering => |*reg| {
                         if (self.eviction_reason != null or should_stop) {
                             if (has_message_bus) {
@@ -500,11 +621,6 @@ pub fn IoThreadType(
                         reg.client_state.client.tick();
                     },
 
-                    // Normal operation. Initiate graceful disconnection on
-                    // eviction or shutdown: terminate all message_bus connections,
-                    // which closes sockets (releasing server resources) while
-                    // keeping message_bus's Connection memory valid for pending IO
-                    // completions to land on.
                     .running => |*running| {
                         if (self.eviction_reason != null or should_stop) {
                             if (has_message_bus) {
@@ -523,15 +639,6 @@ pub fn IoThreadType(
                         running.drain_submitted_packets(self);
                     },
 
-                    // All cancellation happens here. On entry, the pending
-                    // queue is transferred from registering/running, and the
-                    // inflight request (if any) needs cancellation on
-                    // shutdown. On eviction, the inflight was already
-                    // canceled in callback_client_eviction.
-                    //
-                    // Once all connections have fully terminated (no pending
-                    // IO on any Connection memory), it is safe to deinit the
-                    // client which frees the message_bus's connections array.
                     .disconnecting => |*disconnecting| {
                         disconnecting.cancel_inflight(self);
 
@@ -552,11 +659,9 @@ pub fn IoThreadType(
                         }
                     },
 
-                    // Exit only after the vsr client has been deinited
-                    // and we have received the stop signal from the client threads.
-                    // On eviction, deinit returns ClientInvalid (the context pointer
-                    // was already nulled), so no stop signal will arrive from the
-                    // user thread. Send it ourselves.
+                    // On eviction, deinit returns ClientInvalid (context
+                    // pointer already nulled), so no user stop signal will
+                    // arrive. The IO thread stops the signal itself.
                     .settled => {
                         if (self.eviction_reason != null) {
                             self.shared.signal.stop();
@@ -587,6 +692,9 @@ pub fn IoThreadType(
             allocator.destroy(self);
             _ = gpa.deinit();
         }
+
+        // IO-thread callbacks: invoked by the VSR client or Signal within
+        // io.run_for_ns. They set state that the main loop acts on.
 
         fn callback_signal_notify(signal: *Signal) void {
             const shared: *Shared = @alignCast(@fieldParentPtr("signal", signal));
@@ -766,8 +874,24 @@ pub fn IoThreadType(
     };
 }
 
-/// The IO thread phase state machine, parameterized by the IoThread type.
-/// Extracted from IoThreadType for readability.
+/// IO thread phase state machine.
+///
+/// The lifecycle is: registering -> running -> disconnecting -> settled.
+///
+/// - Registering: waiting for the VSR register callback to provide
+///   batch_size_limit. Packets may arrive but are not sent yet.
+/// - Running: normal operation. Drains the submitted queue, batches
+///   compatible packets, sends requests through the VSR client.
+/// - Disconnecting: entered on eviction or shutdown. Cancels inflight,
+///   pending, and submitted packets. Waits for message_bus IO to settle
+///   before deiniting the client. All packet cancellation is consolidated
+///   here, maintaining FIFO ordering (inflight -> pending -> submitted).
+/// - Settled: client resources freed. Waits for the shutdown signal
+///   (or self-stops on eviction) then exits the main loop.
+///
+/// Each variant carries only the state relevant to that phase. Phase
+/// transitions transfer ownership of shared resources (ClientState,
+/// pending queue) from one variant to the next.
 fn PhaseType(comptime IoThread: type) type {
     const Client = IoThread.Client;
     const Operation = IoThread.Operation;
@@ -788,16 +912,17 @@ fn PhaseType(comptime IoThread: type) type {
             return null;
         }
 
-        /// State for the registering phase, before the client has completed
-        /// registration with the cluster.
+        /// Registering: awaiting the VSR register callback.
+        /// Packets accumulate in `pending` but are not sent until
+        /// `batch_size_limit` is set by `callback_client_register`.
         const Registering = struct {
             client_state: *IoThread.ClientState,
             batch_size_limit: ?u32,
             pending: Packet.Queue,
         };
 
-        /// State and methods for the running phase,
-        /// when the client is available for sending requests.
+        /// Running: normal request processing.
+        /// Drains submitted packets, batches them, sends through the VSR client.
         const Running = struct {
             client_state: *IoThread.ClientState,
             batch_size_limit: u32,
@@ -929,7 +1054,7 @@ fn PhaseType(comptime IoThread: type) type {
                 self.pending.push(packet);
             }
 
-            /// Sends the packet (the entire batched linked list of packets) through the vsr client.
+            /// Encode the packet batch into a VSR message and submit it to the client.
             fn packet_send(self: *Running, ctx: *IoThread, packet_list: *Packet) void {
                 assert(ctx.eviction_reason == null);
                 packet_list.assert_phase(.pending);
@@ -1074,16 +1199,20 @@ fn PhaseType(comptime IoThread: type) type {
             }
         };
 
-        /// State and methods for the disconnecting phase,
-        /// when the client is alive but shutting down connections.
-        /// All packet cancellation is consolidated here.
+        /// Disconnecting: tearing down the VSR client.
+        ///
+        /// All packet cancellation is consolidated here, maintaining FIFO order.
+        /// On entry, pending queue is transferred from the previous phase.
+        /// Each tick: cancel inflight if needed, drain pending, drain submitted,
+        /// then check if message_bus IO has settled. Once settled, deinit the
+        /// client and transition to settled.
         const Disconnecting = struct {
             client_state: *IoThread.ClientState,
             pending: Packet.Queue,
             inflight_canceled: bool = false,
 
-            /// Calls the user callback when a packet (the entire batched
-            /// linked list of packets) is canceled due to eviction or shutdown.
+            /// Cancel a packet (and its entire batched chain) by calling
+            /// the user completion callback with the appropriate error status.
             fn packet_cancel(_: *const Disconnecting, ctx: *IoThread, packet_list: *Packet) void {
                 assert(packet_list.link.next == null);
                 assert(packet_list.phase != .complete);
@@ -1107,12 +1236,13 @@ fn PhaseType(comptime IoThread: type) type {
                 }
             }
 
-            /// Cancel the inflight user packet. The VSR client does not
-            /// call the result callback after eviction or after
-            /// connections are shut down, so the packet must be canceled
-            /// here. Skips .register operations (no user packet).
-            /// Must only run once: after cancellation the packet is
-            /// returned to the user and the memory may be freed.
+            /// Cancel the inflight user packet.
+            ///
+            /// After eviction or message_bus shutdown, the VSR client will not
+            /// call the result callback, so the packet must be canceled here.
+            /// Skips .register operations (no associated user packet). Must run
+            /// only once: after cancellation the packet is returned to the user
+            /// and the memory may be freed.
             fn cancel_inflight(self: *Disconnecting, ctx: *IoThread) void {
                 if (self.inflight_canceled) return;
                 self.inflight_canceled = true;
@@ -1152,8 +1282,9 @@ fn PhaseType(comptime IoThread: type) type {
     };
 }
 
-/// Implements the `Mutex` API as an `extern` struct, based on `std.Thread.Futex`.
-/// Vendored from `std.Thread.Mutex.FutexImpl`.
+/// Futex-based mutex with extern struct layout for ABI stability.
+/// Vendored from `std.Thread.Mutex.FutexImpl` because std.Thread.Mutex
+/// is not an extern struct and cannot be embedded in ClientInterface.
 const Locker = extern struct {
     const Futex = std.Thread.Futex;
     const unlocked: u32 = 0b00;
