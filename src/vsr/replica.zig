@@ -566,9 +566,9 @@ pub fn ReplicaType(
         /// (status=view-change backup)
         request_start_view_message_timeout: Timeout,
 
-        /// The number of ticks before peeking into the journal repair budget and expiring
-        /// prepare requests that haven't been responded to.
-        /// (status=normal or status=view-change).
+        /// The number of ticks before peeking into the journal/block repair budget and expiring
+        /// prepare/block requests that haven't been responded to.
+        /// (status=normal or status=view-change or status=recovering_head).
         repair_budget_timeout: Timeout,
 
         /// The number of ticks before repairing missing/disconnected headers, dirty/missing
@@ -586,7 +586,7 @@ pub fn ReplicaType(
         /// (status=normal backup)
         repair_sync_timeout: Timeout,
 
-        /// The number of ticks before replenishing the command=request_blocks budget.
+        /// The number of ticks before requesting missing/corrupt grid blocks.
         /// (always running)
         grid_repair_timeout: Timeout,
         grid_repair_message_budget: RepairBudgetGrid,
@@ -3491,9 +3491,7 @@ pub fn ReplicaType(
                     .checksum = message.header.checksum,
                 });
 
-                if (self.grid_repair_message_budget.full_budget_random(
-                    &self.prng,
-                )) |replica_index| {
+                if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
                     self.send_request_blocks(replica_index);
                 }
             } else {
@@ -3808,9 +3806,7 @@ pub fn ReplicaType(
             self.grid_repair_timeout.reset();
 
             if (self.grid.callback != .cancel) {
-                if (self.grid_repair_message_budget.full_budget_random(
-                    &self.prng,
-                )) |replica_index| {
+                if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
                     self.send_request_blocks(replica_index);
                 }
             }
@@ -10535,9 +10531,7 @@ pub fn ReplicaType(
             }
 
             self.grid_repair_message_budget.refill();
-            if (self.grid_repair_timeout.ticking) {
-                self.grid_repair_timeout.reset();
-            }
+            self.grid_repair_timeout.reset();
 
             log.info("{}: sync: ops={}..{}/{}..{}", .{
                 self.log_prefix(),
@@ -11179,10 +11173,13 @@ pub fn ReplicaType(
             assert(self.grid_repair_timeout.ticking);
             assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
+            assert(destination_replica_index != self.replica);
 
-            assert(self.solo() or
-                self.grid_repair_message_budget.budget_available(destination_replica_index) ==
-                    constants.grid_repair_request_max);
+            if (!self.solo()) {
+                assert(self.grid_repair_message_budget.budget_available(
+                    destination_replica_index,
+                ) >= constants.grid_repair_request_max);
+            }
 
             if (self.grid.blocks_missing.faulty_blocks.count() == 0 and
                 self.grid.read_global_queue.count() == 0) return;
@@ -11220,21 +11217,11 @@ pub fn ReplicaType(
                     .checksum = read_fault.checksum,
                 };
 
-                for (0..self.replica_count) |replica_index| {
-                    if (self.grid_repair_message_budget.requested(
-                        block_identifier,
-                        @intCast(replica_index),
-                    )) {
-                        assert(replica_index != self.replica);
-                        break;
-                    }
-                } else {
-                    assert(self.grid_repair_message_budget.decrement(.{
-                        .block_identifier = block_identifier,
-                        .replica_index = destination_replica_index,
-                        .now = self.clock.monotonic(),
-                    }));
-
+                if (self.grid_repair_message_budget.decrement(.{
+                    .block_identifier = block_identifier,
+                    .replica_index = destination_replica_index,
+                    .now = self.clock.monotonic(),
+                })) {
                     requests_buffer[requests_count] = .{
                         .block_address = read_fault.address,
                         .block_checksum = read_fault.checksum,
@@ -11252,20 +11239,11 @@ pub fn ReplicaType(
                         .checksum = missing_request.block_checksum,
                     };
 
-                    for (0..self.replica_count) |replica_index| {
-                        if (self.grid_repair_message_budget.requested(
-                            block_identifier,
-                            @intCast(replica_index),
-                        )) {
-                            assert(replica_index != self.replica);
-                            break;
-                        }
-                    } else {
-                        assert(self.grid_repair_message_budget.decrement(.{
-                            .block_identifier = block_identifier,
-                            .replica_index = destination_replica_index,
-                            .now = self.clock.monotonic(),
-                        }));
+                    if (self.grid_repair_message_budget.decrement(.{
+                        .block_identifier = block_identifier,
+                        .replica_index = destination_replica_index,
+                        .now = self.clock.monotonic(),
+                    })) {
                         requests_buffer[requests_count] = missing_request;
                         requests_count += 1;
                     }
@@ -11274,7 +11252,6 @@ pub fn ReplicaType(
 
             assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
-
             assert(!self.solo());
 
             for (requests_buffer[0..requests_count]) |*request| {

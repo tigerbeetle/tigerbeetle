@@ -33,11 +33,11 @@ pub const RepairBudgetJournal = struct {
     experiment_chance: Ratio = ratio(1, 10),
 
     // Multiple of repair latency used to determine expiry duration, which is the time we wait
-    // before reclaiming the budget for an inflight repair request.
+    // before restoring the budget for an inflight repair request if the prepare has not arrived.
     repair_latency_multiple_expiry: u8 = 2,
 
     // The maximum amount of time we wait before reclaiming the budget for an inflight repair
-    // request.
+    // request if the prepare has not arrived.
     //
     // Capped at 500ms to avoid an unbounded increase in the tracked repair latency for remote
     // replicas. Specifically, helps avoid the case where a partitioned replica with missing
@@ -60,12 +60,10 @@ pub const RepairBudgetJournal = struct {
         replica_index: u8,
         replica_count: u8,
     }) !RepairBudgetJournal {
-        const remote_replica_count = if (options.replica_index < options.replica_count)
-            // Replicas can repair from all replicas but themselves.
-            options.replica_count - 1
-        else
-            // Standbys can repair from all replicas.
-            options.replica_count;
+        // Replicas can repair from all replicas but themselves,
+        // while standbys can repair from all replicas.
+        const remote_replica_count =
+            options.replica_count - @intFromBool(options.replica_index < options.replica_count);
 
         var replicas_requested_prepares = try gpa.alloc(RequestedPrepares, options.replica_count);
         errdefer gpa.free(replicas_requested_prepares);
@@ -128,12 +126,12 @@ pub const RepairBudgetJournal = struct {
         var repair_latency_min_replica_index: ?u8 = null;
 
         for (budget.replicas_requested_prepares, 0..) |*requested_prepares, replica_index| {
-            // Disallow requesting from a replica from which this op has already been requested.
-            if (requested_prepares.get(options.op) != null) continue;
             // Disallow requests to self.
             if (replica_index == budget.replica_index) continue;
             // Enforce per-replica budget.
             if (requested_prepares.count() == repair_messages_inflight_count_max) continue;
+            // Disallow requesting from a replica from which this op has already been requested.
+            if (requested_prepares.get(options.op) != null) continue;
 
             const replica_repair_latency = budget.replicas_repair_latency[replica_index];
 
@@ -273,8 +271,8 @@ pub const RepairBudgetGrid = struct {
     // Tracks the blocks requested from each remote replica.
     replicas_requested_blocks: []RequestedBlocks,
 
-    // The amount of time we wait before reclaiming the budget for an
-    // inflight repair request.
+    // The amount of time we wait before restoring the budget for an
+    // inflight repair request if the block has not arrived.
     const duration_expiry: stdx.Duration = .ms(250);
 
     // Maximum blocks that can be requested per remote replica.
@@ -283,7 +281,9 @@ pub const RepairBudgetGrid = struct {
     // remote replica is saturated by multiple replicas, overflowing
     // the egress `send_queue` (which leads to dropped messages, and
     // wasted network & storage IO) on the remote replica is unlikely.
-    const repair_blocks_inflight_count_max = constants.grid_repair_request_max;
+    // The +1 allows us to send a full `request_blocks` even when
+    // all but one request has been responded to.
+    const replica_blocks_requested_max = constants.grid_repair_request_max + 1;
 
     const RequestedBlocks = std.AutoArrayHashMapUnmanaged(vsr.BlockReference, stdx.Instant);
 
@@ -291,12 +291,10 @@ pub const RepairBudgetGrid = struct {
         replica_index: u8,
         replica_count: u8,
     }) !RepairBudgetGrid {
-        const remote_replica_count = if (options.replica_index < options.replica_count)
-            // Replicas can repair from all replicas but themselves.
-            options.replica_count - 1
-        else
-            // Standbys can repair from all replicas.
-            options.replica_count;
+        // Replicas can repair from all replicas but themselves,
+        // while standbys can repair from all replicas.
+        const remote_replica_count =
+            options.replica_count - @intFromBool(options.replica_index < options.replica_count);
 
         var replicas_requested_blocks = try gpa.alloc(RequestedBlocks, options.replica_count);
         errdefer gpa.free(replicas_requested_blocks);
@@ -305,14 +303,14 @@ pub const RepairBudgetGrid = struct {
             errdefer for (replicas_requested_blocks[0..replica]) |*m| m.deinit(gpa);
             requested_blocks.* = .{};
 
-            try requested_blocks.ensureTotalCapacity(gpa, repair_blocks_inflight_count_max);
+            try requested_blocks.ensureTotalCapacity(gpa, replica_blocks_requested_max);
             errdefer requested_blocks.deinit(gpa);
         }
         errdefer for (replicas_requested_blocks) |*m| m.deinit(gpa);
 
         return RepairBudgetGrid{
-            .capacity = repair_blocks_inflight_count_max * remote_replica_count,
-            .available = repair_blocks_inflight_count_max * remote_replica_count,
+            .capacity = replica_blocks_requested_max * remote_replica_count,
+            .available = replica_blocks_requested_max * remote_replica_count,
             .replica_index = options.replica_index,
             .replicas_requested_blocks = replicas_requested_blocks,
         };
@@ -325,7 +323,7 @@ pub const RepairBudgetGrid = struct {
         gpa.free(budget.replicas_requested_blocks);
     }
 
-    fn assert_invariants(budget: *RepairBudgetGrid) void {
+    fn assert_invariants(budget: *const RepairBudgetGrid) void {
         assert(budget.available <= budget.capacity);
 
         if (budget.replica_index < budget.replicas_requested_blocks.len) {
@@ -340,19 +338,18 @@ pub const RepairBudgetGrid = struct {
         assert(budget.available + requested_blocks_count == budget.capacity);
     }
 
-    pub fn full_budget_random(budget: *RepairBudgetGrid, prng: *stdx.PRNG) ?u8 {
+    pub fn next_destination(budget: *RepairBudgetGrid, prng: *stdx.PRNG) ?u8 {
         budget.assert_invariants();
-        defer budget.assert_invariants();
 
         const replica_count = budget.replicas_requested_blocks.len;
-        const start = prng.int_inclusive(u8, @intCast(replica_count - 1));
+        var replica_indexes: [constants.replicas_max]u8 = undefined;
+        for (replica_indexes[0..replica_count], 0..) |*replica, i| replica.* = @intCast(i);
+        prng.shuffle(u8, replica_indexes[0..replica_count]);
 
-        for (0..replica_count) |i| {
-            const replica_index: u8 =
-                @intCast((start + i) % budget.replicas_requested_blocks.len);
-
-            if (replica_index == budget.replica_index) continue;
-            if (budget.replicas_requested_blocks[replica_index].count() == 0) {
+        for (replica_indexes[0..replica_count]) |replica_index| {
+            if (replica_index != budget.replica_index and
+                budget.budget_available(replica_index) >= constants.grid_repair_request_max)
+            {
                 return replica_index;
             }
         }
@@ -361,24 +358,12 @@ pub const RepairBudgetGrid = struct {
 
     pub fn budget_available(budget: *RepairBudgetGrid, replica_index: u8) u32 {
         budget.assert_invariants();
-        defer budget.assert_invariants();
 
         assert(budget.replica_index != replica_index);
 
         const replica_requested_blocks = budget.replicas_requested_blocks[replica_index];
 
-        return @intCast(repair_blocks_inflight_count_max - replica_requested_blocks.count());
-    }
-
-    pub fn requested(
-        budget: *RepairBudgetGrid,
-        block_identifier: vsr.BlockReference,
-        replica_index: u8,
-    ) bool {
-        budget.assert_invariants();
-        defer budget.assert_invariants();
-
-        return budget.replicas_requested_blocks[replica_index].get(block_identifier) != null;
+        return @intCast(replica_blocks_requested_max - replica_requested_blocks.count());
     }
 
     pub fn decrement(budget: *RepairBudgetGrid, options: struct {
@@ -389,19 +374,26 @@ pub const RepairBudgetGrid = struct {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
-        var replica_requested_blocks =
-            &budget.replicas_requested_blocks[options.replica_index];
-
-        assert(replica_requested_blocks.count() < repair_blocks_inflight_count_max);
         assert(budget.available > 0);
         assert(options.block_identifier.address > 0);
         assert(options.replica_index != budget.replica_index);
 
-        // Disallow requesting from a replica from which
-        // this block has already been requested.
-        if (replica_requested_blocks.get(options.block_identifier) != null) return false;
+        for (budget.replicas_requested_blocks, 0..) |requested_blocks, replica_index| {
+            if (requested_blocks.get(options.block_identifier) != null) {
+                assert(replica_index != budget.replica_index);
+                return false;
+            }
+        }
 
-        replica_requested_blocks.putAssumeCapacityNoClobber(options.block_identifier, options.now);
+        var replica_requested_blocks =
+            &budget.replicas_requested_blocks[options.replica_index];
+
+        assert(replica_requested_blocks.count() < replica_blocks_requested_max);
+
+        replica_requested_blocks.putAssumeCapacityNoClobber(
+            options.block_identifier,
+            options.now.add(duration_expiry),
+        );
 
         budget.available -= 1;
 
@@ -446,10 +438,8 @@ pub const RepairBudgetGrid = struct {
             var requested_blocks_index: u32 = 0;
 
             while (requested_blocks_index < requested_blocks.entries.len) {
-                const requested_at = requested_blocks.values()[requested_blocks_index];
-                const duration_since_requested_at = now.duration_since(requested_at);
-
-                if (duration_since_requested_at.ns > duration_expiry.ns) {
+                const expires_at = requested_blocks.values()[requested_blocks_index];
+                if (now.ns > expires_at.ns) {
                     requested_blocks.swapRemoveAt(requested_blocks_index);
                     budget.available += 1;
                 } else {
