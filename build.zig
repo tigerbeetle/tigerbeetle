@@ -181,6 +181,15 @@ pub fn build(b: *std.Build) !void {
         .config_release_client_min = "0.16.4",
     });
 
+    // 65535.0.0 + 1, to test both sides of upgrades.
+    const vsr_options_next_test, const vsr_module_next_test = build_vsr_module(b, .{
+        .stdx_module = stdx_module,
+        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
+        .config_verify = true,
+        .config_release = "65535.0.1",
+        .config_release_client_min = "0.16.4",
+    });
+
     var releases_previous = release_history(b);
     const tigerbeetle_test_previous = fetch_release(b, releases_previous.next().?, target, mode);
     const tigerbeetle_test = build_tigerbeetle_executable_multiversion(b, .{
@@ -189,6 +198,16 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options_test,
         .llvm_objcopy = build_options.llvm_objcopy,
         .tigerbeetle_previous = tigerbeetle_test_previous,
+        .target = target,
+        .mode = mode,
+    });
+
+    const tigerbeetle_next_test = build_tigerbeetle_executable_multiversion(b, .{
+        .stdx_module = stdx_module,
+        .vsr_module = vsr_module_next_test,
+        .vsr_options = vsr_options_next_test,
+        .llvm_objcopy = build_options.llvm_objcopy,
+        .tigerbeetle_previous = tigerbeetle_test,
         .target = target,
         .mode = mode,
     });
@@ -248,6 +267,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .mode = mode,
         .tigerbeetle_test = tigerbeetle_test,
+        .tigerbeetle_next_test = tigerbeetle_next_test,
         .vortex_driver_zig = vortex_driver_zig,
     });
 
@@ -1225,11 +1245,13 @@ fn build_vortex_options(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
         tigerbeetle_test: std.Build.LazyPath,
+        tigerbeetle_next_test: std.Build.LazyPath,
         vortex_driver_zig: std.Build.LazyPath,
     },
 ) *std.Build.Step.Options {
     const vortex_options = b.addOptions();
-    const vortex_upgrades_max = 1; // TODO Pack more releases into Debug builds.
+    // TODO See below note about Debug builds.
+    const vortex_upgrades_max: u32 = if (options.mode == .Debug) 1 else 4;
     const vortex_dir = b.fmt("vortex/{s}", .{@tagName(options.mode)});
     vortex_options.addOptionPath(
         "dependencies_path",
@@ -1237,29 +1259,40 @@ fn build_vortex_options(
     );
     vortex_options.addOption(u32, "dependencies_count", vortex_upgrades_max + 1);
 
-    // TODO Include 65535.0.1 build, to test upgrading _from_ the latest version too.
-    vortex_options.step.dependOn(&b.addInstallBinFile(
-        options.tigerbeetle_test,
-        b.fmt("../{s}/tigerbeetle-0", .{vortex_dir}),
-    ).step);
-    vortex_options.step.dependOn(&b.addInstallBinFile(
-        options.vortex_driver_zig,
-        b.fmt("../{s}/vortex-driver-zig-0", .{vortex_dir}),
-    ).step);
+    const driver_exes = b.allocator.alloc(std.Build.LazyPath, 6) catch @panic("OOM");
+    const server_exes = b.allocator.alloc(std.Build.LazyPath, 6) catch @panic("OOM");
+
+    // The "tigerbeetle_next_test" and "tigerbeetle_test" are both builds of the current HEAD's
+    // code, but their release numbers differ. This allows us to test upgrading *from* the current
+    // release, not just upgrading *to* it.
+    // Use the same driver for the "next", since it will be identical anyway.
+    server_exes[0] = options.tigerbeetle_next_test;
+    driver_exes[0] = options.vortex_driver_zig;
+
+    server_exes[1] = options.tigerbeetle_test;
+    driver_exes[1] = options.vortex_driver_zig;
 
     var tags_iterator = release_history(b);
-    var tags_index: u32 = 0;
-    while (tags_iterator.next()) |tag| : (tags_index += 1) {
-        if (tags_index == vortex_upgrades_max) break;
+    for (server_exes[2..], driver_exes[2..]) |*server, *driver| {
+        const tag = tags_iterator.next().?;
+        server.* = fetch_release(b, tag, options.target, options.mode);
+        driver.* = fetch_vortex_driver_zig(b, tag, options.target, options.mode);
+    }
 
-        vortex_options.step.dependOn(&b.addInstallBinFile(
-            fetch_release(b, tag, options.target, options.mode),
-            b.fmt("../{s}/tigerbeetle-{d}", .{ vortex_dir, tags_index + 1 }),
-        ).step);
-        vortex_options.step.dependOn(&b.addInstallBinFile(
-            fetch_vortex_driver_zig(b, tag, options.target, options.mode),
-            b.fmt("../{s}/vortex-driver-zig-{d}", .{ vortex_dir, tags_index + 1 }),
-        ).step);
+    // TODO: Debug builds only include 1 extra release. Since Vortex can't detect whether upgrades
+    // have accurately finished, it is limited to testing a single upgrade, so we prioritize testing
+    // the previous release (skipping past our phony 65535.0.1 release).
+    const exe_offset = @intFromBool(options.mode == .Debug);
+    const server_exes_select = server_exes[exe_offset..][0 .. vortex_upgrades_max + 1];
+    const driver_exes_select = driver_exes[exe_offset..][0 .. vortex_upgrades_max + 1];
+
+    for (server_exes_select, 0..) |executable, i| {
+        const destination = b.fmt("../{s}/tigerbeetle-{d}", .{ vortex_dir, i });
+        vortex_options.step.dependOn(&b.addInstallBinFile(executable, destination).step);
+    }
+    for (driver_exes_select, 0..) |executable, i| {
+        const destination = b.fmt("../{s}/vortex-driver-zig-{d}", .{ vortex_dir, i });
+        vortex_options.step.dependOn(&b.addInstallBinFile(executable, destination).step);
     }
     return vortex_options;
 }
