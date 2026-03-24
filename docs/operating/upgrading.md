@@ -18,9 +18,11 @@ involved, see the [release notes for 0.15.4](https://github.com/tigerbeetle/tige
 
 ## API Stability
 
-At the moment, TigerBeetle doesn't guarantee complete API stability, subscribe to the
-[tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
-to receive notifications about breaking changes!
+At the moment, TigerBeetle doesn't guarantee complete API stability.
+See [API Changes](../coding/api-changes.md) for the history of changes introduced in the TigerBeetle
+Client libraries.<br>
+Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to receive notifications about breaking changes.
 
 ## Planning for upgrades
 When upgrading TigerBeetle, each release specifies two important versions:
@@ -47,9 +49,6 @@ recommended, for an extra layer of safety.
 Any special instructions, like that when upgrading from 0.15.3 to 0.15.4, will be explicitly
 mentioned in the [changelog](https://github.com/tigerbeetle/tigerbeetle/blob/main/CHANGELOG.md)
 and [release notes](https://github.com/tigerbeetle/tigerbeetle/releases).
-
-Additionally, subscribe to [this tracking issue](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
-to be notified when there are breaking API/behavior changes that are visible to the client.
 
 ## Upgrading binary-based installations
 If TigerBeetle is installed under `/usr/bin/tigerbeetle`, and you wish to upgrade to `0.15.4`:
