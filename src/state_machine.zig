@@ -1465,10 +1465,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for get_account_transfers: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_get_account_transfers_scan_callback(
@@ -1598,10 +1595,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             // Returning an empty array on the next tick.
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_get_account_balances_scan_callback(
@@ -1833,10 +1827,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for query_accounts: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_query_accounts_scan_callback(
@@ -1923,10 +1914,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for query_transfers: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_query_transfers_scan_callback(
@@ -2058,9 +2046,24 @@ pub fn StateMachineType(comptime Storage: type) type {
             };
         }
 
+        /// Common `next_tick` used by all `prefetch_scan_*` when the filter is invalid.
+        fn prefetch_scan_invalid_filter(self: *StateMachine) void {
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation != null);
+            assert(self.scan_lookup == .null);
+            maybe(self.scan_lookup_buffer_index > 0);
+            maybe(self.scan_lookup_results.items.len > 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_invalid_filter_callback,
+                &self.scan_lookup_next_tick,
+            );
+        }
+
         /// Common `next_tick` callback used by all `prefetch_scan_*` functions to complete
         /// the operation when the filter is invalid.
-        fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
+        fn prefetch_scan_invalid_filter_callback(completion: *Grid.NextTick) void {
             const self: *StateMachine = @alignCast(@fieldParentPtr(
                 "scan_lookup_next_tick",
                 completion,
@@ -2205,10 +2208,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for prefetch_get_change_events_scan: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_get_change_events_scan_callback(
