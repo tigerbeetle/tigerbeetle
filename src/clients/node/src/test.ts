@@ -897,6 +897,29 @@ test('can get account transfers', async (): Promise<void> => {
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
   assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
+  // TooMuchData
+  filter = {
+    account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
+    limit: 10_000,
+    flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
+  }
+  try {
+    await client.getAccountTransfers(filter)
+  } catch (err) {
+    assert.strictEqual(err.message, "Too much data provided on this batch.");
+  }
+  try {
+    await client.getAccountBalances(filter)
+  } catch (err) {
+    assert.strictEqual(err.message, "Too much data provided on this batch.");
+  }
+
   // Empty flags:
   filter = {
     account_id: accountC.id,
@@ -1371,6 +1394,29 @@ test('query with invalid filter', async (): Promise<void> => {
   }
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])
   assert.deepStrictEqual((await client.queryTransfers(filter)), [])
+
+  // TooMuchData
+  filter = {
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    ledger: 0,
+    code: 0,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
+    limit: 10_000,
+    flags: QueryFilterFlags.none,
+  }
+  try {
+    await client.queryAccounts(filter)
+  } catch (err) {
+    assert.strictEqual(err.message, "Too much data provided on this batch.");
+  }
+  try {
+    await client.queryTransfers(filter)
+  } catch (err) {
+    assert.strictEqual(err.message, "Too much data provided on this batch.");
+  }
 
   // Invalid flags:
   filter = {
