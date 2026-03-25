@@ -122,7 +122,7 @@ internal sealed class NativeClient : IDisposable
             fixed (TBClient* client = &tb_client[0])
             {
                 var status = tb_client_submit(client, packet);
-                ObjectDisposedException.ThrowIf(status == ClientStatus.Invalid, this);
+                if (status != ClientStatus.Ok) throw new ClientClosedException();
             }
         }
     }

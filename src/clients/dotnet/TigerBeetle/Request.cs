@@ -110,11 +110,27 @@ internal abstract class Request<TResult, TBody> : NativeRequest
                         break;
                     }
 
-                case PacketStatus.ClientShutdown:
-                    throw new ObjectDisposedException("Client shutdown.");
+                case PacketStatus.TooMuchData:
+                    throw new TooMuchDataException();
 
+                case PacketStatus.ClientEvicted:
+                    throw new ClientEvictedException();
+
+                case PacketStatus.ClientReleaseTooLow:
+                    throw new ClientReleaseException(ClientReleaseException.Reason.ClientReleaseTooLow);
+
+                case PacketStatus.ClientReleaseTooHigh:
+                    throw new ClientReleaseException(ClientReleaseException.Reason.ClientReleaseTooHigh);
+
+                case PacketStatus.ClientShutdown:
+                    throw new ClientClosedException();
+
+                case PacketStatus.InvalidOperation: // Not expected.
+                case PacketStatus.InvalidDataSize: // Not expected.
                 default:
-                    throw new RequestException(status);
+                    // Panic, as this would be an error in the TigerBeetle client.
+                    Environment.FailFast($"Invalid PacketStatus {status}");
+                    break;
             }
         }
         catch (Exception any)

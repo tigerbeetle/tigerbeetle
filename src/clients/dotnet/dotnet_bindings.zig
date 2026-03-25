@@ -129,7 +129,7 @@ const type_mappings = .{
     } },
     .{ exports.tb_packet_status, TypeMapping{
         .name = "PacketStatus",
-        .visibility = .public,
+        .visibility = .internal,
     } },
     .{ exports.tb_operation, TypeMapping{
         .name = "TBOperation",

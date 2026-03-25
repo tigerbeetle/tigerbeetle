@@ -49,31 +49,41 @@ public class RequestTests
     }
 
     [TestMethod]
-    public async Task RequestException()
+    public async Task PacketStatusException()
     {
-        foreach (var isAsync in new bool[] { true, false })
+        var expectedResults = new (PacketStatus, Type)[]
         {
-            var buffer = new byte[Account.SIZE];
-            var callback = new CallbackSimulator<Account, UInt128>(
-                TBOperation.LookupAccounts,
-                (byte)TBOperation.LookupAccounts,
-                buffer,
-                PacketStatus.TooMuchData,
-                delay: 100,
-                isAsync
-            );
-
-            var task = callback.Run();
-            Assert.IsFalse(task.IsCompleted);
-
-            try
+            new(PacketStatus.TooMuchData, typeof(TooMuchDataException)),
+            new(PacketStatus.ClientEvicted, typeof(ClientEvictedException)),
+            new(PacketStatus.ClientReleaseTooHigh, typeof(ClientReleaseException)),
+            new(PacketStatus.ClientReleaseTooLow, typeof(ClientReleaseException)),
+            new(PacketStatus.ClientShutdown, typeof(ClientClosedException)),
+        };
+        foreach (var expected in expectedResults)
+        {
+            foreach (var isAsync in new bool[] { true, false })
             {
-                _ = await task;
-                Assert.Fail();
-            }
-            catch (RequestException exception)
-            {
-                Assert.AreEqual(PacketStatus.TooMuchData, exception.Status);
+                var buffer = new byte[Account.SIZE];
+                var callback = new CallbackSimulator<Account, UInt128>(
+                    TBOperation.LookupAccounts,
+                    (byte)TBOperation.LookupAccounts,
+                    buffer,
+                    expected.Item1,
+                    delay: 50,
+                    isAsync
+                );
+
+                var task = callback.Run();
+                Assert.IsFalse(task.IsCompleted);
+                try
+                {
+                    _ = await task;
+                    Assert.Fail();
+                }
+                catch (Exception exception)
+                {
+                    Assert.IsInstanceOfType(exception, expected.Item2);
+                }
             }
         }
     }
