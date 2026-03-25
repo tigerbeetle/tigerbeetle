@@ -5,7 +5,7 @@
 
 package com.tigerbeetle;
 
-public enum PacketStatus {
+enum PacketStatus {
     Ok((byte) 0),
     TooMuchData((byte) 1),
     ClientEvicted((byte) 2),

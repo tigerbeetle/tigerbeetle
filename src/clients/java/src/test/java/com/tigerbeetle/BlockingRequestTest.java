@@ -190,15 +190,15 @@ public class BlockingRequestTest {
         var dummyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE);
         request.setReplyBuffer(dummyBuffer.array());
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value,
-                PacketStatus.TooMuchData.value, 0L);
+                PacketStatus.ClientReleaseTooLow.value, 0L);
 
         assertTrue(request.isDone());
 
         try {
             request.waitForResult();
             assert false;
-        } catch (RequestException e) {
-            assertEquals(PacketStatus.TooMuchData.value, e.getStatus());
+        } catch (ClientReleaseException exception) {
+            assertEquals(ClientReleaseException.Reason.ClientReleaseTooLow, exception.getReason());
         }
     }
 
@@ -258,7 +258,7 @@ public class BlockingRequestTest {
         // NOTE: Normally this is caught by `Request.endRequest`, halting the VM immediately.
         // But we can't test that in a good way, so we use `setException` here and catch the
         // IllegalStateException.
-        request.setException(new RequestException(PacketStatus.TooMuchData.value));
+        request.setException(new Exception());
     }
 
     @Test
@@ -440,16 +440,15 @@ public class BlockingRequestTest {
         var callback =
                 new CallbackSimulator<TransferBatch>(BlockingRequest.lookupTransfers(client, batch),
                         Request.Operations.LOOKUP_TRANSFERS.value, null,
-                        PacketStatus.TooMuchData.value, 250);
+                        PacketStatus.ClientReleaseTooHigh.value, 250);
 
         callback.start();
 
         try {
             callback.request.waitForResult();
             assert false;
-        } catch (RequestException requestException) {
-
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
+        } catch (ClientReleaseException exception) {
+            assertEquals(ClientReleaseException.Reason.ClientReleaseTooHigh, exception.getReason());
         }
     }
 

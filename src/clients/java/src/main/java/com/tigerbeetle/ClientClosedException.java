@@ -1,5 +1,9 @@
 package com.tigerbeetle;
 
+/**
+ * ClientClosedException is thrown when the client instance is closed and ts resources have been
+ * freed.
+ **/
 public final class ClientClosedException extends IllegalStateException {
 
     public ClientClosedException() {}

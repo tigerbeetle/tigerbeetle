@@ -4,6 +4,8 @@ import java.lang.annotation.Native;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
+import com.tigerbeetle.ClientReleaseException.Reason;
+
 abstract class Request<TResponse extends Batch> {
 
     // @formatter:off
@@ -94,82 +96,106 @@ abstract class Request<TResponse extends Batch> {
         Throwable exception = null;
 
         try {
-
             if (receivedOperation != operation.value) {
+                throw new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
+                        operation.value, receivedOperation);
 
-                exception =
-                        new AssertionError("Unexpected callback operation: expected=%d, actual=%d",
-                                operation.value, receivedOperation);
+            }
 
-            } else if (status != PacketStatus.Ok.value) {
+            switch (PacketStatus.fromValue(status)) {
+                case Ok:
+                    switch (operation) {
+                        case CREATE_ACCOUNTS: {
+                            result = new CreateAccountResultBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            exception = checkResultLength(result);
+                            break;
+                        }
 
-                if (status == PacketStatus.ClientShutdown.value) {
-                    exception = new IllegalStateException("Client is closed");
-                } else {
-                    exception = new RequestException(status);
+                        case CREATE_TRANSFERS: {
+                            result = new CreateTransferResultBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            exception = checkResultLength(result);
+                            break;
+                        }
+
+                        case ECHO_ACCOUNTS:
+                        case LOOKUP_ACCOUNTS: {
+                            result = new AccountBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            exception = checkResultLength(result);
+                            break;
+                        }
+
+                        case ECHO_TRANSFERS:
+                        case LOOKUP_TRANSFERS: {
+                            result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            exception = checkResultLength(result);
+                            break;
+                        }
+
+                        case GET_ACCOUNT_TRANSFERS: {
+                            result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            break;
+                        }
+
+                        case GET_ACCOUNT_BALANCES: {
+                            result = new AccountBalanceBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            break;
+                        }
+
+                        case QUERY_ACCOUNTS: {
+                            result = new AccountBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            break;
+                        }
+
+                        case QUERY_TRANSFERS: {
+                            result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
+                                    : ByteBuffer.wrap(replyBuffer));
+                            break;
+                        }
+
+                        default: {
+                            exception = new AssertionError("Unknown operation %d", operation);
+                            break;
+                        }
+                    }
+                    break;
+
+                case TooMuchData: {
+                    exception = new TooMuchDataException();
+                    break;
                 }
 
-            } else {
+                case ClientEvicted: {
+                    exception = new ClientEvictedException();
+                    break;
+                }
 
-                switch (operation) {
-                    case CREATE_ACCOUNTS: {
-                        result = new CreateAccountResultBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        exception = checkResultLength(result);
-                        break;
-                    }
+                case ClientReleaseTooHigh: {
+                    exception = new ClientReleaseException(Reason.ClientReleaseTooHigh);
+                    break;
+                }
 
-                    case CREATE_TRANSFERS: {
-                        result = new CreateTransferResultBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        exception = checkResultLength(result);
-                        break;
-                    }
+                case ClientReleaseTooLow: {
+                    exception = new ClientReleaseException(Reason.ClientReleaseTooLow);
+                    break;
+                }
 
-                    case ECHO_ACCOUNTS:
-                    case LOOKUP_ACCOUNTS: {
-                        result = new AccountBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        exception = checkResultLength(result);
-                        break;
-                    }
+                case ClientShutdown: {
+                    exception = new ClientClosedException();
+                    break;
+                }
 
-                    case ECHO_TRANSFERS:
-                    case LOOKUP_TRANSFERS: {
-                        result = new TransferBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        exception = checkResultLength(result);
-                        break;
-                    }
-
-                    case GET_ACCOUNT_TRANSFERS: {
-                        result = new TransferBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        break;
-                    }
-
-                    case GET_ACCOUNT_BALANCES: {
-                        result = new AccountBalanceBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        break;
-                    }
-
-                    case QUERY_ACCOUNTS: {
-                        result = new AccountBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        break;
-                    }
-
-                    case QUERY_TRANSFERS: {
-                        result = new TransferBatch(
-                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
-                        break;
-                    }
-
-                    default: {
-                        exception = new AssertionError("Unknown operation %d", operation);
-                        break;
-                    }
+                case InvalidDataSize:
+                case InvalidOperation:
+                default: {
+                    exception = new AssertionError("Unexpected PacketStatus %d", status);
+                    break;
                 }
             }
         } catch (Throwable any) {

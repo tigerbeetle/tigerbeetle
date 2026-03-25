@@ -207,11 +207,7 @@ public class AsyncRequestTest {
             future.join();
             assert false;
         } catch (CompletionException e) {
-
-            assertTrue(e.getCause() instanceof RequestException);
-
-            var requestException = (RequestException) e.getCause();
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
+            assertTrue(e.getCause() instanceof TooMuchDataException);
         }
     }
 
@@ -506,11 +502,7 @@ public class AsyncRequestTest {
             future.get();
             assert false;
         } catch (ExecutionException exception) {
-
-            assertTrue(exception.getCause() instanceof RequestException);
-
-            var requestException = (RequestException) exception.getCause();
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
+            assertTrue(exception.getCause() instanceof TooMuchDataException);
         }
     }
 
@@ -523,7 +515,7 @@ public class AsyncRequestTest {
         var callback =
                 new CallbackSimulator<AccountBatch>(AsyncRequest.lookupAccounts(client, batch),
                         Request.Operations.LOOKUP_ACCOUNTS.value, null,
-                        PacketStatus.InvalidDataSize.value, 100);
+                        PacketStatus.ClientEvicted.value, 100);
 
         Future<AccountBatch> future = callback.request.getFuture();
         callback.start();
@@ -532,11 +524,7 @@ public class AsyncRequestTest {
             future.get(1000, TimeUnit.MILLISECONDS);
             assert false;
         } catch (ExecutionException exception) {
-
-            assertTrue(exception.getCause() instanceof RequestException);
-
-            var requestException = (RequestException) exception.getCause();
-            assertEquals(PacketStatus.InvalidDataSize.value, requestException.getStatus());
+            assertTrue(exception.getCause() instanceof ClientEvictedException);
         }
     }
 
@@ -547,18 +535,15 @@ public class AsyncRequestTest {
         batch.add();
 
         var request = AsyncRequest.lookupTransfers(client, batch);
-        var status = PacketStatus.TooMuchData.value;
-
         try {
             // First completion is OK, registering the exception in the CompletableFuture.
-            request.setException(new RequestException(status));
+            request.setException(new Exception());
         } catch (Throwable any) {
             // No exception is expected in the first call.
             assert false;
         }
         // Second time throws an exception, because it can only be completed once.
-        request.setException(new RequestException(status));
-
+        request.setException(new Exception());
     }
 
     private static NativeClient getDummyClient() {

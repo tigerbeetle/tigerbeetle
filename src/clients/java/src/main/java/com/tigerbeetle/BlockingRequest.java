@@ -160,15 +160,13 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
         // Handling checked and unchecked exceptions accordingly
         if (exception != null) {
 
-            if (exception instanceof RequestException)
-                throw (RequestException) exception;
-
             if (exception instanceof RuntimeException)
                 throw (RuntimeException) exception;
 
             if (exception instanceof Error)
                 throw (Error) exception;
 
+            // Wrapping checked exceptions.
             throw new AssertionError(exception, "Unexpected exception");
 
         } else {

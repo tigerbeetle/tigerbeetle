@@ -149,6 +149,7 @@ const type_mappings = .{
     } },
     .{ exports.tb_packet_status, TypeMapping{
         .name = "PacketStatus",
+        .visibility = .internal,
     } },
 };
 
