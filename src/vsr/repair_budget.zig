@@ -275,6 +275,10 @@ pub const RepairBudgetGrid = struct {
     // inflight repair request if the block has not arrived.
     const duration_expiry: stdx.Duration = .ms(250);
 
+    // The amount of time we wait before re-requesting a block
+    // which has not yet arrived.
+    const duration_retry: stdx.Duration = .ms(100);
+
     // Maximum blocks that can be requested per remote replica.
     //
     // We use a small number to ensure that even if the budget to a
@@ -378,11 +382,22 @@ pub const RepairBudgetGrid = struct {
         assert(options.block_identifier.address > 0);
         assert(options.replica_index != budget.replica_index);
 
+        var duration_since_requested_min: ?stdx.Duration = null;
+
         for (budget.replicas_requested_blocks, 0..) |requested_blocks, replica_index| {
-            if (requested_blocks.get(options.block_identifier) != null) {
+            if (requested_blocks.get(options.block_identifier)) |requested_at| {
                 assert(replica_index != budget.replica_index);
-                return false;
+                const duration_since_requested = options.now.duration_since(requested_at);
+                if (duration_since_requested_min == null or
+                    duration_since_requested.ns < duration_since_requested_min.?.ns)
+                {
+                    duration_since_requested_min = duration_since_requested;
+                }
             }
+        }
+
+        if (duration_since_requested_min) |duration| {
+            if (duration.ns < duration_retry.ns) return false;
         }
 
         var replica_requested_blocks =
@@ -390,12 +405,10 @@ pub const RepairBudgetGrid = struct {
 
         assert(replica_requested_blocks.count() < replica_blocks_requested_max);
 
-        replica_requested_blocks.putAssumeCapacityNoClobber(
-            options.block_identifier,
-            options.now.add(duration_expiry),
-        );
+        const gop = replica_requested_blocks.getOrPutAssumeCapacity(options.block_identifier);
+        gop.value_ptr.* = options.now;
 
-        budget.available -= 1;
+        if (!gop.found_existing) budget.available -= 1;
 
         return true;
     }
@@ -438,8 +451,10 @@ pub const RepairBudgetGrid = struct {
             var requested_blocks_index: u32 = 0;
 
             while (requested_blocks_index < requested_blocks.entries.len) {
-                const expires_at = requested_blocks.values()[requested_blocks_index];
-                if (now.ns > expires_at.ns) {
+                const requested_at = requested_blocks.values()[requested_blocks_index];
+                const duration_since_requested_at = now.duration_since(requested_at);
+
+                if (duration_since_requested_at.ns > duration_expiry.ns) {
                     requested_blocks.swapRemoveAt(requested_blocks_index);
                     budget.available += 1;
                 } else {

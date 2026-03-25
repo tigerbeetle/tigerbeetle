@@ -7456,6 +7456,12 @@ pub fn ReplicaType(
 
             if (self.syncing == .updating_checkpoint) return;
 
+            if (self.grid.callback != .cancel) {
+                if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
+                    self.send_request_blocks(replica_index);
+                }
+            }
+
             if (!self.state_machine_opened) return;
 
             assert(self.status == .normal or self.status == .view_change);
