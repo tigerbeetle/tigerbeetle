@@ -428,6 +428,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     // For operations that produce 1:1 result per event
                     // (e.g., `create_*` and `lookup_*`), this was already validated
                     // when checking if `event_count` fits within the multi-batch request.
+                    // For queries, this means the reply size cannot fit within the same message.
+                    assert(body_encoder.batch_count > 0);
                     assert(!operation.is_batchable());
                     break;
                 }
@@ -976,6 +978,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
             account_filter.flags.reversed = self.prng.boolean();
 
+            const operation = comptime std.enums.nameCast(Operation, action);
+            const batch_result_max = operation.result_max(self.options.batch_size_limit);
+
             // The timestamp range is restrictive to the number of transfers inserted at the
             // moment the filter was generated. Only when this filter is in place we can assert
             // the expected result count.
@@ -984,7 +989,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             {
                 account_filter.flags.credits = true;
                 account_filter.flags.debits = true;
-                account_filter.limit = account_state.?.transfers_count(account_filter.flags);
+                account_filter.limit = @min(
+                    account_state.?.transfers_count(account_filter.flags),
+                    batch_result_max,
+                );
                 account_filter.timestamp_min = account_state.?.transfer_timestamp_min;
                 account_filter.timestamp_max = account_state.?.transfer_timestamp_max;
 
@@ -1003,20 +1011,16 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     },
                 }
 
-                const operation = comptime std.enums.nameCast(Operation, action);
-                const batch_result_max = operation.result_max(self.options.batch_size_limit);
                 account_filter.limit = switch (self.prng.enum_uniform(enum {
                     zero,
                     one,
                     random,
                     batch_max,
-                    int_max,
                 })) {
                     .zero => 0,
                     .one => 1,
                     .random => self.prng.int_inclusive(u32, batch_result_max),
                     .batch_max => batch_result_max,
-                    .int_max => std.math.maxInt(u32),
                 };
             }
 
@@ -1044,13 +1048,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 one,
                 random,
                 batch_max,
-                int_max,
             })) {
                 .zero => 0,
                 .one => 1,
                 .random => self.prng.int_inclusive(u32, batch_result_max),
                 .batch_max => batch_result_max,
-                .int_max => std.math.maxInt(u32),
             };
 
             if (self.prng.chance(self.options.query_filter_not_found_probability)) {
@@ -1157,13 +1159,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const limit: u32 = switch (self.prng.enum_uniform(enum {
                 exact,
                 batch_max,
-                int_max,
             })) {
                 .exact => snapshot.count_total(),
                 .batch_max => Operation.get_change_events.result_max(
                     self.options.batch_size_limit,
                 ),
-                .int_max => std.math.maxInt(u32),
             };
             filter.* = .{
                 .limit = limit,
@@ -1782,8 +1782,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const batch_result_max = operation.result_max(self.options.batch_size_limit);
             const transfer_count = account_state.transfers_count(account_filter.flags);
             if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
-                assert(account_filter.limit <= batch_result_max or
-                    account_filter.limit == std.math.maxInt(u32));
+                assert(account_filter.limit <= batch_result_max);
                 assert(result_count ==
                     @min(account_filter.limit, batch_result_max, transfer_count));
             } else {

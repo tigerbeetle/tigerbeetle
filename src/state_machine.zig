@@ -940,7 +940,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             var result_count_expected: u32 = 0;
             while (body_decoder.pop()) |batch| {
                 if (!self.batch_valid(operation, batch)) return false;
-                result_count_expected += operation.result_count_expected(batch);
+
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
+                result_count_expected += @min(
+                    operation.result_count_expected(batch),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    operation.result_max(constants.message_body_size_max),
+                );
             }
             const reply_trailer_size: u32 = vsr.multi_batch.trailer_total_size(.{
                 .element_size = result_size,
@@ -1438,11 +1446,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(
                     filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    self.prefetch_operation.?.result_max(constants.message_body_size_max),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -1555,11 +1565,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                             scan,
                         );
 
-                        // Limiting the buffer size according to the query limit.
-                        // TODO: Prevent clients from setting the limit larger than the buffer size.
+                        // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                        // for queries, the limit was capped instead.
+                        // Remove `@min` when clients < 0.17.0 are no longer supported.
                         const limit = @min(
                             filter.limit,
-                            self.prefetch_operation.?.result_max(self.batch_size_limit),
+                            // Replies are not constrained by the runtime `batch_size_limit`.
+                            self.prefetch_operation.?.result_max(constants.message_body_size_max),
                         );
                         assert(limit > 0);
                         assert(scan_buffer.len >= limit);
@@ -1802,12 +1814,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the reply size by
-                // failing with `TooMuchData`.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(
                     filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    self.prefetch_operation.?.result_max(constants.message_body_size_max),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -1891,11 +1904,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(
                     filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    self.prefetch_operation.?.result_max(constants.message_body_size_max),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -2149,7 +2164,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // - Or, make the `operation_{event,result}_max(...)` functions aware of the number
                 //   of prefetches.
                 const limit_max: u32 = limit_max: {
-                    const result_max = self.prefetch_operation.?.result_max(self.batch_size_limit);
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    const result_max = self.prefetch_operation.?.result_max(
+                        constants.message_body_size_max,
+                    );
                     // Also constrained by the maximum number of available prefetches.
                     const prefetch_transfers = @max(
                         Operation.lookup_transfers.event_max(self.batch_size_limit),
@@ -2172,8 +2190,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                     );
                 };
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(filter.limit, limit_max);
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);

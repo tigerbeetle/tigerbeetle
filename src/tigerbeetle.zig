@@ -986,11 +986,7 @@ pub const Operation = enum(u8) {
                 const filter: Filter = std.mem.bytesToValue(Filter, batch);
                 maybe(filter.limit == 0);
 
-                // TODO: Handle `TooMuchData` at the client side instead of capping the limit.
-                break :count @min(
-                    filter.limit,
-                    operation_comptime.result_max(constants.message_body_size_max),
-                );
+                break :count filter.limit;
             },
         };
     }
