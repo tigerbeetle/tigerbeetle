@@ -93,17 +93,17 @@ func NewClient(
 	if init_status != C.TB_INIT_SUCCESS {
 		switch init_status {
 		case C.TB_INIT_UNEXPECTED:
-			return nil, ErrUnexpected{}
+			return nil, ErrUnexpected
 		case C.TB_INIT_OUT_OF_MEMORY:
-			return nil, ErrOutOfMemory{}
+			return nil, ErrOutOfMemory
 		case C.TB_INIT_ADDRESS_INVALID:
-			return nil, ErrInvalidAddress{}
+			return nil, ErrInvalidAddress
 		case C.TB_INIT_ADDRESS_LIMIT_EXCEEDED:
-			return nil, ErrAddressLimitExceeded{}
+			return nil, ErrAddressLimitExceeded
 		case C.TB_INIT_SYSTEM_RESOURCES:
-			return nil, ErrSystemResources{}
+			return nil, ErrSystemResources
 		case C.TB_INIT_NETWORK_SUBSYSTEM:
-			return nil, ErrNetworkSubsystem{}
+			return nil, ErrNetworkSubsystem
 		default:
 			panic("tb_client_init(): invalid error code")
 		}
@@ -198,7 +198,7 @@ func (c *c_client) doRequest(
 
 	client_status := C.tb_client_submit(c.tb_client, packet)
 	if client_status == C.TB_CLIENT_INVALID {
-		return nil, ErrClientClosed{}
+		return nil, ErrClientClosed
 	}
 
 	// Wait for the request to complete.
@@ -209,21 +209,22 @@ func (c *c_client) doRequest(
 	if packet_status != C.TB_PACKET_OK {
 		switch packet_status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
-			return nil, ErrMaximumBatchSizeExceeded{}
+			return nil, ErrTooMuchData
 		case C.TB_PACKET_CLIENT_EVICTED:
-			return nil, ErrClientEvicted{}
+			return nil, ErrClientEvicted
 		case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
-			return nil, ErrClientReleaseTooLow{}
+			return nil, ErrClientReleaseTooLow
 		case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
-			return nil, ErrClientReleaseTooHigh{}
+			return nil, ErrClientReleaseTooHigh
 		case C.TB_PACKET_CLIENT_SHUTDOWN:
-			return nil, ErrClientClosed{}
+			return nil, ErrClientClosed
 		case C.TB_PACKET_INVALID_OPERATION:
-			// we control what C.TB_OPERATION is given
-			// but allow an invalid opcode to be passed to emulate a client nop
-			return nil, ErrInvalidOperation{}
+			// We control what C.TB_OPERATION is given
+			// but allow an invalid opcode to be passed to emulate a client nop.
+			return nil, ErrInvalidOperation
 		case C.TB_PACKET_INVALID_DATA_SIZE:
-			panic("unreachable") // we control what type of data is given
+			// We control what type of data is given.
+			panic("unreachable")
 		default:
 			panic("tb_client_submit(): returned packet with invalid status")
 		}
@@ -497,7 +498,7 @@ func (c *c_client) Nop() error {
 	reservedOp := C.TB_OPERATION(0)
 	reply, err := c.doRequest(reservedOp, 1, ptr)
 
-	if !e.Is(err, ErrInvalidOperation{}) {
+	if !e.Is(err, ErrInvalidOperation) {
 		return err
 	}
 
