@@ -178,40 +178,39 @@ class Client:
             # Can't use tb_assert here, as mypy complains later that it might be None.
             raise TypeError("inflight_packet.on_completion not set")
 
-        match packet[0].status:
-            case bindings.PacketStatus.OK.value:
-                c_result_type = inflight_packet.c_result_type
-                tb_assert(len_ % ctypes.sizeof(c_result_type) == 0)
+        if packet[0].status == bindings.PacketStatus.OK.value:
+            c_result_type = inflight_packet.c_result_type
+            tb_assert(len_ % ctypes.sizeof(c_result_type) == 0)
 
-                # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
-                # it to a fresh, Python owned buffer and do the conversion from the raw C type to the Python
-                # dataclass.
-                results_slice = ctypes.cast(
-                    bytes_ptr,
-                    ctypes.POINTER(c_result_type)
-                )[0:(len_ // ctypes.sizeof(c_result_type))]
-                results = [result.to_python() for result in results_slice]
+            # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
+            # it to a fresh, Python owned buffer and do the conversion from the raw C type to the Python
+            # dataclass.
+            results_slice = ctypes.cast(
+                bytes_ptr,
+                ctypes.POINTER(c_result_type)
+            )[0:(len_ // ctypes.sizeof(c_result_type))]
+            results = [result.to_python() for result in results_slice]
 
-                inflight_packet.response = results
+            inflight_packet.response = results
 
-            case bindings.PacketStatus.TOO_MUCH_DATA.value:
-                inflight_packet.response = TooMuchDataError()
+        elif packet[0].status == bindings.PacketStatus.TOO_MUCH_DATA.value:
+            inflight_packet.response = TooMuchDataError()
 
-            case bindings.PacketStatus.CLIENT_EVICTED.value:
-                inflight_packet.response = ClientEvictedError()
+        elif packet[0].status == bindings.PacketStatus.CLIENT_EVICTED.value:
+            inflight_packet.response = ClientEvictedError()
 
-            case bindings.PacketStatus.CLIENT_RELEASE_TOO_LOW.value:
-                inflight_packet.response = ClientReleaseTooLowError()
+        elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_LOW.value:
+            inflight_packet.response = ClientReleaseTooLowError()
 
-            case bindings.PacketStatus.CLIENT_RELEASE_TOO_HIGH.value:
-                inflight_packet.response = ClientReleaseTooHighError()
+        elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_HIGH.value:
+            inflight_packet.response = ClientReleaseTooHighError()
 
-            case bindings.PacketStatus.CLIENT_SHUTDOWN.value:
-                inflight_packet.response = ClientClosedError()
+        elif packet[0].status == bindings.PacketStatus.CLIENT_SHUTDOWN.value:
+            inflight_packet.response = ClientClosedError()
 
-            case bindings.PacketStatus.INVALID_OPERATION.value | \
-                    bindings.PacketStatus.INVALID_DATA_SIZE.value:
-                inflight_packet.response = Exception("Unexpected PacketStatus {status}")
+        else:
+            # INVALID_OPERATION and INVALID_DATA_SIZE are unexpected.
+            inflight_packet.response = Exception("Unexpected PacketStatus {status}")
 
         inflight_packet.on_completion(inflight_packet)
 
