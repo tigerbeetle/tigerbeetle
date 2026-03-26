@@ -97,7 +97,7 @@ pub fn main() !void {
     log.info("seed={}", .{seed});
     log.info("output_directory={s}", .{supervisor.output_directory});
     log.info("duration={}", .{args.test_duration});
-    log.info("release={}/{}", .{ release_min, dependencies_count });
+    log.info("releases={any}", .{supervisor.releases});
 
     for (0..args.replica_count) |replica_index| {
         try supervisor.replica_install(@intCast(replica_index), release_min);

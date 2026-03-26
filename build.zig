@@ -1251,7 +1251,7 @@ fn build_vortex_options(
 ) *std.Build.Step.Options {
     const vortex_options = b.addOptions();
     // TODO See below note about Debug builds.
-    const vortex_upgrades_max: u32 = if (options.mode == .Debug) 1 else 4;
+    const vortex_upgrades_max: u32 = if (options.mode == .Debug) 1 else 2;
     const vortex_dir = b.fmt("vortex/{s}", .{@tagName(options.mode)});
     vortex_options.addOptionPath(
         "dependencies_path",

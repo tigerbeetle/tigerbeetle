@@ -49,15 +49,17 @@ const Shell = @import("../../shell.zig");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.supervisor);
+const Release = @import("../../multiversion.zig").Release;
 
 const dependencies_path: []const u8 = @import("vortex_options").dependencies_path;
 const dependencies_count: u32 = @import("vortex_options").dependencies_count;
 
-/// Executables are ordered from oldest to newest.
+/// Executables/releases are ordered from oldest to newest.
 /// All paths are absolute.
-fn configuration() struct {
+fn configuration(shell: *Shell) !struct {
     server_executables: [dependencies_count][]const u8,
     driver_executables: [dependencies_count][]const u8,
+    releases: [dependencies_count]Release,
 } {
     comptime assert(dependencies_count > 0);
     const server_executables: [dependencies_count][]const u8 = comptime array: {
@@ -81,11 +83,30 @@ fn configuration() struct {
         break :array executables;
     };
 
+    const releases: [dependencies_count]Release = array: {
+        var release_list: [dependencies_count]Release = undefined;
+        for (&release_list, server_executables) |*release, executable| {
+            const output = try shell.exec_stdout("{exe} version", .{ .exe = executable });
+            const prefix = "TigerBeetle version ";
+            const suffix = std.mem.indexOfScalar(u8, output, '+');
+            assert(std.mem.startsWith(u8, output, prefix));
+
+            release.* = try Release.parse(output[prefix.len..suffix.?]);
+        }
+        break :array release_list;
+    };
+
     for (server_executables) |path| assert(std.fs.path.isAbsolute(path));
     for (driver_executables) |path| assert(std.fs.path.isAbsolute(path));
+    if (dependencies_count > 1) {
+        for (releases[0 .. releases.len - 1], releases[1..]) |release_old, release_new| {
+            assert(release_old.value < release_new.value);
+        }
+    }
     return .{
         .server_executables = server_executables,
         .driver_executables = driver_executables,
+        .releases = releases,
     };
 }
 
@@ -100,6 +121,7 @@ pub const Supervisor = struct {
 
     server_executables: [dependencies_count][]const u8,
     driver_executables: [dependencies_count][]const u8,
+    releases: [dependencies_count]Release,
     release_count: u32,
 
     output_directory: []const u8,
@@ -120,12 +142,13 @@ pub const Supervisor = struct {
     };
 
     pub fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
-        const dependencies = configuration();
-        assert(dependencies.server_executables.len == dependencies.driver_executables.len);
-        assert(options.replica_count > 0);
-
         const shell = try Shell.create(allocator);
         errdefer shell.destroy();
+
+        const dependencies = try configuration(shell);
+        assert(dependencies.releases.len == dependencies.server_executables.len);
+        assert(dependencies.releases.len == dependencies.driver_executables.len);
+        assert(options.replica_count > 0);
 
         const output_directory = try shell.create_tmp_dir();
         errdefer {
@@ -194,7 +217,8 @@ pub const Supervisor = struct {
             .output_directory = output_directory,
             .server_executables = dependencies.server_executables,
             .driver_executables = dependencies.driver_executables,
-            .release_count = @intCast(dependencies.server_executables.len),
+            .releases = dependencies.releases,
+            .release_count = @intCast(dependencies.releases.len),
             .replicas = replicas,
             .replica_datafiles = replica_datafiles,
         };
@@ -381,12 +405,8 @@ pub const Supervisor = struct {
                 assert(cluster_release_ + 1 < supervisor.release_count);
                 const release_max = supervisor.release_count - 1;
                 const release_target = prng.range_inclusive(u32, cluster_release_ + 1, release_max);
-                log.info("upgrading cluster to {}..{}", .{ cluster_release_, release_target });
-
-                try supervisor.replica_install(
-                    @intCast(prng.index(supervisor.replicas)),
-                    release_target,
-                );
+                const replica_index: u8 = @intCast(prng.index(supervisor.replicas));
+                try supervisor.replica_install(replica_index, release_target);
             },
             .network_delay => {
                 const time_ms = prng.range_inclusive(u32, 10, 500);
@@ -571,8 +591,12 @@ pub const Supervisor = struct {
         assert(release_index < supervisor.release_count);
 
         log.info(
-            "{}: upgrading replica to {}/{}",
-            .{ replica_index, release_index, supervisor.release_count - 1 },
+            "{}: installing replica release: {} ... {}",
+            .{
+                replica_index,
+                supervisor.releases[supervisor.replicas[replica_index].executable_index],
+                supervisor.releases[release_index],
+            },
         );
         supervisor.replicas[replica_index].executable_index = release_index;
 
