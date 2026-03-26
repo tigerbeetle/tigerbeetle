@@ -1013,10 +1013,14 @@ public class IntegrationTest {
                         () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
 
 
-                // The client is deinitialized after it learns it was evicted.
-                // Reusing an evicted client must return a "ClientShutdown" error.
-                assertThrows(ClientClosedException.class,
-                        () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
+                // After eviction, subsequent submissions are accepted but
+                // complete with the eviction error.
+                try {
+                    client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                    assert false;
+                } catch (RequestException requestException) {
+                    assertEquals(PacketStatus.ClientEvicted.value, requestException.getStatus());
+                }
             }
         }
     }

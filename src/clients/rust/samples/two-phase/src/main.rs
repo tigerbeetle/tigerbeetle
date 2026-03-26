@@ -27,7 +27,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 code: 1,
                 ..Default::default()
             },
-        ])?
+        ])
         .await?;
 
     assert!(account_results.len() == 2);
@@ -45,14 +45,14 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::Pending,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
     assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-    let accounts = client.lookup_accounts(&[1, 2])?.await?;
+    let accounts = client.lookup_accounts(&[1, 2]).await?;
     assert_eq!(accounts.len(), 2);
 
     for account in &accounts {
@@ -101,14 +101,14 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
     assert!(transfer_results[0].status == tb::CreateTransferStatus::Created);
 
     // Validate the contents of all transfers
-    let transfers = client.lookup_transfers(&[1, 2])?.await?;
+    let transfers = client.lookup_transfers(&[1, 2]).await?;
     assert_eq!(transfers.len(), 2);
 
     for transfer in &transfers {
@@ -140,7 +140,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-    let accounts = client.lookup_accounts(&[1, 2])?.await?;
+    let accounts = client.lookup_accounts(&[1, 2]).await?;
     assert_eq!(accounts.len(), 2);
 
     for account in &accounts {

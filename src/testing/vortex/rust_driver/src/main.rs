@@ -37,23 +37,19 @@ fn main() -> AnyResult<()> {
 fn execute(client: &mut tb::Client, op: Request) -> AnyResult<Reply> {
     match op {
         Request::CreateAccounts(accounts) => {
-            let response = client.create_accounts(&accounts)?;
-            let response = block_on(response)?;
+            let response = block_on(client.create_accounts(&accounts))?;
             Ok(Reply::CreateAccounts(response))
         }
         Request::CreateTransfers(transfers) => {
-            let response = client.create_transfers(&transfers)?;
-            let response = block_on(response)?;
+            let response = block_on(client.create_transfers(&transfers))?;
             Ok(Reply::CreateTransfers(response))
         }
         Request::LookupAccounts(account_ids) => {
-            let response = client.lookup_accounts(&account_ids)?;
-            let response = block_on(response)?;
+            let response = block_on(client.lookup_accounts(&account_ids))?;
             Ok(Reply::LookupAccounts(response))
         }
         Request::LookupTransfers(transfer_ids) => {
-            let response = client.lookup_transfers(&transfer_ids)?;
-            let response = block_on(response)?;
+            let response = block_on(client.lookup_transfers(&transfer_ids))?;
             Ok(Reply::LookupTransfers(response))
         }
     }
