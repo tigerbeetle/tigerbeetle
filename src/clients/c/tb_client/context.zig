@@ -135,15 +135,6 @@ pub const ClientInterface = extern struct {
     }
 };
 
-/// Thread-local variable to track whether the current thread is
-/// the IO thread or a user thread.
-/// Used to assert that certain functions are only called from the
-/// correct thread.
-threadlocal var thread_caller: union(enum) {
-    user,
-    io: std.Thread.Id,
-} = .user;
-
 /// Fields accessed by both the IO thread and client threads.
 /// Vtable functions receive `*Shared` (not the full IO-thread context),
 /// limiting client thread access to only these fields.
@@ -160,8 +151,6 @@ const Shared = struct {
 // VTable functions called by `ClientInterface`, which are thread-safe.
 
 fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
-    assert(thread_caller == .user);
-
     const shared: *Shared = @ptrCast(@alignCast(context));
 
     // Packet is caller-allocated to enable elastic intrusive-link-list-based
@@ -197,8 +186,6 @@ fn vtable_completion_context_fn(context: *anyopaque) usize {
 }
 
 fn vtable_deinit_fn(context: *anyopaque) void {
-    assert(thread_caller == .user);
-
     const shared: *Shared = @ptrCast(@alignCast(context));
 
     // Copy the thread handle here, since stopping the I/O thread deinitializes
@@ -210,8 +197,6 @@ fn vtable_deinit_fn(context: *anyopaque) void {
 }
 
 fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
-    assert(thread_caller == .user);
-
     const shared: *Shared = @ptrCast(@alignCast(context));
     assert(shared.signal.status() == .running);
 
@@ -481,11 +466,6 @@ pub fn IoThreadType(
         const has_message_bus = @hasField(Client, "message_bus");
 
         fn io_thread(self: *IoThread) void {
-            // Initializing the flag as the IO thread.
-            assert(thread_caller == .user);
-            thread_caller = .{ .io = std.Thread.getCurrentId() };
-            defer thread_caller = .user;
-
             main: while (true) {
                 const should_stop = self.shared.signal.status() == .shutdown_completed;
 
@@ -609,8 +589,6 @@ pub fn IoThreadType(
         }
 
         fn callback_signal_notify(signal: *Signal) void {
-            assert(thread_caller == .io);
-
             const shared: *Shared = @alignCast(@fieldParentPtr("signal", signal));
             const self: *IoThread = @fieldParentPtr("shared", shared);
             assert(shared.signal.status() != .shutdown_completed);
@@ -619,8 +597,6 @@ pub fn IoThreadType(
         }
 
         fn callback_client_register(user_data: u128, result: *const vsr.RegisterResult) void {
-            assert(thread_caller == .io);
-
             const self: *IoThread = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(self.eviction_reason == null);
             assert(result.batch_size_limit > 0);
@@ -643,8 +619,6 @@ pub fn IoThreadType(
         }
 
         fn callback_client_eviction(client: *Client, eviction: *const Message.Eviction) void {
-            assert(thread_caller == .io);
-
             const cs: *ClientState = @fieldParentPtr("client", client);
             const self: *IoThread = cs.context;
             assert(self.phase == .registering or self.phase == .running);
@@ -678,8 +652,6 @@ pub fn IoThreadType(
             timestamp: u64,
             reply: []const u8,
         ) void {
-            assert(thread_caller == .io);
-
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *IoThread = user_data.self;
             const packet_list: *Packet = user_data.packet;
@@ -756,8 +728,6 @@ pub fn IoThreadType(
                 reply: []const u8,
             },
         ) void {
-            assert(thread_caller == .io);
-
             const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
@@ -836,7 +806,6 @@ fn PhaseType(comptime IoThread: type) type {
             previous_request_latency: ?stdx.Duration,
 
             fn packet_enqueue(self: *Running, ctx: *IoThread, packet: *Packet) void {
-                assert(thread_caller == .io);
                 packet.assert_phase(.submitted);
 
                 const operation: Operation = operation_from_int(packet.operation) orelse {
@@ -962,7 +931,6 @@ fn PhaseType(comptime IoThread: type) type {
 
             /// Sends the packet (the entire batched linked list of packets) through the vsr client.
             fn packet_send(self: *Running, ctx: *IoThread, packet_list: *Packet) void {
-                assert(thread_caller == .io);
                 assert(ctx.eviction_reason == null);
                 packet_list.assert_phase(.pending);
 
@@ -1071,7 +1039,6 @@ fn PhaseType(comptime IoThread: type) type {
             }
 
             fn drain_submitted_packets(self: *Running, ctx: *IoThread) void {
-                assert(thread_caller == .io);
                 assert(ctx.eviction_reason == null);
 
                 const enqueued_count = self.pending.count();
@@ -1118,7 +1085,6 @@ fn PhaseType(comptime IoThread: type) type {
             /// Calls the user callback when a packet (the entire batched
             /// linked list of packets) is canceled due to eviction or shutdown.
             fn packet_cancel(_: *const Disconnecting, ctx: *IoThread, packet_list: *Packet) void {
-                assert(thread_caller == .io);
                 assert(packet_list.link.next == null);
                 assert(packet_list.phase != .complete);
                 packet_list.assert_phase(packet_list.phase);
@@ -1148,7 +1114,6 @@ fn PhaseType(comptime IoThread: type) type {
             /// Must only run once: after cancellation the packet is
             /// returned to the user and the memory may be freed.
             fn cancel_inflight(self: *Disconnecting, ctx: *IoThread) void {
-                assert(thread_caller == .io);
                 if (self.inflight_canceled) return;
                 self.inflight_canceled = true;
 
