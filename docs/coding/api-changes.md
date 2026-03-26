@@ -98,6 +98,28 @@ pub const CreateTransferResult = extern struct {
 </td></tr>
 </table>
 
+### Query limits.
+
+The previous API did not validate the maximum range of the fields
+[`AccountFilter.limit`](../reference/account-filter.md#limit) and
+[`QueryFilter.limit`](../reference/query-filter.md#limit).
+Values up to `2^32 - 1` were accepted, and the TigerBeetle cluster was
+responsible for capping the number of results to fit the message size.
+
+Now the TigerBeetle client enforces a valid `limit` and rejects requests with limits
+greater than the [maximum batch size](../coding/requests.md#batching-events),
+returning the `too_much_data` error code.
+
+This is the same behavior as when, for example,
+[`create_accounts`](../reference/requests/create_accounts.md) or
+[`create_transfers`](../reference/requests/create_transfers.md)
+are called with more than _8189_ events.
+
+The operations [`query_accounts`](../reference/requests/query_accounts.md),
+[`query_transfers`](../reference/requests/query_transfers.md),
+[`get_account_transfers`](../reference/requests/get_account_transfers.md), and
+[`get_account_balances`](../reference/requests/get_account_balances.md) are affected.
+
 ### Client breaking changes
 
 Along with the new result types, some client libraries have changed the API to be more
@@ -155,6 +177,18 @@ The TigerBeetle .NET Client `0.17.0` introduced the following breaking changes:
   The batched versions that take an array of events such as
   <code>CreateAccount<b>s</b></code>, <code>CreateTransfer<b>s</b></code>,
   <code>LookupAccount<b>s</b></code>, and <code>LookupTransfer<b>s</b></code> remain unchanged.
+
+- New exceptions were introduced for conditions that can be handled by the application.
+  The `PacketStatus` enum is now internal and the `RequestException` was removed.
+
+  |Type       |Before                                 | After                                   |
+  |-----------|---------------------------------------|-----------------------------------------|
+  |Enum       |`PacketStatus`                         |_removed_                                |
+  |Exception  |`RequestException`                     |_removed_                                |
+  |Exception  |                                       |`ClientClosedException`                  |
+  |Exception  |                                       |`ClientEvictedException`                 |
+  |Exception  |                                       |`ClientReleaseException`                 |
+  |Exception  |                                       |`TooMuchDataException`                   |
 
 ### Example:
 
@@ -236,6 +270,9 @@ The TigerBeetle Go Client `0.17.0` introduced the following breaking changes:
 
 - The `types` and `errors` packages were removed, consolidating all definitions under the root
   `tigerbeetle_go` package.
+
+  The `Err` types were removed in favor of simple value declarations for error codes,
+  allowing the use of idiomatic constructions such as `errors.Is(err, ErrTooMuchData)`.
 
 ### Example:
 
@@ -334,6 +371,20 @@ The TigerBeetle Java Client `0.17.0` introduced the following breaking changes:
   The non-blocking versions of the same methods that return a
   [`CompletableFuture<T>`](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html)
   remain unchanged.
+
+- New exceptions were introduced for conditions that can be handled by the application.
+  The `PacketStatus` enum is now internal and the `RequestException` was removed.
+
+  All operations throw `ClientClosedException` instead of `IllegalStateException`
+  if the client is  closed.
+
+  |Type       |Before                                 | After                                   |
+  |-----------|---------------------------------------|-----------------------------------------|
+  |Enum       |`PacketStatus`                         |_removed_                                |
+  |Exception  |`RequestException`                     |_removed_                                |
+  |Exception  |                                       |`ClientEvictedException`                 |
+  |Exception  |                                       |`ClientReleaseException`                 |
+  |Exception  |                                       |`TooMuchDataException`                   |
 
 ### Example:
 
@@ -487,6 +538,18 @@ The TigerBeetle Python Client `0.17.0` introduced the following breaking changes
   |Field      |`CreateTransfersResult.result`         |`CreateTransferResult.status`            |
 
 - The constant `amount_max` was renamed to `AMOUNT_MAX`.
+
+- New exceptions were introduced for conditions that can be handled by the application.
+  The `PacketStatus` enum is now internal and the `PacketError` exception was removed.
+
+  |Type       |Before                                 | After                                   |
+  |-----------|---------------------------------------|-----------------------------------------|
+  |Enum       |`PacketStatus`                         |_removed_                                |
+  |Exception  |`PacketError     `                     |_removed_                                |
+  |Exception  |                                       |`ClientEvictedError`                     |
+  |Exception  |                                       |`ClientReleaseTooLowError`               |
+  |Exception  |                                       |`ClientReleaseTooHighError`              |
+  |Exception  |                                       |`TooMuchDataError`                       |
 
 ### Example:
 
