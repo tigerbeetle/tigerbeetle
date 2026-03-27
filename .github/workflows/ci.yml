@@ -22,6 +22,10 @@ jobs:
       - run: shellcheck ./zig/download.sh
       - shell: pwsh
         run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
+      - uses: actions/cache@v5
+        with:
+          path: ./zig/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
       - run: ./zig/download.ps1 && ./zig/zig build ci -- smoke
 
   test:
@@ -49,6 +53,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2147483647 }
+      - uses: actions/cache@v5
+        with:
+          path: ./zig/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
       - run: ./zig/download.ps1 && ./zig/zig build ci -- aof
 
   clients:
@@ -127,6 +135,10 @@ jobs:
       - if: matrix.language == 'python'
         run: pip install build hatch pytest 'mypy<=1.18.2'
 
+      - uses: actions/cache@v5
+        with:
+          path: ./zig/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
       - run: ./zig/download.ps1 && ./zig/zig build ci -- ${{ matrix.language }}
 
   devhub:
@@ -141,6 +153,10 @@ jobs:
         with: { fetch-depth: 2147483647 }
       - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: sudo rm -rf /usr/local/lib/android # Free up disk space for benchmarking.
+      - uses: actions/cache@v5
+        with:
+          path: ./zig/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
       - run: ./zig/download.ps1
 
       # Dummy devhub run - checks that all the devhub tests pass in CI. They are run again, in main
