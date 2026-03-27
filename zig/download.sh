@@ -51,7 +51,7 @@ ZIG_DIRECTORY=$(basename "$ZIG_ARCHIVE" "$ZIG_EXTENSION")
 
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 if command -v curl > /dev/null; then
-    curl --silent --output "$ZIG_ARCHIVE" "$ZIG_URL"
+    curl --location --silent --output "$ZIG_ARCHIVE" "$ZIG_URL"
 elif command -v wget > /dev/null; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
