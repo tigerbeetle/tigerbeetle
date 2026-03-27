@@ -5,18 +5,20 @@ to receive notifications about breaking changes!
 
 ## TigerBeetle (unreleased)
 
+Released: 2026-03-27
+
 This release improves `create_accounts` and `create_transfers` operations. They now return
 timestamps of newly created objects, allowing the application to learn the resulting global order
 of events without additional roundtrips. As usual, this release remains wire-compatible with
 previous clients. To gain access to the new APIs, please upgrade clients to version 0.17.0. Refer
-to [API changes](https://github.com/tigerbeetle/tigerbeetle/pull/3258) page for details.
+to the [API changes](https://docs.tigerbeetle.com/coding/api-changes) page for details.
 
 ### Safety And Performance
 
 - [#3599](https://github.com/tigerbeetle/tigerbeetle/pull/3599)
 
   Improve repair perfomance by tracking per-replica repair budgets, to prevent a slow replica
-  from tiying up the global budget.
+  from tying up the global budget.
 
 ### Features
 
@@ -36,8 +38,7 @@ to [API changes](https://github.com/tigerbeetle/tigerbeetle/pull/3258) page for 
 
 - [#3604](https://github.com/tigerbeetle/tigerbeetle/pull/3604)
 
-  IO/Linux: Add another attempt to flock() retry loop
-
+  IO/Linux: Add another attempt to the flock() retry loop.
 
 ### TigerTracks 🎧
 
