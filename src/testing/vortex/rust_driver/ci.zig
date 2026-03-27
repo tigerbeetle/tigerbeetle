@@ -19,7 +19,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
             "src/testing/vortex/rust_driver/target/debug/vortex-driver-rust";
         try shell.exec(
             "{vortex_bin} " ++
-                "supervisor --driver-command={driver_command} " ++
+                "--driver-command={driver_command} " ++
                 "--replica-count=1 " ++
                 "--disable-faults " ++
                 "--test-duration=1s",

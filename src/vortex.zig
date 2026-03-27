@@ -36,9 +36,19 @@ pub fn main() !void {
     comptime assert(builtin.target.cpu.arch.endian() == .little);
 
     if (builtin.os.tag == .windows) {
+        // Vortex is not currently supported on Windows because of child process management.
+        // e.g. waitpid, pause/unpause.
         log.err("vortex is not supported for Windows", .{});
         return error.NotSupported;
     }
+
+    if (builtin.os.tag == .macos) {
+        // Vortex is not currently supported on MacOS because io.write() is implemented with
+        // pwrite(), which doesn't work on non-seekable streams like child process input/output.
+        log.err("vortex is not supported for MacOS", .{});
+        return error.NotSupported;
+    }
+    assert(builtin.os.tag == .linux);
 
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer switch (gpa_allocator.deinit()) {
@@ -50,6 +60,17 @@ pub fn main() !void {
 
     var args_iterator = try std.process.argsWithAllocator(allocator);
     defer args_iterator.deinit();
+
+    // TODO Remove after merging https://github.com/tigerbeetle/tigerbeetle/pull/3612.
+    // (Stopgap for CFO).
+    {
+        const args_list = try std.process.argsAlloc(allocator);
+        defer std.process.argsFree(allocator, args_list);
+
+        if (std.mem.eql(u8, args_list[1], "supervisor")) {
+            assert(args_iterator.skip());
+        }
+    }
 
     const args = stdx.flags(&args_iterator, CLIArgs);
 

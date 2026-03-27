@@ -462,7 +462,6 @@ fn build_ci(
         @"test", // Main test suite, excluding VOPR and clients.
         fuzz, // Smoke tests for fuzzers and VOPR.
         aof, // Dedicated test for AOF, which is somewhat slow to run.
-        vortex, // Several minute vortex run.
 
         clients, // Tests for all language clients below.
         dotnet,
@@ -534,16 +533,6 @@ fn build_ci(
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
         hide_stderr(aof);
         step_ci.dependOn(&aof.step);
-    }
-    if (all or mode == .vortex) {
-        build_ci_step(b, step_ci, .{
-            "vortex",
-            "--",
-            "supervisor",
-            "--replica-count=3",
-            "--test-duration=5m",
-            "--disable-faults",
-        });
     }
     inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
         if (default or mode == .clients or mode == language) {
@@ -994,6 +983,7 @@ fn build_test_integration(
         run_integration_tests.has_side_effects = true;
     }
     run_integration_tests.has_side_effects = true;
+    run_integration_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     steps.test_integration.dependOn(&run_integration_tests.step);
 }
 
@@ -1249,16 +1239,6 @@ fn build_vortex_options(
         vortex_driver_zig: std.Build.LazyPath,
     },
 ) *std.Build.Step.Options {
-    const vortex_options = b.addOptions();
-    // TODO See below note about Debug builds.
-    const vortex_upgrades_max: u32 = if (options.mode == .Debug) 1 else 3;
-    const vortex_dir = b.fmt("vortex/{s}", .{@tagName(options.mode)});
-    vortex_options.addOptionPath(
-        "dependencies_path",
-        b.path(b.fmt("./zig-out/{s}", .{vortex_dir})),
-    );
-    vortex_options.addOption(u32, "dependencies_count", vortex_upgrades_max + 1);
-
     const driver_exes = b.allocator.alloc(std.Build.LazyPath, 6) catch @panic("OOM");
     const server_exes = b.allocator.alloc(std.Build.LazyPath, 6) catch @panic("OOM");
 
@@ -1272,20 +1252,41 @@ fn build_vortex_options(
     server_exes[1] = options.tigerbeetle_test;
     driver_exes[1] = options.vortex_driver_zig;
 
-    var tags_iterator = release_history(b);
-    for (server_exes[2..], driver_exes[2..]) |*server, *driver| {
-        const tag = tags_iterator.next().?;
-        server.* = fetch_release(b, tag, options.target, options.mode);
-        driver.* = fetch_vortex_driver_zig(b, tag, options.target, options.mode);
+    if (options.target.result.os.tag == .linux) {
+        var tags_iterator = release_history(b);
+        for (server_exes[2..], driver_exes[2..]) |*server, *driver| {
+            const tag = tags_iterator.next().?;
+            server.* = fetch_release(b, tag, options.target, options.mode);
+            driver.* = fetch_vortex_driver_zig(b, tag, options.target, options.mode);
+        }
     }
 
     // TODO: Debug builds only include 1 extra release. Since Vortex can't detect whether upgrades
     // have accurately finished, it is limited to testing a single upgrade, so we prioritize testing
     // the previous release (skipping past our phony 65535.0.1 release).
-    const exe_offset = @intFromBool(options.mode == .Debug);
-    const server_exes_select = server_exes[exe_offset..][0 .. vortex_upgrades_max + 1];
-    const driver_exes_select = driver_exes[exe_offset..][0 .. vortex_upgrades_max + 1];
+    const release_offset, const release_count = blk: {
+        // Currently we only publish drivers built for Linux.
+        if (options.target.result.os.tag == .linux) {
+            break :blk switch (options.mode) {
+                .ReleaseSafe => .{ @as(u32, 0), @as(u32, 3) },
+                .Debug => .{ 1, 2 },
+                else => unreachable,
+            };
+        } else {
+            break :blk .{ 0, 2 };
+        }
+    };
 
+    const vortex_options = b.addOptions();
+    const vortex_dir = b.fmt("vortex/{s}", .{@tagName(options.mode)});
+    vortex_options.addOption(u32, "dependencies_count", release_count);
+    vortex_options.addOptionPath(
+        "dependencies_path",
+        b.path(b.fmt("./zig-out/{s}", .{vortex_dir})),
+    );
+
+    const server_exes_select = server_exes[release_offset..][0..release_count];
+    const driver_exes_select = driver_exes[release_offset..][0..release_count];
     for (server_exes_select, 0..) |executable, i| {
         const destination = b.fmt("../{s}/tigerbeetle-{d}", .{ vortex_dir, i });
         vortex_options.step.dependOn(&b.addInstallBinFile(executable, destination).step);

@@ -12,7 +12,13 @@ pub const vortex = struct {
 
     // We allow the cluster to not make progress processing requests for this amount of time.
     // After that it's considered a test failure.
-    pub const liveness_requirement_seconds = 120;
+    // TODO: This is long for a couple reasons:
+    // - CFO currently oversaturate s CPU.
+    // - Vortex's liveness check doesn't consider how long replicas have been up. e.g. if you have 3
+    //   replicas, and alternate stopping/starting the backups (such that there is always at least
+    //   2/3 replicas running) then as far as Supervisor is concerned, that cluster should be making
+    //   progress, even if neither replica is up long enough to catch up to the primary.
+    pub const liveness_requirement_seconds = 180;
     pub const liveness_requirement_micros = liveness_requirement_seconds * std.time.us_per_s;
 
     pub const replica_ports_actual = brk: {

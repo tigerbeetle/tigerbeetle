@@ -142,6 +142,9 @@ pub const Supervisor = struct {
     };
 
     pub fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
+        // Vortex currently only supports Linux.
+        assert(builtin.os.tag == .linux);
+
         const shell = try Shell.create(allocator);
         errdefer shell.destroy();
 
@@ -425,10 +428,10 @@ pub const Supervisor = struct {
                 supervisor.network.faults.heal();
             },
             .heal => {
+                log.info("healing all faults", .{});
                 supervisor.network.faults.heal();
                 for (replicas_paused) |index| try supervisor.replica_unpause(index);
                 for (replicas_terminated) |index| try supervisor.replica_start(index);
-                log.info("healing all faults", .{});
             },
         }
     }
@@ -815,14 +818,19 @@ const Workload = struct {
     ) !*Workload {
         assert(std.mem.indexOfScalar(u8, driver_command, '"') == null);
 
+        const arg_cluster = std.fmt.comptimePrint("{d}", .{constants.vortex.cluster_id});
         const arg_addresses = try comma_separate_ports(allocator, proxy_ports);
         defer allocator.free(arg_addresses);
 
-        var driver = std.process.Child.init(&.{
-            driver_command,
-            std.fmt.comptimePrint("{d}", .{constants.vortex.cluster_id}),
-            arg_addresses,
-        }, allocator);
+        var driver_argv = std.ArrayList([]const u8).init(allocator);
+        defer driver_argv.deinit();
+
+        var driver_command_parts = std.mem.splitScalar(u8, driver_command, ' ');
+        while (driver_command_parts.next()) |part| try driver_argv.append(part);
+        try driver_argv.append(arg_cluster);
+        try driver_argv.append(arg_addresses);
+
+        var driver = std.process.Child.init(driver_argv.items, allocator);
         driver.stdin_behavior = .Pipe;
         driver.stdout_behavior = .Pipe;
         driver.stderr_behavior = .Inherit;
@@ -861,7 +869,9 @@ const Workload = struct {
         const workload_result = workload.driver.kill() catch |err| {
             fatal(.workload_exit_result, "workload: error killing driver: {any}", .{err});
         };
-        if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.TERM })) {
+        if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.TERM }) and
+            !std.meta.eql(workload_result, .{ .Exited = 128 + std.posix.SIG.TERM }))
+        {
             fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
         }
 

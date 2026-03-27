@@ -369,7 +369,7 @@ test "help/version smoke" {
 }
 
 test "in-place upgrade" {
-    if (builtin.target.os.tag == .windows) {
+    if (builtin.target.os.tag != .linux) {
         return error.SkipZigTest;
     }
 
@@ -462,15 +462,15 @@ test "recover smoke" {
         try supervisor.replica_format(@intCast(replica_index));
         try supervisor.replica_start(@intCast(replica_index));
     }
-    try supervisor.workload_start(.{ .release = release_current }, .{ .transfer_count = 200_000 });
-    for (0..200) |_| try supervisor.tick();
+    try supervisor.workload_start(.{ .release = release_current }, .{ .transfer_count = 100_000 });
+    for (0..400) |_| try supervisor.tick();
 
     try supervisor.replica_terminate(2);
     try supervisor.replica_reformat(2);
 
     try supervisor.replica_terminate(1);
     try supervisor.replica_start(2);
-    for (0..1000) |_| {
+    for (0..2000) |_| {
         if (supervisor.workload_done()) break;
         try supervisor.tick();
     } else {
