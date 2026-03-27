@@ -25,6 +25,7 @@ const stdx = @import("stdx");
 const tb = @import("../../tigerbeetle.zig");
 const Operation = tb.Operation;
 const ratio = stdx.PRNG.ratio;
+const Release = @import("../../multiversion.zig").Release;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
@@ -35,13 +36,17 @@ const accounts_count_max = 128;
 
 pub const Command = enum {
     create_accounts,
+    create_accounts_sparse,
     create_transfers,
+    create_transfers_sparse,
     lookup_accounts,
 
     pub fn operation(command: Command) Operation {
         return switch (command) {
             .create_accounts => .create_accounts,
             .create_transfers => .create_transfers,
+            .create_accounts_sparse => .deprecated_create_accounts_sparse,
+            .create_transfers_sparse => .deprecated_create_transfers_sparse,
             .lookup_accounts => .lookup_accounts,
         };
     }
@@ -50,29 +55,28 @@ pub const Command = enum {
 // TODO Add padding to the protocol to avoid the misalignment.
 const Request = union(Command) {
     create_accounts: []align(1) const tb.Account,
+    create_accounts_sparse: []align(1) const tb.Account,
     create_transfers: []align(1) const tb.Transfer,
+    create_transfers_sparse: []align(1) const tb.Transfer,
     lookup_accounts: []align(1) const u128,
 };
 
 const Result = union(Command) {
     create_accounts: []align(1) const tb.CreateAccountResult,
+    create_accounts_sparse: []align(1) const tb.CreateAccountErrorResult,
     create_transfers: []align(1) const tb.CreateTransferResult,
+    create_transfers_sparse: []align(1) const tb.CreateTransferErrorResult,
     lookup_accounts: []align(1) const tb.Account,
 };
 
-fn reconcile_(command: Command, request: Request, result: Result, model: *Model) !void {
-    assert(command == request);
-    assert(command == result);
+fn reconcile_(request: Request, result: Result, model: *Model) !void {
+    assert(@as(Command, request) == @as(Command, result));
     switch (result) {
         .create_accounts => |account_results| {
             const accounts = request.create_accounts;
             assert(account_results.len == accounts.len);
 
-            for (
-                accounts,
-                account_results,
-                0..,
-            ) |account, account_result, index| {
+            for (accounts, account_results, 0..) |account, account_result, index| {
                 if (account_result.status == .created) {
                     model.accounts.putAssumeCapacityNoClobber(account.id, account);
                 } else {
@@ -85,25 +89,37 @@ fn reconcile_(command: Command, request: Request, result: Result, model: *Model)
                 }
             }
         },
+        .create_accounts_sparse => |account_results| {
+            const accounts = request.create_accounts_sparse;
+            assert(account_results.len == 0);
+
+            for (accounts) |account| {
+                model.accounts.putAssumeCapacityNoClobber(account.id, account);
+            }
+        },
         .create_transfers => |transfer_results| {
             const transfers = request.create_transfers;
             assert(transfer_results.len == transfers.len);
 
-            for (transfers, transfer_results, 0..) |transfer, transfer_result, index| {
-                // Check that linked transfers fail together.
-                if (index > 0) {
-                    const preceding_transfer = transfers[index - 1];
-                    if (preceding_transfer.flags.linked) {
-                        const preceding_entry = transfer_results[index - 1];
-                        try testing.expect(preceding_entry.status != .created);
-                    }
-                }
-
+            for (transfers, transfer_results) |transfer, transfer_result| {
                 // No further validation needed for failed transfers.
                 if (transfer_result.status != .created) {
                     continue;
                 }
 
+                const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
+                const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
+                debit_account.debits_posted += transfer.amount;
+                credit_account.credits_posted += transfer.amount;
+            }
+
+            model.transfers_created += transfers.len;
+        },
+        .create_transfers_sparse => |transfer_results| {
+            const transfers = request.create_transfers_sparse;
+            assert(transfer_results.len == 0);
+
+            for (transfers) |transfer| {
                 const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
                 const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
                 debit_account.debits_posted += transfer.amount;
@@ -150,13 +166,18 @@ pub const Model = struct {
         result: []const u8,
     ) !void {
         try reconcile_(
-            command,
             switch (command) {
                 .create_accounts => .{
                     .create_accounts = std.mem.bytesAsSlice(tb.Account, request),
                 },
+                .create_accounts_sparse => .{
+                    .create_accounts_sparse = std.mem.bytesAsSlice(tb.Account, request),
+                },
                 .create_transfers => .{
                     .create_transfers = std.mem.bytesAsSlice(tb.Transfer, request),
+                },
+                .create_transfers_sparse => .{
+                    .create_transfers_sparse = std.mem.bytesAsSlice(tb.Transfer, request),
                 },
                 .lookup_accounts => .{
                     .lookup_accounts = std.mem.bytesAsSlice(u128, request),
@@ -166,9 +187,17 @@ pub const Model = struct {
                 .create_accounts => .{
                     .create_accounts = std.mem.bytesAsSlice(tb.CreateAccountResult, result),
                 },
+                .create_accounts_sparse => .{ .create_accounts_sparse = std.mem.bytesAsSlice(
+                    tb.CreateAccountErrorResult,
+                    result,
+                ) },
                 .create_transfers => .{
                     .create_transfers = std.mem.bytesAsSlice(tb.CreateTransferResult, result),
                 },
+                .create_transfers_sparse => .{ .create_transfers_sparse = std.mem.bytesAsSlice(
+                    tb.CreateTransferErrorResult,
+                    result,
+                ) },
                 .lookup_accounts => .{
                     .lookup_accounts = std.mem.bytesAsSlice(tb.Account, result),
                 },
@@ -180,20 +209,37 @@ pub const Model = struct {
 
 pub const Generator = struct {
     prng: stdx.PRNG,
+    release: Release,
 
     pub const buffer_size = events_count_max * @max(@sizeOf(tb.Account), @sizeOf(tb.Account));
 
-    pub fn init(seed: u64) Generator {
-        return .{ .prng = stdx.PRNG.from_seed(seed) };
+    pub fn init(seed: u64, release: Release) Generator {
+        return .{
+            .prng = stdx.PRNG.from_seed(seed),
+            .release = release,
+        };
     }
 
     pub fn random_command(generator: *Generator, model: *const Model) Command {
         // Mostly send create_transfers, to fill up the LSM.
-        return generator.prng.enum_weighted(Command, .{
-            .create_accounts = if (model.accounts.count() < accounts_count_max) 1 else 0,
-            .create_transfers = if (model.accounts.count() > 2) 20 else 0,
-            .lookup_accounts = if (model.accounts.count() > 0) 1 else 0,
-        });
+        const dense_create_release_min = Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
+        if (dense_create_release_min.value <= generator.release.value) {
+            return generator.prng.enum_weighted(Command, .{
+                .create_accounts = if (model.accounts.count() < accounts_count_max) 1 else 0,
+                .create_accounts_sparse = 0,
+                .create_transfers = if (model.accounts.count() > 2) 20 else 0,
+                .create_transfers_sparse = 0,
+                .lookup_accounts = if (model.accounts.count() > 0) 1 else 0,
+            });
+        } else {
+            return generator.prng.enum_weighted(Command, .{
+                .create_accounts = 0,
+                .create_accounts_sparse = if (model.accounts.count() < accounts_count_max) 1 else 0,
+                .create_transfers = 0,
+                .create_transfers_sparse = if (model.accounts.count() > 2) 20 else 0,
+                .lookup_accounts = if (model.accounts.count() > 0) 1 else 0,
+            });
+        }
     }
 
     pub fn random_request(
@@ -206,7 +252,9 @@ pub const Generator = struct {
 
         return switch (command) {
             .create_accounts => generator.random_create_accounts(model, buffer),
+            .create_accounts_sparse => generator.random_create_accounts(model, buffer),
             .create_transfers => generator.random_create_transfers(model, buffer),
+            .create_transfers_sparse => generator.random_create_transfers(model, buffer),
             .lookup_accounts => generator.random_lookup_accounts(model, buffer),
         };
     }

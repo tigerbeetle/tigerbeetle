@@ -636,15 +636,25 @@ pub const Supervisor = struct {
         // TODO Take client_release_min into account for driver.
         const workload_driver = switch (driver) {
             .command => |command| command,
-            .release => |release| supervisor.driver_executables[release],
+            .release => |release_index| supervisor.driver_executables[release_index],
         };
-        log.info("launching workload with driver: {s}", .{workload_driver});
+        const workload_driver_release = supervisor.releases[
+            switch (driver) {
+                .command => |_| supervisor.driver_executables.len - 1,
+                .release => |release_index| release_index,
+            }
+        ];
+        log.info(
+            "launching workload with driver: {s} (release={})",
+            .{ workload_driver, workload_driver_release },
+        );
 
         const workload = try Workload.create(
             supervisor.allocator,
             supervisor.io,
             proxy_ports,
             workload_driver,
+            workload_driver_release,
             .{ .seed = supervisor.prng.int(u64) },
         );
         errdefer workload.destroy(supervisor.allocator);
@@ -800,6 +810,7 @@ const Workload = struct {
         io: *IO,
         proxy_ports: []const u16,
         driver_command: []const u8,
+        driver_release: Release,
         options: struct { seed: u64 },
     ) !*Workload {
         assert(std.mem.indexOfScalar(u8, driver_command, '"') == null);
@@ -837,7 +848,7 @@ const Workload = struct {
         workload.* = .{
             .io = io,
             .model = model,
-            .generator = Generator.init(options.seed),
+            .generator = Generator.init(options.seed, driver_release),
             .driver = driver,
             .request_buffer = request_buffer,
             .reply_buffer = reply_buffer,
