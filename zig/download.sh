@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ZIG_MIRROR="https://pkg.machengine.org/zig"
+ZIG_MIRROR="https://ziglang.org/download"
 ZIG_RELEASE="0.14.1"
 ZIG_CHECKSUMS=$(cat<<EOF
 ${ZIG_MIRROR}/0.14.1/zig-aarch64-linux-0.14.1.tar.xz f7a654acc967864f7a050ddacfaa778c7504a0eca8d2b678839c21eea47c992b
