@@ -3,6 +3,46 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle (unreleased)
+
+This release improves `create_accounts` and `create_transfers` operations. They now return
+timestamps of newly created objects, allowing the application to learn the resulting global order
+of events without additional roundtrips. As usual, this release remains wire-compatible with
+previous clients. To gain access to the new APIs, please upgrade clients to version 0.17.0. Refer
+to [API changes](https://github.com/tigerbeetle/tigerbeetle/pull/3258) page for details.
+
+### Safety And Performance
+
+- [#3599](https://github.com/tigerbeetle/tigerbeetle/pull/3599)
+
+  Improve repair perfomance by tracking per-replica repair budgets, to prevent a slow replica
+  from tiying up the global budget.
+
+### Features
+
+- [#3258](https://github.com/tigerbeetle/tigerbeetle/pull/3258)
+
+  Change the return type and semantics of the `create_{accounts,transfers}`.
+
+- [#3574](https://github.com/tigerbeetle/tigerbeetle/pull/3574)
+
+  Add the API changes page to the docs: <https://docs.tigerbeetle.com/coding/api-changes>
+
+### Internals
+
+- [#3609](https://github.com/tigerbeetle/tigerbeetle/pull/3609)
+
+  Cache Zig compiler on CI.
+
+- [#3604](https://github.com/tigerbeetle/tigerbeetle/pull/3604)
+
+  IO/Linux: Add another attempt to flock() retry loop
+
+
+### TigerTracks 🎧
+
+- [Картины Босха](https://www.youtube.com/watch?v=bJIpxObvd7A)
+
 ## TigerBeetle 0.16.78
 
 Released: 2026-03-20
