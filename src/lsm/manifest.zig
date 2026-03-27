@@ -522,6 +522,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest_level_a.table_count_visible <= table_count_visible_max + 1);
             if (manifest_level_a.table_count_visible < table_count_visible_max) return null;
 
+            assert(manifest_level_a.table_count_visible > 0);
+
             const least_overlap_table = manifest_level_a.table_with_least_overlap(
                 manifest_level_b,
                 snapshot_latest,
