@@ -52,96 +52,6 @@ pub const Command = enum {
     }
 };
 
-// TODO Add padding to the protocol to avoid the misalignment.
-const Request = union(Command) {
-    create_accounts: []align(1) const tb.Account,
-    create_accounts_sparse: []align(1) const tb.Account,
-    create_transfers: []align(1) const tb.Transfer,
-    create_transfers_sparse: []align(1) const tb.Transfer,
-    lookup_accounts: []align(1) const u128,
-};
-
-const Result = union(Command) {
-    create_accounts: []align(1) const tb.CreateAccountResult,
-    create_accounts_sparse: []align(1) const tb.CreateAccountErrorResult,
-    create_transfers: []align(1) const tb.CreateTransferResult,
-    create_transfers_sparse: []align(1) const tb.CreateTransferErrorResult,
-    lookup_accounts: []align(1) const tb.Account,
-};
-
-fn reconcile_(request: Request, result: Result, model: *Model) !void {
-    assert(@as(Command, request) == @as(Command, result));
-    switch (result) {
-        .create_accounts => |account_results| {
-            const accounts = request.create_accounts;
-            assert(account_results.len == accounts.len);
-
-            for (accounts, account_results, 0..) |account, account_result, index| {
-                if (account_result.status == .created) {
-                    model.accounts.putAssumeCapacityNoClobber(account.id, account);
-                } else {
-                    log.err("got status {s} for event {d}: {any}", .{
-                        @tagName(account_result.status),
-                        index,
-                        account,
-                    });
-                    return error.TestFailed;
-                }
-            }
-        },
-        .create_accounts_sparse => |account_results| {
-            const accounts = request.create_accounts_sparse;
-            assert(account_results.len == 0);
-
-            for (accounts) |account| {
-                model.accounts.putAssumeCapacityNoClobber(account.id, account);
-            }
-        },
-        .create_transfers => |transfer_results| {
-            const transfers = request.create_transfers;
-            assert(transfer_results.len == transfers.len);
-
-            for (transfers, transfer_results) |transfer, transfer_result| {
-                // No further validation needed for failed transfers.
-                if (transfer_result.status != .created) {
-                    continue;
-                }
-
-                const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
-                const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
-                debit_account.debits_posted += transfer.amount;
-                credit_account.credits_posted += transfer.amount;
-            }
-
-            model.transfers_created += transfers.len;
-        },
-        .create_transfers_sparse => |transfer_results| {
-            const transfers = request.create_transfers_sparse;
-            assert(transfer_results.len == 0);
-
-            for (transfers) |transfer| {
-                const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
-                const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
-                debit_account.debits_posted += transfer.amount;
-                credit_account.credits_posted += transfer.amount;
-            }
-
-            model.transfers_created += transfers.len;
-        },
-        .lookup_accounts => |accounts_found| {
-            const account_ids = request.lookup_accounts;
-            for (account_ids, accounts_found) |account_id, account| {
-                const account_expect = model.accounts.getPtr(account_id).?;
-                try testing.expectEqual(account.id, account_id);
-                try testing.expectEqual(account.debits_pending, account_expect.debits_pending);
-                try testing.expectEqual(account.debits_posted, account_expect.debits_posted);
-                try testing.expectEqual(account.credits_pending, account_expect.credits_pending);
-                try testing.expectEqual(account.credits_posted, account_expect.credits_posted);
-            }
-        },
-    }
-}
-
 /// Tracks information about the accounts and transfers created by the workload.
 pub const Model = struct {
     accounts: std.AutoArrayHashMapUnmanaged(u128, tb.Account),
@@ -165,45 +75,100 @@ pub const Model = struct {
         request: []const u8,
         result: []const u8,
     ) !void {
-        try reconcile_(
-            switch (command) {
-                .create_accounts => .{
-                    .create_accounts = std.mem.bytesAsSlice(tb.Account, request),
-                },
-                .create_accounts_sparse => .{
-                    .create_accounts_sparse = std.mem.bytesAsSlice(tb.Account, request),
-                },
-                .create_transfers => .{
-                    .create_transfers = std.mem.bytesAsSlice(tb.Transfer, request),
-                },
-                .create_transfers_sparse => .{
-                    .create_transfers_sparse = std.mem.bytesAsSlice(tb.Transfer, request),
-                },
-                .lookup_accounts => .{
-                    .lookup_accounts = std.mem.bytesAsSlice(u128, request),
-                },
-            },
-            switch (command) {
-                .create_accounts => .{
-                    .create_accounts = std.mem.bytesAsSlice(tb.CreateAccountResult, result),
-                },
-                .create_accounts_sparse => .{ .create_accounts_sparse = std.mem.bytesAsSlice(
-                    tb.CreateAccountErrorResult,
-                    result,
-                ) },
-                .create_transfers => .{
-                    .create_transfers = std.mem.bytesAsSlice(tb.CreateTransferResult, result),
-                },
-                .create_transfers_sparse => .{ .create_transfers_sparse = std.mem.bytesAsSlice(
-                    tb.CreateTransferErrorResult,
-                    result,
-                ) },
-                .lookup_accounts => .{
-                    .lookup_accounts = std.mem.bytesAsSlice(tb.Account, result),
-                },
-            },
-            model,
-        );
+        return switch (command) {
+            .create_accounts => model.reconcile_create_accounts(request, result),
+            .create_accounts_sparse => model.reconcile_create_accounts_sparse(request, result),
+            .create_transfers => model.reconcile_create_transfers(request, result),
+            .create_transfers_sparse => model.reconcile_create_transfers_sparse(request, result),
+            .lookup_accounts => model.reconcile_lookup_accounts(request, result),
+        };
+    }
+
+    fn reconcile_create_accounts(model: *Model, request: []const u8, result: []const u8) !void {
+        const accounts = std.mem.bytesAsSlice(tb.Account, request);
+        const account_results = std.mem.bytesAsSlice(tb.CreateAccountResult, result);
+        assert(account_results.len == accounts.len);
+
+        for (accounts, account_results, 0..) |account, account_result, index| {
+            if (account_result.status == .created) {
+                model.accounts.putAssumeCapacityNoClobber(account.id, account);
+            } else {
+                log.err("got status {s} for event {d}: {any}", .{
+                    @tagName(account_result.status),
+                    index,
+                    account,
+                });
+                return error.TestFailed;
+            }
+        }
+    }
+
+    fn reconcile_create_accounts_sparse(
+        model: *Model,
+        request: []const u8,
+        result: []const u8,
+    ) !void {
+        const accounts = std.mem.bytesAsSlice(tb.Account, request);
+        const account_results = std.mem.bytesAsSlice(tb.CreateAccountErrorResult, result);
+        assert(account_results.len == 0);
+
+        for (accounts) |account| {
+            model.accounts.putAssumeCapacityNoClobber(account.id, account);
+        }
+    }
+
+    fn reconcile_create_transfers(model: *Model, request: []const u8, result: []const u8) !void {
+        const transfers = std.mem.bytesAsSlice(tb.Transfer, request);
+        const transfer_results = std.mem.bytesAsSlice(tb.CreateTransferResult, result);
+        assert(transfer_results.len == transfers.len);
+
+        for (transfers, transfer_results) |transfer, transfer_result| {
+            // No further validation needed for failed transfers.
+            if (transfer_result.status != .created) {
+                continue;
+            }
+
+            const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
+            const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
+            debit_account.debits_posted += transfer.amount;
+            credit_account.credits_posted += transfer.amount;
+        }
+
+        model.transfers_created += transfers.len;
+    }
+
+    fn reconcile_create_transfers_sparse(
+        model: *Model,
+        request: []const u8,
+        result: []const u8,
+    ) !void {
+        const transfers = std.mem.bytesAsSlice(tb.Transfer, request);
+        const transfer_results = std.mem.bytesAsSlice(tb.CreateTransferErrorResult, result);
+        assert(transfer_results.len == 0);
+
+        for (transfers) |transfer| {
+            const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
+            const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
+            debit_account.debits_posted += transfer.amount;
+            credit_account.credits_posted += transfer.amount;
+        }
+
+        model.transfers_created += transfers.len;
+    }
+
+    fn reconcile_lookup_accounts(model: *Model, request: []const u8, result: []const u8) !void {
+        const account_ids = std.mem.bytesAsSlice(u128, request);
+        const accounts_found = std.mem.bytesAsSlice(tb.Account, result);
+        assert(accounts_found.len == account_ids.len);
+
+        for (account_ids, accounts_found) |account_id, account| {
+            const account_expect = model.accounts.getPtr(account_id).?;
+            try testing.expectEqual(account.id, account_id);
+            try testing.expectEqual(account.debits_pending, account_expect.debits_pending);
+            try testing.expectEqual(account.debits_posted, account_expect.debits_posted);
+            try testing.expectEqual(account.credits_pending, account_expect.credits_pending);
+            try testing.expectEqual(account.credits_posted, account_expect.credits_posted);
+        }
     }
 };
 
