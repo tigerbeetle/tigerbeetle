@@ -45,7 +45,10 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
-        return self.flush(false);
+        try self.flush(false);
+        // Clear any yield requested by callbacks during flush, so it
+        // doesn't cause the next run_for_ns to short-circuit.
+        self.yield_requested = false;
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
@@ -92,6 +95,12 @@ pub const IO = struct {
         self.yield_requested = false;
     }
 
+    /// Request early return from run_for_ns. Called from IO callbacks to
+    /// return control to the caller's event loop without waiting for the
+    /// full tick timeout. run_for_ns may dispatch additional callbacks
+    /// before returning; yield only eliminates latency, it does not cut
+    /// off observation of further events.
+    ///
     pub fn yield(self: *IO) void {
         self.yield_requested = true;
     }

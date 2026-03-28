@@ -51,7 +51,10 @@ pub const IO = struct {
     }
 
     pub fn run(self: *IO) !void {
-        return self.flush(.non_blocking);
+        try self.flush(.non_blocking);
+        // Clear any yield requested by callbacks during flush, so it
+        // doesn't cause the next run_for_ns to short-circuit.
+        self.yield_requested = false;
     }
 
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
@@ -85,6 +88,12 @@ pub const IO = struct {
         self.yield_requested = false;
     }
 
+    /// Request early return from run_for_ns. Called from IO callbacks to
+    /// return control to the caller's event loop without waiting for the
+    /// full tick timeout. run_for_ns may dispatch additional callbacks
+    /// before returning; yield only eliminates latency, it does not cut
+    /// off observation of further events.
+    ///
     pub fn yield(self: *IO) void {
         self.yield_requested = true;
     }
