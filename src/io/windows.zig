@@ -104,57 +104,65 @@ pub const IO = struct {
     };
 
     fn flush(self: *IO, mode: FlushMode) !void {
-        if (self.completed.empty()) {
-            // Compute how long to poll by flushing timeout completions.
-            // NOTE: this may push to completed queue.
-            var timeout_ms: ?os.windows.DWORD = null;
-            if (self.flush_timeouts()) |expires_ns| {
-                // 0ns expires should have been completed not returned.
-                assert(expires_ns != 0);
-                // Round up sub-millisecond expire times to the next millisecond.
-                const expires_ms = (expires_ns + (std.time.ns_per_ms / 2)) / std.time.ns_per_ms;
-                // Saturating cast to DWORD milliseconds.
-                const expires = std.math.cast(os.windows.DWORD, expires_ms) orelse
-                    std.math.maxInt(os.windows.DWORD);
-                // Max DWORD is reserved for INFINITE so cap the cast at max - 1.
-                timeout_ms = if (expires == os.windows.INFINITE) expires - 1 else expires;
+        // Always check for expired timeouts, even if the completed
+        // queue already has items. This matches Darwin behavior and
+        // ensures timeouts that expire during callback dispatch are
+        // discovered on the next flush.
+        var timeout_ms: ?os.windows.DWORD = null;
+        if (self.flush_timeouts()) |expires_ns| {
+            // 0ns expires should have been completed not returned.
+            assert(expires_ns != 0);
+            // Round up sub-millisecond expire times to the next millisecond.
+            const expires_ms = (expires_ns + (std.time.ns_per_ms / 2)) / std.time.ns_per_ms;
+            // Saturating cast to DWORD milliseconds.
+            const expires = std.math.cast(os.windows.DWORD, expires_ms) orelse
+                std.math.maxInt(os.windows.DWORD);
+            // Max DWORD is reserved for INFINITE so cap the cast at max - 1.
+            timeout_ms = if (expires == os.windows.INFINITE) expires - 1 else expires;
+        }
+
+        // Wait for IOCP completions when there's IO pending or when we need
+        // to block for timeout expiry. Without this, pure-timeout workloads
+        // (io_pending == 0) would busy-loop and pick off timeouts one at a
+        // time instead of batching all that expire at the same instant.
+        const should_poll = self.io_pending > 0 and self.completed.empty();
+        const should_wait = mode == .blocking and self.completed.empty() and timeout_ms != null;
+        if (should_poll or should_wait) {
+            const io_timeout = switch (mode) {
+                .blocking => timeout_ms orelse @panic("IO.flush blocking unbounded"),
+                .non_blocking => 0,
+            };
+
+            var events: [64]os.windows.OVERLAPPED_ENTRY = undefined;
+            const num_events: u32 = os.windows.GetQueuedCompletionStatusEx(
+                self.iocp,
+                &events,
+                io_timeout,
+                false, // Non-alertable wait.
+            ) catch |err| switch (err) {
+                error.Timeout => 0,
+                error.Aborted => unreachable,
+                else => |e| return e,
+            };
+
+            assert(self.io_pending >= num_events);
+            self.io_pending -= num_events;
+
+            for (events[0..num_events]) |event| {
+                const raw_overlapped = event.lpOverlapped;
+                const overlapped: *Completion.Overlapped = @fieldParentPtr(
+                    "raw",
+                    raw_overlapped,
+                );
+                const completion = overlapped.completion;
+                completion.link = .{};
+                self.completed.push(completion);
             }
 
-            // Poll for IO iff there's IO pending and flush_timeouts() found no ready completions.
-            if (self.io_pending > 0 and self.completed.empty()) {
-                // In blocking mode, we're always waiting at least until the timeout by run_for_ns.
-                // In non-blocking mode, we shouldn't wait at all.
-                const io_timeout = switch (mode) {
-                    .blocking => timeout_ms orelse @panic("IO.flush blocking unbounded"),
-                    .non_blocking => 0,
-                };
-
-                var events: [64]os.windows.OVERLAPPED_ENTRY = undefined;
-                const num_events: u32 = os.windows.GetQueuedCompletionStatusEx(
-                    self.iocp,
-                    &events,
-                    io_timeout,
-                    false, // Non-alertable wait.
-                ) catch |err| switch (err) {
-                    error.Timeout => 0,
-                    error.Aborted => unreachable,
-                    else => |e| return e,
-                };
-
-                assert(self.io_pending >= num_events);
-                self.io_pending -= num_events;
-
-                for (events[0..num_events]) |event| {
-                    const raw_overlapped = event.lpOverlapped;
-                    const overlapped: *Completion.Overlapped = @fieldParentPtr(
-                        "raw",
-                        raw_overlapped,
-                    );
-                    const completion = overlapped.completion;
-                    completion.link = .{};
-                    self.completed.push(completion);
-                }
-            }
+            // After sleeping for the timeout, re-check timeouts so that
+            // all timeouts expiring at the same instant are collected in
+            // the same batch rather than trickling in one per flush.
+            _ = self.flush_timeouts();
         }
 
         // Drain all ready completions. Callbacks may push new completions

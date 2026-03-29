@@ -907,6 +907,48 @@ test "cancel" {
     }.run_test();
 }
 
+test "flush checks timeouts even when completions are queued" {
+    // Linux manages timeouts via io_uring, not userspace flush_timeouts.
+    if (builtin.target.os.tag == .linux) return error.SkipZigTest;
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        instant_fired: bool = false,
+        timeout_fired: bool = false,
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // The zero-delay goes directly into the completed queue.
+            // The 1ns timeout goes into the timeouts queue and expires
+            // immediately on the next flush_timeouts call. If flush
+            // skips flush_timeouts when completed is non-empty, the
+            // 1ns timeout will be stranded.
+            var c1: IO.Completion = undefined;
+            var c2: IO.Completion = undefined;
+            self.io.timeout(*Context, &self, on_instant, &c1, 0);
+            self.io.timeout(*Context, &self, on_timeout, &c2, 1);
+
+            try self.io.run();
+
+            try testing.expect(self.instant_fired);
+            try testing.expect(self.timeout_fired);
+        }
+
+        fn on_instant(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("instant timeout error");
+            self.instant_fired = true;
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.timeout_fired = true;
+        }
+    }.run_test();
+}
+
 test "chained zero-delay callbacks complete in a single flush" {
     try struct {
         const Context = @This();
