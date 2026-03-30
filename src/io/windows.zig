@@ -157,14 +157,11 @@ pub const IO = struct {
             }
         }
 
-        // Dequeue and invoke all the completions currently ready.
-        // Must read all `completions` before invoking the callbacks
-        // as the callbacks could potentially submit more completions.
-        var completed = self.completed;
-        self.completed.reset();
-
+        // Drain all ready completions. Callbacks may push new completions
+        // (e.g. zero-delay timeouts) which are picked up in the same pass,
+        // matching Linux io_uring behavior (see ba0535354).
         var timer = try std.time.Timer.start();
-        while (completed.pop()) |completion| {
+        while (self.completed.pop()) |completion| {
             (completion.callback)(Completion.Context{
                 .io = self,
                 .completion = completion,

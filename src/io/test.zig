@@ -907,6 +907,43 @@ test "cancel" {
     }.run_test();
 }
 
+test "chained zero-delay callbacks complete in a single flush" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        count: u32 = 0,
+        completions: [chain_length]IO.Completion = undefined,
+
+        const chain_length = 10;
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // Start the chain with a single zero-delay timeout.
+            self.io.timeout(*Context, &self, on_timeout, &self.completions[0], 0);
+
+            // A single run() calls flush once. If the dispatch loop
+            // drains the live completed queue, each callback's 0-delay
+            // successor is picked up in the same pass and the entire
+            // chain completes. If completed were snapshot'd, only the
+            // first link would fire per run() call.
+            try self.io.run();
+
+            try testing.expectEqual(@as(u32, chain_length), self.count);
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.count += 1;
+            if (self.count < chain_length) {
+                self.io.timeout(*Context, self, on_timeout, &self.completions[self.count], 0);
+            }
+        }
+    }.run_test();
+}
+
 test "timeouts with the same delay fire in the same batch" {
     try struct {
         const Context = @This();
