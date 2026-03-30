@@ -1192,7 +1192,7 @@ pub const IO = struct {
     /// Closes a socket opened by the IO instance.
     pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
-        posix.close(socket);
+        _ = os.windows.ws2_32.closesocket(socket);
     }
 
     /// Listen on the given TCP socket.
