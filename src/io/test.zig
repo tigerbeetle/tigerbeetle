@@ -906,3 +906,183 @@ test "cancel" {
         }
     }.run_test();
 }
+
+test "timeouts with the same delay fire in the same batch" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        callback_count: u32 = 0,
+        probe_saw: ?u32 = null,
+        probe_completion: IO.Completion = undefined,
+
+        const timeout_count = 10;
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            var completions: [timeout_count]IO.Completion = undefined;
+            for (&completions) |*c| {
+                self.io.timeout(*Context, &self, on_timeout, c, 5 * std.time.ns_per_ms);
+            }
+
+            try self.io.run_for_ns(1000 * std.time.ns_per_ms);
+
+            try testing.expectEqual(@as(u32, timeout_count), self.callback_count);
+            // The probe fires after all original timeouts because:
+            // - On Linux, completed is drained in-place (FIFO), so the
+            //   probe queued during callback 1 fires after originals 2-10.
+            // - On Windows/Darwin, completed is snapshot'd, so the probe
+            //   fires in the next flush, after all originals are done.
+            // If timeouts trickled in one per flush instead of batching,
+            // the probe would fire after only 1 or 2 callbacks.
+            try testing.expectEqual(@as(u32, timeout_count), self.probe_saw.?);
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.callback_count += 1;
+            if (self.callback_count == 1) {
+                // Submit a zero-delay probe that fires in the next
+                // dispatch round, acting as a flush boundary marker.
+                self.io.timeout(*Context, self, on_probe, &self.probe_completion, 0);
+            }
+        }
+
+        fn on_probe(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("probe timeout error");
+            self.probe_saw = self.callback_count;
+        }
+    }.run_test();
+}
+
+test "yield from timeout callback causes early return" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        yielded: bool = false,
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // Schedule a short timeout whose callback yields.
+            var completion: IO.Completion = undefined;
+            self.io.timeout(*Context, &self, on_timeout, &completion, 5 * std.time.ns_per_ms);
+
+            var time_os: TimeOS = .{};
+            const timer = time_os.time();
+            const start = timer.monotonic().ns;
+            try self.io.run_for_ns(1000 * std.time.ns_per_ms);
+            const elapsed_ms = (timer.monotonic().ns - start) / std.time.ns_per_ms;
+
+            try testing.expect(self.yielded);
+            try testing.expect(elapsed_ms < 500);
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.io.yield();
+            self.yielded = true;
+        }
+    }.run_test();
+}
+
+test "yield does not suppress other ready callbacks" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        yield_requested: bool = false,
+        post_yield_count: u32 = 0,
+
+        const timeout_count = 10;
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // Schedule many timeouts at the same delay. With high
+            // probability, most or all expire in the same kernel batch
+            // and get collected in a single flush. The first callback
+            // to fire calls yield; subsequent callbacks observe that
+            // yield was already requested and increment post_yield_count.
+            var completions: [timeout_count]IO.Completion = undefined;
+            for (&completions) |*c| {
+                self.io.timeout(*Context, &self, on_timeout, c, 5 * std.time.ns_per_ms);
+            }
+
+            try self.io.run_for_ns(1000 * std.time.ns_per_ms);
+
+            // At least one callback must have fired after yield was
+            // requested, proving the dispatch loop wasn't cut short.
+            try testing.expect(self.yield_requested);
+            try testing.expect(self.post_yield_count >= 1);
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            if (self.yield_requested) {
+                self.post_yield_count += 1;
+            } else {
+                self.yield_requested = true;
+                self.io.yield();
+            }
+        }
+    }.run_test();
+}
+
+test "run_for_ns works correctly after yield" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // First call: yield from a timeout callback causes early return,
+            // orphaning the run_for_ns internal timeout CQE(s).
+            var completion: IO.Completion = undefined;
+            self.io.timeout(*Context, &self, on_timeout, &completion, 5 * std.time.ns_per_ms);
+            try self.io.run_for_ns(1000 * std.time.ns_per_ms);
+
+            // Second call: must block normally. If the orphaned timeout
+            // tracking is broken, this would either short-circuit or corrupt
+            // the timeout counter.
+            var time_os: TimeOS = .{};
+            const timer = time_os.time();
+            const start = timer.monotonic().ns;
+            try self.io.run_for_ns(20 * std.time.ns_per_ms);
+            const elapsed_ms = (timer.monotonic().ns - start) / std.time.ns_per_ms;
+
+            try testing.expect(elapsed_ms >= 10);
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.io.yield();
+        }
+    }.run_test();
+}
+
+test "run clears stale yield" {
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    // Set yield directly, then call run() which should clear it.
+    io.yield();
+    try io.run();
+
+    // run_for_ns should now block for the full duration, not short-circuit.
+    var time_os: TimeOS = .{};
+    const timer = time_os.time();
+    const start = timer.monotonic().ns;
+    try io.run_for_ns(20 * std.time.ns_per_ms);
+    const elapsed_ms = (timer.monotonic().ns - start) / std.time.ns_per_ms;
+
+    try testing.expect(elapsed_ms >= 10);
+}
