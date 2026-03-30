@@ -61,7 +61,16 @@ class _IDGenerator:
     """
     def __init__(self) -> None:
         self._last_time_ms = time.time_ns() // (1000 * 1000)
-        self._last_random = int.from_bytes(os.urandom(10), 'little')
+
+        # Bound _last_random to half of 2^80.
+        #
+        # Let us consider the worst case, _last_random falling on 2^79 - 1; that
+        # leaves a room of about 6 x 10^23 IDs to reach the threshold of 2^80.
+        #
+        # Each generate() calls roughly 5 operations, we would require a rate of
+        # 3 x 10^27 FLOPS/s to reach the threshold within a millisecond: that is
+        # equivalent to 2 billion El Capitan running in parallel.
+        self._last_random = int.from_bytes(os.urandom(10), 'little') % (2 ** 79 - 1)
 
     def generate(self) -> int:
         time_ms = time.time_ns() // (1000 * 1000)
@@ -71,7 +80,7 @@ class _IDGenerator:
             time_ms = self._last_time_ms
         else:
             self._last_time_ms = time_ms
-            self._last_random = int.from_bytes(os.urandom(10), 'little')
+            self._last_random = int.from_bytes(os.urandom(10), 'little') % (2 ** 79 - 1)
 
         self._last_random += 1
         if self._last_random == 2 ** 80:
