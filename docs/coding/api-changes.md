@@ -545,7 +545,7 @@ The TigerBeetle Python Client `0.17.0` introduced the following breaking changes
   |Type       |Before                                 | After                                   |
   |-----------|---------------------------------------|-----------------------------------------|
   |Enum       |`PacketStatus`                         |_removed_                                |
-  |Exception  |`PacketError     `                     |_removed_                                |
+  |Exception  |`PacketError`                          |_removed_                                |
   |Exception  |                                       |`ClientEvictedError`                     |
   |Exception  |                                       |`ClientReleaseTooLowError`               |
   |Exception  |                                       |`ClientReleaseTooHighError`              |
