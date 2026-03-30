@@ -10,7 +10,6 @@
 * [Redesigning OLTP for a New Order of Magnitude (QCon SF)](https://www.infoq.com/presentations/redesign-oltp/)
   talk with a deeper dive into TigerBeetle’s local storage engine and global consensus protocol.
 * [TIGER_STYLE.md](./docs/TIGER_STYLE.md), the engineering methodology behind TigerBeetle.
-* [Slack](https://slack.tigerbeetle.com/join), say hello!
 
 ## Start
 
