@@ -21,10 +21,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+
+      # TODO: move this to be after tag checkout once #3613 is released
+      - uses: actions/cache@v5
+        with:
+          path: ./zig/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
+      - run: ./zig/download.sh
+
       # Run on the latest tag. The release branch is ahead of release tag over the weekend.
       - run: |
           TAG=$(gh release list --limit 1 | cut -f1)
-          git fetch origin $TAG && git switch -d FETCH_HEAD
+          git fetch origin $TAG && git switch --detach FETCH_HEAD
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -45,12 +53,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 'latest'
-
-      - uses: actions/cache@v5
-        with:
-          path: ./zig/cache
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
-      - run: ./zig/download.sh
 
       - run: ./zig/zig build scripts -- ci --validate-release
         env:
