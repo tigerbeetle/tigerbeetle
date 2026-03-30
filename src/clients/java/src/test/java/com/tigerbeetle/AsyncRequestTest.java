@@ -544,6 +544,7 @@ public class AsyncRequestTest {
         }
         // Second time throws an exception, because it can only be completed once.
         request.setException(new Exception());
+        assert false;
     }
 
     private static NativeClient getDummyClient() {
