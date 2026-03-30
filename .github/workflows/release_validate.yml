@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: release
+          ref: main
       # Run on the latest tag. The release branch is ahead of release tag over the weekend.
       - run: |
           TAG=$(gh release list --limit 1 | cut -f1)
