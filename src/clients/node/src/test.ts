@@ -13,6 +13,7 @@ import {
   id,
   QueryFilter,
   QueryFilterFlags,
+  ErrorCodes,
 } from '.'
 
 const client = createClient({
@@ -131,13 +132,7 @@ test('batch max size', async (): Promise<void> => {
       timestamp: 0n,
     });
   }
-
-  try {
-    const results = await client.createTransfers(transfers);
-    assert.fail();
-  } catch (error) {
-    assert.strictEqual(error.message, "Too much data provided on this batch.");
-  }
+  assert.rejects(async() => await client.createTransfers(transfers), { code: ErrorCodes.ERR_TOO_MUCH_DATA })
 })
 
 test('can lookup accounts', async (): Promise<void> => {
@@ -909,16 +904,8 @@ test('can get account transfers', async (): Promise<void> => {
     limit: 10_000,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
-  try {
-    await client.getAccountTransfers(filter)
-  } catch (err) {
-    assert.strictEqual(err.message, "Too much data provided on this batch.");
-  }
-  try {
-    await client.getAccountBalances(filter)
-  } catch (err) {
-    assert.strictEqual(err.message, "Too much data provided on this batch.");
-  }
+  assert.rejects(async() => await client.getAccountTransfers(filter), { code: ErrorCodes.ERR_TOO_MUCH_DATA })
+  assert.rejects(async() => await client.getAccountBalances(filter), { code: ErrorCodes.ERR_TOO_MUCH_DATA })
 
   // Empty flags:
   filter = {
@@ -1407,16 +1394,8 @@ test('query with invalid filter', async (): Promise<void> => {
     limit: 10_000,
     flags: QueryFilterFlags.none,
   }
-  try {
-    await client.queryAccounts(filter)
-  } catch (err) {
-    assert.strictEqual(err.message, "Too much data provided on this batch.");
-  }
-  try {
-    await client.queryTransfers(filter)
-  } catch (err) {
-    assert.strictEqual(err.message, "Too much data provided on this batch.");
-  }
+  assert.rejects(async() => await client.queryAccounts(filter), { code: ErrorCodes.ERR_TOO_MUCH_DATA })
+  assert.rejects(async() => await client.queryTransfers(filter), { code: ErrorCodes.ERR_TOO_MUCH_DATA })
 
   // Invalid flags:
   filter = {
@@ -1555,13 +1534,7 @@ test("destroy client in-flight", async (): Promise<void> => {
   // Non-existing cluster.
   const client = createClient({ cluster_id: 92n, replica_addresses: ["99"] });
   setTimeout(() => client.destroy(), 30);
-  try {
-    await client.lookupAccounts([0n]);
-  } catch (error) {
-    assert.strictEqual(error.message, "Client was shutdown.");
-    return;
-  }
-  throw "expected an error";
+  assert.rejects(async () => await client.lookupAccounts([0n]), { code: ErrorCodes.ERR_CLIENT_CLOSED })
 });
 
 async function main () {

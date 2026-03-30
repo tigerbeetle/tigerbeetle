@@ -73,23 +73,33 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value
 
     const operation_int = translate.u32_from_value(env, args[1], "operation") catch return null;
     if (!@as(vsr.Operation, @enumFromInt(operation_int)).valid(Operation)) {
-        translate.throw(env, "Unknown operation.") catch return null;
+        translate.throw(env, .{
+            .message = "Unknown operation.",
+        }) catch return null;
     }
 
     var is_array: bool = undefined;
     if (c.napi_is_array(env, args[2], &is_array) != c.napi_ok) {
-        translate.throw(env, "Failed to check array argument type.") catch return null;
+        translate.throw(env, .{
+            .message = "Failed to check array argument type.",
+        }) catch return null;
     }
     if (!is_array) {
-        translate.throw(env, "Array argument must be an [object Array].") catch return null;
+        translate.throw(env, .{
+            .message = "Array argument must be an [object Array].",
+        }) catch return null;
     }
 
     var callback_type: c.napi_valuetype = undefined;
     if (c.napi_typeof(env, args[3], &callback_type) != c.napi_ok) {
-        translate.throw(env, "Failed to check callback argument type.") catch return null;
+        translate.throw(env, .{
+            .message = "Failed to check callback argument type.",
+        }) catch return null;
     }
     if (callback_type != c.napi_function) {
-        translate.throw(env, "Callback argument must be a Function.") catch return null;
+        translate.throw(env, .{
+            .message = "Callback argument must be a Function.",
+        }) catch return null;
     }
 
     request(
@@ -113,7 +123,7 @@ fn create(
     if (c.napi_create_string_utf8(env, "tb_client", c.NAPI_AUTO_LENGTH, &tsfn_name) != c.napi_ok) {
         return translate.throw(
             env,
-            "Failed to create resource name for thread-safe function.",
+            .{ .message = "Failed to create resource name for thread-safe function." },
         );
     }
 
@@ -131,7 +141,9 @@ fn create(
         on_completion_js, // Function to call on JS thread when TSFN is called.
         &completion_tsfn, // TSFN out handle.
     ) != c.napi_ok) {
-        return translate.throw(env, "Failed to create thread-safe function.");
+        return translate.throw(env, .{
+            .message = "Failed to create thread-safe function.",
+        });
     }
     errdefer if (c.napi_release_threadsafe_function(
         completion_tsfn,
@@ -141,7 +153,9 @@ fn create(
     };
 
     const client = global_allocator.create(tb_client.ClientInterface) catch {
-        return translate.throw(env, "Failed to allocated the client interface.");
+        return translate.throw(env, .{
+            .message = "Failed to allocated the client interface.",
+        });
     };
     errdefer global_allocator.destroy(client);
 
@@ -153,12 +167,24 @@ fn create(
         @intFromPtr(completion_tsfn),
         on_completion,
     ) catch |err| switch (err) {
-        error.OutOfMemory => return translate.throw(env, "Failed to allocate memory for Client."),
-        error.Unexpected => return translate.throw(env, "Unexpected error occurred on Client."),
-        error.AddressInvalid => return translate.throw(env, "Invalid replica address."),
-        error.AddressLimitExceeded => return translate.throw(env, "Too many replica addresses."),
-        error.SystemResources => return translate.throw(env, "Failed to reserve system resources."),
-        error.NetworkSubsystemFailed => return translate.throw(env, "Network stack failure."),
+        error.OutOfMemory => return translate.throw(env, .{
+            .message = "Failed to allocate memory for Client.",
+        }),
+        error.AddressInvalid => return translate.throw(env, .{
+            .message = "Invalid replica address.",
+        }),
+        error.AddressLimitExceeded => return translate.throw(env, .{
+            .message = "Too many replica addresses.",
+        }),
+        error.SystemResources => return translate.throw(env, .{
+            .message = "Failed to reserve system resources.",
+        }),
+        error.NetworkSubsystemFailed => return translate.throw(env, .{
+            .message = "Network stack failure.",
+        }),
+        error.Unexpected => return translate.throw(env, .{
+            .message = "Unexpected error occurred on Client.",
+        }),
     };
     errdefer client.deinit() catch unreachable;
 
@@ -179,12 +205,17 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
     }
 
     const completion_ctx = client.completion_context() catch |err| switch (err) {
-        error.ClientInvalid => return translate.throw(env, "Client was closed."),
+        error.ClientInvalid => return translate.throw(env, .{
+            .code = "ERR_CLIENT_CLOSED",
+            .message = "Client was closed.",
+        }),
     };
 
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
     if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_release) != c.napi_ok) {
-        return translate.throw(env, "Failed to release allocated thread-safe function on error.");
+        return translate.throw(env, .{
+            .message = "Failed to release allocated thread-safe function on error.",
+        });
     }
 }
 
@@ -205,7 +236,9 @@ fn request(
     // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
     if (c.napi_create_reference(env, callback, 1, &callback_ref) != c.napi_ok) {
-        return translate.throw(env, "Failed to create reference to callback.");
+        return translate.throw(env, .{
+            .message = "Failed to create reference to callback.",
+        });
     }
     errdefer translate.delete_reference(env, callback_ref) catch {
         std.log.warn("Failed to delete reference to callback on error.", .{});
@@ -220,16 +253,23 @@ fn request(
             // However, the final validation happens in `tb_client` against the runtime-known
             // maximum size.
             if (array_length * @sizeOf(Event) > constants.message_body_size_max) {
-                return translate.throw(env, "Too much data provided on this batch.");
+                return translate.throw(env, .{
+                    .code = "ERR_TOO_MUCH_DATA",
+                    .message = "Too much data provided on this batch.",
+                });
             }
 
             const packet = global_allocator.create(tb_client.Packet) catch {
-                return translate.throw(env, "Failed to allocated a new packet.");
+                return translate.throw(env, .{
+                    .message = "Failed to allocated a new packet.",
+                });
             };
             errdefer global_allocator.destroy(packet);
 
             const buffer: []Event = global_allocator.alloc(Event, array_length) catch {
-                return translate.throw(env, "Failed to allocated the request buffer.");
+                return translate.throw(env, .{
+                    .message = "Failed to allocated the request buffer.",
+                });
             };
             errdefer global_allocator.free(buffer);
 
@@ -249,7 +289,10 @@ fn request(
     };
 
     client.submit(packet) catch |err| switch (err) {
-        error.ClientInvalid => return translate.throw(env, "Client was closed."),
+        error.ClientInvalid => return translate.throw(env, .{
+            .code = "ERR_CLIENT_CLOSED",
+            .message = "Client was closed.",
+        }),
     };
 }
 
@@ -369,19 +412,34 @@ fn on_completion_js(
                     break :blk encode_array(Result, env, results);
                 },
                 .client_shutdown => {
-                    break :blk translate.throw(env, "Client was shutdown.");
+                    break :blk translate.throw(env, .{
+                        .code = "ERR_CLIENT_CLOSED",
+                        .message = "Client was closed.",
+                    });
                 },
                 .client_evicted => {
-                    break :blk translate.throw(env, "Client was evicted.");
+                    break :blk translate.throw(env, .{
+                        .code = "ERR_CLIENT_EVICTED",
+                        .message = "Client was evicted.",
+                    });
                 },
                 .client_release_too_low => {
-                    break :blk translate.throw(env, "Client was evicted: release too old.");
+                    break :blk translate.throw(env, .{
+                        .code = "ERR_CLIENT_RELEASE_TOO_LOW",
+                        .message = "Client was evicted: release too old.",
+                    });
                 },
                 .client_release_too_high => {
-                    break :blk translate.throw(env, "Client was evicted: release too new.");
+                    break :blk translate.throw(env, .{
+                        .code = "ERR_CLIENT_RELEASE_TOO_HIGH",
+                        .message = "Client was evicted: release too new.",
+                    });
                 },
                 .too_much_data => {
-                    break :blk translate.throw(env, "Too much data provided on this batch.");
+                    break :blk translate.throw(env, .{
+                        .code = "ERR_TOO_MUCH_DATA",
+                        .message = "Too much data provided on this batch.",
+                    });
                 },
                 else => unreachable, // all other packet status' handled in previous callback.
             }

@@ -10,7 +10,9 @@ pub fn register_function(
 ) !void {
     var napi_function: c.napi_value = undefined;
     if (c.napi_create_function(env, null, 0, function, null, &napi_function) != c.napi_ok) {
-        return throw(env, "Failed to create function " ++ name ++ "().");
+        return throw(env, .{
+            .message = "Failed to create function " ++ name ++ "().",
+        });
     }
 
     if (c.napi_set_named_property(
@@ -19,13 +21,23 @@ pub fn register_function(
         @as([*c]const u8, @ptrCast(name)),
         napi_function,
     ) != c.napi_ok) {
-        return throw(env, "Failed to add " ++ name ++ "() to exports.");
+        return throw(env, .{
+            .message = "Failed to add " ++ name ++ "() to exports.",
+        });
     }
 }
 
 const TranslationError = error{ExceptionThrown};
-pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationError {
-    const result = c.napi_throw_error(env, null, @as([*c]const u8, @ptrCast(message)));
+pub fn throw(env: c.napi_env, comptime options: struct {
+    code: ?[:0]const u8 = null,
+    message: [:0]const u8,
+}) TranslationError {
+    const result = c.napi_throw_error(
+        env,
+        // TODO(zig): Casting the optional to [*c] caused the Node runtime to panic.
+        options.code orelse null,
+        options.message,
+    );
     switch (result) {
         c.napi_ok, c.napi_pending_exception => {},
         else => unreachable,
@@ -37,7 +49,9 @@ pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationError {
 pub fn capture_null(env: c.napi_env) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_get_null(env, &result) != c.napi_ok) {
-        return throw(env, "Failed to capture the value of \"null\".");
+        return throw(env, .{
+            .message = "Failed to capture the value of \"null\".",
+        });
     }
 
     return result;
@@ -50,20 +64,21 @@ pub fn extract_args(env: c.napi_env, info: c.napi_callback_info, comptime args: 
     var argc = args.count;
     var argv: [args.count]c.napi_value = undefined;
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
-        return throw(
-            env,
-            std.fmt.comptimePrint("Failed to get args for {s}()\x00", .{args.function}),
-        );
+        return throw(env, .{
+            .message = std.fmt.comptimePrint("Failed to get args for {s}()\x00", .{args.function}),
+        });
     }
 
     if (argc != args.count) {
-        return throw(
-            env,
-            std.fmt.comptimePrint("Function {s}() requires exactly {} arguments.\x00", .{
-                args.function,
-                args.count,
-            }),
-        );
+        return throw(env, .{
+            .message = std.fmt.comptimePrint(
+                "Function {s}() requires exactly {} arguments.\x00",
+                .{
+                    args.function,
+                    args.count,
+                },
+            ),
+        });
     }
 
     return argv;
@@ -72,7 +87,9 @@ pub fn extract_args(env: c.napi_env, info: c.napi_callback_info, comptime args: 
 pub fn create_external(env: c.napi_env, context: *anyopaque) !c.napi_value {
     var result: c.napi_value = null;
     if (c.napi_create_external(env, context, null, null, &result) != c.napi_ok) {
-        return throw(env, "Failed to create external for client context.");
+        return throw(env, .{
+            .message = "Failed to create external for client context.",
+        });
     }
 
     return result;
@@ -85,7 +102,7 @@ pub fn value_external(
 ) !?*anyopaque {
     var result: ?*anyopaque = undefined;
     if (c.napi_get_value_external(env, value, &result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     return result;
@@ -98,7 +115,9 @@ pub fn slice_from_object(
 ) ![]const u8 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
-        return throw(env, key ++ " must be defined");
+        return throw(env, .{
+            .message = key ++ " must be defined",
+        });
     }
 
     return slice_from_value(env, property, key);
@@ -112,13 +131,17 @@ pub fn slice_from_value(
     var is_buffer: bool = undefined;
     assert(c.napi_is_buffer(env, value, &is_buffer) == c.napi_ok);
 
-    if (!is_buffer) return throw(env, key ++ " must be a buffer");
+    if (!is_buffer) return throw(env, .{
+        .message = key ++ " must be a buffer",
+    });
 
     var data: ?*anyopaque = null;
     var data_length: usize = undefined;
     assert(c.napi_get_buffer_info(env, value, &data, &data_length) == c.napi_ok);
 
-    if (data_length < 1) return throw(env, key ++ " must not be empty");
+    if (data_length < 1) return throw(env, .{
+        .message = key ++ " must not be empty",
+    });
 
     return @as([*]u8, @ptrCast(data.?))[0..data_length];
 }
@@ -126,7 +149,9 @@ pub fn slice_from_value(
 pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
-        return throw(env, key ++ " must be defined");
+        return throw(env, .{
+            .message = key ++ " must be defined",
+        });
     }
 
     return u128_from_value(env, property, key);
@@ -135,7 +160,9 @@ pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0
 pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u64 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
-        return throw(env, key ++ " must be defined");
+        return throw(env, .{
+            .message = key ++ " must be defined",
+        });
     }
 
     return u64_from_value(env, property, key);
@@ -144,7 +171,9 @@ pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u32 {
     var property: c.napi_value = undefined;
     if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
-        return throw(env, key ++ " must be defined");
+        return throw(env, .{
+            .message = key ++ " must be defined",
+        });
     }
 
     return u32_from_value(env, property, key);
@@ -153,7 +182,9 @@ pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 pub fn u16_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u16 {
     const result = try u32_from_object(env, object, key);
     if (result > std.math.maxInt(u16)) {
-        return throw(env, key ++ " must be a u16.");
+        return throw(env, .{
+            .message = key ++ " must be a u16.",
+        });
     }
 
     return @as(u16, @intCast(result));
@@ -171,11 +202,17 @@ pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]
     var word_count: usize = 2;
     switch (c.napi_get_value_bigint_words(env, value, &sign_bit, &word_count, words)) {
         c.napi_ok => {},
-        c.napi_bigint_expected => return throw(env, name ++ " must be a BigInt"),
+        c.napi_bigint_expected => return throw(env, .{
+            .message = name ++ " must be a BigInt",
+        }),
         else => unreachable,
     }
-    if (sign_bit != 0) return throw(env, name ++ " must be positive");
-    if (word_count > 2) return throw(env, name ++ " must fit in 128 bits");
+    if (sign_bit != 0) return throw(env, .{
+        .message = name ++ " must be positive",
+    });
+    if (word_count > 2) return throw(env, .{
+        .message = name ++ " must fit in 128 bits",
+    });
 
     return result;
 }
@@ -185,10 +222,14 @@ pub fn u64_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]c
     var lossless: bool = undefined;
     switch (c.napi_get_value_bigint_uint64(env, value, &result, &lossless)) {
         c.napi_ok => {},
-        c.napi_bigint_expected => return throw(env, name ++ " must be an unsigned 64-bit BigInt"),
+        c.napi_bigint_expected => return throw(env, .{
+            .message = name ++ " must be an unsigned 64-bit BigInt",
+        }),
         else => unreachable,
     }
-    if (!lossless) return throw(env, name ++ " conversion was lossy");
+    if (!lossless) return throw(env, .{
+        .message = name ++ " conversion was lossy",
+    });
 
     return result;
 }
@@ -200,7 +241,9 @@ pub fn u32_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]c
     // We want to make sure this is: unsigned, and an integer.
     switch (c.napi_get_value_uint32(env, value, &result)) {
         c.napi_ok => {},
-        c.napi_number_expected => return throw(env, name ++ " must be a number"),
+        c.napi_number_expected => return throw(env, .{
+            .message = name ++ " must be a number",
+        }),
         else => unreachable,
     }
     return result;
@@ -226,7 +269,7 @@ pub fn u128_into_object(
         @as(*const [2]u64, @ptrCast(&value)),
         &bigint,
     ) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     if (c.napi_set_named_property(
@@ -235,7 +278,7 @@ pub fn u128_into_object(
         @ptrCast(key),
         bigint,
     ) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 }
 
@@ -248,7 +291,7 @@ pub fn u64_into_object(
 ) !void {
     var result: c.napi_value = undefined;
     if (c.napi_create_bigint_uint64(env, value, &result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     if (c.napi_set_named_property(
@@ -257,7 +300,7 @@ pub fn u64_into_object(
         @ptrCast(key),
         result,
     ) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 }
 
@@ -270,11 +313,11 @@ pub fn u32_into_object(
 ) !void {
     var result: c.napi_value = undefined;
     if (c.napi_create_uint32(env, value, &result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     if (c.napi_set_named_property(env, object, @ptrCast(key), result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 }
 
@@ -291,7 +334,7 @@ pub fn u16_into_object(
 pub fn create_object(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_create_object(env, &result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     return result;
@@ -304,7 +347,7 @@ pub fn create_array(
 ) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_create_array_with_length(env, length, &result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     return result;
@@ -318,14 +361,14 @@ pub fn set_array_element(
     comptime error_message: [:0]const u8,
 ) !void {
     if (c.napi_set_element(env, array, index, value) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 }
 
 pub fn array_element(env: c.napi_env, array: c.napi_value, index: u32) !c.napi_value {
     var element: c.napi_value = undefined;
     if (c.napi_get_element(env, array, index, &element) != c.napi_ok) {
-        return throw(env, "Failed to get array element.");
+        return throw(env, .{ .message = "Failed to get array element." });
     }
 
     return element;
@@ -334,7 +377,9 @@ pub fn array_element(env: c.napi_env, array: c.napi_value, index: u32) !c.napi_v
 pub fn array_length(env: c.napi_env, array: c.napi_value) !u32 {
     var is_array: bool = undefined;
     assert(c.napi_is_array(env, array, &is_array) == c.napi_ok);
-    if (!is_array) return throw(env, "Batch must be an Array.");
+    if (!is_array) return throw(env, .{
+        .message = "Batch must be an Array.",
+    });
 
     var length: u32 = undefined;
     assert(c.napi_get_array_length(env, array, &length) == c.napi_ok);
@@ -344,7 +389,9 @@ pub fn array_length(env: c.napi_env, array: c.napi_value) !u32 {
 
 pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
     if (c.napi_delete_reference(env, reference) != c.napi_ok) {
-        return throw(env, "Failed to delete callback reference.");
+        return throw(env, .{
+            .message = "Failed to delete callback reference.",
+        });
     }
 }
 
@@ -360,7 +407,9 @@ pub fn call_function(
         // the user's callback may throw a JS exception or call other functions that do so. We
         // therefore don't throw another error.
         c.napi_pending_exception => {},
-        else => return throw(env, "Failed to invoke results callback."),
+        else => return throw(env, .{
+            .message = "Failed to invoke results callback.",
+        }),
     }
     return result;
 }
@@ -372,7 +421,7 @@ pub fn reference_value(
 ) !c.napi_value {
     var result: c.napi_value = undefined;
     if (c.napi_get_reference_value(env, callback_reference, &result) != c.napi_ok) {
-        return throw(env, error_message);
+        return throw(env, .{ .message = error_message });
     }
 
     return result;

@@ -62,6 +62,15 @@ export type ResultCallback = (error: Error | null, results: Result[] | null) => 
 
 export const amount_max: bigint = (2n ** 128n) - 1n
 
+// Error codes returned by the client.
+export const ErrorCodes = {
+  ERR_CLIENT_CLOSED: 'ERR_CLIENT_CLOSED',
+  ERR_CLIENT_EVICTED: 'ERR_CLIENT_EVICTED',
+  ERR_CLIENT_RELEASE_TOO_LOW: 'ERR_CLIENT_RELEASE_TOO_LOW',
+  ERR_CLIENT_RELEASE_TOO_HIGH: 'ERR_CLIENT_RELEASE_TOO_HIGH',
+  ERR_TOO_MUCH_DATA: 'ERR_TOO_MUCH_DATA',
+} as const;
+
 interface BindingInitArgs {
   cluster_id: bigint, // u128
   replica_addresses: Buffer,
@@ -106,7 +115,10 @@ export function createClient (args: ClientInitArgs): Client {
   const request = <T extends Result>(operation: Operation, batch: Event[]): Promise<T[]> => {
     return new Promise((resolve, reject) => {
       try {
-        if (!context) throw new Error('Client was shutdown.');
+        if (!context) throw Object.assign(new Error('Client was closed.'), {
+          code: ErrorCodes.ERR_CLIENT_CLOSED,
+        })
+
         binding.submit(context, operation, batch, (error, result) => {
           if (error) {
             reject(error)
