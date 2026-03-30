@@ -1010,3 +1010,52 @@ test "cancel" {
         }
     }.run_test();
 }
+
+test "timeouts with the same delay fire in the same batch" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        callback_count: u32 = 0,
+        probe_saw: ?u32 = null,
+        probe_completion: IO.Completion = undefined,
+
+        const timeout_count = 10;
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            var time = TimeOS{};
+            const target_ns = time.monotonic().ns + 5 * std.time.ns_per_ms;
+            var completions: [timeout_count]IO.Completion = undefined;
+            for (&completions) |*c| {
+                const remaining: u63 = @intCast(target_ns - time.monotonic().ns);
+                self.io.timeout(*Context, &self, on_timeout, c, remaining);
+            }
+
+            try self.io.run_for_ns(1000 * std.time.ns_per_ms);
+
+            try testing.expectEqual(@as(u32, timeout_count), self.callback_count);
+            // The probe is appended to `completed` after the originals
+            // are queued, so it fires after they do. If timeouts trickled
+            // in one per flush instead of batching, the probe would fire
+            // after only 1 or 2 callbacks.
+            try testing.expectEqual(@as(u32, timeout_count), self.probe_saw.?);
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.callback_count += 1;
+            if (self.callback_count == 1) {
+                // Submit a next_tick probe that fires in the next
+                // dispatch round, acting as a flush boundary marker.
+                self.io.next_tick(*Context, self, on_probe, &self.probe_completion, .vsr);
+            }
+        }
+
+        fn on_probe(self: *Context, _: *IO.Completion, _: IO.NextTickResult) void {
+            self.probe_saw = self.callback_count;
+        }
+    }.run_test();
+}
