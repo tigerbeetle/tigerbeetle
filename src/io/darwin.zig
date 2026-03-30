@@ -144,11 +144,11 @@ pub const IO = struct {
             }
         }
 
-        var completed = self.completed;
-        self.completed.reset();
-
+        // Drain all ready completions. Callbacks may push new completions
+        // (e.g. zero-delay timeouts) which are picked up in the same pass,
+        // matching Linux io_uring behavior (see ba0535354).
         const timer = self.time.monotonic();
-        while (completed.pop()) |completion| {
+        while (self.completed.pop()) |completion| {
             (completion.callback)(self, completion);
         }
         const elapsed = timer.elapsed(self.time.monotonic());
