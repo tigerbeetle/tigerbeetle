@@ -16,7 +16,7 @@ public final class TooMuchDataException extends RuntimeException {
 
     @Override
     public String toString() {
-        return "Too much data provided on this batch.";
+        return "Too much data was sent or requested in this batch.";
     }
 
 }

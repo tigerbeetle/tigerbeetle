@@ -10,5 +10,5 @@ namespace TigerBeetle;
 public sealed class TooMuchDataException : Exception
 {
     internal TooMuchDataException() { }
-    public override string Message => "Too much data provided on this batch.";
+    public override string Message => "Too much data was sent or requested in this batch.";
 }

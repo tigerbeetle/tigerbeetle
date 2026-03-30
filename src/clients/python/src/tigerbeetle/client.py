@@ -97,25 +97,30 @@ class InitError(Exception):
     pass
 
 class ClientClosedError(Exception):
-    pass
+    def __init__(self) -> None:
+        super().__init__("Client was closed.")
 
 class TooMuchDataError(Exception):
-    pass
+    def __init__(self) -> None:
+        super().__init__("Too much data was sent or requested in this batch.")
 
 class ClientEvictedError(Exception):
-    pass
+    def __init__(self) -> None:
+        super().__init__("Client was evicted.")
 
 class ClientReleaseTooLowError(Exception):
-    pass
+    def __init__(self) -> None:
+        super().__init__("Client was evicted: release too old.")
 
 class ClientReleaseTooHighError(Exception):
-    pass
+    def __init__(self) -> None:
+        super().__init__("Client was evicted: release too new.")
 
 class Client:
     _clients: dict[int, Any] = {}
     _counter = AtomicInteger()
 
-    def __init__(self, cluster_id: int, replica_addresses: str):
+    def __init__(self, cluster_id: int, replica_addresses: str) -> None:
         self._client_key = Client._counter.increment()
         self._client = bindings.CClient()
 

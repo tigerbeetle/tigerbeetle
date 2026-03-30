@@ -255,7 +255,7 @@ fn request(
             if (array_length * @sizeOf(Event) > constants.message_body_size_max) {
                 return translate.throw(env, .{
                     .code = "ERR_TOO_MUCH_DATA",
-                    .message = "Too much data provided on this batch.",
+                    .message = "Too much data was sent or requested in this batch.",
                 });
             }
 
