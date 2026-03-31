@@ -312,7 +312,7 @@ pub fn ReplicaType(
 
         /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling
-        /// `on_message_from_bus()`.
+        /// `on_messages_from_bus()`.
         message_bus: MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
@@ -618,6 +618,11 @@ pub fn ReplicaType(
 
         trace: *Tracer,
         trace_emit_timeout: Timeout,
+
+        // Record the lowest and highest client releases that this replica has seen. These get reset
+        // every time they are emitted (by trace_emit_timeout).
+        release_seen_client_min: ?u32 = null,
+        release_seen_client_max: ?u32 = null,
 
         aof: ?*AOF,
         aof_recovery: bool,
@@ -1757,7 +1762,27 @@ pub fn ReplicaType(
             self.jump_view(message.header);
 
             assert(message.header.replica < self.node_count);
-            switch (message.into_any()) {
+            const message_any = message.into_any();
+
+            // Don't rely on header.peer_type, since it's about who sent the message rather than
+            // who created it. Handle messages that have explicitly been created by a client.
+            switch (message_any) {
+                inline .ping_client, .request => |m| {
+                    if (m.header.client != 0) {
+                        self.release_seen_client_min = @min(
+                            message.header.release.value,
+                            self.release_seen_client_min orelse message.header.release.value,
+                        );
+                        self.release_seen_client_max = @max(
+                            message.header.release.value,
+                            self.release_seen_client_max orelse message.header.release.value,
+                        );
+                    }
+                },
+                else => {},
+            }
+
+            switch (message_any) {
                 .ping => |m| self.on_ping(m),
                 .pong => |m| self.on_pong(m),
                 .ping_client => |m| self.on_ping_client(m),
@@ -3903,6 +3928,15 @@ pub fn ReplicaType(
                 .lsm_manifest_block_count,
                 self.superblock.working.vsr_state.checkpoint.manifest_block_count,
             );
+
+            if (self.release_seen_client_min) |release_seen_client_min| {
+                self.trace.gauge(.release_seen_client_min, release_seen_client_min);
+            }
+            if (self.release_seen_client_max) |release_seen_client_max| {
+                self.trace.gauge(.release_seen_client_max, release_seen_client_max);
+            }
+            self.release_seen_client_min = null;
+            self.release_seen_client_max = null;
 
             self.message_bus.trace_gauge();
 
