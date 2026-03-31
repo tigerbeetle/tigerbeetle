@@ -7228,15 +7228,20 @@ pub fn ReplicaType(
                 request.message.header.checksum,
                 request.message.header.client,
             });
+
             if (request.message.header.previous_request_latency != 0) {
                 if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                     self.status == .normal)
                 {
-                    const operation = request.message.header.operation;
-                    self.trace.timing(
-                        .{ .client_request_round_trip = .from(operation) },
-                        .{ .ns = request.message.header.previous_request_latency },
-                    );
+                    const session_entry = self.client_sessions.get(request.message.header.client);
+                    if (session_entry) |entry| {
+                        const operation = entry.header.operation;
+
+                        self.trace.timing(
+                            .{ .client_request_round_trip = .from(operation) },
+                            .{ .ns = request.message.header.previous_request_latency },
+                        );
+                    }
                 }
             }
 

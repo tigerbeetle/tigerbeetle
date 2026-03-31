@@ -228,7 +228,7 @@ pub fn ContextType(
         eviction_reason: ?vsr.Header.Eviction.Reason = null,
         thread: std.Thread,
 
-        previous_request_instant: ?stdx.Instant = null,
+        previous_request_instant: stdx.Instant,
         previous_request_latency: ?stdx.Duration = null,
 
         pub fn init(
@@ -289,6 +289,7 @@ pub fn ContextType(
                 .client = undefined,
                 .signal = undefined,
                 .thread = undefined,
+                .previous_request_instant = undefined,
             };
             context.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_owned);
@@ -374,6 +375,7 @@ pub fn ContextType(
             try context.signal.init(&context.io, Context.signal_notify_callback);
             errdefer context.signal.deinit();
 
+            context.previous_request_instant = context.client.time.monotonic();
             context.client.register(client_register_callback, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
@@ -726,8 +728,6 @@ pub fn ContextType(
                 )),
             };
 
-            assert((self.previous_request_instant == null) ==
-                (self.previous_request_latency == null));
             self.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
 
             packet_list.phase = .sent;
@@ -799,6 +799,10 @@ pub fn ContextType(
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
 
+            const current_timestamp = self.client.time.monotonic();
+            self.previous_request_latency =
+                current_timestamp.duration_since(self.previous_request_instant);
+
             // The client might have a smaller message size limit.
             maybe(constants.message_body_size_max < result.batch_size_limit);
             self.batch_size_limit = @min(result.batch_size_limit, constants.message_body_size_max);
@@ -853,7 +857,7 @@ pub fn ContextType(
 
             const current_timestamp = self.client.time.monotonic();
             self.previous_request_latency =
-                current_timestamp.duration_since(self.previous_request_instant.?);
+                current_timestamp.duration_since(self.previous_request_instant);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
