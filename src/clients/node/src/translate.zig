@@ -29,13 +29,11 @@ pub fn register_function(
 
 pub const Error = error{ExceptionThrown};
 pub fn throw(env: c.napi_env, comptime options: struct {
-    code: ?[:0]const u8 = null,
     message: [:0]const u8,
 }) Error {
     const result = c.napi_throw_error(
         env,
-        // TODO(zig): Casting the optional to [*c] caused the Node runtime to panic.
-        options.code orelse null,
+        null,
         options.message,
     );
     switch (result) {
