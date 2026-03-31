@@ -1246,7 +1246,7 @@ public class IntegrationTest {
 
                 // Can fail due to client closed.
                 final var failed = tasks[i].exception != null
-                        && tasks[i].exception instanceof IllegalStateException;
+                        && tasks[i].exception instanceof ClientClosedException;
 
                 assertTrue(failed || succeeded);
 

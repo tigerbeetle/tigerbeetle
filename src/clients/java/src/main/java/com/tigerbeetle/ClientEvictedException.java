@@ -5,7 +5,7 @@ package com.tigerbeetle;
  * exception is thrown, then either there are too many clients connected or the client was idle for
  * too long.
  **/
-public final class ClientEvictedException extends RuntimeException {
+public final class ClientEvictedException extends RequestException {
 
     ClientEvictedException() {}
 

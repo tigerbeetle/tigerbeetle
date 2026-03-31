@@ -150,6 +150,7 @@
             <excludes>
               <!-- Excluding exceptions classes -->
               <exclude>com/tigerbeetle/InitializationException.class</exclude>
+              <exclude>com/tigerbeetle/RequestException.class</exclude>
               <exclude>com/tigerbeetle/TooMuchDataException.class</exclude>
               <exclude>com/tigerbeetle/ClientClosedException.class</exclude>
               <exclude>com/tigerbeetle/ClientEvictedException.class</exclude>

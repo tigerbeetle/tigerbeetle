@@ -8,7 +8,7 @@ package com.tigerbeetle;
  *
  * @see <a href="https://docs.tigerbeetle.com/operating/upgrading/">upgrading</a>
  */
-public final class ClientReleaseException extends RuntimeException {
+public final class ClientReleaseException extends RequestException {
 
     public enum Reason {
         ClientReleaseTooLow,

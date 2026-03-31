@@ -5,7 +5,7 @@ package com.tigerbeetle;
  * message size. If this exception is thrown, then either there are too many elements in a batch, or
  * the limit of a query is too large to be fulfilled in a single request.
  **/
-public final class TooMuchDataException extends RuntimeException {
+public final class TooMuchDataException extends RequestException {
 
     TooMuchDataException() {}
 
