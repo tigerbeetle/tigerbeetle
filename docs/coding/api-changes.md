@@ -179,12 +179,18 @@ The TigerBeetle .NET Client `0.17.0` introduced the following breaking changes:
   <code>LookupAccount<b>s</b></code>, and <code>LookupTransfer<b>s</b></code> remain unchanged.
 
 - New exceptions were introduced for conditions that can be handled by the application.
-  The `PacketStatus` enum is now internal and the `RequestException` was removed.
+  The `PacketStatus` enum is now internal and the `RequestException` was made `abstract`.
+
+  The client can be explicitly closed by calling `Client.Close()`, whereas previously the only
+  way to close a client was through `Client.Dispose()`.
+  Interacting with a closed client now throws a `ClientClosedException`
+  instead of an `ObjectDisposedException`.
 
   |Type       |Before                                 | After                                   |
   |-----------|---------------------------------------|-----------------------------------------|
   |Enum       |`PacketStatus`                         |_removed_                                |
   |Exception  |`RequestException`                     |_removed_                                |
+  |Method     | _added_                               |`Client.Close()`                         |
   |Exception  |                                       |`ClientClosedException`                  |
   |Exception  |                                       |`ClientEvictedException`                 |
   |Exception  |                                       |`ClientReleaseException`                 |
@@ -381,7 +387,8 @@ The TigerBeetle Java Client `0.17.0` introduced the following breaking changes:
   |Type       |Before                                 | After                                   |
   |-----------|---------------------------------------|-----------------------------------------|
   |Enum       |`PacketStatus`                         |_removed_                                |
-  |Exception  |`RequestException`                     |_removed_                                |
+  |Exception  |`RequestException`                     |_abstract class_                         |
+  |Exception  |`ClientClosedException`                |_extends_ `RequestException`             |
   |Exception  |                                       |`ClientEvictedException`                 |
   |Exception  |                                       |`ClientReleaseException`                 |
   |Exception  |                                       |`TooMuchDataException`                   |
@@ -462,6 +469,17 @@ The TigerBeetle Node.js Client `0.17.0` introduced the following breaking change
   |Field      |`CreateTransfersError.index`           |_removed_                                |
   |Field      |_NA_                                   |`CreateTransferResult.timestamp`         |
   |Field      |`CreateTransfersError.result`          |`CreateTransferResult.status`            |
+
+- New error type `RequestError` was introduced for conditions that can be handled by the
+  application.
+  Match the `RequestError.code` property against the constants defined in `ErrorCodes` to
+  determine the specific failure.
+
+  |Type       |Before                                 | After                                   |
+  |-----------|---------------------------------------|-----------------------------------------|
+  |Type       |                                       |`ErrorCodes`                             |
+  |Error      |                                       |`RequestError`                           |
+
 
 ### Example:
 
