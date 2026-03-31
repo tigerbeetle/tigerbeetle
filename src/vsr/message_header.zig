@@ -612,9 +612,9 @@ pub const Header = extern struct {
         request: u32,
         operation: Operation,
         previous_request_latency_padding: [3]u8 = @splat(0),
-        /// Nanosecond interval measuring the time between when the client first began to construct
-        /// the previous request's body and the time that the client received the corresponding
-        /// reply.
+        /// Microsecond (0.17.0+) / Nanosecond interval measuring the time between when the client
+        /// first began to construct the previous request's body and the time that the client
+        /// received the corresponding reply.
         previous_request_latency: u32,
         reserved: [52]u8 = @splat(0),
 

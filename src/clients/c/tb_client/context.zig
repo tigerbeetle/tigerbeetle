@@ -723,7 +723,7 @@ pub fn ContextType(
                 .operation = operation.to_vsr(),
                 .size = @sizeOf(vsr.Header) + request_size,
                 .previous_request_latency = @intCast(@min(
-                    previous_request_latency.ns,
+                    previous_request_latency.to_us(),
                     std.math.maxInt(u32),
                 )),
             };
