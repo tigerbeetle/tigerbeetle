@@ -93,7 +93,7 @@ export class RequestError extends Error {
       case ErrorCodes.ERR_CLIENT_RELEASE_TOO_HIGH:
         return 'Client was evicted: release too new.'
       case ErrorCodes.ERR_TOO_MUCH_DATA:
-        return 'Too much data provided on this batch.'
+        return 'Too much data was sent or requested in this batch.'
       default:
         throw new Error("Unknown error code.")
     }
