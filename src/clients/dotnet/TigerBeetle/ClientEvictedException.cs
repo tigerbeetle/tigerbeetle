@@ -7,7 +7,7 @@ namespace TigerBeetle;
 /// If this exception is thrown, then either there are too many clients
 /// connected or the client was idle for too long.
 /// </summary>
-public sealed class ClientEvictedException : Exception
+public sealed class ClientEvictedException : RequestException
 {
     internal ClientEvictedException() { }
 

@@ -8,7 +8,7 @@ namespace TigerBeetle;
 /// the client is too new or too old to connect to the cluster.
 /// <see href="https://docs.tigerbeetle.com/operating/upgrading"/>
 /// </summary>
-public sealed class ClientReleaseException : Exception
+public sealed class ClientReleaseException : RequestException
 {
     public enum Reason
     {

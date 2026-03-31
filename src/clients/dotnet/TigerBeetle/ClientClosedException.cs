@@ -5,9 +5,9 @@ namespace TigerBeetle;
 /// ClientClosedException is thrown when the client instance is closed and
 /// its resources have been freed.
 /// </summary>
-public sealed class ClientClosedException : ObjectDisposedException
+public sealed class ClientClosedException : RequestException
 {
-    internal ClientClosedException() : base(objectName: null) { }
+    internal ClientClosedException() { }
 
     public override string Message => "Client was closed.";
 }
