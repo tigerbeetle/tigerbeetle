@@ -27,11 +27,11 @@ pub fn register_function(
     }
 }
 
-const TranslationError = error{ExceptionThrown};
+pub const Error = error{ExceptionThrown};
 pub fn throw(env: c.napi_env, comptime options: struct {
     code: ?[:0]const u8 = null,
     message: [:0]const u8,
-}) TranslationError {
+}) Error {
     const result = c.napi_throw_error(
         env,
         // TODO(zig): Casting the optional to [*c] caused the Node runtime to panic.
@@ -43,7 +43,59 @@ pub fn throw(env: c.napi_env, comptime options: struct {
         else => unreachable,
     }
 
-    return TranslationError.ExceptionThrown;
+    return Error.ExceptionThrown;
+}
+
+pub fn throw_typed_error(
+    env: c.napi_env,
+    ctor_ref: c.napi_ref,
+    code: [:0]const u8,
+) Error {
+    var string: c.napi_value = undefined;
+    var ctor: c.napi_value = undefined;
+    var exception: c.napi_value = undefined;
+    if (c.napi_get_reference_value(
+        env,
+        ctor_ref,
+        &ctor,
+    ) != c.napi_ok) {
+        return throw(env, .{ .message = "Failed to get the constructor reference." });
+    }
+    assert(ctor != null);
+
+    if (c.napi_create_string_utf8(
+        env,
+        code,
+        code.len,
+        &string,
+    ) != c.napi_ok) {
+        return throw(env, .{ .message = "Failed to create string utf8." });
+    }
+    if (c.napi_new_instance(
+        env,
+        ctor,
+        1,
+        &[_]c.napi_value{string},
+        &exception,
+    ) != c.napi_ok) {
+        return throw(env, .{ .message = "Failed to create new instance." });
+    }
+
+    // Asserting the exception got the right type.
+    var is_instance_of: bool = false;
+    assert(c.napi_instanceof(
+        env,
+        exception,
+        ctor,
+        &is_instance_of,
+    ) == c.napi_ok);
+    assert(is_instance_of);
+
+    if (c.napi_throw(env, exception) != c.napi_ok) {
+        return throw(env, .{ .message = "Failed to throw typed error" });
+    }
+
+    return Error.ExceptionThrown;
 }
 
 pub fn capture_null(env: c.napi_env) !c.napi_value {
@@ -121,6 +173,20 @@ pub fn slice_from_object(
     }
 
     return slice_from_value(env, property, key);
+}
+
+pub fn get_object_property(
+    env: c.napi_env,
+    object: c.napi_value,
+    comptime key: [:0]const u8,
+) !c.napi_value {
+    var result: c.napi_value = undefined;
+    if (c.napi_get_named_property(env, object, key, &result) != c.napi_ok) {
+        return throw(env, .{
+            .message = key ++ " must be defined",
+        });
+    }
+    return result;
 }
 
 pub fn slice_from_value(
@@ -385,6 +451,27 @@ pub fn array_length(env: c.napi_env, array: c.napi_value) !u32 {
     assert(c.napi_get_array_length(env, array, &length) == c.napi_ok);
 
     return length;
+}
+
+pub fn create_reference(
+    env: c.napi_env,
+    object: c.napi_value,
+    reference_type: enum { strong, weak },
+    reference_out: *c.napi_ref,
+    comptime error_message: [:0]const u8,
+) !void {
+    const initial_ref_count: u32 = switch (reference_type) {
+        .weak => 0,
+        .strong => 1,
+    };
+    if (c.napi_create_reference(
+        env,
+        object,
+        initial_ref_count,
+        reference_out,
+    ) != c.napi_ok) {
+        return throw(env, .{ .message = error_message });
+    }
 }
 
 pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
