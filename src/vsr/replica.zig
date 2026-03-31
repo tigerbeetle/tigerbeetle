@@ -1763,20 +1763,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            switch (message.header.peer_type()) {
-                .client, .client_likely => {
-                    self.release_seen_client_min = @min(
-                        message.header.release.value,
-                        self.release_seen_client_min orelse message.header.release.value,
-                    );
-                    self.release_seen_client_max = @max(
-                        message.header.release.value,
-                        self.release_seen_client_max orelse message.header.release.value,
-                    );
-                },
-                else => {},
-            }
-
             switch (self.syncing) {
                 .idle => {},
                 .canceling_commit, .canceling_grid => {
@@ -1792,7 +1778,27 @@ pub fn ReplicaType(
             self.jump_view(message.header);
 
             assert(message.header.replica < self.node_count);
-            switch (message.into_any()) {
+            const message_any = message.into_any();
+
+            // Don't rely on header.peer_type, since it's about who sent the message rather than
+            // who created it. Handle messages that have explicitly been created by a client.
+            switch (message_any) {
+                inline .ping_client, .request => |m| {
+                    if (m.header.client != 0) {
+                        self.release_seen_client_min = @min(
+                            message.header.release.value,
+                            self.release_seen_client_min orelse message.header.release.value,
+                        );
+                        self.release_seen_client_max = @max(
+                            message.header.release.value,
+                            self.release_seen_client_max orelse message.header.release.value,
+                        );
+                    }
+                },
+                else => {},
+            }
+
+            switch (message_any) {
                 .ping => |m| self.on_ping(m),
                 .pong => |m| self.on_pong(m),
                 .ping_client => |m| self.on_ping_client(m),
