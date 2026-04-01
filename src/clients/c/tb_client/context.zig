@@ -206,16 +206,16 @@ pub fn ContextType(
         } = .user;
 
         gpa: GPA,
-        time_os: TimeOS,
+        time_os: TimeOS = .{},
         client_id: u128,
         cluster_id: u128,
         addresses_owned: []const u8,
 
-        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
+        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max) = .{},
         io: IO,
         message_pool: MessagePool,
         client: Client,
-        batch_size_limit: ?u32,
+        batch_size_limit: ?u32 = null,
 
         completion_callback: CompletionCallback,
         completion_context: usize,
@@ -225,10 +225,10 @@ pub fn ContextType(
         pending: Packet.Queue,
 
         signal: Signal,
-        eviction_reason: ?vsr.Header.Eviction.Reason,
+        eviction_reason: ?vsr.Header.Eviction.Reason = null,
         thread: std.Thread,
 
-        previous_request_instant: ?stdx.Instant = null,
+        previous_request_instant: stdx.Instant,
         previous_request_latency: ?stdx.Duration = null,
 
         pub fn init(
@@ -263,12 +263,37 @@ pub fn ContextType(
             }
 
             const allocator = context.gpa.allocator();
-            context.client_id = stdx.unique_u128();
-            context.cluster_id = cluster_id;
+
+            context.* = .{
+                .gpa = context.gpa,
+
+                .client_id = stdx.unique_u128(),
+                .cluster_id = cluster_id,
+
+                .completion_callback = completion_callback,
+                .completion_context = completion_ctx,
+
+                .interface = client_out,
+                .submitted = Packet.Queue.init(.{
+                    .name = null,
+                    .verify_push = builtin.is_test,
+                }),
+                .pending = Packet.Queue.init(.{
+                    .name = null,
+                    .verify_push = builtin.is_test,
+                }),
+
+                .addresses_owned = undefined,
+                .io = undefined,
+                .message_pool = undefined,
+                .client = undefined,
+                .signal = undefined,
+                .thread = undefined,
+                .previous_request_instant = undefined,
+            };
             context.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_owned);
 
-            context.time_os = .{};
             const time = context.time_os.time();
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
@@ -345,24 +370,12 @@ pub fn ContextType(
                 .deinit_fn = &vtable_deinit_fn,
                 .init_parameters_fn = &vtable_init_parameters_fn,
             });
-            context.interface = client_out;
-            context.submitted = Packet.Queue.init(.{
-                .name = null,
-                .verify_push = builtin.is_test,
-            });
-            context.pending = Packet.Queue.init(.{
-                .name = null,
-                .verify_push = builtin.is_test,
-            });
-            context.completion_context = completion_ctx;
-            context.completion_callback = completion_callback;
-            context.eviction_reason = null;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
             try context.signal.init(&context.io, Context.signal_notify_callback);
             errdefer context.signal.deinit();
 
-            context.batch_size_limit = null;
+            context.previous_request_instant = context.client.time.monotonic();
             context.client.register(client_register_callback, @intFromPtr(context));
 
             log.debug("{}: init: spawning thread", .{context.client_id});
@@ -710,13 +723,11 @@ pub fn ContextType(
                 .operation = operation.to_vsr(),
                 .size = @sizeOf(vsr.Header) + request_size,
                 .previous_request_latency = @intCast(@min(
-                    previous_request_latency.ns,
+                    previous_request_latency.to_us(),
                     std.math.maxInt(u32),
                 )),
             };
 
-            assert((self.previous_request_instant == null) ==
-                (self.previous_request_latency == null));
             self.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
 
             packet_list.phase = .sent;
@@ -788,6 +799,10 @@ pub fn ContextType(
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
 
+            const current_timestamp = self.client.time.monotonic();
+            self.previous_request_latency =
+                current_timestamp.duration_since(self.previous_request_instant);
+
             // The client might have a smaller message size limit.
             maybe(constants.message_body_size_max < result.batch_size_limit);
             self.batch_size_limit = @min(result.batch_size_limit, constants.message_body_size_max);
@@ -842,7 +857,7 @@ pub fn ContextType(
 
             const current_timestamp = self.client.time.monotonic();
             self.previous_request_latency =
-                current_timestamp.duration_since(self.previous_request_instant.?);
+                current_timestamp.duration_since(self.previous_request_instant);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);

@@ -26,6 +26,10 @@ pub const Instant = struct {
 pub const Duration = struct {
     ns: u64,
 
+    pub fn us(amount_us: u64) Duration {
+        return .{ .ns = amount_us * std.time.ns_per_us };
+    }
+
     pub fn ms(amount_ms: u64) Duration {
         return .{ .ns = amount_ms * std.time.ns_per_ms };
     }

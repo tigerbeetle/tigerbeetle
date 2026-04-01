@@ -7262,15 +7262,34 @@ pub fn ReplicaType(
                 request.message.header.checksum,
                 request.message.header.client,
             });
+
             if (request.message.header.previous_request_latency != 0) {
                 if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                     self.status == .normal)
                 {
-                    const operation = request.message.header.operation;
-                    self.trace.timing(
-                        .{ .client_request_round_trip = .from(operation) },
-                        .{ .ns = request.message.header.previous_request_latency },
-                    );
+                    const session_entry = self.client_sessions.get(request.message.header.client);
+                    if (session_entry) |entry| {
+                        const operation = entry.header.operation;
+
+                        // Starting from 0.17.0, the previous_request_latency field encodes
+                        // microseconds and not nanoseconds.
+                        const release_duration_us = vsr.Release.from(.{
+                            .major = 0,
+                            .minor = 17,
+                            .patch = 0,
+                        });
+
+                        const duration = if (request.message.header.release.value <
+                            release_duration_us.value)
+                            stdx.Duration{ .ns = request.message.header.previous_request_latency }
+                        else
+                            Duration.us(request.message.header.previous_request_latency);
+
+                        self.trace.timing(
+                            .{ .client_request_round_trip = .from(operation) },
+                            duration,
+                        );
+                    }
                 }
             }
 
