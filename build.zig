@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) !void {
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
+        .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -392,6 +393,13 @@ pub fn build(b: *std.Build) !void {
         .tb_client = tb_client,
         .mode = mode,
     });
+    build_ruby_client(b, build_steps.clients_ruby, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client.header,
+        .tb_client = tb_client,
+        .mode = mode,
+    });
     build_c_client(b, build_steps.clients_c, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
@@ -479,6 +487,7 @@ fn build_ci(
         java,
         node,
         python,
+        ruby,
 
         devhub, // Things that run on known-good commit on main branch after merge.
         @"devhub-dry-run",
@@ -541,7 +550,7 @@ fn build_ci(
         hide_stderr(aof);
         step_ci.dependOn(&aof.step);
     }
-    inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
+    inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python, .ruby }) |language| {
         if (default or mode == .clients or mode == language) {
             // Client tests expect vortex to exist.
             build_ci_step(b, step_ci, .{"vortex:build"});
@@ -1889,6 +1898,44 @@ fn build_python_client(
         .source_dir = options.tb_client.all_platforms,
         .install_dir = .prefix,
         .install_subdir = "../src/clients/python/src/tigerbeetle/lib/",
+    }).step);
+}
+
+fn build_ruby_client(
+    b: *std.Build,
+    step_clients_ruby: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: std.Build.LazyPath,
+        tb_client: TBClientPrebuilt,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const ruby_bindings_generator = b.addExecutable(.{
+        .name = "ruby_bindings",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    ruby_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    ruby_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
+    const bindings = Generated.file(b, .{
+        .generator = ruby_bindings_generator,
+        .path = "./src/clients/ruby/src/tigerbeetle/bindings.rb",
+    });
+    step_clients_ruby.dependOn(&bindings.step);
+
+    step_clients_ruby.dependOn(&b.addInstallFile(
+        options.tb_client_header,
+        "../src/clients/ruby/src/ext/tigerbeetle/tb_client.h",
+    ).step);
+
+    step_clients_ruby.dependOn(&b.addInstallDirectory(.{
+        .source_dir = options.tb_client.all_platforms,
+        .install_dir = .prefix,
+        .install_subdir = "../src/clients/ruby/src/ext/tigerbeetle/lib/",
     }).step);
 }
 
