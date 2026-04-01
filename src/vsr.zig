@@ -754,6 +754,22 @@ pub const Timeout = struct {
         log.debug("{}: {s} reset", .{ self.id, self.name });
     }
 
+    pub fn reset_with_jitter(self: *Timeout, prng: *stdx.PRNG) void {
+        self.attempts = 0;
+        self.ticks = 0;
+        assert(self.ticking);
+
+        // Uniformly between [0.5 * timeout, 1.5 * timeout].
+        self.after_dynamic = prng.range_inclusive(
+            u64,
+            @divTrunc(self.after, 2),
+            @divTrunc(self.after, 2) + self.after,
+        );
+        assert(self.after_dynamic.? > 0);
+
+        log.debug("{}: {s} reset", .{ self.id, self.name });
+    }
+
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
     /// Adds exponential backoff and jitter.
     /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.

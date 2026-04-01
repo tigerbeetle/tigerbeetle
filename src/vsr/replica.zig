@@ -3783,7 +3783,7 @@ pub fn ReplicaType(
 
         fn on_journal_repair_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
-            self.journal_repair_timeout.reset();
+            self.journal_repair_timeout.reset_with_jitter(&self.prng);
 
             self.repair();
         }
@@ -3828,7 +3828,7 @@ pub fn ReplicaType(
             assert(self.grid_repair_timeout.ticking);
             maybe(self.state_machine_opened);
 
-            self.grid_repair_timeout.reset();
+            self.grid_repair_timeout.reset_with_jitter(&self.prng);
 
             if (self.grid.callback != .cancel) {
                 if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
@@ -10567,11 +10567,11 @@ pub fn ReplicaType(
             // order to start committing again.
             self.journal_repair_message_budget.refill();
             if (self.journal_repair_timeout.ticking) {
-                self.journal_repair_timeout.reset();
+                self.journal_repair_timeout.reset_with_jitter(&self.prng);
             }
 
             self.grid_repair_message_budget.refill();
-            self.grid_repair_timeout.reset();
+            self.grid_repair_timeout.reset_with_jitter(&self.prng);
 
             log.info("{}: sync: ops={}..{}/{}..{}", .{
                 self.log_prefix(),
