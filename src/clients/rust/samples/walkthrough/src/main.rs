@@ -27,7 +27,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 ledger: 1,
                 code: 718,
                 ..Default::default()
-            }])
+            }])?
             .await?;
         // Result handling omitted.
         // endsection:create-accounts
@@ -50,7 +50,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let account_results = client.create_accounts(&[account0, account1]).await?;
+        let account_results = client.create_accounts(&[account0, account1])?.await?;
         // Result handling omitted.
         // endsection:account-flags
     }
@@ -77,7 +77,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let account_results = client
-            .create_accounts(&[account0, account1, account2])
+            .create_accounts(&[account0, account1, account2])?
             .await?;
 
         assert!(account_results.len() == 3);
@@ -108,7 +108,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         // section:lookup-accounts
-        let accounts = client.lookup_accounts(&[100, 101]).await?;
+        let accounts = client.lookup_accounts(&[100, 101])?.await?;
         // endsection:lookup-accounts
     }
 
@@ -124,7 +124,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }];
 
-        let transfer_results = client.create_transfers(&transfers).await?;
+        let transfer_results = client.create_transfers(&transfers)?.await?;
         // Result handling omitted.
         // endsection:create-transfers
     }
@@ -161,7 +161,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             },
         ];
 
-        let transfer_results = client.create_transfers(&transfers).await?;
+        let transfer_results = client.create_transfers(&transfers)?.await?;
         assert!(transfer_results.len() == transfers.len());
         for (index, result) in transfer_results.into_iter().enumerate() {
             match result.status {
@@ -193,7 +193,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         let transfers: Vec<tb::Transfer> = vec![];
         const BATCH_SIZE: usize = 8189;
         for batch in transfers.chunks(BATCH_SIZE) {
-            let transfer_results = client.create_transfers(batch).await?;
+            let transfer_results = client.create_transfers(batch)?.await?;
             // Result handling omitted.
         }
         // endsection:batch
@@ -221,7 +221,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_results = client.create_transfers(&[transfer0, transfer1]).await?;
+        let transfer_results = client.create_transfers(&[transfer0, transfer1])?.await?;
         // Result handling omitted.
         // endsection:transfer-flags-link
     }
@@ -238,7 +238,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_results = client.create_transfers(&[transfer0]).await?;
+        let transfer_results = client.create_transfers(&[transfer0])?.await?;
         // Result handling omitted.
 
         let transfer1 = tb::Transfer {
@@ -249,7 +249,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_results = client.create_transfers(&[transfer1]).await?;
+        let transfer_results = client.create_transfers(&[transfer1])?.await?;
         // Result handling omitted.
         // endsection:transfer-flags-post
     }
@@ -266,7 +266,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_results = client.create_transfers(&[transfer0]).await?;
+        let transfer_results = client.create_transfers(&[transfer0])?.await?;
         // Result handling omitted.
 
         let transfer1 = tb::Transfer {
@@ -277,14 +277,14 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
 
-        let transfer_results = client.create_transfers(&[transfer1]).await?;
+        let transfer_results = client.create_transfers(&[transfer1])?.await?;
         // Result handling omitted.
         // endsection:transfer-flags-void
     }
 
     {
         // section:lookup-transfers
-        let transfers = client.lookup_transfers(&[1, 2]).await?;
+        let transfers = client.lookup_transfers(&[1, 2])?.await?;
         // endsection:lookup-transfers
     }
 
@@ -305,7 +305,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 | tb::AccountFilterFlags::Reversed,
         };
 
-        let transfers = client.get_account_transfers(filter).await?;
+        let transfers = client.get_account_transfers(filter)?.await?;
         // endsection:get-account-transfers
     }
 
@@ -326,7 +326,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 | tb::AccountFilterFlags::Reversed,
         };
 
-        let account_balances = client.get_account_balances(filter).await?;
+        let account_balances = client.get_account_balances(filter)?.await?;
         // endsection:get-account-balances
     }
 
@@ -345,7 +345,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             flags: tb::QueryFilterFlags::Reversed,
         };
 
-        let accounts = client.query_accounts(filter).await?;
+        let accounts = client.query_accounts(filter)?.await?;
         // endsection:query-accounts
     }
 
@@ -364,7 +364,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             flags: tb::QueryFilterFlags::Reversed,
         };
 
-        let transfers = client.query_transfers(filter).await?;
+        let transfers = client.query_transfers(filter)?.await?;
         // endsection:query-transfers
     }
 
@@ -429,7 +429,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         });
 
-        let transfer_results = client.create_transfers(&batch).await?;
+        let transfer_results = client.create_transfers(&batch)?.await?;
         // Result handling omitted.
         // endsection:linked-events
     }
@@ -457,7 +457,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             accounts_batch.push(account);
         }
 
-        let account_results = client.create_accounts(&accounts_batch).await?;
+        let account_results = client.create_accounts(&accounts_batch)?.await?;
         // Result handling omitted.
 
         // Then, load and import all transfers with their timestamps from the historical source.
@@ -476,7 +476,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             transfers_batch.push(transfer);
         }
 
-        let transfer_results = client.create_transfers(&transfers_batch).await?;
+        let transfer_results = client.create_transfers(&transfers_batch)?.await?;
         // Result handling omitted.
         // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
         // with the same historical timestamps without regressing the cluster timestamp.

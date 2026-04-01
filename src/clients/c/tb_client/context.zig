@@ -40,9 +40,10 @@
 //!
 //! The user calls ClientInterface.deinit, which nulls the context pointer
 //! (rejecting further submissions) and calls signal.stop(). The IO thread detects
-//! shutdown_completed and breaks out of the main loop. On eviction, the eviction
-//! callback sets eviction_reason, after which the main loop begins disconnecting
-//! the client.
+//! shutdown_completed and breaks out of the main loop. On eviction, the server sends
+//! an eviction message; the callback nulls the context pointer and sets
+//! eviction_reason. The IO thread self-stops the signal since no user-initiated
+//! deinit will arrive.
 //!
 //! ## Eviction
 //!
@@ -52,11 +53,25 @@
 //! responses.
 //!
 //! On the client side, the eviction callback fires once during run_for_ns.
-//! It sets eviction_reason and yields. The main loop sees eviction_reason,
-//! enters disconnecting (which cancels inflight, pending, and submitted
-//! packets with the eviction error), then settles. Thereafter the I/O
-//! thread continues short-circuiting submitted packets with eviction errors
-//! until tb_client_deinit sends the shutdown signal.
+//! It nulls the context pointer (rejecting new submissions), sets
+//! eviction_reason, and yields. The main loop sees eviction_reason, enters
+//! the disconnecting phase (which cancels inflight, pending, and submitted packets
+//! with the eviction error), then settles. Subsequent requests from the client thread
+//! immediately return ClientInvalid. Because deinit checks the context
+//! pointer (already null), it returns ClientInvalid. The IO thread self-stops
+//! the signal and exits on its own.
+//!
+//! There are multiple footguns to be aware of here:
+//!
+//! 1. Callers must handle ClientInvalid in all cases.
+//! 2. It is possible to be silently evicted during registration.
+//!    Subsequent calls, including the dtor, will return ClientInvalid.
+//!    Caller never knows they were evicted.
+//! 3. It is possible that multiple requests get evicted packet statuses,
+//!    because all enqueued requests are purged on eviction.
+//! 3. After eviction the tb_client_deinit function will report failure
+//!    (though it has already shutdown and freed resources).
+//!    It is not possible to successfully destruct after eviction.
 //!
 //! ## File organization
 //!
@@ -112,8 +127,8 @@ pub const InitParameters = extern struct {
 /// This is the public API surface exposed through the C ABI. Its layout is
 /// fixed at 32 bytes / 8-byte so that C headers and FFI bindings can
 /// embed it without knowing internal types. The `context` pointer targets the
-/// Shared struct; it is nulled on deinit to atomically reject further
-/// submissions. All methods acquire the Locker before touching state.
+/// Shared struct; it is nulled on deinit or eviction to atomically reject
+/// further submissions. All methods acquire the Locker before touching state.
 ///
 /// Safe to call from multiple threads, even after `deinit` is called.
 pub const ClientInterface = extern struct {
@@ -644,9 +659,12 @@ pub fn IoThreadType(
                         }
                     },
 
+                    // On eviction, deinit returns ClientInvalid (context
+                    // pointer already nulled), so no user stop signal will
+                    // arrive. The IO thread stops the signal itself.
                     .settled => {
                         if (self.eviction_reason != null) {
-                            self.cancel_submitted_evicted();
+                            self.shared.signal.stop();
                         }
 
                         if (should_stop) break :main;
@@ -720,11 +738,18 @@ pub fn IoThreadType(
                 @intFromEnum(eviction.header.reason),
             });
 
+            // Clear the interface context so that no more requests can be
+            // submitted from user threads. Subsequent submissions will fail
+            // synchronously with ClientInvalid.
+            self.interface.locker.lock();
+            defer self.interface.locker.unlock();
+
+            self.interface.context = .{ .ptr = null };
+
             // Set the eviction reason. The io_thread main loop will detect
             // this and initiate graceful disconnection: cancel the inflight
-            // and pending packets, terminate connections, then wait
-            // until the user thread requests shutdown. Further submissions
-            // will continue to receive eviction packet statuses.
+            // and pending packets, terminate connections, and deinit the
+            // client once all connection IO has settled.
             self.eviction_reason = eviction.header.reason;
             self.io.yield();
         }
@@ -845,39 +870,6 @@ pub fn IoThreadType(
                 result.reply.ptr,
                 @intCast(result.reply.len),
             );
-        }
-
-        /// Map the current termination state to the error returned to user packets.
-        ///
-        /// In the eviction case, maps the specific eviction reason to a
-        /// typed error. Otherwise the client is shutting down normally.
-        fn cancellation_error(self: *const IoThread) PacketError {
-            return if (self.eviction_reason) |reason| switch (reason) {
-                .reserved => unreachable,
-                .client_release_too_low => error.ClientReleaseTooLow,
-                .client_release_too_high => error.ClientReleaseTooHigh,
-                else => error.ClientEvicted,
-            } else result: {
-                assert(self.shared.signal.status() != .running);
-                break :result error.ClientShutdown;
-            };
-        }
-
-        /// Drain and cancel submitted packets in the settled phase.
-        fn cancel_submitted_evicted(self: *IoThread) void {
-            assert(self.eviction_reason != null);
-            const result = self.cancellation_error();
-
-            while (true) {
-                const packet: *Packet = pop: {
-                    self.interface.locker.lock();
-                    defer self.interface.locker.unlock();
-
-                    break :pop self.shared.submitted.pop() orelse break;
-                };
-                packet.assert_phase(.submitted);
-                self.notify_completion(packet, result);
-            }
         }
     };
 }
@@ -1226,7 +1218,15 @@ fn PhaseType(comptime IoThread: type) type {
                 assert(packet_list.phase != .complete);
                 packet_list.assert_phase(packet_list.phase);
 
-                const result = ctx.cancellation_error();
+                const result = if (ctx.eviction_reason) |reason| switch (reason) {
+                    .reserved => unreachable,
+                    .client_release_too_low => error.ClientReleaseTooLow,
+                    .client_release_too_high => error.ClientReleaseTooHigh,
+                    else => error.ClientEvicted,
+                } else result: {
+                    assert(ctx.shared.signal.status() != .running);
+                    break :result error.ClientShutdown;
+                };
 
                 var it: ?*Packet = packet_list;
                 while (it) |batched| {
