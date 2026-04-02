@@ -97,17 +97,30 @@ class InitError(Exception):
     pass
 
 class ClientClosedError(Exception):
-    pass
+    def __init__(self) -> None:
+        super().__init__("Client was closed.")
 
-class PacketError(Exception):
-    pass
+class TooMuchDataError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Too much data was sent or requested in this batch.")
 
+class ClientEvictedError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Client was evicted.")
+
+class ClientReleaseTooLowError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Client was evicted: release too old.")
+
+class ClientReleaseTooHighError(Exception):
+    def __init__(self) -> None:
+        super().__init__("Client was evicted: release too new.")
 
 class Client:
     _clients: dict[int, Any] = {}
     _counter = AtomicInteger()
 
-    def __init__(self, cluster_id: int, replica_addresses: str):
+    def __init__(self, cluster_id: int, replica_addresses: str) -> None:
         self._client_key = Client._counter.increment()
         self._client = bindings.CClient()
 
@@ -166,32 +179,43 @@ class Client:
 
         packet = ctypes.cast(packet, ctypes.POINTER(bindings.CPacket))
         inflight_packet = self._inflight_packets[packet[0].user_data]
-
-        if packet[0].status != bindings.PacketStatus.OK.value:
-            inflight_packet.response = PacketError(repr(bindings.PacketStatus(packet[0].status)))
-            if inflight_packet.on_completion is None:
-                # Can't use tb_assert here, as mypy complains later that it might be None.
-                raise TypeError("inflight_packet.on_completion not set")
-            inflight_packet.on_completion(inflight_packet)
-            return
-
-        c_result_type = inflight_packet.c_result_type
-        tb_assert(len_ % ctypes.sizeof(c_result_type) == 0)
-
-        # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
-        # it to a fresh, Python owned buffer and do the conversion from the raw C type to the Python
-        # dataclass.
-        results_slice = ctypes.cast(
-            bytes_ptr,
-            ctypes.POINTER(c_result_type)
-        )[0:(len_ // ctypes.sizeof(c_result_type))]
-        results = [result.to_python() for result in results_slice]
-
-        inflight_packet.response = results
-
         if inflight_packet.on_completion is None:
             # Can't use tb_assert here, as mypy complains later that it might be None.
             raise TypeError("inflight_packet.on_completion not set")
+
+        if packet[0].status == bindings.PacketStatus.OK.value:
+            c_result_type = inflight_packet.c_result_type
+            tb_assert(len_ % ctypes.sizeof(c_result_type) == 0)
+
+            # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
+            # it to a fresh, Python owned buffer and do the conversion from the raw C type to the Python
+            # dataclass.
+            results_slice = ctypes.cast(
+                bytes_ptr,
+                ctypes.POINTER(c_result_type)
+            )[0:(len_ // ctypes.sizeof(c_result_type))]
+            results = [result.to_python() for result in results_slice]
+
+            inflight_packet.response = results
+
+        elif packet[0].status == bindings.PacketStatus.TOO_MUCH_DATA.value:
+            inflight_packet.response = TooMuchDataError()
+
+        elif packet[0].status == bindings.PacketStatus.CLIENT_EVICTED.value:
+            inflight_packet.response = ClientEvictedError()
+
+        elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_LOW.value:
+            inflight_packet.response = ClientReleaseTooLowError()
+
+        elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_HIGH.value:
+            inflight_packet.response = ClientReleaseTooHighError()
+
+        elif packet[0].status == bindings.PacketStatus.CLIENT_SHUTDOWN.value:
+            inflight_packet.response = ClientClosedError()
+
+        else:
+            # INVALID_OPERATION and INVALID_DATA_SIZE are unexpected.
+            inflight_packet.response = Exception("Unexpected PacketStatus {status}")
 
         inflight_packet.on_completion(inflight_packet)
 

@@ -65,10 +65,12 @@ public final class Client implements AutoCloseable {
      *        created.
      * @return a read-only {@link com.tigerbeetle.CreateAccountResultBatch batch} describing the
      *         result.
-     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws TooMuchDataException
+     * @throws ClientClosedException
+     * @throws ClientEvictedException
+     * @throws ClientReleaseException
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
-     * @throws IllegalStateException if this client is closed.
      * @throws InterruptedException if the current thread is interrupted.
      */
     public CreateAccountResultBatch createAccounts(final AccountBatch batch)
@@ -101,10 +103,12 @@ public final class Client implements AutoCloseable {
      *
      * @param batch an {@link com.tigerbeetle.IdBatch batch} containing all account ids.
      * @return a read-only {@link com.tigerbeetle.AccountBatch batch} containing all accounts found.
-     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws TooMuchDataException
+     * @throws ClientClosedException
+     * @throws ClientEvictedException
+     * @throws ClientReleaseException
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
-     * @throws IllegalStateException if this client is closed.
      * @throws InterruptedException if the current thread is interrupted.
      */
     public AccountBatch lookupAccounts(final IdBatch batch) throws InterruptedException {
@@ -136,10 +140,12 @@ public final class Client implements AutoCloseable {
      *        created.
      * @return a read-only {@link com.tigerbeetle.CreateTransferResultBatch batch} describing the
      *         result.
-     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws TooMuchDataException
+     * @throws ClientClosedException
+     * @throws ClientEvictedException
+     * @throws ClientReleaseException
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
-     * @throws IllegalStateException if this client is closed.
      * @throws InterruptedException if the current thread is interrupted.
      */
     public CreateTransferResultBatch createTransfers(final TransferBatch batch)
@@ -172,10 +178,12 @@ public final class Client implements AutoCloseable {
      * @param batch a {@link com.tigerbeetle.IdBatch batch} containing all transfer ids.
      * @return a read-only {@link com.tigerbeetle.TransferBatch batch} containing all transfers
      *         found.
-     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws TooMuchDataException
+     * @throws ClientClosedException
+     * @throws ClientEvictedException
+     * @throws ClientReleaseException
      * @throws IllegalArgumentException if {@code batch} is empty.
      * @throws NullPointerException if {@code batch} is null.
-     * @throws IllegalStateException if this client is closed.
      * @throws InterruptedException if the current thread is interrupted.
      */
     public TransferBatch lookupTransfers(final IdBatch batch) throws InterruptedException {

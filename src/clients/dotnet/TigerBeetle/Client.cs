@@ -22,7 +22,7 @@ public sealed class Client : IDisposable
         // NativeClient can be null if the constructor threw an exception.
         if (nativeClient != null)
         {
-            Dispose(disposing: false);
+            Close();
         }
     }
 
@@ -108,15 +108,14 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequestAsync<Transfer, QueryFilter>(TBOperation.QueryTransfers, new[] { filter });
     }
 
+    public void Close()
+    {
+        nativeClient.Dispose();
+    }
+
     public void Dispose()
     {
         GC.SuppressFinalize(this);
-        Dispose(disposing: true);
-    }
-
-    private void Dispose(bool disposing)
-    {
-        _ = disposing;
-        nativeClient.Dispose();
+        Close();
     }
 }

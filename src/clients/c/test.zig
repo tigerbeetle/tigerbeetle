@@ -111,15 +111,12 @@ test "tb_client echo" {
     const RequestContext = RequestContextType(constants.message_body_size_max);
 
     // Test multiple operations to prevent all requests from ending up in the same batch.
+    // Query operations are not included because the `limit` field cannot be randomized.
     const operations = [_]tb_client.Operation{
         tb_client.Operation.create_accounts,
         tb_client.Operation.create_transfers,
         tb_client.Operation.lookup_accounts,
         tb_client.Operation.lookup_transfers,
-        tb_client.Operation.get_account_transfers,
-        tb_client.Operation.get_account_balances,
-        tb_client.Operation.query_accounts,
-        tb_client.Operation.query_transfers,
     };
 
     // Initializing an echo client for testing purposes.
@@ -184,14 +181,6 @@ test "tb_client echo" {
             .lookup_transfers => .{
                 @sizeOf(u128),
                 @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
-            },
-            .get_account_transfers, .get_account_balances => .{
-                @sizeOf(tb.AccountFilter),
-                1,
-            },
-            .query_accounts, .query_transfers => .{
-                @sizeOf(tb.QueryFilter),
-                1,
             },
             else => unreachable,
         };

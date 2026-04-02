@@ -25,6 +25,7 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -907,13 +908,7 @@ public class IntegrationTest {
             accounts.setCode(1);
             accounts.setLedger(1);
         }
-
-        try {
-            client.createAccounts(accounts);
-            assert false;
-        } catch (RequestException requestException) {
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
-        }
+        assertThrows(TooMuchDataException.class, () -> client.createAccounts(accounts));
     }
 
     @Test
@@ -935,10 +930,7 @@ public class IntegrationTest {
             future.get();
             assert false;
         } catch (ExecutionException executionException) {
-            assertTrue(executionException.getCause() instanceof RequestException);
-
-            final var requestException = (RequestException) executionException.getCause();
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
+            assertTrue(executionException.getCause() instanceof TooMuchDataException);
         }
     }
 
@@ -955,13 +947,8 @@ public class IntegrationTest {
             transfers.setCode(1);
             transfers.setLedger(1);
         }
+        assertThrows(TooMuchDataException.class, () -> client.createTransfers(transfers));
 
-        try {
-            client.createTransfers(transfers);
-            assert false;
-        } catch (RequestException requestException) {
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
-        }
     }
 
     @Test
@@ -987,10 +974,7 @@ public class IntegrationTest {
             assert false;
 
         } catch (ExecutionException executionException) {
-            assertTrue(executionException.getCause() instanceof RequestException);
-
-            final var requestException = (RequestException) executionException.getCause();
-            assertEquals(PacketStatus.TooMuchData.value, requestException.getStatus());
+            assertTrue(executionException.getCause() instanceof TooMuchDataException);
         }
     }
 
@@ -1025,21 +1009,14 @@ public class IntegrationTest {
 
                 barrier.await();
                 executor.shutdown();
+                assertThrows(ClientEvictedException.class,
+                        () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
 
-                try {
-                    client_evict.lookupAccounts(new IdBatch(UInt128.id()));
-                    assert false;
-                } catch (RequestException requestException) {
-                    assertEquals(PacketStatus.ClientEvicted.value, requestException.getStatus());
-                }
 
                 // The client is deinitialized after it learns it was evicted.
                 // Reusing an evicted client must return a "ClientShutdown" error.
-                try {
-                    client_evict.lookupAccounts(new IdBatch(UInt128.id()));
-                    assert false;
-                } catch (ClientClosedException clientClosedException) {
-                }
+                assertThrows(ClientClosedException.class,
+                        () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
             }
         }
     }
@@ -1269,7 +1246,7 @@ public class IntegrationTest {
 
                 // Can fail due to client closed.
                 final var failed = tasks[i].exception != null
-                        && tasks[i].exception instanceof IllegalStateException;
+                        && tasks[i].exception instanceof ClientClosedException;
 
                 assertTrue(failed || succeeded);
 
@@ -1738,14 +1715,14 @@ public class IntegrationTest {
             assertTrue(accountBalances3.getLength() == 0);
         }
 
-        // For those tests it doesn't matter using the sync or async version. We use the async
+        // For those tests it doesn't matter using the sync or async version. We use the sync
         // version here for test coverage purposes, but there's no need to duplicate the tests.
 
         {
             // Empty filter:
             final var filter = new AccountFilter();
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1758,8 +1735,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1772,8 +1749,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1786,8 +1763,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1800,8 +1777,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1814,8 +1791,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1828,8 +1805,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
 
         {
@@ -1842,8 +1819,23 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
+        }
+
+        {
+            // TooMuchData
+            final var filter = new AccountFilter();
+            filter.setAccountId(account2Id);
+            filter.setTimestampMin(0);
+            filter.setTimestampMax(0);
+            filter.setLimit(10_000);
+            filter.setDebits(true);
+            filter.setCredits(true);
+            filter.setReversed(false);
+            assertThrows(TooMuchDataException.class, () -> client.getAccountTransfers(filter));
+            assertThrows(TooMuchDataException.class, () -> client.getAccountBalances(filter));
+
         }
 
         {
@@ -1856,8 +1848,8 @@ public class IntegrationTest {
             filter.setDebits(false);
             filter.setCredits(false);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            assertTrue(client.getAccountBalances(filter).getLength() == 0);
         }
     }
 
@@ -2187,14 +2179,22 @@ public class IntegrationTest {
 
     @Test
     public void testInvalidQueryFilter() throws Throwable {
-        // For those tests it doesn't matter using the sync or async version. We use the async
+        // For those tests it doesn't matter using the sync or async version. We use the sync
         // version here for test coverage purposes, but there's no need to duplicate the tests.
 
         {
             // Empty filter with zero limit:
             final var filter = new QueryFilter();
-            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
-            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryAccounts(filter).getLength() == 0);
+            assertTrue(client.queryTransfers(filter).getLength() == 0);
+        }
+
+        {
+            // TooMuchData
+            final var filter = new QueryFilter();
+            filter.setLimit(10_000);
+            assertThrows(TooMuchDataException.class, () -> client.queryAccounts(filter));
+            assertThrows(TooMuchDataException.class, () -> client.queryTransfers(filter));
         }
 
         {
@@ -2203,8 +2203,8 @@ public class IntegrationTest {
             filter.setTimestampMin(-1L); // -1L == ulong max value
             filter.setTimestampMax(0);
             filter.setLimit(254);
-            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
-            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryAccounts(filter).getLength() == 0);
+            assertTrue(client.queryTransfers(filter).getLength() == 0);
         }
 
         {
@@ -2213,8 +2213,8 @@ public class IntegrationTest {
             filter.setTimestampMin(0);
             filter.setTimestampMax(-1L); // -1L == ulong max value
             filter.setLimit(254);
-            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
-            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryAccounts(filter).getLength() == 0);
+            assertTrue(client.queryTransfers(filter).getLength() == 0);
         }
 
         {
@@ -2223,8 +2223,8 @@ public class IntegrationTest {
             filter.setTimestampMin(-2); // -2L == ulong max - 1
             filter.setTimestampMax(1);
             filter.setLimit(254);
-            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
-            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryAccounts(filter).getLength() == 0);
+            assertTrue(client.queryTransfers(filter).getLength() == 0);
         }
 
         {
@@ -2233,8 +2233,8 @@ public class IntegrationTest {
             filter.setTimestampMin(-123123130);
             filter.setTimestampMax(0);
             filter.setLimit(254);
-            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
-            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryAccounts(filter).getLength() == 0);
+            assertTrue(client.queryTransfers(filter).getLength() == 0);
         }
 
         {
@@ -2243,8 +2243,8 @@ public class IntegrationTest {
             filter.setTimestampMin(0);
             filter.setTimestampMax(-123123130);
             filter.setLimit(254);
-            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
-            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryAccounts(filter).getLength() == 0);
+            assertTrue(client.queryTransfers(filter).getLength() == 0);
         }
 
     }
@@ -2326,9 +2326,9 @@ public class IntegrationTest {
         }
 
         // Limit=1 allows multiple queries to be batched together in the same request.
-        // Limit=MAX prevents batching because it would exceed the message size.
+        // Limit=8189 prevents batching because it would exceed the message size.
         final var TASKS_COUNT = 100;
-        final var limits = new int[] {1, Integer.MAX_VALUE};
+        final var limits = new int[] {1, 8189};
         for (var limit : limits) {
             var tasks = new Tasks[TASKS_COUNT];
             for (int i = 0; i < TASKS_COUNT; i++) {

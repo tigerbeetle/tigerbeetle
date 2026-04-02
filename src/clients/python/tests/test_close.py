@@ -45,7 +45,7 @@ def test_close_sync():
     thread.join()
 
     assert len(thread_result) == 1
-    with pytest.raises(tb.PacketError, match='CLIENT_SHUTDOWN'):
+    with pytest.raises(tb.ClientClosedError):
         raise thread_result[0]
 
     # Closing the client should have resulted in the request being terminated.
@@ -79,7 +79,7 @@ async def _test_close_async():
 
     await client.close()
 
-    with pytest.raises(tb.PacketError, match='CLIENT_SHUTDOWN'):
+    with pytest.raises(tb.ClientClosedError):
         lookup_result = await lookup_task
 
     # Closing the client should have resulted in the request being terminated.

@@ -61,22 +61,4 @@ public class ExceptionTests
             }
         }
     }
-
-    [TestMethod]
-    public void RequestException()
-    {
-        foreach (PacketStatus status in (PacketStatus[])Enum.GetValues(typeof(PacketStatus)))
-        {
-            var exception = new RequestException(status);
-            var unknownMessage = "Unknown error status " + status;
-            if (status == PacketStatus.Ok)
-            {
-                Assert.AreEqual(unknownMessage, exception.Message);
-            }
-            else
-            {
-                Assert.AreNotEqual(unknownMessage, exception.Message);
-            }
-        }
-    }
 }

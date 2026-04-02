@@ -62,9 +62,49 @@ export type ResultCallback = (error: Error | null, results: Result[] | null) => 
 
 export const amount_max: bigint = (2n ** 128n) - 1n
 
+// Error codes returned by the client.
+export const ErrorCodes = {
+  ERR_CLIENT_CLOSED: 'ERR_CLIENT_CLOSED',
+  ERR_CLIENT_EVICTED: 'ERR_CLIENT_EVICTED',
+  ERR_CLIENT_RELEASE_TOO_LOW: 'ERR_CLIENT_RELEASE_TOO_LOW',
+  ERR_CLIENT_RELEASE_TOO_HIGH: 'ERR_CLIENT_RELEASE_TOO_HIGH',
+  ERR_TOO_MUCH_DATA: 'ERR_TOO_MUCH_DATA',
+} as const;
+
+export type ErrorCodes = typeof ErrorCodes[keyof typeof ErrorCodes];
+
+export class RequestError extends Error {
+  code: ErrorCodes;
+
+  constructor(code: ErrorCodes) {
+    super(RequestError.errorMessage(code));
+    this.name = 'RequestError';
+    this.code = code;
+  }
+
+  static errorMessage(code: ErrorCodes): string {
+    switch (code) {
+      case ErrorCodes.ERR_CLIENT_CLOSED:
+        return 'Client was closed.'
+      case ErrorCodes.ERR_CLIENT_EVICTED:
+        return 'Client was evicted.'
+      case ErrorCodes.ERR_CLIENT_RELEASE_TOO_LOW:
+        return 'Client was evicted: release too old.'
+      case ErrorCodes.ERR_CLIENT_RELEASE_TOO_HIGH:
+        return 'Client was evicted: release too new.'
+      case ErrorCodes.ERR_TOO_MUCH_DATA:
+        return 'Too much data was sent or requested in this batch.'
+      default:
+        throw new Error("Unknown error code.")
+    }
+  }
+
+}
+
 interface BindingInitArgs {
   cluster_id: bigint, // u128
   replica_addresses: Buffer,
+  request_error_class: typeof RequestError,
 }
 
 interface Binding {
@@ -96,6 +136,7 @@ export function createClient (args: ClientInitArgs): Client {
   let context: Context | null = binding.init({
     cluster_id: args.cluster_id,
     replica_addresses: Buffer.from(args.replica_addresses.join(',')),
+    request_error_class: RequestError,
   })
 
   const destroy = () => {
@@ -106,7 +147,8 @@ export function createClient (args: ClientInitArgs): Client {
   const request = <T extends Result>(operation: Operation, batch: Event[]): Promise<T[]> => {
     return new Promise((resolve, reject) => {
       try {
-        if (!context) throw new Error('Client was shutdown.');
+        if (!context) throw new RequestError(ErrorCodes.ERR_CLIENT_CLOSED);
+
         binding.submit(context, operation, batch, (error, result) => {
           if (error) {
             reject(error)

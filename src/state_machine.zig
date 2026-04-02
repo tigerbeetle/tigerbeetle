@@ -940,7 +940,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             var result_count_expected: u32 = 0;
             while (body_decoder.pop()) |batch| {
                 if (!self.batch_valid(operation, batch)) return false;
-                result_count_expected += operation.result_count_expected(batch);
+
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
+                result_count_expected += @min(
+                    operation.result_count_expected(batch),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    operation.result_max(constants.message_body_size_max),
+                );
             }
             const reply_trailer_size: u32 = vsr.multi_batch.trailer_total_size(.{
                 .element_size = result_size,
@@ -1438,11 +1446,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(
                     filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    self.prefetch_operation.?.result_max(constants.message_body_size_max),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -1455,10 +1465,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for get_account_transfers: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_get_account_transfers_scan_callback(
@@ -1555,11 +1562,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                             scan,
                         );
 
-                        // Limiting the buffer size according to the query limit.
-                        // TODO: Prevent clients from setting the limit larger than the buffer size.
+                        // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                        // for queries, the limit was capped instead.
+                        // Remove `@min` when clients < 0.17.0 are no longer supported.
                         const limit = @min(
                             filter.limit,
-                            self.prefetch_operation.?.result_max(self.batch_size_limit),
+                            // Replies are not constrained by the runtime `batch_size_limit`.
+                            self.prefetch_operation.?.result_max(constants.message_body_size_max),
                         );
                         assert(limit > 0);
                         assert(scan_buffer.len >= limit);
@@ -1586,10 +1595,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             // Returning an empty array on the next tick.
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_get_account_balances_scan_callback(
@@ -1802,12 +1808,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the reply size by
-                // failing with `TooMuchData`.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(
                     filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    self.prefetch_operation.?.result_max(constants.message_body_size_max),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -1820,10 +1827,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for query_accounts: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_query_accounts_scan_callback(
@@ -1891,11 +1895,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(
                     filter.limit,
-                    self.prefetch_operation.?.result_max(self.batch_size_limit),
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    self.prefetch_operation.?.result_max(constants.message_body_size_max),
                 );
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -1908,10 +1914,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for query_transfers: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_query_transfers_scan_callback(
@@ -2043,9 +2046,24 @@ pub fn StateMachineType(comptime Storage: type) type {
             };
         }
 
+        /// Common `next_tick` used by all `prefetch_scan_*` when the filter is invalid.
+        fn prefetch_scan_invalid_filter(self: *StateMachine) void {
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation != null);
+            assert(self.scan_lookup == .null);
+            maybe(self.scan_lookup_buffer_index > 0);
+            maybe(self.scan_lookup_results.items.len > 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_invalid_filter_callback,
+                &self.scan_lookup_next_tick,
+            );
+        }
+
         /// Common `next_tick` callback used by all `prefetch_scan_*` functions to complete
         /// the operation when the filter is invalid.
-        fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
+        fn prefetch_scan_invalid_filter_callback(completion: *Grid.NextTick) void {
             const self: *StateMachine = @alignCast(@fieldParentPtr(
                 "scan_lookup_next_tick",
                 completion,
@@ -2149,7 +2167,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // - Or, make the `operation_{event,result}_max(...)` functions aware of the number
                 //   of prefetches.
                 const limit_max: u32 = limit_max: {
-                    const result_max = self.prefetch_operation.?.result_max(self.batch_size_limit);
+                    // Replies are not constrained by the runtime `batch_size_limit`.
+                    const result_max = self.prefetch_operation.?.result_max(
+                        constants.message_body_size_max,
+                    );
                     // Also constrained by the maximum number of available prefetches.
                     const prefetch_transfers = @max(
                         Operation.lookup_transfers.event_max(self.batch_size_limit),
@@ -2172,8 +2193,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                     );
                 };
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                // for queries, the limit was capped instead.
+                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 const limit = @min(filter.limit, limit_max);
                 assert(limit > 0);
                 assert(scan_buffer.len >= limit);
@@ -2186,10 +2208,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             // TODO(batiati): Improve the way we do validations on the state machine.
             log.info("invalid filter for prefetch_get_change_events_scan: {any}", .{filter});
-            self.forest.grid.on_next_tick(
-                &prefetch_scan_next_tick_callback,
-                &self.scan_lookup_next_tick,
-            );
+            self.prefetch_scan_invalid_filter();
         }
 
         fn prefetch_get_change_events_scan_callback(

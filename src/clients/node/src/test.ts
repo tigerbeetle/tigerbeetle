@@ -13,6 +13,8 @@ import {
   id,
   QueryFilter,
   QueryFilterFlags,
+  ErrorCodes,
+  RequestError,
 } from '.'
 
 const client = createClient({
@@ -131,13 +133,11 @@ test('batch max size', async (): Promise<void> => {
       timestamp: 0n,
     });
   }
-
-  try {
-    const results = await client.createTransfers(transfers);
-    assert.fail();
-  } catch (error) {
-    assert.strictEqual(error.message, "Too much data provided on this batch.");
-  }
+  assert.rejects(async() => await client.createTransfers(transfers), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
 })
 
 test('can lookup accounts', async (): Promise<void> => {
@@ -897,6 +897,29 @@ test('can get account transfers', async (): Promise<void> => {
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
   assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
+  // TooMuchData
+  filter = {
+    account_id: accountC.id,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    code: 0,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
+    limit: 10_000,
+    flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
+  }
+  assert.rejects(async() => await client.getAccountTransfers(filter), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
+  assert.rejects(async() => await client.getAccountBalances(filter), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
+
   // Empty flags:
   filter = {
     account_id: accountC.id,
@@ -1372,6 +1395,29 @@ test('query with invalid filter', async (): Promise<void> => {
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])
   assert.deepStrictEqual((await client.queryTransfers(filter)), [])
 
+  // TooMuchData
+  filter = {
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    ledger: 0,
+    code: 0,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
+    limit: 10_000,
+    flags: QueryFilterFlags.none,
+  }
+  assert.rejects(async() => await client.queryAccounts(filter), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
+  assert.rejects(async() => await client.queryTransfers(filter), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
+
   // Invalid flags:
   filter = {
     user_data_128: 0n,
@@ -1509,13 +1555,11 @@ test("destroy client in-flight", async (): Promise<void> => {
   // Non-existing cluster.
   const client = createClient({ cluster_id: 92n, replica_addresses: ["99"] });
   setTimeout(() => client.destroy(), 30);
-  try {
-    await client.lookupAccounts([0n]);
-  } catch (error) {
-    assert.strictEqual(error.message, "Client was shutdown.");
-    return;
-  }
-  throw "expected an error";
+  assert.rejects(async () => await client.lookupAccounts([0n]), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_CLIENT_CLOSED)
+    return true
+  })
 });
 
 async function main () {

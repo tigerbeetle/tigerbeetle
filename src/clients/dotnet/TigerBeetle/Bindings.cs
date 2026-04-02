@@ -1184,7 +1184,7 @@ internal enum ClientStatus : uint
 
 }
 
-public enum PacketStatus : byte
+internal enum PacketStatus : byte
 {
     Ok = 0,
 

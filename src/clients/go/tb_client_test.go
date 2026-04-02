@@ -2,6 +2,7 @@ package tigerbeetle_go
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -933,6 +934,25 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Len(t, transfers_retrieved, 0)
 		assert.Len(t, account_balances, len(transfers_retrieved))
 
+		// TooMuchData:
+		filter = AccountFilter{
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        10_000,
+			Flags: AccountFilterFlags{
+				Debits:   true,
+				Credits:  true,
+				Reversed: false,
+			}.ToUint32(),
+		}
+
+		_, err = client.GetAccountTransfers(filter)
+		assert.True(t, errors.Is(err, ErrTooMuchData))
+
+		_, err = client.GetAccountBalances(filter)
+		assert.True(t, errors.Is(err, ErrTooMuchData))
+
 		// Empty flags:
 		filter = AccountFilter{
 			AccountID:    accountC.ID,
@@ -1500,6 +1520,26 @@ func doTestClient(t *testing.T, client Client) {
 			t.Fatal(err)
 		}
 		assert.Len(t, query, 0)
+
+		// TooMuchData:
+		filter = QueryFilter{
+			UserData128:  ToUint128(0),
+			UserData64:   0,
+			UserData32:   0,
+			Ledger:       0,
+			Code:         0,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        10_000,
+			Flags: QueryFilterFlags{
+				Reversed: false,
+			}.ToUint32(),
+		}
+		_, err = client.QueryTransfers(filter)
+		assert.True(t, errors.Is(err, ErrTooMuchData))
+
+		_, err = client.QueryAccounts(filter)
+		assert.True(t, errors.Is(err, ErrTooMuchData))
 
 		// Invalid flags:
 		filter = QueryFilter{

@@ -959,16 +959,7 @@ public class IntegrationTests
                 Ledger = 1
             };
         }
-
-        try
-        {
-            _ = client.CreateAccounts(accounts);
-            Assert.Fail();
-        }
-        catch (RequestException requestException)
-        {
-            Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
-        }
+        Assert.ThrowsException<TooMuchDataException>(() => _ = client.CreateAccounts(accounts));
     }
 
     [TestMethod]
@@ -986,16 +977,7 @@ public class IntegrationTests
                 Ledger = 1
             };
         }
-
-        try
-        {
-            _ = await client.CreateAccountsAsync(accounts);
-            Assert.Fail();
-        }
-        catch (RequestException requestException)
-        {
-            Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
-        }
+        await Assert.ThrowsExceptionAsync<TooMuchDataException>(() => client.CreateAccountsAsync(accounts));
     }
 
     [TestMethod]
@@ -1012,16 +994,7 @@ public class IntegrationTests
                 Ledger = 1
             };
         }
-
-        try
-        {
-            _ = client.CreateTransfers(transfers);
-            Assert.Fail();
-        }
-        catch (RequestException requestException)
-        {
-            Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
-        }
+        Assert.ThrowsException<TooMuchDataException>(() => _ = client.CreateTransfers(transfers));
     }
 
     [TestMethod]
@@ -1041,16 +1014,7 @@ public class IntegrationTests
                 Amount = 100,
             };
         }
-
-        try
-        {
-            _ = await client.CreateTransfersAsync(transfers);
-            Assert.Fail();
-        }
-        catch (RequestException requestException)
-        {
-            Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
-        }
+        await Assert.ThrowsExceptionAsync<TooMuchDataException>(() => client.CreateTransfersAsync(transfers));
     }
 
     [TestMethod]
@@ -1452,6 +1416,18 @@ public class IntegrationTests
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
             Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
+
+            // TooMuchData
+            filter = new AccountFilter
+            {
+                AccountId = accounts[0].Id,
+                TimestampMin = 0,
+                TimestampMax = 0,
+                Limit = 10_000,
+                Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
+            };
+            Assert.ThrowsException<TooMuchDataException>(() => _ = client.GetAccountTransfers(filter));
+            Assert.ThrowsException<TooMuchDataException>(() => _ = client.GetAccountBalances(filter));
 
             // Empty flags
             filter = new AccountFilter
@@ -1911,6 +1887,18 @@ public class IntegrationTests
             Assert.IsTrue(client.QueryAccounts(filter).Length == 0);
             Assert.IsTrue(client.QueryTransfers(filter).Length == 0);
         }
+        {
+            // TooMuchData
+            var filter = new QueryFilter
+            {
+                TimestampMin = 0,
+                TimestampMax = 0,
+                Limit = 10_000,
+                Flags = (QueryFilterFlags)0xFFFF,
+            };
+            Assert.ThrowsException<TooMuchDataException>(() => _ = client.QueryAccounts(filter));
+            Assert.ThrowsException<TooMuchDataException>(() => _ = client.QueryTransfers(filter));
+        }
     }
 
     [TestMethod]
@@ -2256,7 +2244,7 @@ public class IntegrationTests
     }
 
     [TestMethod]
-    [ExpectedException(typeof(ObjectDisposedException))]
+    [ExpectedException(typeof(ClientClosedException))]
     public void DisposedClient()
     {
         using var client = new Client(0, new[] { server.Address });
