@@ -20,7 +20,7 @@ pub const RepairBudgetJournal = struct {
     //
     // Repair latency is calculated as the duration elapsed between when a prepare is requested from
     // a remote replica, and when it is either received from the remote replica (see `decrement`),
-    // or expired (see `maybe_expire_requested_prepares`).
+    // or expired (see `reap_expired_requests`).
     replicas_repair_latency: []stdx.Duration,
 
     // Probability of choosing a random replica with available budget, as opposed to one with the
@@ -214,10 +214,11 @@ pub const RepairBudgetJournal = struct {
     /// remote replica crashing doesn't cause an op to get stuck in the queue for a remote replica.
     /// We avoid spurious expiry due to transient network hiccups like increased latency by waiting
     /// for twice the measured repair latency.
-    pub fn maybe_expire_requested_prepares(budget: *RepairBudgetJournal, now: stdx.Instant) void {
+    pub fn reap_expired_requests(budget: *RepairBudgetJournal, now: stdx.Instant) bool {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
+        const budget_before = budget.available;
         for (budget.replicas_requested_prepares, 0..) |*requested_prepares, replica_index| {
             var requested_prepares_index: u32 = 0;
 
@@ -241,6 +242,7 @@ pub const RepairBudgetJournal = struct {
                 }
             }
         }
+        return budget.available > budget_before;
     }
 
     fn assert_invariants(budget: *const RepairBudgetJournal) void {
@@ -443,10 +445,11 @@ pub const RepairBudgetGrid = struct {
         }
     }
 
-    pub fn maybe_expire_requested_blocks(budget: *RepairBudgetGrid, now: stdx.Instant) void {
+    pub fn reap_expired_requests(budget: *RepairBudgetGrid, now: stdx.Instant) bool {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
+        const budget_before = budget.available;
         for (budget.replicas_requested_blocks) |*requested_blocks| {
             var requested_blocks_index: u32 = 0;
 
@@ -462,5 +465,6 @@ pub const RepairBudgetGrid = struct {
                 }
             }
         }
+        return budget.available > budget_before;
     }
 };

@@ -3773,12 +3773,20 @@ pub fn ReplicaType(
             assert(self.status != .recovering);
 
             self.repair_budget_timeout.reset();
-            self.journal_repair_message_budget.maybe_expire_requested_prepares(
-                self.clock.monotonic(),
-            );
-            self.grid_repair_message_budget.maybe_expire_requested_blocks(
-                self.clock.monotonic(),
-            );
+
+            if (self.journal_repair_message_budget.reap_expired_requests(self.clock.monotonic())) {
+                self.repair();
+            }
+
+            if (self.grid_repair_message_budget.reap_expired_requests(self.clock.monotonic())) {
+                if (self.grid.callback != .cancel) {
+                    if (self.grid_repair_message_budget
+                        .next_destination(&self.prng)) |replica_index|
+                    {
+                        self.send_request_blocks(replica_index);
+                    }
+                }
+            }
         }
 
         fn on_journal_repair_timeout(self: *Replica) void {
