@@ -577,6 +577,8 @@ The TigerBeetle Python Client `0.17.0` introduced the following breaking changes
   |Exception  |                                       |`ClientReleaseTooHighError`              |
   |Exception  |                                       |`TooMuchDataError`                       |
 
+- Removed all default initialization values from the types `AccountFilter` and `QueryFilter`.
+
 ### Example:
 
 Before:
