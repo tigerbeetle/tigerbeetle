@@ -7096,18 +7096,24 @@ pub fn ReplicaType(
         /// durable on a commit quorum of replicas. Instead, R2 waits till it commits op=23 and
         /// reaches op_checkpoint=19. Thereafter, it sends withheld prepare_oks for ops 28 → 31.
         fn op_prepare_ok_max(self: *const Replica) u64 {
-            if (!self.sync_grid_done() and
-                !vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max))
-            {
-                //  A replica could sync to a checkpoint that is not yet durable on a quorum of
-                //  replicas. To avoid falsely contributing to checkpoint durability, syncing
-                //  replicas must withhold some prepare_oks till they haven't synced all tables.
-                const op_checkpoint_trigger =
-                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-                return op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
-            } else {
+            // No state sync, the grid and checkpoint can be trusted.
+            if (self.sync_grid_done()) {
                 return self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max;
             }
+
+            // State sync, but the grid *can* be trusted as we synced to
+            // a checkpoint that is durable on a quorum of replicas.
+            if (vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max)) {
+                return self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max;
+            }
+
+            // State sync, but the grid *can't* be trusted as we synced to
+            // to a checkpoint that is *not* durable on a quorum of replicas.
+            // To avoid falsely contributing to checkpoint durability, we
+            // withhold some prepare_oks till we finish syncing all tables.
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            return op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
         }
 
         /// Returns checkpoint id associated with the op.
@@ -8640,15 +8646,15 @@ pub fn ReplicaType(
                 return;
             }
             if (header.op > self.op_prepare_ok_max()) {
-                if (!self.sync_grid_done()) {
+                if (self.sync_grid_done()) {
+                    log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
+                        "durability of the next checkpoint)", .{self.log_prefix()});
+                } else {
                     log.debug(
                         "{}: send_prepare_ok: not sending (syncing replica falsely " ++
                             "contributes to durability of the current checkpoint)",
                         .{self.log_prefix()},
                     );
-                } else {
-                    log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
-                        "durability of the next checkpoint)", .{self.log_prefix()});
                 }
                 return;
             }
