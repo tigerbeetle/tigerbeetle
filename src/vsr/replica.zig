@@ -8632,15 +8632,15 @@ pub fn ReplicaType(
                 return;
             }
             if (header.op > self.op_prepare_ok_max()) {
-                if (!self.sync_grid_done()) {
+                if (self.sync_grid_done()) {
+                    log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
+                        "durability of the next checkpoint)", .{self.log_prefix()});
+                } else {
                     log.debug(
                         "{}: send_prepare_ok: not sending (syncing replica falsely " ++
                             "contributes to durability of the current checkpoint)",
                         .{self.log_prefix()},
                     );
-                } else {
-                    log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
-                        "durability of the next checkpoint)", .{self.log_prefix()});
                 }
                 return;
             }
