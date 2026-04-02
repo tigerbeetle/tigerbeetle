@@ -40,7 +40,6 @@ const stdx = @import("stdx");
 const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
 const RingBufferType = stdx.RingBufferType;
-const LoggedProcess = @import("./logged_process.zig");
 const Network = @import("./faulty_network.zig").Network;
 const constants = @import("constants.zig");
 const ratio = stdx.PRNG.ratio;
@@ -236,7 +235,7 @@ pub const Supervisor = struct {
         for (supervisor.replicas, 0..) |replica, replica_index| {
             // We might have terminated the replica and never restarted it,
             // so we need to check its state.
-            if (replica.state() != .terminated) {
+            if (replica.state != .terminated) {
                 supervisor.replica_terminate(@intCast(replica_index)) catch {};
             }
             replica.destroy();
@@ -264,8 +263,8 @@ pub const Supervisor = struct {
 
         // Check for replicas that have exited.
         for (supervisor.replicas, 0..) |replica, replica_index| {
-            if (replica.state() != .terminated) {
-                if (replica.process.?.wait_nonblocking()) |term| {
+            if (replica.state != .terminated) {
+                if (replica.wait_nonblocking()) |term| {
                     // Replicas shouldn't exit on their own, even with code=0.
                     maybe(std.meta.eql(term, .{ .Exited = 0 }));
 
@@ -314,7 +313,7 @@ pub const Supervisor = struct {
         const faulty_replica_count = count: {
             var count: u32 = 0;
             for (supervisor.replicas) |replica| {
-                count += @intFromBool(replica.state() != .running);
+                count += @intFromBool(replica.state != .running);
             }
             break :count count;
         };
@@ -458,7 +457,7 @@ pub const Supervisor = struct {
     }
 
     pub fn replica_format(supervisor: *Supervisor, replica_index: u8) !void {
-        assert(supervisor.replicas[replica_index].state() == .terminated);
+        assert(supervisor.replicas[replica_index].state == .terminated);
 
         const release_index = supervisor.replicas[replica_index].executable_index;
         const server_executable = supervisor.server_executables[release_index];
@@ -481,7 +480,7 @@ pub const Supervisor = struct {
     }
 
     pub fn replica_reformat(supervisor: *Supervisor, replica_index: u8) !void {
-        assert(supervisor.replicas[replica_index].state() == .terminated);
+        assert(supervisor.replicas[replica_index].state == .terminated);
 
         supervisor.shell.cwd.deleteFile(supervisor.replica_datafiles[replica_index]) catch |err| {
             log.err("{}: failed deleting datafile: {}", .{ replica_index, err });
@@ -537,8 +536,8 @@ pub const Supervisor = struct {
         log.info("{}: starting replica", .{replica_index});
 
         const replica = supervisor.replicas[replica_index];
-        assert(replica.state() == .terminated);
-        defer assert(replica.state() == .running);
+        assert(replica.state == .terminated);
+        defer assert(replica.state == .running);
 
         var addresses_buffer: [128]u8 = undefined;
         const addresses_arg = try std.fmt.bufPrint(
@@ -555,39 +554,47 @@ pub const Supervisor = struct {
         argv.push_slice(&.{ addresses_arg, supervisor.replica_datafiles[replica_index] });
 
         assert(replica.process == null);
-        replica.process = try LoggedProcess.spawn(supervisor.allocator, argv.const_slice(), .{});
+        replica.state = .running;
+        replica.process = std.process.Child.init(argv.const_slice(), supervisor.allocator);
+        replica.process.?.stdin_behavior = .Ignore;
+        replica.process.?.stdout_behavior = .Ignore;
+        replica.process.?.stderr_behavior = .Inherit;
+
+        try replica.process.?.spawn();
+        errdefer _ = replica.process.?.kill() catch {};
     }
 
     pub fn replica_terminate(supervisor: *Supervisor, replica_index: u8) !void {
         log.info("{}: terminating replica", .{replica_index});
 
         const replica = supervisor.replicas[replica_index];
-        assert(replica.state() == .running or replica.state() == .paused);
-        defer assert(replica.state() == .terminated);
+        assert(replica.state == .running or replica.state == .paused);
 
-        _ = try replica.process.?.terminate();
-        replica.process.?.destroy(supervisor.allocator);
+        try std.posix.kill(replica.process.?.id, std.posix.SIG.KILL);
         replica.process = null;
+        replica.state = .terminated;
     }
 
     pub fn replica_pause(supervisor: *Supervisor, replica_index: u8) !void {
+        comptime assert(builtin.os.tag != .windows);
         log.info("{}: pausing replica", .{replica_index});
 
         const replica = supervisor.replicas[replica_index];
-        assert(replica.state() == .running);
-        defer assert(replica.state() == .paused);
+        assert(replica.state == .running);
 
-        try replica.process.?.pause();
+        try std.posix.kill(replica.process.?.id, std.posix.SIG.STOP);
+        replica.state = .paused;
     }
 
     pub fn replica_unpause(supervisor: *Supervisor, replica_index: u8) !void {
+        comptime assert(builtin.os.tag != .windows);
         log.info("{}: unpausing replica", .{replica_index});
 
         const replica = supervisor.replicas[replica_index];
-        assert(replica.state() == .paused);
-        defer assert(replica.state() == .running);
+        assert(replica.state == .paused);
 
-        try replica.process.?.unpause();
+        try std.posix.kill(replica.process.?.id, std.posix.SIG.CONT);
+        replica.state = .running;
     }
 
     pub fn replica_install(supervisor: *Supervisor, replica_index: u8, release_index: u32) !void {
@@ -604,7 +611,7 @@ pub const Supervisor = struct {
         supervisor.replicas[replica_index].executable_index = release_index;
 
         const upgrade_requires_restart = builtin.os.tag != .linux and
-            supervisor.replicas[replica_index].state() != .terminated;
+            supervisor.replicas[replica_index].state != .terminated;
         if (upgrade_requires_restart) {
             try supervisor.replica_terminate(replica_index);
         }
@@ -679,11 +686,11 @@ pub const Supervisor = struct {
 fn replicas_in_state(
     replicas: []const *Replica,
     replica_index_buffer: []u8,
-    state: LoggedProcess.State,
+    state: ReplicaState,
 ) []u8 {
     var count: u8 = 0;
     for (replicas, 0..) |replica, index| {
-        if (replica.state() == state) {
+        if (replica.state == state) {
             replica_index_buffer[count] = @intCast(index);
             count += 1;
         }
@@ -711,6 +718,8 @@ test comma_separate_ports {
     try std.testing.expectEqualStrings("3000,3001,3002", formatted);
 }
 
+const ReplicaState = enum { running, paused, terminated };
+
 const Replica = struct {
     allocator: std.mem.Allocator,
     executable_index: u32,
@@ -721,7 +730,8 @@ const Replica = struct {
     replica_index: u8,
     replica_ports: [constants.vsr.replicas_max]u16,
     addresses: []const u8,
-    process: ?*LoggedProcess,
+    process: ?std.process.Child,
+    state: ReplicaState,
 
     pub fn create(
         allocator: std.mem.Allocator,
@@ -748,28 +758,29 @@ const Replica = struct {
             .replica_ports = replica_ports,
             .addresses = addresses,
             .process = null,
+            .state = .terminated,
         };
         return self;
     }
 
     pub fn destroy(self: *Replica) void {
-        assert(self.state() == .terminated);
+        assert(self.state == .terminated);
         const allocator = self.allocator;
-        if (self.process) |process| {
-            process.destroy(allocator);
-        }
         allocator.free(self.addresses);
         allocator.destroy(self);
     }
 
-    pub fn state(self: *Replica) LoggedProcess.State {
-        if (self.process) |process| {
-            switch (process.state) {
-                .running => return .running,
-                .paused => return .paused,
-                .terminated => return .terminated,
-            }
-        } else return .terminated;
+    /// If the process has exited, reap it and return the exit code.
+    /// Otherwise, return null.
+    pub fn wait_nonblocking(self: *Replica) ?std.process.Child.Term {
+        assert(self.state == .running or self.state == .paused);
+
+        const result = std.posix.waitpid(self.process.?.id, std.posix.W.NOHANG);
+        if (result.pid == 0) return null;
+        assert(result.pid == self.process.?.id);
+
+        self.state = .terminated;
+        return stdx.term_from_status(result.status);
     }
 };
 

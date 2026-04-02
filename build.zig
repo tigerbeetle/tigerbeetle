@@ -983,7 +983,6 @@ fn build_test_integration(
         run_integration_tests.has_side_effects = true;
     }
     run_integration_tests.has_side_effects = true;
-    run_integration_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     steps.test_integration.dependOn(&run_integration_tests.step);
 }
 

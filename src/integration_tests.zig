@@ -424,9 +424,9 @@ test "in-place upgrade" {
         const crash = early and supervisor.prng.chance(ratio(1, 400));
         const restart = (!early) or supervisor.prng.chance(ratio(1, 200));
 
-        if (supervisor.replicas[replica_index].state() == .terminated and restart) {
+        if (supervisor.replicas[replica_index].state == .terminated and restart) {
             try supervisor.replica_start(@intCast(replica_index));
-        } else if (supervisor.replicas[replica_index].state() == .running and crash) {
+        } else if (supervisor.replicas[replica_index].state == .running and crash) {
             try supervisor.replica_terminate(@intCast(replica_index));
         }
     }
