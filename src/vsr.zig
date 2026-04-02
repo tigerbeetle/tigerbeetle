@@ -760,11 +760,9 @@ pub const Timeout = struct {
         assert(self.ticking);
 
         // Uniformly between [0.5 * timeout, 1.5 * timeout].
-        self.after_dynamic = prng.range_inclusive(
-            u64,
-            @divTrunc(self.after, 2),
-            @divTrunc(self.after, 2) + self.after,
-        );
+        assert(self.after > 1);
+        const half = @divFloor(self.after, 2);
+        self.after_dynamic = prng.range_inclusive(u64, half, 2 * self.after - half);
         assert(self.after_dynamic.? > 0);
 
         log.debug("{}: {s} reset", .{ self.id, self.name });
