@@ -460,7 +460,12 @@ pub fn main() !void {
     inline for (mappings_state_machine) |type_mapping| {
         const ZigType, const python_name = type_mapping;
         const has_default_initialization = switch (ZigType) {
-            tb.CreateAccountResult, tb.CreateTransferResult, tb.AccountBalance => false,
+            tb.AccountFilter,
+            tb.QueryFilter,
+            tb.CreateAccountResult,
+            tb.CreateTransferResult,
+            tb.AccountBalance,
+            => false,
             else => true,
         };
 

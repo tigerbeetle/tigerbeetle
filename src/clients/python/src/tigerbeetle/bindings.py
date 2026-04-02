@@ -258,15 +258,15 @@ class CreateTransferResult:
 
 @dataclass
 class AccountFilter:
-    account_id: int = 0
-    user_data_128: int = 0
-    user_data_64: int = 0
-    user_data_32: int = 0
-    code: int = 0
-    timestamp_min: int = 0
-    timestamp_max: int = 0
-    limit: int = 0
-    flags: AccountFilterFlags = AccountFilterFlags.NONE
+    account_id: int
+    user_data_128: int
+    user_data_64: int
+    user_data_32: int
+    code: int
+    timestamp_min: int
+    timestamp_max: int
+    limit: int
+    flags: AccountFilterFlags
 
 
 @dataclass
@@ -280,15 +280,15 @@ class AccountBalance:
 
 @dataclass
 class QueryFilter:
-    user_data_128: int = 0
-    user_data_64: int = 0
-    user_data_32: int = 0
-    ledger: int = 0
-    code: int = 0
-    timestamp_min: int = 0
-    timestamp_max: int = 0
-    limit: int = 0
-    flags: QueryFilterFlags = QueryFilterFlags.NONE
+    user_data_128: int
+    user_data_64: int
+    user_data_32: int
+    ledger: int
+    code: int
+    timestamp_min: int
+    timestamp_max: int
+    limit: int
+    flags: QueryFilterFlags
 
 
 class CPacket(ctypes.Structure):
