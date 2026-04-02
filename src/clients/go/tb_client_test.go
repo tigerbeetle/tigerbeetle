@@ -132,7 +132,7 @@ func doTestClient(t *testing.T, client Client) {
 			0xb2, 0xb1,
 			0xa4, 0xa3, 0xa2, 0xa1,
 		}
-		decimal, ok := big.NewInt(0).SetString("214850178493633095719753766415838275046", 10)
+		decimal, ok := new(big.Int).SetString("214850178493633095719753766415838275046", 10)
 		if !ok {
 			t.Fatal()
 		}
@@ -140,8 +140,12 @@ func doTestClient(t *testing.T, client Client) {
 		u128 := BytesToUint128(binary)
 
 		assert.Equal(t, u128.Bytes(), binary)
-		assert.Equal(t, u128.BigInt(), *decimal)
-		assert.Equal(t, BigIntToUint128(*decimal).Bytes(), u128.Bytes())
+		assert.Equal(t, u128.BigInt(), decimal)
+		assert.Equal(t, BigIntToUint128(decimal).Bytes(), u128.Bytes())
+
+		lo, hi := u128.Uint64()
+		assert.True(t, lo == 15119395263638463974)
+		assert.True(t, hi == 11647051514084770242)
 	})
 
 	t.Run("can create accounts", func(t *testing.T) {
@@ -436,8 +440,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		// Each transfer moves ONE unit,
 		// so the credit/debit must differ from TRANSFERS_MAX units:
-		assert.Equal(t, TASKS_MAX/2, big.NewInt(0).Sub(&accountACreditsAfter, &accountACredits).Int64())
-		assert.Equal(t, TASKS_MAX/2, big.NewInt(0).Sub(&accountBDebitsAfter, &accountBDebits).Int64())
+		assert.Equal(t, TASKS_MAX/2, big.NewInt(0).Sub(accountACreditsAfter, accountACredits).Int64())
+		assert.Equal(t, TASKS_MAX/2, big.NewInt(0).Sub(accountBDebitsAfter, accountBDebits).Int64())
 	})
 
 	t.Run("can create concurrent linked chains", func(t *testing.T) {

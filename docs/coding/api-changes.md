@@ -280,6 +280,14 @@ The TigerBeetle Go Client `0.17.0` introduced the following breaking changes:
   The `Err` types were removed in favor of simple value declarations for error codes,
   allowing the use of idiomatic constructions such as `errors.Is(err, ErrTooMuchData)`.
 
+- Conversions between `UInt128` and `big.Int` now return and accept a pointer to a big integer
+  `*big.Int`, making the API more idiomatic.
+
+  |Type      |Before                                  | After                                   |
+  |----------|----------------------------------------|-----------------------------------------|
+  |Function  |`BigInt() big.Int`                      |`BigInt() *big.Int`                      |
+  |Function  |`BigIntToUint128(value big.Int) Uint128`|`BigIntToUint128(value *big.Int) Uint128`|
+
 ### Example:
 
 Before:
