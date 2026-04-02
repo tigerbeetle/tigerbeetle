@@ -2065,12 +2065,15 @@ test "Cluster: backups prepare past prepare_max if the next checkpoint is durabl
     const b1 = t.replica(.B1);
     const b2 = t.replica(.B2);
 
-    b2.drop(.R_, .incoming, .start_view);
     const b2_replica = &t.cluster.replicas[b2.replicas.get(0)];
 
-    // Stall commit pipeline on b2, forcing it to accept prepares but advance its checkpoint past 0.
-    // Meanwhile, the rest of the cluster moves to checkpoint=checkpoint_2.
-    b2_replica.commit_stage = .compact;
+    // Stall commit pipeline on b2, forcing it to accept prepares
+    // but not advance its checkpoint past 0. Meanwhile, the rest
+    // of the cluster moves to checkpoint=checkpoint_2. Setting the
+    // stage to checkpoint_superblock also ensures that if we receive
+    // any start_view message from the primary, we don't use it to
+    // start state sync (see `on_start_view_set_checkpoint`).
+    b2_replica.commit_stage = .checkpoint_superblock;
 
     try c.request(checkpoint_2_prepare_max, checkpoint_2_prepare_max);
 
@@ -2079,24 +2082,26 @@ test "Cluster: backups prepare past prepare_max if the next checkpoint is durabl
     try expectEqual(a0.op_head(), checkpoint_2_prepare_max);
     try expectEqual(b1.op_head(), checkpoint_2_prepare_max);
 
-    // Since checkpoint_1 is durable on a0, b1 (a commit quorum of replicas), b2 is able to accept
-    // some prepares from the next checkpoint, overwriting some of its committed prepares.
-    // However, even though ops [checkpoint_1, checkpoint_1_trigger - 1] are committed on b2,
-    // they are not overwritten as they are required during checkpointing & upgrade.
+    // Since checkpoint_1 is durable on a0, b1 (a commit quorum of
+    // replicas), b2 is able to accept some prepares from the next
+    // checkpoint, overwriting some of its committed prepares.
+    // However, even though ops [checkpoint_1, checkpoint_1_trigger - 1]
+    // are committed on b2, they are not overwritten as they are
+    // required during checkpointing & upgrade.
     try expectEqual(b2.op_head(), checkpoint_1 + constants.journal_slot_count - 1);
 
     try expectEqual(a0.op_checkpoint(), checkpoint_2);
     try expectEqual(b1.op_checkpoint(), checkpoint_2);
     try expectEqual(b2.op_checkpoint(), 0);
 
-    // b2 crashes and restarts, and truncates all prepares that past checkpoint_1_prepare_max,
-    // since all prepares in checkpoint=0 must be replayed after restart.
+    // b2 crashes and restarts, and truncates all prepares that past
+    // checkpoint_1_prepare_max, since all prepares in checkpoint=0
+    // must be replayed after restart.
     b2.stop();
     try b2.open();
 
     try expectEqual(b2.op_head(), checkpoint_1_prepare_max);
 
-    b2.pass(.R_, .incoming, .start_view);
     t.run();
 
     try expectEqual(t.replica(.R_).op_head(), checkpoint_2_prepare_max);
