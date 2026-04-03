@@ -3,9 +3,9 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## TigerBeetle (unreleased)
+## TigerBeetle 0.17.0
 
-Released: 2026-03-27
+Released: 2026-04-03
 
 This release improves `create_accounts` and `create_transfers` operations. They now return
 timestamps of newly created objects, allowing the application to learn the resulting global order
@@ -17,8 +17,13 @@ to the [API changes](https://docs.tigerbeetle.com/coding/api-changes) page for d
 
 - [#3599](https://github.com/tigerbeetle/tigerbeetle/pull/3599)
 
-  Improve repair perfomance by tracking per-replica repair budgets, to prevent a slow replica
+  Improve repair performance by tracking per-replica repair budgets, to prevent a slow replica
   from tying up the global budget.
+
+- [#3618](https://github.com/tigerbeetle/tigerbeetle/pull/3618),
+  [#3623](https://github.com/tigerbeetle/tigerbeetle/pull/3623)
+
+  Add jitter to repair timeouts, to guard against resonance liveness bugs.
 
 ### Features
 
@@ -28,7 +33,28 @@ to the [API changes](https://docs.tigerbeetle.com/coding/api-changes) page for d
 
 - [#3574](https://github.com/tigerbeetle/tigerbeetle/pull/3574)
 
-  Add the API changes page to the docs: <https://docs.tigerbeetle.com/coding/api-changes>
+  Add the API changes page to the docs: <https://docs.tigerbeetle.com/coding/api-changes>.
+
+- [#3624](https://github.com/tigerbeetle/tigerbeetle/pull/3624)
+
+  Remove default initialization from Python client's `AccountFilter` and `QueryFilter`.
+
+- [#3607](https://github.com/tigerbeetle/tigerbeetle/pull/3607)
+
+  Querying with a `limit` which would not fit in the maximum message size now
+  fails with `TooMuchData` in the client, rather than silently truncating results.
+
+- [#3593](https://github.com/tigerbeetle/tigerbeetle/pull/3593)
+
+  Add metric tracking recent client min/max releases seen by the cluster.
+
+- [#3617](https://github.com/tigerbeetle/tigerbeetle/pull/3617)
+
+  Fix several bugs in the `client_request_round_trip` metric.
+
+- [#3620](https://github.com/tigerbeetle/tigerbeetle/pull/3620)
+
+  Make the Golang client API more idiomatic using `*big.Int`.
 
 ### Internals
 
