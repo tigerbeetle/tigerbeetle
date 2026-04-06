@@ -161,9 +161,24 @@ const Fuzzer = enum {
         };
     }
 
+    // Returns the number of CPU cores that this fuzzer "reserves" from the available concurrency.
+    fn concurrency(fuzzer: Fuzzer) u8 {
+        return switch (fuzzer) {
+            // Vortex runs with 5 processes, but supervisor and driver don't use much CPU.
+            .vortex => 3,
+            else => 1,
+        };
+    }
+
     fn capture_logs(fuzzer: Fuzzer) bool {
         return fuzzer == .vortex;
     }
+};
+
+const fuzzer_concurrency_max = max: {
+    var max: u8 = 0;
+    for (std.enums.values(Fuzzer)) |fuzzer| max = @max(max, fuzzer.concurrency());
+    break :max max;
 };
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
@@ -253,7 +268,13 @@ fn run_fuzzers(
         seed: SeedRecord,
     };
 
-    const children = try shell.arena.allocator().alloc(?FuzzerChild, options.concurrency);
+    // Even if a given fuzzer (i.e. Vortex) requires multiple CPU cores, it is allowed to start if
+    // there is only 1 available. We cease starting fuzzers while concurrency_available≤1.
+    // (That way we don't accidentally bias towards fuzzers concurrency of exactly 1).
+    const concurrency_max: u31 = @intCast(options.concurrency);
+    var concurrency_available: i32 = @intCast(options.concurrency);
+
+    const children = try shell.arena.allocator().alloc(?FuzzerChild, concurrency_max);
     @memset(children, null);
     defer for (children) |*fuzzer_or_null| {
         if (fuzzer_or_null.*) |*fuzzer| {
@@ -300,9 +321,12 @@ fn run_fuzzers(
 
         // Start new fuzzer processes.
         for (children) |*child_or_null| {
+            if (concurrency_available <= 0) break;
+
             if (child_or_null.* == null) {
                 const task = tasks.sample();
                 const seed = random.int(u64);
+                concurrency_available -= task.seed_template.fuzzer.concurrency();
 
                 // Ensure that multiple fuzzers spawned in the same tick are spread out over tasks.
                 task.runtime_virtual += @divFloor(sleep_ns, task.weight);
@@ -345,7 +369,7 @@ fn run_fuzzers(
             // Poll for completed fuzzers.
 
             if (fuzzer_or_null.*) |*fuzzer| {
-                running_count += 1;
+                running_count += fuzzer.fuzzer.concurrency();
 
                 // Update runtime_virtual incrementally every tick so that we have an accurate score
                 // for choosing new tasks.
@@ -471,11 +495,15 @@ fn run_fuzzers(
                         };
                     }
 
+                    concurrency_available += fuzzer.fuzzer.concurrency();
+                    assert(concurrency_available <= concurrency_max);
+
                     fuzzer_or_null.* = null;
                 }
             }
         }
-        assert(running_count == options.concurrency);
+        assert(running_count >= concurrency_max);
+        assert(running_count <= concurrency_max + fuzzer_concurrency_max - 1);
 
         if (iteration_push) {
             try upload_results(shell, gpa, options.devhub_token, seeds.items, seed_logs.items);
