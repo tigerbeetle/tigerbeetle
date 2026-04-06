@@ -3125,13 +3125,20 @@ pub fn ReplicaType(
             options: Journal.Read.Options,
         ) void {
             const message = prepare orelse {
-                log.debug("{}: on_request_prepare_read: prepare=null", .{self.log_prefix()});
+                log.debug("{}: on_request_prepare_read: " ++
+                    "op={} checksum={x:0>32} prepare=null", .{
+                    self.log_prefix(),
+                    options.op,
+                    options.checksum,
+                });
                 return;
             };
             const destination_replica = options.destination_replica.?;
 
             assert(message.header.command == .prepare);
             assert(destination_replica != self.replica);
+            assert(options.op == message.header.op);
+            assert(options.checksum == message.header.checksum);
 
             log.debug("{}: on_request_prepare_read: " ++
                 "op={} checksum={x:0>32} sending to replica={}", .{
