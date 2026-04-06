@@ -566,11 +566,6 @@ pub fn ReplicaType(
         /// (status=view-change backup)
         request_start_view_message_timeout: Timeout,
 
-        /// The number of ticks before peeking into the journal/block repair budget and expiring
-        /// prepare/block requests that haven't been responded to.
-        /// (status=normal or status=view-change or status=recovering_head).
-        repair_budget_timeout: Timeout,
-
         /// The number of ticks before repairing missing/disconnected headers, dirty/missing
         /// prepares, and replenishing the repair budget.
         /// (status=normal or (status=view-change and primary)).
@@ -1387,11 +1382,6 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 1_000 / constants.tick_ms,
                 },
-                .repair_budget_timeout = Timeout{
-                    .name = "repair_budget_timeout",
-                    .id = replica_index,
-                    .after = 20 / constants.tick_ms,
-                },
                 .journal_repair_timeout = Timeout{
                     .name = "journal_repair_timeout",
                     .id = replica_index,
@@ -1552,7 +1542,6 @@ pub fn ReplicaType(
                     &self.request_start_view_message_timeout,
                     on_request_start_view_message_timeout,
                 },
-                .{ &self.repair_budget_timeout, on_repair_budget_timeout },
                 .{ &self.journal_repair_timeout, on_journal_repair_timeout },
 
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },
@@ -2516,10 +2505,10 @@ pub fn ReplicaType(
             if (self.repair_header(message.header) and self.write_prepare(message)) {
                 assert(self.journal.has_dirty(message.header));
 
-                self.journal_repair_message_budget.increment(.{
-                    .op = message.header.op,
-                    .now = self.clock.monotonic(),
-                });
+                self.journal_repair_message_budget.increment(
+                    message.header.op,
+                    self.clock.monotonic(),
+                );
 
                 log.debug("{}: on_repair: repairing journal op={}", .{
                     self.log_prefix(),
@@ -3769,30 +3758,11 @@ pub fn ReplicaType(
             );
         }
 
-        fn on_repair_budget_timeout(self: *Replica) void {
-            assert(self.status != .recovering);
-
-            self.repair_budget_timeout.reset();
-
-            if (self.journal_repair_message_budget.reap_expired_requests(self.clock.monotonic())) {
-                self.repair();
-            }
-
-            if (self.grid_repair_message_budget.reap_expired_requests(self.clock.monotonic())) {
-                if (self.grid.callback != .cancel) {
-                    if (self.grid_repair_message_budget
-                        .next_destination(&self.prng)) |replica_index|
-                    {
-                        self.send_request_blocks(replica_index);
-                    }
-                }
-            }
-        }
-
         fn on_journal_repair_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
-            self.journal_repair_timeout.reset_with_jitter(&self.prng);
 
+            self.journal_repair_timeout.reset_with_jitter(&self.prng);
+            self.journal_repair_message_budget.reap_expired_requests(self.clock.monotonic());
             self.repair();
         }
 
@@ -3837,6 +3807,7 @@ pub fn ReplicaType(
             maybe(self.state_machine_opened);
 
             self.grid_repair_timeout.reset_with_jitter(&self.prng);
+            self.grid_repair_message_budget.reap_expired_requests(self.clock.monotonic());
 
             if (self.grid.callback != .cancel) {
                 if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
@@ -8167,11 +8138,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.journal_repair_message_budget.available == 0) {
-                log.debug("{}: repair_prepares: waiting for repair budget", .{self.log_prefix()});
-                return;
-            }
-
             for (op_min..op_max + 1) |op| {
                 const slot_with_op_maybe = self.journal.slot_with_op(op);
                 if (slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?)) {
@@ -8180,16 +8146,15 @@ pub fn ReplicaType(
                     if (self.repair_prepare(op)) {
                         io_budget -= 1;
 
-                        if (self.journal_repair_message_budget.available == 0) {
-                            log.debug("{}: repair_prepares: repair budget used", .{
-                                self.log_prefix(),
-                            });
-                            break;
-                        }
                         if (io_budget == 0) {
                             log.debug("{}: repair_prepares: IO budget used", .{self.log_prefix()});
                             break;
                         }
+                    } else if (self.journal_repair_message_budget.available == 0) {
+                        log.debug("{}: repair_prepares: repair budget used", .{
+                            self.log_prefix(),
+                        });
+                        break;
                     }
                 }
             }
@@ -8296,7 +8261,8 @@ pub fn ReplicaType(
             assert(self.repairs_allowed());
             assert(slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?));
             assert(self.journal.writes.available() > 0);
-            assert(self.journal_repair_message_budget.available > 0);
+            maybe(self.journal_repair_message_budget.available == 0);
+
             if (self.journal.header_with_op(op)) |header| {
                 // We may be appending to or repairing the journal concurrently.
                 // We do not want to re-request any of these prepares unnecessarily.
@@ -8354,11 +8320,11 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.journal_repair_message_budget.decrement(.{
-                .op = op,
-                .now = self.clock.monotonic(),
-                .prng = &self.prng,
-            })) |replica_index| {
+            if (self.journal_repair_message_budget.decrement(
+                op,
+                self.clock.monotonic(),
+                &self.prng,
+            )) |replica_index| {
                 assert(replica_index != self.replica);
                 const request_prepare = Header.RequestPrepare{
                     .command = .request_prepare,
@@ -9920,13 +9886,11 @@ pub fn ReplicaType(
             assert(!self.do_view_change_message_timeout.ticking);
             assert(!self.request_start_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
-            assert(!self.repair_budget_timeout.ticking);
             assert(!self.journal_repair_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
             assert(!self.upgrade_timeout.ticking);
 
             self.ping_timeout.start();
-            self.repair_budget_timeout.start();
             self.grid_repair_timeout.start();
             self.grid_scrub_timeout.start();
 
@@ -9963,7 +9927,6 @@ pub fn ReplicaType(
             assert(!self.do_view_change_message_timeout.ticking);
             assert(!self.request_start_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
-            assert(!self.repair_budget_timeout.ticking);
             assert(!self.journal_repair_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
             assert(!self.upgrade_timeout.ticking);
@@ -9981,7 +9944,6 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
-                self.repair_budget_timeout.start();
                 self.journal_repair_timeout.start();
                 self.grid_repair_timeout.start();
                 self.grid_scrub_timeout.start();
@@ -10004,7 +9966,6 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.journal_repair_timeout.start();
-                self.repair_budget_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_timeout.start();
                 self.grid_scrub_timeout.start();
@@ -10062,7 +10023,6 @@ pub fn ReplicaType(
 
             self.ping_timeout.start();
             self.start_view_change_message_timeout.start();
-            self.repair_budget_timeout.start();
             self.journal_repair_timeout.start();
             self.repair_sync_timeout.start();
             self.grid_repair_timeout.start();
@@ -10154,7 +10114,6 @@ pub fn ReplicaType(
                 self.repair_sync_timeout.start();
             }
 
-            assert(self.repair_budget_timeout.ticking);
             self.journal_repair_timeout.start();
             self.grid_repair_timeout.start();
             self.grid_scrub_timeout.start();
@@ -10245,7 +10204,6 @@ pub fn ReplicaType(
             self.grid_scrub_timeout.start();
             self.upgrade_timeout.stop();
             self.journal_repair_timeout.stop();
-            if (!self.repair_budget_timeout.ticking) self.repair_budget_timeout.start();
 
             if (self.primary_index(self.view) == self.replica) {
                 self.request_start_view_message_timeout.stop();
@@ -11275,6 +11233,8 @@ pub fn ReplicaType(
             assert(request_faults_count_max <= requests_buffer.len);
             assert(request_faults_count_max >= @divFloor(requests_buffer.len, 2));
 
+            const now = self.clock.monotonic();
+
             var grid_faults = self.grid.read_global_queue.iterate();
             while (grid_faults.next()) |read_fault| {
                 if (requests_count >= request_faults_count_max) break;
@@ -11284,11 +11244,11 @@ pub fn ReplicaType(
                     .checksum = read_fault.checksum,
                 };
 
-                if (self.grid_repair_message_budget.decrement(.{
-                    .block_identifier = block_identifier,
-                    .replica_index = destination_replica_index,
-                    .now = self.clock.monotonic(),
-                })) {
+                if (self.grid_repair_message_budget.decrement(
+                    block_identifier,
+                    destination_replica_index,
+                    now,
+                )) {
                     requests_buffer[requests_count] = .{
                         .block_address = read_fault.address,
                         .block_checksum = read_fault.checksum,
@@ -11306,11 +11266,11 @@ pub fn ReplicaType(
                         .checksum = missing_request.block_checksum,
                     };
 
-                    if (self.grid_repair_message_budget.decrement(.{
-                        .block_identifier = block_identifier,
-                        .replica_index = destination_replica_index,
-                        .now = self.clock.monotonic(),
-                    })) {
+                    if (self.grid_repair_message_budget.decrement(
+                        block_identifier,
+                        destination_replica_index,
+                        now,
+                    )) {
                         requests_buffer[requests_count] = missing_request;
                         requests_count += 1;
                     }
