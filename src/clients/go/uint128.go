@@ -121,6 +121,9 @@ var idMutex sync.Mutex
 // Generates a Universally Unique and Sortable Identifier based on https://github.com/ulid/spec.
 // Uint128 returned are guaranteed to be monotonically increasing when interpreted as little-endian.
 // `ID()` is safe to call from multiple goroutines with monotonicity being sequentially consistent.
+//
+// Panics if it is unable to generated random bytes.
+// Panics if the timestamp is outside of a reasonable bounds.
 func ID() Uint128 {
 	timestamp := time.Now().UnixMilli()
 
