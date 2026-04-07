@@ -46,7 +46,7 @@ This case is symmetric:
   [`flags.credits_must_not_exceed_debits`](../../reference/account.md#flagscredits_must_not_exceed_debits) nor
   [`flags.debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits) are set.
 3. The **control** account has
-  [`flags.credits_must_not_exceed_debits`](../../reference/account.md#flagscredits_must_not_exceed_debits)
+  [`flags.debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits)
   set.
 
 | Id | Debit Account | Credit Account | Amount | Pending Id |                                               Flags |
