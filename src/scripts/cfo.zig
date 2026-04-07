@@ -153,6 +153,7 @@ const Fuzzer = enum {
             .vopr, .vopr_debug, .vopr_testing => &.{},
             .vopr_lite, .vopr_testing_lite => &.{"--lite"},
             .vortex, .vortex_debug => &.{
+                "supervisor",
                 "--log-debug",
                 "--replica-count=3",
                 "--test-duration=10m",
