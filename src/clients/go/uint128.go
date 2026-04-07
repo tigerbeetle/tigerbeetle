@@ -121,6 +121,9 @@ var idMutex sync.Mutex
 // Generates a Universally Unique and Sortable Identifier based on https://github.com/ulid/spec.
 // Uint128 returned are guaranteed to be monotonically increasing when interpreted as little-endian.
 // `ID()` is safe to call from multiple goroutines with monotonicity being sequentially consistent.
+//
+// Panics if it is unable to generated random bytes.
+// Panics if the timestamp is outside of a reasonable bounds.
 func ID() Uint128 {
 	timestamp := time.Now().UnixMilli()
 
@@ -142,14 +145,18 @@ func ID() Uint128 {
 	randomLo := binary.LittleEndian.Uint64(idLastRandom[:8])
 	randomHi := binary.LittleEndian.Uint16(idLastRandom[8:])
 
-	// Increment the random bits as a uint80 together, checking for overflow.
-	// Go defines unsigned arithmetic to wrap around on overflow by default so check for zero.
+	// Increment the random bits as a uint80 together.
+	// If the random bits wrap, increment the timestamp.
 	randomLo += 1
 	if randomLo == 0 {
 		randomHi += 1
 		if randomHi == 0 {
-			idMutex.Unlock()
-			panic("random bits overflow on monotonic increment")
+			timestamp += 1
+			idLastTimestamp = timestamp
+
+			if timestamp == 1<<48 {
+				panic("timestamp overflow")
+			}
 		}
 	}
 

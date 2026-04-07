@@ -209,13 +209,17 @@ public enum UInt128 {
             randomHi = random.getShort();
 
             // Increment the u80 stored in idLastRandom using a u64 increment then u16 increment.
-            // Throws an exception if the entire u80 represented with both overflows.
+            // If both overflow, increment timestamp too.
             // In Java, all arithmetic wraps around on overflow by default so check for zero.
             randomLo += 1;
             if (randomLo == 0) {
                 randomHi += 1;
                 if (randomHi == 0) {
-                    throw new ArithmeticException("Random bits overflow on monotonic increment");
+                    timestamp += 1;
+                    idLastTimestamp = timestamp;
+                    if (timestamp == 1 << 48) {
+                        throw new ArithmeticException("Timestamp overflow on monotonic increment");
+                    }
                 }
             }
 

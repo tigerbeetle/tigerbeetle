@@ -207,15 +207,20 @@ export function id(): bigint {
   // Increment the u80 in idLastBuffer using carry arithmetic on u32s (as JS doesn't have fast u64).
   const littleEndian = true
   const randomLo32 = idLastBuffer.getUint32(0, littleEndian) + 1
-  const randomHi32 = idLastBuffer.getUint32(4, littleEndian) + (randomLo32 > 0xFFFFFFFF ? 1 : 0)
-  const randomHi16 = idLastBuffer.getUint16(8, littleEndian) + (randomHi32 > 0xFFFFFFFF ? 1 : 0)
+  const randomHi32 = idLastBuffer.getUint32(4, littleEndian) + (randomLo32 > 0xFFFF_FFFF ? 1 : 0)
+  const randomHi16 = idLastBuffer.getUint16(8, littleEndian) + (randomHi32 > 0xFFFF_FFFF ? 1 : 0)
   if (randomHi16 > 0xFFFF) {
-    throw new Error('random bits overflow on monotonic increment')
+    timestamp += 1
+    idLastTimestamp = timestamp
+
+    if (timestamp === 0x1_0000_0000_0000) {
+        throw new Error('timestamp overflow on monotonic increment')
+    }
   }
 
   // Store the incremented random monotonic and the timestamp into the buffer.
-  idLastBuffer.setUint32(0, randomLo32 & 0xFFFFFFFF, littleEndian)
-  idLastBuffer.setUint32(4, randomHi32 & 0xFFFFFFFF, littleEndian)
+  idLastBuffer.setUint32(0, randomLo32 & 0xFFFF_FFFF, littleEndian)
+  idLastBuffer.setUint32(4, randomHi32 & 0xFFFF_FFFF, littleEndian)
   idLastBuffer.setUint16(8, randomHi16, littleEndian) // No need to mask since checked above.
   idLastBuffer.setUint16(10, timestamp & 0xFFFF, littleEndian) // timestamp lo.
   idLastBuffer.setUint32(12, (timestamp / 0x10000) | 0, littleEndian) // timestamp hi.

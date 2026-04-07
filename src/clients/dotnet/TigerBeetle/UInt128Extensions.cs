@@ -151,7 +151,7 @@ public static class ID
             randomHi = BitConverter.ToUInt16(lastRandom.Slice(8));
 
             // Increment the u80 stored in lastRandom using a u64 increment then u16 increment.
-            // Throws an exception if the entire u80 represented with both overflows.
+            // If both overflow, increment timestamp too.
             // We rely on unsigned arithmetic wrapping on overflow by detecting for zero after inc.
             // Unsigned types wrap by default but can be overridden by compiler flag so be explicit.
             unchecked
@@ -162,7 +162,12 @@ public static class ID
                     randomHi += 1;
                     if (randomHi == 0)
                     {
-                        throw new OverflowException("Random bits overflow on monotonic increment");
+                        timestamp += 1;
+                        idLastTimestamp = timestamp;
+                        if (timestamp == 1 << 48)
+                        {
+                            throw new OverflowException("Timestamp bits overflow on monotonic increment");
+                        }
                     }
                 }
             }
