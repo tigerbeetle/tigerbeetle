@@ -255,7 +255,18 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.tree_init, .manifest_log_open);
 
             env.tree.open_commence(&env.manifest_log);
-            env.manifest_log.open(manifest_log_open_event, manifest_log_open_callback);
+            // In production this slice is borrowed from `Forest.radix_buffer`; here we own it.
+            const tables_removed_scratch = try gpa.alloc(
+                u8,
+                ManifestLog.tables_removed_scratch_size(table_count_max),
+            );
+            defer gpa.free(tables_removed_scratch);
+
+            env.manifest_log.open(
+                tables_removed_scratch,
+                manifest_log_open_event,
+                manifest_log_open_callback,
+            );
 
             env.tick_until_state_change(.manifest_log_open, .fuzzing);
             env.tree.open_complete();

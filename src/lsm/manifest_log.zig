@@ -55,6 +55,18 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         pub const OpenEvent = *const fn (manifest_log: *ManifestLog, table: *const TableInfo) void;
 
+        /// Bytes required to back `tables_removed.ensureTotalCapacity(forest_table_count_max)`.
+        /// Used by `Forest.open()` and the LSM fuzzers to size the scratch slice they pass to
+        /// `open()`. Returns a conservative power-of-two upper bound (16 bytes per slot, 80%
+        /// load factor) so the FBA cannot run out at construction time.
+        pub fn tables_removed_scratch_size(forest_table_count_max: u32) usize {
+            assert(forest_table_count_max > 0);
+            const minimum: u64 = (@as(u64, forest_table_count_max) * 5 + 3) / 4;
+            var cap: u64 = 1;
+            while (cap < minimum) cap <<= 1;
+            return @as(usize, @intCast(cap)) * 16;
+        }
+
         const Write = struct {
             manifest_log: *ManifestLog,
             write: Grid.Write = undefined,
@@ -134,10 +146,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// not yet been encountered. Given that the maximum number of tables in the forest at any
         /// given moment is `forest_table_count_max`, there are likewise at most
         /// `forest_table_count_max` "unpaired" removes to track.
-        // TODO(Optimization) This memory (~35MiB) is only needed during open() – maybe borrow it
-        // from the grid cache or node pool instead so that we don't pay for it during normal
-        // operation.
+        ///
+        /// Only live during `open()`. Its backing storage comes from `tables_removed_fba`, which
+        /// the caller of `open()` installs over a scratch slice (in production borrowed from
+        /// `Forest.radix_buffer`, idle while `open()` runs).
         tables_removed: TablesRemoved,
+        tables_removed_fba: std.heap.FixedBufferAllocator,
 
         pub fn init(
             manifest_log: *ManifestLog,
@@ -155,7 +169,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .blocks = undefined,
                 .writes = undefined,
                 .table_extents = undefined,
-                .tables_removed = undefined,
+                .tables_removed = .{},
+                .tables_removed_fba = std.heap.FixedBufferAllocator.init(&.{}),
             };
 
             inline for (std.meta.fields(Pace)) |pace_field| {
@@ -169,7 +184,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.log_block_checksums =
                 try RingBufferType(u128, .slice).init(allocator, manifest_log.pace.log_blocks_max);
             errdefer manifest_log.log_block_checksums.deinit(allocator);
-
             manifest_log.log_block_addresses =
                 try RingBufferType(u64, .slice).init(allocator, manifest_log.pace.log_blocks_max);
             errdefer manifest_log.log_block_addresses.deinit(allocator);
@@ -208,17 +222,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.forest_table_count_max + 1,
             );
             errdefer manifest_log.table_extents.deinit(allocator);
-
-            manifest_log.tables_removed = TablesRemoved{};
-            try manifest_log.tables_removed.ensureTotalCapacity(
-                allocator,
-                manifest_log.forest_table_count_max,
-            );
-            errdefer manifest_log.tables_removed.deinit(allocator);
         }
 
         pub fn deinit(manifest_log: *ManifestLog, allocator: mem.Allocator) void {
-            manifest_log.tables_removed.deinit(allocator);
             manifest_log.table_extents.deinit(allocator);
             allocator.free(manifest_log.writes);
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
@@ -230,6 +236,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         pub fn reset(manifest_log: *ManifestLog) void {
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
+            assert(manifest_log.tables_removed.count() == 0);
 
             manifest_log.grid.trace.cancel(.compact_manifest);
 
@@ -237,7 +244,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.log_block_addresses.clear();
             for (manifest_log.blocks.buffer) |block| @memset(block, 0);
             manifest_log.table_extents.clearRetainingCapacity();
-            manifest_log.tables_removed.clearRetainingCapacity();
 
             manifest_log.* = .{
                 .superblock = manifest_log.superblock,
@@ -249,7 +255,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .blocks = .{ .buffer = manifest_log.blocks.buffer },
                 .writes = manifest_log.writes,
                 .table_extents = manifest_log.table_extents,
-                .tables_removed = manifest_log.tables_removed,
+                .tables_removed = .{},
+                .tables_removed_fba = std.heap.FixedBufferAllocator.init(&.{}),
             };
         }
 
@@ -262,7 +269,15 @@ pub fn ManifestLogType(comptime Storage: type) type {
         // TODO(Optimization): Accumulate tables unordered, then sort all at once to splice into the
         // ManifestLevels' SegmentedArrays. (Constructing SegmentedArrays by repeated inserts is
         // expensive.)
-        pub fn open(manifest_log: *ManifestLog, event: OpenEvent, callback: Callback) void {
+        //
+        // `tables_removed_scratch` is a caller-owned slice that backs `tables_removed`'s hash
+        // table for the duration of `open()`. Size it via `tables_removed_scratch_size()`.
+        pub fn open(
+            manifest_log: *ManifestLog,
+            tables_removed_scratch: []u8,
+            event: OpenEvent,
+            callback: Callback,
+        ) void {
             assert(!manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
@@ -275,7 +290,15 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.entry_count == 0);
             assert(manifest_log.table_extents.count() == 0);
             assert(manifest_log.tables_removed.count() == 0);
+            assert(manifest_log.tables_removed_fba.buffer.len == 0);
 
+            manifest_log.tables_removed_fba =
+                std.heap.FixedBufferAllocator.init(tables_removed_scratch);
+            manifest_log.tables_removed = .{};
+            manifest_log.tables_removed.ensureTotalCapacity(
+                manifest_log.tables_removed_fba.allocator(),
+                manifest_log.forest_table_count_max,
+            ) catch @panic("manifest_log: tables_removed scratch undersized");
             manifest_log.open_event = event;
             manifest_log.reading = true;
             manifest_log.read_callback = callback;
@@ -439,6 +462,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.log_block_checksums.count,
                 manifest_log.table_extents.count(),
             });
+
+            // Any orphaned removes still in the set correspond to tables whose insert lived
+            // in a manifest block older than `manifest_oldest_address`, and are discarded.
+            assert(manifest_log.tables_removed.count() <= manifest_log.forest_table_count_max);
+            manifest_log.tables_removed = .{};
+            manifest_log.tables_removed_fba = std.heap.FixedBufferAllocator.init(&.{});
 
             const callback = manifest_log.read_callback.?;
             manifest_log.opened = true;

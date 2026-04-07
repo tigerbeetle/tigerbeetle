@@ -267,6 +267,9 @@ const Environment = struct {
     manifest_log_model: ManifestLogModel,
     manifest_log_opening: ?ManifestLogModel.TableMap,
     pending: u32,
+    // In production this slice is borrowed from `Forest.radix_buffer`; here we own it.
+    // Reused by both `manifest_log` and `manifest_log_verify`, whose opens never overlap.
+    tables_removed_scratch: []u8,
 
     fn init(
         env: *Environment, // In-place construction for stable addresses.
@@ -344,11 +347,19 @@ const Environment = struct {
         fields_initialized += 1;
         env.pending = 0;
 
+        fields_initialized += 1;
+        env.tables_removed_scratch = try gpa.alloc(
+            u8,
+            ManifestLog.tables_removed_scratch_size(manifest_log_compaction_pace.tables_max),
+        );
+        errdefer gpa.free(env.tables_removed_scratch);
+
         comptime assert(fields_initialized == std.meta.fields(@This()).len);
     }
 
     fn deinit(env: *Environment) void {
         assert(env.manifest_log_opening == null);
+        env.gpa.free(env.tables_removed_scratch);
         env.manifest_log_model.deinit();
         env.manifest_log_verify.deinit(env.gpa);
         env.manifest_log.deinit(env.gpa);
@@ -373,7 +384,7 @@ const Environment = struct {
         assert(env.pending == 0);
 
         env.pending += 1;
-        env.manifest_log.open(open_event, open_callback);
+        env.manifest_log.open(env.tables_removed_scratch, open_event, open_callback);
     }
 
     fn open_event(manifest_log: *ManifestLog, table: *const TableInfo) void {
@@ -532,7 +543,11 @@ const Environment = struct {
         }
 
         env.pending += 1;
-        env.manifest_log_verify.open(verify_manifest_open_event, verify_manifest_open_callback);
+        env.manifest_log_verify.open(
+            env.tables_removed_scratch,
+            verify_manifest_open_event,
+            verify_manifest_open_callback,
+        );
         env.wait(&env.manifest_log_verify);
 
         try std.testing.expect(hash_map_equals(

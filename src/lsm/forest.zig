@@ -211,6 +211,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub const manifest_log_blocks_released_half_bar_max =
             manifest_log_compaction_pace.half_bar_compact_blocks_max;
 
+        // Bytes that `ManifestLog.open()` needs for its `tables_removed` FBA, which we lend it
+        // for the duration of `open()` from `radix_buffer`. The two uses do not overlap in time
+        // (compaction does not start until after `open()` completes), so they share one
+        // allocation. See `ManifestLog.tables_removed_scratch_size`.
+        const tables_removed_fba_size_bytes: usize =
+            ManifestLog.tables_removed_scratch_size(manifest_log_compaction_pace.tables_max);
+
         pub const Options = struct {
             node_count: u32,
             /// The amount of blocks allocated for compactions. Compactions will be deterministic
@@ -223,7 +230,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         const ResourcePool = ResourcePoolType(Grid);
 
         progress: ?union(enum) {
-            open: struct { callback: Callback },
+            open: struct {
+                callback: Callback,
+                // Scratch slice borrowed from `radix_buffer` for the lifetime of
+                // `manifest_log.open()`, released when the open callback fires.
+                tables_removed_scratch: []u8,
+            },
             checkpoint: struct {
                 callback: Callback,
                 manifest_log_done: bool,
@@ -308,7 +320,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     assert(size > 0);
                     size_max = @max(size_max, size);
                 }
-                break :blk size_max;
+                break :blk @max(size_max, tables_removed_fba_size_bytes);
             };
 
             forest.radix_buffer = try .init(allocator, radix_buffer_size);
@@ -382,13 +394,24 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub fn open(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
 
-            forest.progress = .{ .open = .{ .callback = callback } };
+            // Released in `manifest_log_open_callback` once `manifest_log.open()` is done.
+            const tables_removed_scratch =
+                forest.radix_buffer.acquire(u8, tables_removed_fba_size_bytes);
+
+            forest.progress = .{ .open = .{
+                .callback = callback,
+                .tables_removed_scratch = tables_removed_scratch,
+            } };
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).open_commence(&forest.manifest_log);
             }
 
-            forest.manifest_log.open(manifest_log_open_event, manifest_log_open_callback);
+            forest.manifest_log.open(
+                tables_removed_scratch,
+                manifest_log_open_event,
+                manifest_log_open_callback,
+            );
         }
 
         fn manifest_log_open_event(
@@ -415,6 +438,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
+
+            forest.radix_buffer.release(u8, forest.progress.?.open.tables_removed_scratch);
+
             forest.verify_tables_recovered();
 
             inline for (std.meta.fields(Grooves)) |field| {
