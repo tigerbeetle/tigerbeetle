@@ -349,6 +349,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         pub fn deinit(forest: *Forest, allocator: mem.Allocator) void {
+            // If we are torn down mid-open (e.g. a replica crash in the simulator,
+            // or shutdown before `manifest_log.open()` completes), release the
+            // scratch slice we borrowed from `radix_buffer` so that
+            // `radix_buffer.deinit`'s `state == .free` assertion holds.
+            if (forest.progress) |progress| switch (progress) {
+                .open => |o| forest.radix_buffer.release(u8, o.tables_removed_scratch),
+                else => {},
+            };
+
             inline for (std.meta.fields(Grooves)) |field| {
                 const Groove = field.type;
                 const groove: *Groove = &@field(forest.grooves, field.name);
@@ -365,6 +374,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub fn reset(forest: *Forest) void {
             // Components using the node_pool must release all nodes they acquired upon reset.
             defer assert(forest.node_pool.free.count() == forest.node_pool.free.bit_length);
+
+            // If a sync recovery interrupts an in-progress `open()`, the scratch slice we
+            // borrowed from `radix_buffer` for `manifest_log.tables_removed` was never returned
+            // by the open callback. Release it here so the next `open()` can acquire again.
+            if (forest.progress) |progress| switch (progress) {
+                .open => |o| forest.radix_buffer.release(u8, o.tables_removed_scratch),
+                else => {},
+            };
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).reset();
@@ -394,7 +411,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub fn open(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
 
-            // Released in `manifest_log_open_callback` once `manifest_log.open()` is done.
+            // Released in `manifest_log_open_callback` once `manifest_log.open()` is done,
+            // or in `reset()` if a sync recovery interrupts the open before then.
             const tables_removed_scratch =
                 forest.radix_buffer.acquire(u8, tables_removed_fba_size_bytes);
 
