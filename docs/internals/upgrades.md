@@ -31,10 +31,8 @@ mv /usr/bin/tigerbeetle /usr/bin/tigerbeetle-old
 mv /usr/bin/tigerbeetle-new /usr/bin/tigerbeetle
 ```
 
-When the primary determines that enough[^1] replicas have the new binary, it'll [coordinate the
+When the primary determines that all replicas have the new binary, it'll [coordinate the
  upgrade](https://github.com/tigerbeetle/tigerbeetle/pull/1670).
-
-[^1]: Currently the total number of replicas, less one.
 
 There are three main parts to multiversion binaries: building, monitoring and executing, with
 platform specific parts in each.
