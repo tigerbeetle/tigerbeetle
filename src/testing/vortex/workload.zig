@@ -1,8 +1,5 @@
-//! This workload runs in an loop, generating and executing operations on a cluster through a
-//! _driver_.
-//!
-//! Any successful operations are reconciled with a model, tracking what accounts exist. Future
-//! operations are generated based on this model.
+//! This workload generates requests, and reconciles replies with a model, tracking account
+//! balances.
 //!
 //! After every operation, all accounts are queried, and basic invariants are checked.
 //!
@@ -22,502 +19,263 @@
 //!      result enum value (see `src/tigerbeetle.zig`)
 //! 3. The workload receives the results, and expects them to be of the same operation type as
 //!    originally requested.
-//!
-//! Additionally, the workload itself sends `Progress` events on its stdout back to the supervisor.
-//! This is used for tracing and liveness checks.
 
 const std = @import("std");
 const stdx = @import("stdx");
 const tb = @import("../../tigerbeetle.zig");
 const Operation = tb.Operation;
-const RingBufferType = stdx.RingBufferType;
 const ratio = stdx.PRNG.ratio;
+const Release = @import("../../multiversion.zig").Release;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
 const testing = std.testing;
 
 const events_count_max = 8189;
-const pending_transfers_count_max = 1024;
 const accounts_count_max = 128;
 
-const DriverStdio = struct { input: std.fs.File, output: std.fs.File };
+pub const Command = enum {
+    create_accounts,
+    create_accounts_sparse,
+    create_transfers,
+    create_transfers_sparse,
+    lookup_accounts,
 
-pub fn main(
-    allocator: std.mem.Allocator,
-    driver: *const DriverStdio,
-) !void {
-    var accounts_buffer = std.mem.zeroes([accounts_count_max]tb.Account);
-
-    var model = Model{
-        .accounts = std.ArrayListUnmanaged(tb.Account).initBuffer(&accounts_buffer),
-    };
-    defer model.pending_transfers.deinit(allocator);
-
-    try model.pending_transfers.ensureTotalCapacity(allocator, pending_transfers_count_max);
-
-    const seed = std.crypto.random.int(u64);
-    var prng = stdx.PRNG.from_seed(seed);
-
-    const stdout = std.io.getStdOut().writer().any();
-
-    for (0..std.math.maxInt(u64)) |i| {
-        const command_timestamp_start: u64 = @intCast(std.time.microTimestamp());
-        const command = random_command(&prng, &model);
-        const result = try execute(command, driver) orelse break;
-        try reconcile(result, &command, &model);
-        const command_timestamp_end: u64 = @intCast(std.time.microTimestamp());
-        try progress_write(stdout, .{
-            .event_count = command.event_count(),
-            .timestamp_start_micros = command_timestamp_start,
-            .timestamp_end_micros = command_timestamp_end,
-        });
-
-        const query_timestamp_start: u64 = @intCast(std.time.microTimestamp());
-        const query = lookup_all_accounts(&model);
-        const query_result = try execute(query, driver) orelse break;
-        try reconcile(query_result, &query, &model);
-        const query_timestamp_end: u64 = @intCast(std.time.microTimestamp());
-        try progress_write(stdout, .{
-            .event_count = query.event_count(),
-            .timestamp_start_micros = query_timestamp_start,
-            .timestamp_end_micros = query_timestamp_end,
-        });
-
-        log.info(
-            "accounts created = {d}, transfers = {d}, pending transfers = {d}, commands run = {d}",
-            .{
-                model.accounts.items.len,
-                model.transfers_created,
-                model.pending_transfers.count(),
-                i + 1,
-            },
-        );
-    }
-}
-
-const Command = union(enum) {
-    create_accounts: []tb.Account,
-    create_transfers: []tb.Transfer,
-    lookup_all_accounts: []u128,
-    lookup_latest_transfers: []u128,
-
-    fn event_count(command: Command) usize {
+    pub fn operation(command: Command) Operation {
         return switch (command) {
-            .create_accounts => |entries| entries.len,
-            .create_transfers => |entries| entries.len,
-            .lookup_all_accounts => |entries| entries.len,
-            .lookup_latest_transfers => |entries| entries.len,
+            .create_accounts => .create_accounts,
+            .create_transfers => .create_transfers,
+            .create_accounts_sparse => .deprecated_create_accounts_sparse,
+            .create_transfers_sparse => .deprecated_create_transfers_sparse,
+            .lookup_accounts => .lookup_accounts,
         };
     }
 };
-
-const CommandBuffers = FixedSizeBuffersType(Command);
-var command_buffers: CommandBuffers = std.mem.zeroes(CommandBuffers);
-
-const Result = union(enum) {
-    create_accounts: []tb.CreateAccountResult,
-    create_transfers: []tb.CreateTransferResult,
-    lookup_all_accounts: []tb.Account,
-    lookup_latest_transfers: []tb.Transfer,
-};
-const ResultBuffers = FixedSizeBuffersType(Result);
-var result_buffers: ResultBuffers = std.mem.zeroes(ResultBuffers);
-
-fn execute(command: Command, driver: *const DriverStdio) !?Result {
-    switch (command) {
-        inline else => |events, tag| {
-            const operation = comptime operation_from_command(tag);
-            try send(driver, operation, events);
-
-            const buffer = @field(result_buffers, @tagName(tag))[0..events.len];
-            const results = receive(driver, operation, buffer) catch |err| {
-                switch (err) {
-                    error.EndOfStream => return null,
-                    else => return err,
-                }
-            };
-            return @unionInit(Result, @tagName(tag), results);
-        },
-    }
-}
-
-/// State machine operations and Vortex workload commands are not 1:1. This function maps the
-/// enum values from command to operation.
-fn operation_from_command(tag: std.meta.Tag(Command)) Operation {
-    return switch (tag) {
-        .create_accounts => .create_accounts,
-        .create_transfers => .create_transfers,
-        .lookup_all_accounts => .lookup_accounts,
-        .lookup_latest_transfers => .lookup_transfers,
-    };
-}
-
-fn reconcile(result: Result, command: *const Command, model: *Model) !void {
-    switch (result) {
-        .create_accounts => |account_results| {
-            const accounts = command.create_accounts;
-            assert(account_results.len == accounts.len);
-
-            for (
-                accounts,
-                account_results,
-                0..,
-            ) |account, account_result, index| {
-                if (account_result.status == .created) {
-                    model.accounts.appendAssumeCapacity(account);
-                } else {
-                    log.err("got status {s} for event {d}: {any}", .{
-                        @tagName(account_result.status),
-                        index,
-                        account,
-                    });
-                    return error.TestFailed;
-                }
-            }
-        },
-        .create_transfers => |transfer_results| {
-            const transfers = command.create_transfers;
-            assert(transfer_results.len == transfers.len);
-
-            // Collect all successful transfer IDs.
-            var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
-
-            for (
-                transfers,
-                transfer_results,
-                0..,
-            ) |transfer, transfer_result, index| {
-                // Check that linked transfers fail together.
-                if (index > 0) {
-                    const preceding_transfer = transfers[index - 1];
-                    if (preceding_transfer.flags.linked) {
-                        const preceding_entry = transfer_results[index - 1];
-                        try testing.expect(preceding_entry.status != .created);
-                    }
-                }
-
-                // No further validation needed for failed transfers.
-                if (transfer_result.status != .created) {
-                    continue;
-                }
-
-                successful_transfer_ids.push(transfer.id);
-
-                if (transfer.flags.pending) {
-                    try testing.expect(!model.pending_transfers.contains(transfer.id));
-                    assert(model.pending_transfers.count() <= pending_transfers_count_max);
-                    model.pending_transfers.putAssumeCapacity(transfer.id, {});
-                }
-
-                if (transfer.flags.void_pending_transfer or transfer.flags.post_pending_transfer) {
-                    try testing.expect(model.pending_transfers.remove(transfer.id));
-                }
-
-                try testing.expect(model.account_exists(transfer.debit_account_id));
-                try testing.expect(model.account_exists(transfer.credit_account_id));
-            }
-
-            // Drop the oldest transfer IDs and add new ones.
-            for (0..@min(successful_transfer_ids.count(), model.latest_transfers.count)) |_| {
-                model.latest_transfers.retreat_tail();
-            }
-            try model.latest_transfers.push_slice(successful_transfer_ids.const_slice());
-
-            model.transfers_created += transfers.len;
-        },
-        .lookup_all_accounts => |accounts_found| {
-            // Get all known account ids.
-            var id_buffer: [accounts_count_max]u128 = undefined;
-            const account_ids_known = model.account_ids(id_buffer[0..]);
-
-            // Check that timestamps are monotonically increasing.
-            var timestamp_max: u64 = 0;
-            for (accounts_found) |account| {
-                if (account.timestamp <= timestamp_max) {
-                    log.err(
-                        "account {d} timestamp {d} is not greater than previous timestamp {d}",
-                        .{ account.id, account.timestamp, timestamp_max },
-                    );
-                    return error.TestFailed;
-                }
-                timestamp_max = account.timestamp;
-            }
-
-            // Extract and sort all found account ids.
-            var account_ids_found_buffer: [accounts_count_max]u128 = undefined;
-            for (accounts_found, 0..) |account, i| {
-                account_ids_found_buffer[i] = account.id;
-            }
-            const account_ids_found = account_ids_found_buffer[0..accounts_found.len];
-
-            // All known accounts are found by the query, and no others.
-            try testing.expectEqualSlices(u128, account_ids_known, account_ids_found);
-
-            try testing.expectEqual(0, debits_credits_difference(accounts_found));
-        },
-        .lookup_latest_transfers => |transfers_found| {
-            // Check that timestamps are monotonically increasing.
-            var timestamp_max: u64 = 0;
-            for (transfers_found) |transfer| {
-                if (transfer.timestamp <= timestamp_max) {
-                    log.err(
-                        "transfer {d} timestamp {d} is not greater than previous timestamp {d}",
-                        .{ transfer.id, transfer.timestamp, timestamp_max },
-                    );
-                    return error.TestFailed;
-                }
-                timestamp_max = transfer.timestamp;
-            }
-        },
-    }
-}
-
-const LatestTransfers = RingBufferType(u128, .{ .array = events_count_max });
 
 /// Tracks information about the accounts and transfers created by the workload.
-const Model = struct {
-    accounts: std.ArrayListUnmanaged(tb.Account),
+pub const Model = struct {
+    accounts: std.AutoArrayHashMapUnmanaged(u128, tb.Account),
     transfers_created: u64 = 0,
-    latest_transfers: LatestTransfers = LatestTransfers.init(),
-    pending_transfers: std.AutoHashMapUnmanaged(u128, void) = .{},
 
-    // O(n) lookup, but it's limited by `accounts_count_max`, so it's OK for this test.
-    fn account_exists(model: @This(), id: u128) bool {
-        for (model.accounts.items) |account| {
-            if (account.id == id) return true;
-        }
-        return false;
+    pub fn init(allocator: std.mem.Allocator) !Model {
+        var accounts = std.AutoArrayHashMapUnmanaged(u128, tb.Account).empty;
+        errdefer accounts.deinit(allocator);
+
+        try accounts.ensureTotalCapacity(allocator, accounts_count_max);
+        return .{ .accounts = accounts };
     }
 
-    /// Returns a slice of the account ids known by the model.
-    fn account_ids(model: @This(), buffer: []u128) []u128 {
-        assert(buffer.len >= model.accounts.items.len);
-        const ids = buffer[0..model.accounts.items.len];
-        for (model.accounts.items, 0..) |account, i| {
-            ids[i] = account.id;
-        }
-        return ids;
-    }
-};
-
-fn debits_credits_difference(accounts: []tb.Account) i128 {
-    var balance: i128 = 0;
-    for (accounts) |account| {
-        balance += @intCast(account.debits_posted);
-        balance -= @intCast(account.credits_posted);
-    }
-    return balance;
-}
-
-fn random_command(prng: *stdx.PRNG, model: *const Model) Command {
-    const command_tag = prng.enum_weighted(std.meta.Tag(Command), .{
-        .create_accounts = if (model.accounts.items.len < accounts_count_max) 1 else 0,
-        .create_transfers = if (model.accounts.items.len > 2) 10 else 0,
-        .lookup_all_accounts = 0,
-        .lookup_latest_transfers = 5,
-    });
-    switch (command_tag) {
-        .create_accounts => return random_create_accounts(prng, model),
-        .create_transfers => return random_create_transfers(prng, model),
-        .lookup_latest_transfers => return lookup_latest_transfers(model),
-        .lookup_all_accounts => unreachable,
-    }
-}
-
-fn random_create_accounts(prng: *stdx.PRNG, model: *const Model) Command {
-    // NOTE: we're not generating closed or imported accounts yet.
-
-    const events_count = prng.range_inclusive(
-        usize,
-        1,
-        accounts_count_max - model.accounts.items.len,
-    );
-    assert(events_count <= events_count_max);
-
-    var events = command_buffers.create_accounts[0..events_count];
-    for (events, 0..) |*event, i| {
-        var flags = std.mem.zeroes(tb.AccountFlags);
-
-        flags.history = prng.chance(ratio(1, 10));
-
-        if (prng.chance(ratio(1, 10))) {
-            flags.debits_must_not_exceed_credits = prng.boolean();
-            flags.credits_must_not_exceed_debits = !flags.debits_must_not_exceed_credits;
-        }
-
-        // The last account in a batch can't be linked.
-        flags.linked = i < events_count - 1 and prng.chance(ratio(1, 100));
-
-        event.* = std.mem.zeroInit(tb.Account, .{
-            .id = prng.range_inclusive(u128, 1, std.math.maxInt(u128)),
-            .ledger = 1,
-            .code = prng.range_inclusive(u16, 1, 100),
-            .flags = flags,
-        });
+    pub fn deinit(model: *Model, allocator: std.mem.Allocator) void {
+        model.accounts.deinit(allocator);
     }
 
-    return .{ .create_accounts = events[0..events_count] };
-}
+    pub fn reconcile(
+        model: *Model,
+        command: Command,
+        request: []const u8,
+        result: []const u8,
+    ) !void {
+        return switch (command) {
+            .create_accounts => model.reconcile_create_accounts(request, result),
+            .create_accounts_sparse => model.reconcile_create_accounts_sparse(request, result),
+            .create_transfers => model.reconcile_create_transfers(request, result),
+            .create_transfers_sparse => model.reconcile_create_transfers_sparse(request, result),
+            .lookup_accounts => model.reconcile_lookup_accounts(request, result),
+        };
+    }
 
-fn random_create_transfers(prng: *stdx.PRNG, model: *const Model) Command {
-    const events_count = prng.range_inclusive(usize, 1, events_count_max);
-    assert(events_count <= events_count_max);
+    fn reconcile_create_accounts(model: *Model, request: []const u8, result: []const u8) !void {
+        const accounts = std.mem.bytesAsSlice(tb.Account, request);
+        const account_results = std.mem.bytesAsSlice(tb.CreateAccountResult, result);
+        assert(account_results.len == accounts.len);
 
-    var buffer = command_buffers.create_transfers[0..events_count];
-    for (buffer, 0..) |*event, i| {
-        var flags = std.mem.zeroes(tb.TransferFlags);
-        var pending_id: u128 = 0;
-        var code = prng.range_inclusive(u16, 1, 100);
-
-        var debit_account_id = model.accounts.items[prng.index(model.accounts.items)].id;
-        var credit_account_id: u128 = 0;
-        while (credit_account_id == 0 or credit_account_id == debit_account_id) {
-            credit_account_id = model.accounts.items[prng.index(model.accounts.items)].id;
-        }
-
-        if (prng.chance(ratio(1, 10)) and model.pending_transfers.count() > 0) {
-            flags.post_pending_transfer = prng.boolean();
-            flags.void_pending_transfer = !flags.post_pending_transfer;
-        } else if (prng.chance(ratio(1, 100_000))) {
-            flags.closing_debit = prng.boolean();
-            flags.closing_credit = !flags.closing_debit;
-        } else {
-            inline for (.{ .pending, .balancing_debit, .balancing_credit }) |flag| {
-                @field(flags, @tagName(flag)) = prng.boolean();
+        for (accounts, account_results, 0..) |account, account_result, index| {
+            if (account_result.status == .created) {
+                model.accounts.putAssumeCapacityNoClobber(account.id, account);
+            } else {
+                log.err("got status {s} for event {d}: {any}", .{
+                    @tagName(account_result.status),
+                    index,
+                    account,
+                });
+                return error.TestFailed;
             }
         }
+    }
 
-        // The last transfer in a batch can't be linked.
-        flags.linked = i < events_count - 1 and prng.chance(ratio(1, 100));
+    fn reconcile_create_accounts_sparse(
+        model: *Model,
+        request: []const u8,
+        result: []const u8,
+    ) !void {
+        const accounts = std.mem.bytesAsSlice(tb.Account, request);
+        const account_results = std.mem.bytesAsSlice(tb.CreateAccountErrorResult, result);
+        assert(account_results.len == 0);
 
-        if (flags.post_pending_transfer or flags.void_pending_transfer) {
-            pending_id = random_pending_transfer(prng, &model.pending_transfers);
-            code = 0;
-            debit_account_id = 0;
-            credit_account_id = 0;
+        for (accounts) |account| {
+            model.accounts.putAssumeCapacityNoClobber(account.id, account);
+        }
+    }
+
+    fn reconcile_create_transfers(model: *Model, request: []const u8, result: []const u8) !void {
+        const transfers = std.mem.bytesAsSlice(tb.Transfer, request);
+        const transfer_results = std.mem.bytesAsSlice(tb.CreateTransferResult, result);
+        assert(transfer_results.len == transfers.len);
+
+        for (transfers, transfer_results) |transfer, transfer_result| {
+            // No further validation needed for failed transfers.
+            if (transfer_result.status != .created) {
+                continue;
+            }
+
+            const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
+            const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
+            debit_account.debits_posted += transfer.amount;
+            credit_account.credits_posted += transfer.amount;
         }
 
-        event.* = std.mem.zeroInit(tb.Transfer, .{
-            // Use monotonically increasing IDs from 1 for easier debugging.
-            .id = model.transfers_created + i + 1,
-            .ledger = 1,
-            .debit_account_id = debit_account_id,
-            .credit_account_id = credit_account_id,
-            .amount = prng.int_inclusive(u128, 1 << 32),
-            .code = code,
-            .pending_id = pending_id,
-        });
+        model.transfers_created += transfers.len;
     }
 
-    return .{ .create_transfers = buffer[0..events_count] };
-}
+    fn reconcile_create_transfers_sparse(
+        model: *Model,
+        request: []const u8,
+        result: []const u8,
+    ) !void {
+        const transfers = std.mem.bytesAsSlice(tb.Transfer, request);
+        const transfer_results = std.mem.bytesAsSlice(tb.CreateTransferErrorResult, result);
+        assert(transfer_results.len == 0);
 
-fn random_pending_transfer(
-    prng: *stdx.PRNG,
-    pending_transfers: *const std.AutoHashMapUnmanaged(u128, void),
-) u128 {
-    assert(pending_transfers.count() > 0);
-    var pick = prng.int_inclusive(usize, pending_transfers.count() - 1);
-    var iterator = pending_transfers.keyIterator();
-    while (iterator.next()) |item| {
-        if (pick == 0) return item.*;
-        pick -= 1;
-    }
-    unreachable;
-}
+        for (transfers) |transfer| {
+            const debit_account = model.accounts.getPtr(transfer.debit_account_id).?;
+            const credit_account = model.accounts.getPtr(transfer.credit_account_id).?;
+            debit_account.debits_posted += transfer.amount;
+            credit_account.credits_posted += transfer.amount;
+        }
 
-fn lookup_all_accounts(model: *const Model) Command {
-    const events_count = model.accounts.items.len;
-    var buffer = command_buffers.lookup_all_accounts[0..events_count];
-    for (buffer, model.accounts.items) |*event, account| {
-        event.* = account.id;
-    }
-    return .{ .lookup_all_accounts = buffer[0..events_count] };
-}
-
-fn lookup_latest_transfers(model: *const Model) Command {
-    const buffer = command_buffers.lookup_latest_transfers[0..model.latest_transfers.count];
-    var ids = model.latest_transfers.iterator();
-    var count: usize = 0;
-    while (ids.next()) |id| {
-        buffer[count] = id;
-        count += 1;
-    }
-    return .{ .lookup_latest_transfers = buffer };
-}
-
-/// Converts a union type, where each field is of a slice type, into a struct of arrays of the
-/// corresponding type, with the maximum count of driver events as its len. These buffers are used
-/// to hold commands and results in the workload loop.
-fn FixedSizeBuffersType(Union: type) type {
-    const union_fields = @typeInfo(Union).@"union".fields;
-    var struct_fields: [union_fields.len]std.builtin.Type.StructField = undefined;
-
-    var i = 0;
-    for (union_fields) |union_field| {
-        const info = @typeInfo(union_field.type);
-        const field_type = [events_count_max]info.pointer.child;
-        struct_fields[i] = .{
-            .name = union_field.name,
-            .type = field_type,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(field_type),
-        };
-        i += 1;
+        model.transfers_created += transfers.len;
     }
 
-    return @Type(.{
-        .@"struct" = .{
-            .is_tuple = false,
-            .fields = &struct_fields,
-            .layout = .auto,
-            .decls = &.{},
-        },
-    });
-}
+    fn reconcile_lookup_accounts(model: *Model, request: []const u8, result: []const u8) !void {
+        const account_ids = std.mem.bytesAsSlice(u128, request);
+        const accounts_found = std.mem.bytesAsSlice(tb.Account, result);
+        assert(accounts_found.len == account_ids.len);
 
-pub fn send(
-    driver: *const DriverStdio,
-    comptime operation: Operation,
-    events: []const operation.EventType(),
-) !void {
-    assert(events.len <= events_count_max);
-
-    const writer = driver.input.writer().any();
-
-    try writer.writeInt(u8, @intFromEnum(operation), .little);
-    try writer.writeInt(u32, @intCast(events.len), .little);
-
-    const bytes: []const u8 = std.mem.sliceAsBytes(events);
-    try writer.writeAll(bytes);
-}
-
-pub fn receive(
-    driver: *const DriverStdio,
-    comptime operation: Operation,
-    results: []operation.ResultType(),
-) ![]operation.ResultType() {
-    assert(results.len <= events_count_max);
-    const reader = driver.output.reader();
-
-    const results_count = try reader.readInt(u32, .little);
-    assert(results_count <= results.len);
-
-    const buf: []u8 = std.mem.sliceAsBytes(results[0..results_count]);
-    assert(try reader.readAtLeast(buf, buf.len) == buf.len);
-
-    return results[0..results_count];
-}
-
-/// A message written to stdout by the workload, communicating the progress it makes.
-pub const Progress = extern struct {
-    event_count: u64,
-    timestamp_start_micros: u64,
-    timestamp_end_micros: u64,
+        for (account_ids, accounts_found) |account_id, account| {
+            const account_expect = model.accounts.getPtr(account_id).?;
+            try testing.expectEqual(account.id, account_id);
+            try testing.expectEqual(account.debits_pending, account_expect.debits_pending);
+            try testing.expectEqual(account.debits_posted, account_expect.debits_posted);
+            try testing.expectEqual(account.credits_pending, account_expect.credits_pending);
+            try testing.expectEqual(account.credits_posted, account_expect.credits_posted);
+        }
+    }
 };
 
-fn progress_write(writer: std.io.AnyWriter, stats: Progress) !void {
-    try writer.writeAll(std.mem.asBytes(&stats));
-}
+pub const Generator = struct {
+    prng: stdx.PRNG,
+    release: Release,
+
+    pub const buffer_size = events_count_max * @max(@sizeOf(tb.Account), @sizeOf(tb.Account));
+
+    pub fn init(seed: u64, release: Release) Generator {
+        return .{
+            .prng = stdx.PRNG.from_seed(seed),
+            .release = release,
+        };
+    }
+
+    pub fn random_command(generator: *Generator, model: *const Model) Command {
+        // Mostly send create_transfers, to fill up the LSM.
+        const dense_create_release_min = Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
+        if (dense_create_release_min.value <= generator.release.value) {
+            return generator.prng.enum_weighted(Command, .{
+                .create_accounts = if (model.accounts.count() < accounts_count_max) 1 else 0,
+                .create_accounts_sparse = 0,
+                .create_transfers = if (model.accounts.count() > 2) 20 else 0,
+                .create_transfers_sparse = 0,
+                .lookup_accounts = if (model.accounts.count() > 0) 1 else 0,
+            });
+        } else {
+            return generator.prng.enum_weighted(Command, .{
+                .create_accounts = 0,
+                .create_accounts_sparse = if (model.accounts.count() < accounts_count_max) 1 else 0,
+                .create_transfers = 0,
+                .create_transfers_sparse = if (model.accounts.count() > 2) 20 else 0,
+                .lookup_accounts = if (model.accounts.count() > 0) 1 else 0,
+            });
+        }
+    }
+
+    pub fn random_request(
+        generator: *Generator,
+        model: *const Model,
+        command: Command,
+        buffer: []u8,
+    ) u32 {
+        assert(buffer.len == buffer_size);
+
+        return switch (command) {
+            .create_accounts => generator.random_create_accounts(model, buffer),
+            .create_accounts_sparse => generator.random_create_accounts(model, buffer),
+            .create_transfers => generator.random_create_transfers(model, buffer),
+            .create_transfers_sparse => generator.random_create_transfers(model, buffer),
+            .lookup_accounts => generator.random_lookup_accounts(model, buffer),
+        };
+    }
+
+    fn random_create_accounts(generator: *Generator, model: *const Model, buffer: []u8) u32 {
+        const events_count =
+            generator.prng.range_inclusive(usize, 1, accounts_count_max - model.accounts.count());
+        assert(events_count <= events_count_max);
+
+        const events_buffer = buffer[0..(events_count * @sizeOf(tb.Account))];
+        const events = std.mem.bytesAsSlice(tb.Account, events_buffer);
+        for (events) |*event| {
+            event.* = std.mem.zeroInit(tb.Account, .{
+                .id = generator.prng.range_inclusive(u128, 1, std.math.maxInt(u128)),
+                .ledger = 1,
+                .code = generator.prng.range_inclusive(u16, 1, 100),
+                .flags = .{ .history = generator.prng.chance(ratio(1, 10)) },
+            });
+        }
+        return @intCast(events_buffer.len);
+    }
+
+    fn random_create_transfers(generator: *Generator, model: *const Model, buffer: []u8) u32 {
+        const events_count = generator.prng.range_inclusive(usize, 1, events_count_max);
+        assert(events_count <= events_count_max);
+
+        const events_buffer = buffer[0..(events_count * @sizeOf(tb.Transfer))];
+        const events = std.mem.bytesAsSlice(tb.Transfer, events_buffer);
+        for (events) |*event| {
+            const debit_account_id =
+                model.accounts.values()[generator.prng.index(model.accounts.values())].id;
+            var credit_account_id: u128 = 0;
+            while (credit_account_id == 0 or credit_account_id == debit_account_id) {
+                credit_account_id =
+                    model.accounts.values()[generator.prng.index(model.accounts.values())].id;
+            }
+
+            event.* = std.mem.zeroInit(tb.Transfer, .{
+                .id = generator.prng.int(u128) +| 1,
+                .ledger = 1,
+                .debit_account_id = debit_account_id,
+                .credit_account_id = credit_account_id,
+                .amount = generator.prng.int_inclusive(u128, 1 << 32),
+                .code = generator.prng.range_inclusive(u16, 1, 100),
+            });
+        }
+        return @intCast(events_buffer.len);
+    }
+
+    fn random_lookup_accounts(generator: *Generator, model: *const Model, buffer: []u8) u32 {
+        const events_count = @min(events_count_max, model.accounts.count());
+        const events_buffer = buffer[0..(events_count * @sizeOf(u128))];
+        const events = std.mem.bytesAsSlice(u128, events_buffer);
+        for (events) |*event| {
+            event.* = model.accounts.values()[generator.prng.index(model.accounts.values())].id;
+        }
+        return @intCast(events_buffer.len);
+    }
+};

@@ -15,13 +15,13 @@ const Shell = @import("./shell.zig");
 const Snap = stdx.Snap;
 const snap = Snap.snap_fn("src");
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
+const Supervisor = @import("./testing/vortex/supervisor.zig").Supervisor;
 
 const stdx = @import("stdx");
 const ratio = stdx.PRNG.ratio;
 
 const vortex_exe: []const u8 = @import("test_options").vortex_exe;
 const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
-const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
 
 comptime {
     _ = @import("clients/c/tb_client_header_test.zig");
@@ -369,71 +369,71 @@ test "help/version smoke" {
 }
 
 test "in-place upgrade" {
-    // Smoke test that in-place upgrades work.
-    //
-    // Starts a cluster of three replicas using the previous release of TigerBeetle and then
-    // replaces the binaries on disk with a new version.
-    //
-    // Against this upgrading cluster, we are running a benchmark load and checking that it finishes
-    // with a zero status.
-    //
-    // To spice things up, replicas are periodically killed and restarted.
-
-    if (builtin.target.os.tag == .windows) {
-        return error.SkipZigTest; // Coming soon!
+    if (builtin.target.os.tag != .linux) {
+        return error.SkipZigTest;
     }
 
-    const replica_count = TmpCluster.replica_count;
+    const level = std.testing.log_level;
+    std.testing.log_level = std.log.Level.info;
+    defer std.testing.log_level = level;
 
-    var cluster = try TmpCluster.init();
-    defer cluster.deinit();
+    const replica_count = 3;
+    const duration_max = stdx.Duration.seconds(150);
+    const tick_ms = 10;
+    const ticks_max = duration_max.to_ms() / tick_ms;
+
+    var supervisor = try Supervisor.create(std.testing.allocator, .{
+        .seed = std.testing.random_seed,
+        .replica_count = replica_count,
+        .faulty = false,
+        .log_debug = false,
+    });
+    defer supervisor.destroy();
+
+    assert(supervisor.release_count > 0);
+    const release_past = supervisor.release_count - 2;
+    const release_current = supervisor.release_count - 1;
 
     for (0..replica_count) |replica_index| {
-        try cluster.replica_install(replica_index, .past);
-        try cluster.replica_format(replica_index);
+        try supervisor.replica_install(@intCast(replica_index), release_past);
+        try supervisor.replica_format(@intCast(replica_index));
     }
-    try cluster.workload_start(.{ .transfer_count = 2_000_000 });
+    try supervisor.workload_start(.{ .release = release_past }, .{ .transfer_count = 1_000_000 });
 
     for (0..replica_count) |replica_index| {
-        try cluster.replica_spawn(replica_index);
+        try supervisor.replica_start(@intCast(replica_index));
     }
 
-    const ticks_max = 50;
-    var upgrade_tick: [replica_count]u8 = @splat(0);
+    // Schedule the replica upgrades.
+    var upgrade_tick: [replica_count]u64 = @splat(0);
     for (0..replica_count) |replica_index| {
-        upgrade_tick[replica_index] = cluster.prng.int_inclusive(u8, ticks_max - 1);
+        upgrade_tick[replica_index] = supervisor.prng.int_inclusive(u64, ticks_max / 2);
     }
 
     for (0..ticks_max) |tick| {
-        std.time.sleep(2 * std.time.ns_per_s);
+        try supervisor.tick();
 
         for (0..replica_count) |replica_index| {
             if (tick == upgrade_tick[replica_index]) {
-                assert(!cluster.replica_upgraded[replica_index]);
-                try cluster.replica_upgrade(replica_index);
-                assert(cluster.replica_upgraded[replica_index]);
+                try supervisor.replica_install(@intCast(replica_index), release_current);
             }
         }
 
-        const replica_index = cluster.prng.index(cluster.replicas);
-        const crash = cluster.prng.chance(ratio(1, 4));
-        const restart = cluster.prng.chance(ratio(1, 2));
+        const early = tick < ticks_max / 2;
+        const replica_index = supervisor.prng.index(supervisor.replicas);
+        const crash = early and supervisor.prng.chance(ratio(1, 400));
+        const restart = (!early) or supervisor.prng.chance(ratio(1, 200));
 
-        if (cluster.replicas[replica_index] == null and restart) {
-            try cluster.replica_spawn(replica_index);
-        } else if (cluster.replicas[replica_index] != null and crash) {
-            try cluster.replica_kill(replica_index);
+        if (supervisor.replicas[replica_index].state == .terminated and restart) {
+            try supervisor.replica_start(@intCast(replica_index));
+        } else if (supervisor.replicas[replica_index].state == .running and crash) {
+            try supervisor.replica_terminate(@intCast(replica_index));
         }
     }
 
-    for (0..replica_count) |replica_index| {
-        assert(cluster.replica_upgraded[replica_index]);
-        if (cluster.replicas[replica_index] == null) {
-            try cluster.replica_spawn(replica_index);
-        }
+    if (!supervisor.workload_done()) {
+        return error.WorkloadIncomplete;
     }
-
-    cluster.workload_finish();
 }
 
 test "recover smoke" {
@@ -441,29 +441,41 @@ test "recover smoke" {
         return error.SkipZigTest;
     }
 
-    const replica_count = TmpCluster.replica_count;
+    const level = std.testing.log_level;
+    std.testing.log_level = std.log.Level.info;
+    defer std.testing.log_level = level;
 
-    var cluster = try TmpCluster.init();
-    defer cluster.deinit();
+    const replica_count = 3;
+
+    var supervisor = try Supervisor.create(std.testing.allocator, .{
+        .seed = std.testing.random_seed,
+        .replica_count = replica_count,
+        .faulty = false,
+        .log_debug = false,
+    });
+    defer supervisor.destroy();
+
+    const release_current = supervisor.release_count - 1;
 
     for (0..replica_count) |replica_index| {
-        try cluster.replica_install(replica_index, .past);
+        try supervisor.replica_install(@intCast(replica_index), release_current);
+        try supervisor.replica_format(@intCast(replica_index));
+        try supervisor.replica_start(@intCast(replica_index));
     }
-    try cluster.replica_format(0);
-    try cluster.replica_format(1);
-    try cluster.replica_format(2);
-    try cluster.workload_start(.{ .transfer_count = 200_000 });
-    try cluster.replica_spawn(0);
-    try cluster.replica_spawn(1);
-    try cluster.replica_spawn(2);
-    std.time.sleep(2 * std.time.ns_per_s);
+    try supervisor.workload_start(.{ .release = release_current }, .{ .transfer_count = 100_000 });
+    for (0..400) |_| try supervisor.tick();
 
-    try cluster.replica_kill(2);
-    try cluster.replica_reformat(2);
+    try supervisor.replica_terminate(2);
+    try supervisor.replica_reformat(2);
 
-    try cluster.replica_kill(1);
-    try cluster.replica_spawn(2);
-    cluster.workload_finish();
+    try supervisor.replica_terminate(1);
+    try supervisor.replica_start(2);
+    for (0..2000) |_| {
+        if (supervisor.workload_done()) break;
+        try supervisor.tick();
+    } else {
+        return error.WorkloadIncomplete;
+    }
 }
 
 test "vortex smoke" {
@@ -475,204 +487,7 @@ test "vortex smoke" {
     defer shell.destroy();
 
     try shell.exec(
-        "{vortex_exe} supervisor --test-duration=1s --replica-count=1",
+        "{vortex_exe} --test-duration=1s --replica-count=1",
         .{ .vortex_exe = vortex_exe },
     );
 }
-
-const TmpCluster = struct {
-    const replica_count = 3;
-    // The test uses this hard-coded address, so only one instance can be running at a time.
-    const addresses = "127.0.0.1:7121,127.0.0.1:7122,127.0.0.1:7123";
-
-    shell: *Shell,
-    tmp: []const u8,
-
-    prng: stdx.PRNG,
-    replicas: [replica_count]?std.process.Child = @splat(null),
-    replica_exe: [replica_count][]const u8,
-    replica_datafile: [replica_count][]const u8,
-    replica_upgraded: [replica_count]bool = @splat(false),
-
-    workload_thread: ?std.Thread = null,
-    workload_exit_ok: bool = false,
-
-    fn init() !TmpCluster {
-        const shell = try Shell.create(std.testing.allocator);
-        errdefer shell.destroy();
-
-        const tmp = try shell.fmt("./.zig-cache/tmp/{}", .{std.crypto.random.int(u64)});
-        errdefer shell.cwd.deleteTree(tmp) catch {};
-
-        try shell.cwd.makePath(tmp);
-
-        var replica_exe: [replica_count][]const u8 = @splat("");
-        var replica_datafile: [replica_count][]const u8 = @splat("");
-        for (0..replica_count) |replica_index| {
-            replica_exe[replica_index] = try shell.fmt("{s}/tigerbeetle{}{s}", .{
-                tmp,
-                replica_index,
-                builtin.target.exeFileExt(),
-            });
-            replica_datafile[replica_index] = try shell.fmt("{s}/0_{}.tigerbeetle", .{
-                tmp,
-                replica_index,
-            });
-        }
-
-        const prng = stdx.PRNG.from_seed_testing();
-        return .{
-            .shell = shell,
-            .tmp = tmp,
-            .prng = prng,
-            .replica_exe = replica_exe,
-            .replica_datafile = replica_datafile,
-        };
-    }
-
-    fn deinit(cluster: *TmpCluster) void {
-        // Sadly, killing workload process is not easy, so, in case of an error, we'll wait
-        // for full timeout.
-        if (cluster.workload_thread) |workload_thread| {
-            workload_thread.join();
-        }
-
-        for (&cluster.replicas) |*replica| {
-            if (replica.*) |*alive| {
-                _ = alive.kill() catch {};
-            }
-        }
-
-        cluster.shell.cwd.deleteTree(cluster.tmp) catch {};
-        cluster.shell.destroy();
-        cluster.* = undefined;
-    }
-
-    fn replica_install(
-        cluster: *TmpCluster,
-        replica_index: usize,
-        version: enum { past, current },
-    ) !void {
-        const destination = cluster.replica_exe[replica_index];
-        try cluster.shell.cwd.copyFile(
-            switch (version) {
-                .past => tigerbeetle_past,
-                .current => tigerbeetle,
-            },
-            cluster.shell.cwd,
-            destination,
-            .{},
-        );
-        try cluster.shell.file_make_executable(destination);
-    }
-
-    fn replica_format(cluster: *TmpCluster, replica_index: usize) !void {
-        assert(cluster.replicas[replica_index] == null);
-
-        try cluster.shell.exec(
-            \\{tigerbeetle} format --cluster=0 --replica={replica} --replica-count=3 {datafile}
-        , .{
-            .tigerbeetle = cluster.replica_exe[replica_index],
-            .replica = replica_index,
-            .datafile = cluster.replica_datafile[replica_index],
-        });
-    }
-
-    fn replica_reformat(cluster: *TmpCluster, replica_index: usize) !void {
-        assert(cluster.replicas[replica_index] == null);
-
-        cluster.shell.cwd.deleteFile(cluster.replica_datafile[replica_index]) catch {};
-
-        try cluster.shell.exec(
-            \\{tigerbeetle} recover
-            \\    --cluster=0
-            \\    --replica={replica}
-            \\    --replica-count=3
-            \\    --addresses={addresses}
-            \\    {datafile}
-        , .{
-            .tigerbeetle = cluster.replica_exe[replica_index],
-            .replica = replica_index,
-            .addresses = addresses,
-            .datafile = cluster.replica_datafile[replica_index],
-        });
-    }
-
-    fn replica_upgrade(cluster: *TmpCluster, replica_index: usize) !void {
-        assert(!cluster.replica_upgraded[replica_index]);
-
-        const upgrade_requires_restart = builtin.os.tag != .linux;
-        if (upgrade_requires_restart) {
-            if (cluster.replicas[replica_index] != null) {
-                try cluster.replica_kill(replica_index);
-            }
-            assert(cluster.replicas[replica_index] == null);
-        }
-
-        cluster.shell.cwd.deleteFile(cluster.replica_exe[replica_index]) catch {};
-        try cluster.replica_install(replica_index, .current);
-        cluster.replica_upgraded[replica_index] = true;
-
-        if (upgrade_requires_restart) {
-            assert(cluster.replicas[replica_index] == null);
-            try cluster.replica_spawn(replica_index);
-            assert(cluster.replicas[replica_index] != null);
-        }
-    }
-
-    fn replica_spawn(cluster: *TmpCluster, replica_index: usize) !void {
-        assert(cluster.replicas[replica_index] == null);
-        cluster.replicas[replica_index] = try cluster.shell.spawn(.{},
-            \\{tigerbeetle} start --addresses={addresses} {datafile}
-        , .{
-            .tigerbeetle = cluster.replica_exe[replica_index],
-            .addresses = addresses,
-            .datafile = cluster.replica_datafile[replica_index],
-        });
-    }
-
-    fn replica_kill(cluster: *TmpCluster, replica_index: usize) !void {
-        assert(cluster.replicas[replica_index] != null);
-        _ = cluster.replicas[replica_index].?.kill() catch {};
-        cluster.replicas[replica_index] = null;
-    }
-
-    const WorkloadStartOptions = struct {
-        transfer_count: usize,
-    };
-
-    fn workload_start(cluster: *TmpCluster, options: WorkloadStartOptions) !void {
-        assert(cluster.workload_thread == null);
-        assert(!cluster.workload_exit_ok);
-        // Run workload in a separate thread, to collect it's stdout and stderr, and to
-        // forcefully terminate it after 10 minutes.
-        cluster.workload_thread = try std.Thread.spawn(.{}, struct {
-            fn thread_main(
-                workload_exit_ok_ptr: *bool,
-                tigerbeetle_path: []const u8,
-                benchmark_options: WorkloadStartOptions,
-            ) !void {
-                const shell = try Shell.create(std.testing.allocator);
-                defer shell.destroy();
-
-                try shell.exec_options(.{ .timeout = .minutes(10) },
-                    \\{tigerbeetle} benchmark
-                    \\    --print-batch-timings
-                    \\    --transfer-count={transfer_count}
-                    \\    --addresses={addresses}
-                , .{
-                    .tigerbeetle = tigerbeetle_path,
-                    .addresses = addresses,
-                    .transfer_count = benchmark_options.transfer_count,
-                });
-                workload_exit_ok_ptr.* = true;
-            }
-        }.thread_main, .{ &cluster.workload_exit_ok, tigerbeetle_past, options });
-    }
-
-    fn workload_finish(cluster: *TmpCluster) void {
-        cluster.workload_thread.?.join();
-        cluster.workload_thread = null;
-        assert(cluster.workload_exit_ok);
-    }
-};

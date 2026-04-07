@@ -1,23 +1,16 @@
-/// This is the main entrypoint for the Vortex testing tools, delegating to these programs:
+/// Run a cluster of TigerBeetle replicas, a client driver, a workload, all with fault injection,
+/// to test the whole system.
 ///
-/// * _supervisor_: runs a cluster of multiple TigerBeetle replicas, drivers, and a workload, along
-/// with various fault injection, to test the system as a whole.
-/// * _driver_: a separate process communicating over stdio, using `tb_client` to send commands
-/// and queries to the cluster. Drivers in other languages should be implemented elsewhere.
-/// * _workload_: a separate process that, given a driver, runs commands and queries against the
-/// cluster, verifying its correctness.
-///
-/// For practical use, Vortex should be run in a Linux namespace where it can control the network.
-/// The `run` command sets up a Linux namespace automatically.
+/// On Linux, Vortex runs in a Linux namespace where it can control the network.
 const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
 
-const Supervisor = @import("testing/vortex/supervisor.zig");
-const Workload = @import("testing/vortex/workload.zig");
+const Supervisor = @import("testing/vortex/supervisor.zig").Supervisor;
+const Command = @import("testing/vortex/workload.zig").Command;
+const dependencies_count: u32 = @import("vortex_options").dependencies_count;
 
 const assert = std.debug.assert;
-
 const log = std.log.scoped(.vortex);
 
 pub const std_options: std.Options = .{
@@ -25,24 +18,37 @@ pub const std_options: std.Options = .{
     .logFn = stdx.log_with_timestamp,
 };
 
-pub const CLIArgs = union(enum) {
-    supervisor: Supervisor.CLIArgs,
-    workload: WorkloadArgs,
-};
+const CLIArgs = struct {
+    test_duration: stdx.Duration = .minutes(1),
+    driver_command: ?[]const u8 = null,
+    replica_count: u8 = 1,
+    disable_faults: bool = false,
+    log_debug: bool = false,
+    /// Log file path.
+    log: ?[]const u8 = null,
 
-const WorkloadArgs = struct {
-    cluster: u128,
-    addresses: []const u8,
-    driver_command: []const u8,
+    @"--": void,
+    /// Vortex is non-deterministic, but providing a seed can still help constrain the scenario.
+    seed: ?u64 = null,
 };
 
 pub fn main() !void {
     comptime assert(builtin.target.cpu.arch.endian() == .little);
 
     if (builtin.os.tag == .windows) {
+        // Vortex is not currently supported on Windows because of child process management.
+        // e.g. waitpid, pause/unpause.
         log.err("vortex is not supported for Windows", .{});
         return error.NotSupported;
     }
+
+    if (builtin.os.tag == .macos) {
+        // Vortex is not currently supported on MacOS because io.write() is implemented with
+        // pwrite(), which doesn't work on non-seekable streams like child process input/output.
+        log.err("vortex is not supported for MacOS", .{});
+        return error.NotSupported;
+    }
+    assert(builtin.os.tag == .linux);
 
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     defer switch (gpa_allocator.deinit()) {
@@ -52,50 +58,95 @@ pub fn main() !void {
 
     const allocator = gpa_allocator.allocator();
 
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    var args_iterator = try std.process.argsWithAllocator(allocator);
+    defer args_iterator.deinit();
 
-    switch (stdx.flags(&args, CLIArgs)) {
-        .supervisor => |supervisor_args| try Supervisor.main(allocator, supervisor_args),
-        .workload => |driver_args| {
-            var driver = try start_driver(allocator, driver_args);
-            defer {
-                _ = driver.kill() catch {
-                    log.err("failed to kill driver", .{});
-                };
-            }
+    // TODO Remove after merging https://github.com/tigerbeetle/tigerbeetle/pull/3612.
+    // (Stopgap for CFO).
+    {
+        const args_list = try std.process.argsAlloc(allocator);
+        defer std.process.argsFree(allocator, args_list);
 
-            try Workload.main(allocator, &.{
-                .input = driver.stdin.?,
-                .output = driver.stdout.?,
-            });
-        },
-    }
-}
-
-fn start_driver(allocator: std.mem.Allocator, args: WorkloadArgs) !std.process.Child {
-    var argv = std.ArrayList([]const u8).init(allocator);
-    defer argv.deinit();
-
-    assert(std.mem.indexOfScalar(u8, args.driver_command, '"') == null);
-    var cmd_parts = std.mem.splitScalar(u8, args.driver_command, ' ');
-
-    while (cmd_parts.next()) |part| {
-        try argv.append(part);
+        if (std.mem.eql(u8, args_list[1], "supervisor")) {
+            assert(args_iterator.skip());
+        }
     }
 
-    var cluster_argument: [32]u8 = undefined;
-    const cluster = try std.fmt.bufPrint(cluster_argument[0..], "{d}", .{args.cluster});
+    const args = stdx.flags(&args_iterator, CLIArgs);
 
-    try argv.append(cluster);
-    try argv.append(args.addresses);
+    if (args.log) |log_path| {
+        const log_file = try std.fs.cwd().createFile(log_path, .{});
+        defer log_file.close();
 
-    var child = std.process.Child.init(argv.items, allocator);
-    child.stdin_behavior = .Pipe;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Inherit;
+        // Redirect stderr to the file.
+        try std.posix.dup2(log_file.handle, std.posix.STDERR_FILENO);
+    }
 
-    try child.spawn();
+    if (builtin.os.tag == .linux) {
+        // Relaunch in fresh pid / network namespaces.
+        try stdx.unshare.maybe_unshare_and_relaunch(allocator, .{
+            .pid = true,
+            .network = true,
+        });
+    } else {
+        log.warn("vortex may spawn runaway processes when run on a non-Linux OS", .{});
+        log.warn("vortex may encounter port collisions non-Linux OS", .{});
+    }
 
-    return child;
+    if (dependencies_count == 1 or args.disable_faults or args.driver_command != null) {
+        log.warn("not testing upgrades", .{});
+    }
+
+    const seed = args.seed orelse std.crypto.random.int(u64);
+    var prng = stdx.PRNG.from_seed(seed);
+
+    // Even if we have past versions available, only use them sometimes.
+    const release_min = prng.range_inclusive(
+        u32,
+        if (args.disable_faults or args.driver_command != null) dependencies_count - 1 else 0,
+        dependencies_count - 1,
+    );
+
+    const supervisor = try Supervisor.create(allocator, .{
+        .seed = prng.int(u64),
+        .replica_count = args.replica_count,
+        .faulty = !args.disable_faults,
+        .log_debug = args.log_debug,
+    });
+    defer supervisor.destroy();
+
+    log.info("seed={}", .{seed});
+    log.info("output_directory={s}", .{supervisor.output_directory});
+    log.info("duration={}", .{args.test_duration});
+    log.info("releases={any}", .{supervisor.releases});
+
+    for (0..args.replica_count) |replica_index| {
+        try supervisor.replica_install(@intCast(replica_index), release_min);
+        try supervisor.replica_format(@intCast(replica_index));
+        try supervisor.replica_start(@intCast(replica_index));
+    }
+    try supervisor.workload_start(
+        if (args.driver_command) |driver_command|
+            .{ .command = driver_command }
+        else
+            .{ .release = supervisor.prng.range_inclusive(u32, 0, release_min) },
+        .{ .transfer_count = std.math.maxInt(u32) },
+    );
+
+    const test_deadline = std.time.nanoTimestamp() + args.test_duration.ns;
+    while (std.time.nanoTimestamp() < test_deadline) {
+        try supervisor.tick();
+    }
+
+    log.info("workload: terminating due to max duration", .{});
+    log.info("workload: created accounts={}", .{supervisor.workload.?.model.accounts.count()});
+    log.info("workload: created transfers={}", .{supervisor.workload.?.model.transfers_created});
+    for (std.enums.values(Command)) |command| {
+        log.info("workload: completed command={s} count={}", .{
+            @tagName(command),
+            supervisor.workload.?.requests_finished_count.getAssertContains(command),
+        });
+    }
+    supervisor.workload_terminate();
+    log.info("done", .{});
 }

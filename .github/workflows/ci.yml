@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - run: shellcheck ./zig/download.sh
       - shell: pwsh
         run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
@@ -45,14 +46,14 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2147483647 } # Fetch full history for tidy.
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch full history for tidy.
       - run: ./zig/download.ps1 && ./zig/zig build ci -- test
 
   test_aof:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2147483647 }
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - uses: actions/cache@v5
         with:
           path: ./zig/cache
@@ -109,6 +110,7 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/checkout@v4
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
 
       - if: matrix.language == 'dotnet'
         uses: actions/setup-dotnet@v4
@@ -150,7 +152,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2147483647 }
+        with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: sudo rm -rf /usr/local/lib/android # Free up disk space for benchmarking.
       - uses: actions/cache@v5
