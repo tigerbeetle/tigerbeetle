@@ -1,0 +1,67 @@
+require "tmpdir"
+require "minitest/test_task"
+
+EXT_DIR = File.expand_path("src/ext/tigerbeetle", __dir__)
+PROJECT_ROOT = File.expand_path("../../..", __dir__)
+TB_BINARY = ENV.fetch("TIGERBEETLE_BINARY", File.join(PROJECT_ROOT, "tigerbeetle"))
+
+desc("Build the TigerBeetle binary")
+task(:tb_build) do
+  sh("zig build", chdir: PROJECT_ROOT)
+end
+
+desc("Build the C extension")
+task(:ext_compile) do
+  sh("zig build clients:ruby", chdir: PROJECT_ROOT)
+  sh("ruby extconf.rb && make", chdir: EXT_DIR)
+end
+
+desc("Start a temporary TigerBeetle instance (sets TB_ADDRESS)")
+task(:temp_tb) do
+  dir = Dir.mktmpdir("tb-test-")
+  data_file = File.join(dir, "0_0.tigerbeetle")
+
+  sh(
+    TB_BINARY,
+    "format",
+    "--cluster=0",
+    "--replica=0",
+    "--replica-count=1",
+    data_file,
+    out: File::NULL,
+    err: File::NULL
+  )
+
+  io = IO.popen(
+    [TB_BINARY, "start", "--development=true", "--addresses=0", data_file, err: File::NULL]
+  )
+  ENV["TB_ADDRESS"] = io.readline.chomp
+
+  at_exit do
+    Process.kill("TERM", io.pid)
+    io.close
+    FileUtils.rm_rf(dir)
+    ENV.delete("TB_ADDRESS")
+  end
+end
+
+namespace(:test) do
+  Minitest::TestTask.create(:unit) do |t|
+    t.libs = [".", "src", "src/ext"]
+    t.test_globs = ["tests/unit/**/*.rb"]
+  end
+
+  task(unit: :ext_compile)
+
+  Minitest::TestTask.create(:integration) do |t|
+    t.libs = [".", "src", "src/ext"]
+    t.test_globs = ["tests/integration/**/*.rb"]
+  end
+
+  task(integration: :ext_compile)
+
+  desc("Run integration tests against a temporary TigerBeetle instance")
+  task(integration_local: [:ext_compile, :tb_build, :temp_tb, :integration])
+end
+
+task(default: "test:unit")

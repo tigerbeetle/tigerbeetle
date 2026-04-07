@@ -48,7 +48,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
-        try shell.exec("ruby tests/test_basic.rb", .{});
+        try shell.exec("rake test", .{});
+        try shell.exec("rake test:integration", .{});
     }
 
     inline for ([_][]const u8{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
