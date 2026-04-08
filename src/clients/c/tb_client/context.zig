@@ -699,8 +699,6 @@ pub fn IoThreadType(
         fn callback_signal_notify(signal: *Signal) void {
             const shared: *Shared = @alignCast(@fieldParentPtr("signal", signal));
             const self: *IoThread = @fieldParentPtr("shared", shared);
-            assert(shared.signal.status() != .shutdown_completed);
-
             self.io.yield();
         }
 

@@ -131,13 +131,15 @@ pub const Signal = struct {
         const listening: bool = self.listening.load(.acquire);
         const state = self.event_state.cmpxchgStrong(
             .notified,
-            if (listening) .running else .shutdown,
+            .running,
             .release,
             .acquire,
         ) orelse {
+            (self.on_signal_fn)(self);
             if (listening) {
-                (self.on_signal_fn)(self);
                 self.wait();
+            } else {
+                self.event_state.store(.shutdown, .release);
             }
             return;
         };
