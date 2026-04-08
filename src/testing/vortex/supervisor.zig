@@ -571,6 +571,10 @@ pub const Supervisor = struct {
         assert(replica.state == .running or replica.state == .paused);
 
         try std.posix.kill(replica.process.?.id, std.posix.SIG.KILL);
+
+        const term = try replica.process.?.wait();
+        assert(std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL }));
+
         replica.process = null;
         replica.state = .terminated;
     }
