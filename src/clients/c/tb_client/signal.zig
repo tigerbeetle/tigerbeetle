@@ -41,14 +41,14 @@ pub const Signal = struct {
 
     pub fn deinit(self: *Signal) void {
         assert(self.event != IO.INVALID_EVENT);
-        assert(self.status() == .shutdown_completed);
+        assert(self.status() == .shutdown);
 
         self.io.close_event(self.event);
         self.* = undefined;
     }
 
     /// Requests to stop listening for notifications.
-    /// The caller must continue processing `IO.run()` until `state() == .stopped`.
+    /// The caller must continue processing `IO.run()` until `status() == .shutdown`.
     /// Safe to call from multiple threads.
     pub fn stop(self: *Signal) void {
         const listening = self.listening.swap(false, .release);
@@ -61,23 +61,13 @@ pub const Signal = struct {
     /// Safe to call from multiple threads.
     pub fn status(self: *const Signal) enum {
         /// Listening for event notifications.
-        /// Call `notify()` to trigger the callback.
         running,
-        /// `stop()` was called, but the event listener is still waiting for the IO operation
-        /// to complete. Further calls to `notify()` have no effect.
-        shutdown_requested,
-        /// No pending listening events. It is safe to call `deinit()`.
-        shutdown_completed,
+        /// Shutdown complete. No pending IO. Safe to call `deinit()`.
+        shutdown,
     } {
         return switch (self.event_state.load(.acquire)) {
-            .shutdown => .shutdown_completed,
-            .running,
-            .waiting,
-            .notified,
-            => if (self.listening.load(.acquire))
-                .running
-            else
-                .shutdown_requested,
+            .shutdown => .shutdown,
+            .running, .waiting, .notified => .running,
         };
     }
 
@@ -109,7 +99,7 @@ pub const Signal = struct {
     fn wait(self: *Signal) void {
         // It is not guaranteed to be `running` here, as another caller might have requested
         // a stop during the callback.
-        assert(self.status() != .shutdown_completed);
+        assert(self.status() != .shutdown);
 
         const state = self.event_state.swap(.waiting, .acquire);
         self.io.event_listen(self.event, &self.completion, on_event);
@@ -187,14 +177,14 @@ test "signal" {
 
             // Begin shutdown and keep ticking until it's completed.
             self.signal.stop();
-            while (self.signal.status() != .shutdown_completed) try self.io.run();
+            while (self.signal.status() != .shutdown) try self.io.run();
             thread.join();
 
             // Notify after shutdown should be ignored.
             self.signal.notify();
 
-            // Make sure the event was triggered multiple times.
-            assert(self.count == events_count);
+            // events_count normal signals + 1 final signal during shutdown.
+            assert(self.count == events_count + 1);
 
             // Make sure at least some time has passed.
             const elapsed = timer.monotonic().duration_since(start);
@@ -203,7 +193,7 @@ test "signal" {
 
         fn notify(self: *Context) void {
             assert(std.Thread.getCurrentId() != self.main_thread_id);
-            while (self.signal.status() != .shutdown_completed) {
+            while (self.signal.status() != .shutdown) {
                 std.time.sleep(delay + 1);
 
                 // Triggering the event:
@@ -218,14 +208,9 @@ test "signal" {
         fn on_signal(signal: *Signal) void {
             const self: *Context = @fieldParentPtr("signal", signal);
             assert(std.Thread.getCurrentId() == self.main_thread_id);
-            switch (self.signal.status()) {
-                .running => {
-                    assert(self.count < events_count);
-                    self.count += 1;
-                },
-                .shutdown_requested => assert(self.count == events_count),
-                .shutdown_completed => unreachable,
-            }
+            assert(self.signal.status() == .running);
+            assert(self.count <= events_count);
+            self.count += 1;
         }
     }.run_test();
 }
