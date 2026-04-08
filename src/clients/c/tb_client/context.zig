@@ -40,7 +40,7 @@
 //!
 //! The user calls ClientInterface.deinit, which nulls the context pointer
 //! (rejecting further submissions) and calls signal.stop(). The IO thread detects
-//! shutdown_completed and breaks out of the main loop. On eviction, the server sends
+//! shutdown and breaks out of the main loop. On eviction, the server sends
 //! an eviction message; the callback nulls the context pointer and sets
 //! eviction_reason. The IO thread self-stops the signal since no user-initiated
 //! deinit will arrive.
@@ -590,7 +590,7 @@ pub fn IoThreadType(
         /// in the way you might expect and want.
         fn io_thread(self: *IoThread) void {
             main: while (true) {
-                const should_stop = self.shared.signal.status() == .shutdown_completed;
+                const should_stop = self.shared.signal.status() == .shutdown;
 
                 switch (self.phase) {
                     .registering => |*reg| {
