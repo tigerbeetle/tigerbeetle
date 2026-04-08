@@ -571,103 +571,21 @@ pub fn IoThreadType(
 
         /// Main event loop running on the dedicated IO thread.
         ///
-        /// Each iteration: check phase, do phase-specific work, then call
-        /// io.run_for_ns to process IO completions and wait for the next tick.
-        /// VSR callbacks (register, eviction, result, signal) fire inside
-        /// run_for_ns; they set flags/data that the next loop iteration acts on.
-        ///
-        /// Some callbacks call io.yield in order to return quickly to the event loop
-        /// without waiting for the wait_for_ns timeout. This allows the state
-        /// transition logic to be entirely encoded directly in the event loop
-        /// without extra induced latency.
-        ///
-        /// ### Safety note re io.yield ###
-        ///
-        /// io.yield may dispatch additional callbacks between the yield
-        /// call and the actual return to the event loop. This means that within each phase,
-        /// even after yielding, additional callbacks in that phase continue to be observed.
-        /// Yielding only eliminates latency, it doesn't sequence control flow in
-        /// in the way you might expect and want.
+        /// Each iteration: dispatch transitions, do phase-specific
+        /// steady-state work (tick, drain), then call io.run_for_ns to
+        /// process IO completions. VSR callbacks (register, eviction,
+        /// signal) call dispatch() directly to handle transitions
+        /// without waiting for the next tick.
         fn io_thread(self: *IoThread) void {
-            main: while (true) {
-                const should_stop = self.shared.signal.status() == .shutdown;
+            while (!(self.phase == .settled and
+                self.shared.signal.status() == .shutdown))
+            {
+                self.dispatch();
 
                 switch (self.phase) {
-                    .registering => |*reg| {
-                        if (self.eviction_reason != null or should_stop) {
-                            self.phase = .{ .disconnecting = .{
-                                .client_state = reg.client_state,
-                                .pending = reg.pending,
-                            } };
-                            continue :main;
-                        }
-
-                        if (reg.batch_size_limit) |batch_size_limit| {
-                            self.phase = .{ .running = .{
-                                .client_state = reg.client_state,
-                                .batch_size_limit = batch_size_limit,
-                                .pending = reg.pending,
-                                .previous_request_instant = null,
-                                .previous_request_latency = null,
-                            } };
-                            continue :main;
-                        }
-
-                        assert(self.eviction_reason == null);
-                        reg.client_state.client.tick();
-                    },
-
-                    .running => |*running| {
-                        if (self.eviction_reason != null or should_stop) {
-                            self.phase = .{ .disconnecting = .{
-                                .client_state = running.client_state,
-                                .pending = running.pending,
-                            } };
-                            continue :main;
-                        }
-
-                        assert(self.eviction_reason == null);
-                        running.client_state.client.tick();
-                        running.drain_submitted_packets(self);
-                    },
-
-                    .disconnecting => |*disconnecting| {
-                        if (has_message_bus) {
-                            const bus = &disconnecting.client_state.client.message_bus;
-                            if (!bus.shutdown_requested) {
-                                bus.shutdown();
-                            }
-                        }
-
-                        disconnecting.cancel_inflight(self);
-
-                        while (disconnecting.pending.pop()) |packet| {
-                            packet.assert_phase(.pending);
-                            disconnecting.packet_cancel(self, packet);
-                        }
-
-                        disconnecting.cancel_submitted(self);
-
-                        if (disconnecting.client_io_settled()) {
-                            const allocator = self.gpa.allocator();
-                            disconnecting.client_state.client.deinit(allocator);
-                            disconnecting.client_state.message_pool.deinit(allocator);
-                            allocator.destroy(disconnecting.client_state);
-                            self.phase = .settled;
-                            continue :main;
-                        }
-                    },
-
-                    // On eviction, deinit returns ClientInvalid (context
-                    // pointer already nulled), so no user stop signal will
-                    // arrive. The IO thread stops the signal itself.
-                    .settled => {
-                        if (self.eviction_reason != null) {
-                            self.shared.signal.stop();
-                        }
-
-                        if (should_stop) break :main;
-                    },
+                    .registering => |*reg| reg.client_state.client.tick(),
+                    .running => |*running| running.client_state.client.tick(),
+                    .disconnecting, .settled => {},
                 }
 
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
@@ -692,13 +610,84 @@ pub fn IoThreadType(
             _ = gpa.deinit();
         }
 
+        /// Checks for and executes phase transitions. Called from the main
+        /// loop each iteration, and from callbacks that trigger transitions.
+        fn dispatch(self: *IoThread) void {
+            const should_stop = self.shared.signal.status() == .shutdown;
+
+            switch (self.phase) {
+                .registering => |*reg| {
+                    if (self.eviction_reason != null or should_stop) {
+                        self.phase = .{ .disconnecting = .{
+                            .client_state = reg.client_state,
+                            .pending = reg.pending,
+                        } };
+                        return;
+                    }
+
+                    if (reg.batch_size_limit) |batch_size_limit| {
+                        self.phase = .{ .running = .{
+                            .client_state = reg.client_state,
+                            .batch_size_limit = batch_size_limit,
+                            .pending = reg.pending,
+                            .previous_request_instant = null,
+                            .previous_request_latency = null,
+                        } };
+                        return;
+                    }
+                },
+                .running => |*running| {
+                    if (self.eviction_reason != null or should_stop) {
+                        self.phase = .{ .disconnecting = .{
+                            .client_state = running.client_state,
+                            .pending = running.pending,
+                        } };
+                        return;
+                    }
+                    running.drain_submitted_packets(self);
+                },
+                .disconnecting => |*disconnecting| {
+                    if (has_message_bus) {
+                        const bus = &disconnecting.client_state.client.message_bus;
+                        if (!bus.shutdown_requested) {
+                            bus.shutdown();
+                        }
+                    }
+
+                    disconnecting.cancel_inflight(self);
+
+                    while (disconnecting.pending.pop()) |packet| {
+                        packet.assert_phase(.pending);
+                        disconnecting.packet_cancel(self, packet);
+                    }
+
+                    disconnecting.cancel_submitted(self);
+
+                    if (disconnecting.client_io_settled()) {
+                        const allocator = self.gpa.allocator();
+                        disconnecting.client_state.client.deinit(allocator);
+                        disconnecting.client_state.message_pool.deinit(allocator);
+                        allocator.destroy(disconnecting.client_state);
+                        self.phase = .settled;
+                        return;
+                    }
+                },
+
+                .settled => {
+                    if (self.eviction_reason != null) {
+                        self.shared.signal.stop();
+                    }
+                },
+            }
+        }
+
         // IO-thread callbacks: invoked by the VSR client or Signal within
-        // io.run_for_ns. They set state that the main loop acts on.
+        // io.run_for_ns. They set state and call dispatch() to handle transitions.
 
         fn callback_signal_notify(signal: *Signal) void {
             const shared: *Shared = @alignCast(@fieldParentPtr("signal", signal));
             const self: *IoThread = @fieldParentPtr("shared", shared);
-            self.io.yield();
+            self.dispatch();
         }
 
         fn callback_client_register(user_data: u128, result: *const vsr.RegisterResult) void {
@@ -717,7 +706,7 @@ pub fn IoThreadType(
                         constants.message_body_size_max,
                     );
 
-                    self.io.yield();
+                    self.dispatch();
                 },
                 .running, .disconnecting, .settled => unreachable,
             }
@@ -743,12 +732,13 @@ pub fn IoThreadType(
 
             self.interface.context = .{ .ptr = null };
 
-            // Set the eviction reason. The io_thread main loop will detect
-            // this and initiate graceful disconnection: cancel the inflight
-            // and pending packets, terminate connections, and deinit the
-            // client once all connection IO has settled.
+            // Set the eviction reason and dispatch the transition to
+            // disconnecting. message_bus.shutdown() is deferred to the
+            // disconnecting phase, so it is safe to dispatch here even
+            // though this callback fires from within the message_bus
+            // recv path.
             self.eviction_reason = eviction.header.reason;
-            self.io.yield();
+            self.dispatch();
         }
 
         fn callback_client_result(
