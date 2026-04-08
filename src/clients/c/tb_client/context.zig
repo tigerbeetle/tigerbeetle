@@ -595,10 +595,6 @@ pub fn IoThreadType(
                 switch (self.phase) {
                     .registering => |*reg| {
                         if (self.eviction_reason != null or should_stop) {
-                            if (has_message_bus) {
-                                reg.client_state.client.message_bus.shutdown();
-                            }
-
                             self.phase = .{ .disconnecting = .{
                                 .client_state = reg.client_state,
                                 .pending = reg.pending,
@@ -623,10 +619,6 @@ pub fn IoThreadType(
 
                     .running => |*running| {
                         if (self.eviction_reason != null or should_stop) {
-                            if (has_message_bus) {
-                                running.client_state.client.message_bus.shutdown();
-                            }
-
                             self.phase = .{ .disconnecting = .{
                                 .client_state = running.client_state,
                                 .pending = running.pending,
@@ -640,6 +632,13 @@ pub fn IoThreadType(
                     },
 
                     .disconnecting => |*disconnecting| {
+                        if (has_message_bus) {
+                            const bus = &disconnecting.client_state.client.message_bus;
+                            if (!bus.shutdown_requested) {
+                                bus.shutdown();
+                            }
+                        }
+
                         disconnecting.cancel_inflight(self);
 
                         while (disconnecting.pending.pop()) |packet| {
