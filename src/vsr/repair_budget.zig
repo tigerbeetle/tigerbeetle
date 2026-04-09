@@ -4,6 +4,8 @@ const constants = @import("../constants.zig");
 
 const vsr = @import("../vsr.zig");
 const stdx = @import("stdx");
+const maybe = stdx.maybe;
+
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
 
@@ -107,18 +109,19 @@ pub const RepairBudgetJournal = struct {
     /// one exists. Otherwise, returns null. For a fraction of ops (guided by `experiment_chance`),
     /// diverges from this heuristic and returns the index of a random replica with budget
     /// availability, using reservoir sampling.
-    pub fn decrement(budget: *RepairBudgetJournal, options: struct {
+    pub fn decrement(
+        budget: *RepairBudgetJournal,
         op: u64,
         now: stdx.Instant,
         prng: *stdx.PRNG,
-    }) ?u8 {
+    ) ?u8 {
         assert(budget.capacity > 0);
-        assert(budget.available > 0);
+        maybe(budget.available == 0);
 
         budget.assert_invariants();
         defer budget.assert_invariants();
 
-        const experiment = options.prng.chance(budget.experiment_chance);
+        const experiment = prng.chance(budget.experiment_chance);
         var experiment_replica_index: ?u8 = null;
         var reservoir = stdx.PRNG.Reservoir.init();
 
@@ -131,7 +134,7 @@ pub const RepairBudgetJournal = struct {
             // Enforce per-replica budget.
             if (requested_prepares.count() == repair_messages_inflight_count_max) continue;
             // Disallow requesting from a replica from which this op has already been requested.
-            if (requested_prepares.get(options.op) != null) continue;
+            if (requested_prepares.get(op) != null) continue;
 
             const replica_repair_latency = budget.replicas_repair_latency[replica_index];
 
@@ -142,7 +145,7 @@ pub const RepairBudgetJournal = struct {
 
             // Reservoir sampling with an arbitrarily chosen weight of 1 for each item suffices
             // our use case, as the goal is to get some degree of randomness during experiments.
-            if (reservoir.replace(options.prng, 1)) {
+            if (reservoir.replace(prng, 1)) {
                 experiment_replica_index = @intCast(replica_index);
             }
         }
@@ -156,11 +159,7 @@ pub const RepairBudgetJournal = struct {
 
         if (replica_index_maybe) |replica_index| {
             assert(replica_index != budget.replica_index);
-            budget.replicas_requested_prepares[replica_index].putAssumeCapacityNoClobber(
-                options.op,
-                options.now,
-            );
-
+            budget.replicas_requested_prepares[replica_index].putAssumeCapacityNoClobber(op, now);
             budget.available -= 1;
         }
 
@@ -169,15 +168,12 @@ pub const RepairBudgetJournal = struct {
 
     /// Increments the budget by 1 for each replica that this prepare op has been requested from.
     /// Also refines the repair latency for each of these replicas.
-    pub fn increment(budget: *RepairBudgetJournal, options: struct {
-        op: u64,
-        now: stdx.Instant,
-    }) void {
+    pub fn increment(budget: *RepairBudgetJournal, op: u64, now: stdx.Instant) void {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
         for (budget.replicas_requested_prepares, 0..) |*requested_prepares, replica_index| {
-            if (requested_prepares.fetchSwapRemove(options.op)) |requested_prepare| {
+            if (requested_prepares.fetchSwapRemove(op)) |requested_prepare| {
                 budget.available += 1;
 
                 // We have no information about the replica that sent this prepare, as the message
@@ -190,7 +186,7 @@ pub const RepairBudgetJournal = struct {
                 // to a new checkpoint), in which case we request a unique op from each replica.
                 budget.replicas_repair_latency[replica_index] = ewma_add_duration(
                     budget.replicas_repair_latency[replica_index],
-                    options.now.duration_since(requested_prepare.value),
+                    now.duration_since(requested_prepare.value),
                 );
             }
         }
@@ -214,11 +210,10 @@ pub const RepairBudgetJournal = struct {
     /// remote replica crashing doesn't cause an op to get stuck in the queue for a remote replica.
     /// We avoid spurious expiry due to transient network hiccups like increased latency by waiting
     /// for twice the measured repair latency.
-    pub fn reap_expired_requests(budget: *RepairBudgetJournal, now: stdx.Instant) bool {
+    pub fn reap_expired_requests(budget: *RepairBudgetJournal, now: stdx.Instant) void {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
-        const budget_before = budget.available;
         for (budget.replicas_requested_prepares, 0..) |*requested_prepares, replica_index| {
             var requested_prepares_index: u32 = 0;
 
@@ -242,7 +237,6 @@ pub const RepairBudgetJournal = struct {
                 }
             }
         }
-        return budget.available > budget_before;
     }
 
     fn assert_invariants(budget: *const RepairBudgetJournal) void {
@@ -346,6 +340,7 @@ pub const RepairBudgetGrid = struct {
 
     pub fn next_destination(budget: *RepairBudgetGrid, prng: *stdx.PRNG) ?u8 {
         budget.assert_invariants();
+        defer budget.assert_invariants();
 
         const replica_count = budget.replicas_requested_blocks.len;
         var replica_indexes: [constants.replicas_max]u8 = undefined;
@@ -362,7 +357,7 @@ pub const RepairBudgetGrid = struct {
         return null;
     }
 
-    pub fn budget_available(budget: *RepairBudgetGrid, replica_index: u8) u32 {
+    pub fn budget_available(budget: *const RepairBudgetGrid, replica_index: u8) u32 {
         budget.assert_invariants();
 
         assert(budget.replica_index != replica_index);
@@ -372,24 +367,25 @@ pub const RepairBudgetGrid = struct {
         return @intCast(replica_blocks_requested_max - replica_requested_blocks.count());
     }
 
-    pub fn decrement(budget: *RepairBudgetGrid, options: struct {
+    pub fn decrement(
+        budget: *RepairBudgetGrid,
         block_identifier: vsr.BlockReference,
         replica_index: u8,
         now: stdx.Instant,
-    }) bool {
+    ) bool {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
         assert(budget.available > 0);
-        assert(options.block_identifier.address > 0);
-        assert(options.replica_index != budget.replica_index);
+        assert(block_identifier.address > 0);
+        assert(replica_index != budget.replica_index);
 
         var duration_since_requested_min: ?stdx.Duration = null;
 
-        for (budget.replicas_requested_blocks, 0..) |requested_blocks, replica_index| {
-            if (requested_blocks.get(options.block_identifier)) |requested_at| {
-                assert(replica_index != budget.replica_index);
-                const duration_since_requested = options.now.duration_since(requested_at);
+        for (budget.replicas_requested_blocks, 0..) |requested_blocks, index| {
+            if (requested_blocks.get(block_identifier)) |requested_at| {
+                assert(index != budget.replica_index);
+                const duration_since_requested = now.duration_since(requested_at);
                 if (duration_since_requested_min == null or
                     duration_since_requested.ns < duration_since_requested_min.?.ns)
                 {
@@ -403,12 +399,12 @@ pub const RepairBudgetGrid = struct {
         }
 
         var replica_requested_blocks =
-            &budget.replicas_requested_blocks[options.replica_index];
+            &budget.replicas_requested_blocks[replica_index];
 
         assert(replica_requested_blocks.count() < replica_blocks_requested_max);
 
-        const gop = replica_requested_blocks.getOrPutAssumeCapacity(options.block_identifier);
-        gop.value_ptr.* = options.now;
+        const gop = replica_requested_blocks.getOrPutAssumeCapacity(block_identifier);
+        gop.value_ptr.* = now;
 
         if (!gop.found_existing) budget.available -= 1;
 
@@ -445,11 +441,10 @@ pub const RepairBudgetGrid = struct {
         }
     }
 
-    pub fn reap_expired_requests(budget: *RepairBudgetGrid, now: stdx.Instant) bool {
+    pub fn reap_expired_requests(budget: *RepairBudgetGrid, now: stdx.Instant) void {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
-        const budget_before = budget.available;
         for (budget.replicas_requested_blocks) |*requested_blocks| {
             var requested_blocks_index: u32 = 0;
 
@@ -465,6 +460,5 @@ pub const RepairBudgetGrid = struct {
                 }
             }
         }
-        return budget.available > budget_before;
     }
 };
