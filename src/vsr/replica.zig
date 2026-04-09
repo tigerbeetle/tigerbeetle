@@ -11270,10 +11270,14 @@ pub fn ReplicaType(
                 }
             }
 
-            for (0..self.grid.blocks_missing.faulty_blocks.count()) |_| {
+            const faulty_blocks_count = self.grid.blocks_missing.faulty_blocks.count();
+            const faulty_index_offset = self.prng.int_inclusive(usize, faulty_blocks_count -| 1);
+            for (0..faulty_blocks_count) |index| {
                 if (requests_count >= requests_buffer.len) break;
 
-                if (self.grid.blocks_missing.next_request()) |missing_request| {
+                if (self.grid.blocks_missing.fault_at_index(
+                    (faulty_index_offset + index) % faulty_blocks_count,
+                )) |missing_request| {
                     const block_identifier = vsr.BlockReference{
                         .address = missing_request.block_address,
                         .checksum = missing_request.block_checksum,

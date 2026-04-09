@@ -94,12 +94,6 @@ pub const GridBlocksMissing = struct {
     /// Invariants:
     /// - For every block address in faulty_blocks, ¬free_set.is_free(address).
     faulty_blocks: FaultyBlocks,
-    /// Index within `faulty_blocks`, used to cycle through block-repair requests.
-    ///
-    /// Invariants:
-    /// - faulty_blocks.count() > 0 implies faulty_blocks_repair_index < faulty_blocks.count()
-    /// - faulty_blocks.count() = 0 implies faulty_blocks_repair_index = faulty_blocks.count()
-    faulty_blocks_repair_index: usize = 0,
 
     /// On `sync_jump_commence()` and `sync_complete()`, swap this with `faulty_blocks` so that the
     /// (possibly invalid) table blocks don't interfere.
@@ -182,8 +176,6 @@ pub const GridBlocksMissing = struct {
     pub fn verify(queue: *const GridBlocksMissing) void {
         assert(queue.faulty_blocks.count() + queue.syncing_faulty_blocks.count() ==
             queue.enqueued_blocks_repair + queue.enqueued_blocks_sync);
-        assert(queue.faulty_blocks_repair_index == 0 or
-            queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
 
         var enqueued_blocks_repair: u32 = 0;
         var enqueued_blocks_sync: u32 = 0;
@@ -235,15 +227,12 @@ pub const GridBlocksMissing = struct {
     }
 
     /// Note that returning `null` doesn't necessarily indicate that there are no more blocks.
-    pub fn next_request(queue: *GridBlocksMissing) ?vsr.BlockRequest {
+    pub fn fault_at_index(queue: *const GridBlocksMissing, fault_index: usize) ?vsr.BlockRequest {
         assert(queue.faulty_blocks.count() > 0);
-        assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
+        assert(fault_index < queue.faulty_blocks.count());
 
         const fault_addresses = queue.faulty_blocks.keys();
         const fault_data = queue.faulty_blocks.values();
-        const fault_index = queue.faulty_blocks_repair_index;
-
-        queue.faulty_blocks_repair_index = (fault_index + 1) % queue.faulty_blocks.count();
 
         return switch (fault_data[fault_index].state) {
             .waiting => .{
@@ -437,6 +426,7 @@ pub const GridBlocksMissing = struct {
         const fault_index = queue.faulty_blocks.getIndex(block_header.address).?;
         const fault_address = queue.faulty_blocks.keys()[fault_index];
         const fault: FaultyBlock = queue.faulty_blocks.values()[fault_index];
+
         assert(fault_address == block_header.address);
         assert(fault.checksum == block_header.checksum);
         assert(fault.state == .aborting or fault.state == .writing);
@@ -528,18 +518,12 @@ pub const GridBlocksMissing = struct {
     }
 
     fn release_fault(queue: *GridBlocksMissing, fault_index: usize) void {
-        assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
-
         switch (queue.faulty_blocks.values()[fault_index].cause) {
             .repair => queue.enqueued_blocks_repair -= 1,
             .sync => queue.enqueued_blocks_sync -= 1,
         }
 
         queue.faulty_blocks.swapRemoveAt(fault_index);
-
-        if (queue.faulty_blocks_repair_index == queue.faulty_blocks.count()) {
-            queue.faulty_blocks_repair_index = 0;
-        }
     }
 
     pub fn cancel(queue: *GridBlocksMissing) void {
@@ -598,7 +582,6 @@ pub const GridBlocksMissing = struct {
 
             assert(queue.syncing_faulty_blocks.count() == 0);
             std.mem.swap(FaultyBlocks, &queue.faulty_blocks, &queue.syncing_faulty_blocks);
-            queue.faulty_blocks_repair_index = 0;
         }
         assert(queue.faulty_blocks.count() == 0);
         assert(queue.syncing_faulty_blocks.count() == queue.enqueued_blocks_sync);
