@@ -21,7 +21,7 @@ pub const huge_page_allocator = @import("huge_page_allocator.zig").huge_page_all
 
 pub const aegis = @import("vendored/aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
-pub const flags = @import("flags.zig").parse;
+pub const Flags = @import("flags.zig");
 pub const parse_flag_value_fuzz = @import("flags.zig").parse_flag_value_fuzz;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;

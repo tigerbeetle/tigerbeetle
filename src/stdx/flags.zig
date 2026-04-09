@@ -42,6 +42,24 @@ const stdx = @import("stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const Allocator = std.mem.Allocator;
+
+arena: std.heap.ArenaAllocator,
+
+const Flags = @This();
+
+pub fn init(gpa: Allocator) Flags {
+    return .{
+        .arena = std.heap.ArenaAllocator.init(gpa),
+    };
+}
+
+pub fn deinit(flags: *Flags, gpa: Allocator) void {
+    assert(std.meta.eql(flags.arena.child_allocator, gpa));
+    flags.arena.deinit();
+    flags.* = undefined;
+}
+
 /// Format and print an error message to stderr, then exit with an exit code of 1.
 fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
@@ -51,6 +69,10 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     // the implementation of fatal function, but let's be pragmatic here and just match the behavior
     // manually.
     std.process.exit(1);
+}
+
+fn oom(_: error{OutOfMemory}) noreturn {
+    fatal("error: out of memory when parsing cli", .{});
 }
 
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
@@ -77,10 +99,15 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 ///
 /// Value parsing can be customized on per-type basis via `parse_flag_value` customization point.
-pub fn parse(args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
+pub fn parse(flags: *Flags, comptime CLIArgs: type) CLIArgs {
     comptime assert(CLIArgs != void);
-    assert(args.skip()); // Discard executable name.
-    return parse_flags(args, CLIArgs);
+
+    const arena = flags.arena.allocator();
+
+    var args = std.process.argsWithAllocator(arena) catch |err| oom(err);
+    if (!args.skip()) fatal("executable name missing", .{});
+
+    return parse_flags(&args, CLIArgs);
 }
 
 fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
@@ -109,23 +136,23 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     fatal("unknown subcommand: '{s}'", .{first_arg});
 }
 
-fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
+fn parse_flags(args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
     @setEvalBranchQuota(5_000);
 
-    if (Flags == void) {
+    if (CLIArgs == void) {
         if (args.next()) |arg| {
             fatal("unexpected argument: '{s}'", .{arg});
         }
         return {};
     }
 
-    if (@typeInfo(Flags) == .@"union") {
-        return parse_commands(args, Flags);
+    if (@typeInfo(CLIArgs) == .@"union") {
+        return parse_commands(args, CLIArgs);
     }
 
-    assert(@typeInfo(Flags) == .@"struct");
+    assert(@typeInfo(CLIArgs) == .@"struct");
 
-    const fields = std.meta.fields(Flags);
+    const fields = std.meta.fields(CLIArgs);
     comptime var fields_named, const fields_positional, const fields_extended =
         for (fields, 0..) |field, index| {
             if (std.mem.eql(u8, field.name, "--")) {
@@ -203,8 +230,8 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
     }
 
-    var counts: std.enums.EnumFieldStruct(std.meta.FieldEnum(Flags), u32, 0) = .{};
-    var result: Flags = undefined;
+    var counts: std.enums.EnumFieldStruct(std.meta.FieldEnum(CLIArgs), u32, 0) = .{};
+    var result: CLIArgs = undefined;
     var parsed_positional = false;
     next_arg: while (args.next()) |arg| {
         comptime var field_len_prev = std.math.maxInt(usize);

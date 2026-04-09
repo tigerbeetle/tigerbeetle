@@ -69,10 +69,10 @@ pub fn main() !void {
     // Arena is an implementation detail, all memory must be freed.
     const gpa = arena_instance.allocator();
 
-    var arg_iterator = try std.process.argsWithAllocator(gpa);
-    defer arg_iterator.deinit();
+    var flags = stdx.Flags.init(gpa);
+    defer flags.deinit(gpa);
 
-    var command = cli.parse_args(&arg_iterator);
+    var command = cli.parse_args(&flags);
 
     if (command == .version) {
         try command_version(gpa, command.version.verbose);
