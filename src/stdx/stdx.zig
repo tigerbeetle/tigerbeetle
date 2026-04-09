@@ -22,7 +22,6 @@ pub const huge_page_allocator = @import("huge_page_allocator.zig").huge_page_all
 pub const aegis = @import("vendored/aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const Flags = @import("flags.zig");
-pub const parse_flag_value_fuzz = @import("flags.zig").parse_flag_value_fuzz;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
@@ -1072,7 +1071,7 @@ pub const ByteSize = struct {
 };
 
 test "ByteSize.parse_flag_value" {
-    try parse_flag_value_fuzz(ByteSize, ByteSize.parse_flag_value, .{
+    try Flags.parse_flag_value_fuzz(ByteSize, ByteSize.parse_flag_value, .{
         .ok = &.{
             .{ "0", .{ .value = 0, .unit = .bytes } },
             .{ "1", .{ .value = 1, .unit = .bytes } },

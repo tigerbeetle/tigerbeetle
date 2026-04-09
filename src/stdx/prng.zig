@@ -83,7 +83,7 @@ pub const Ratio = struct {
 };
 
 test "Ratio.parse_flag_value" {
-    try stdx.parse_flag_value_fuzz(Ratio, Ratio.parse_flag_value, .{
+    try stdx.Flags.parse_flag_value_fuzz(Ratio, Ratio.parse_flag_value, .{
         .ok = &.{
             .{ "0", .zero() },
             .{ "3/4", ratio(3, 4) },

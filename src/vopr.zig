@@ -108,10 +108,10 @@ pub fn main() !void {
 
     const gpa = gpa_instance.allocator();
 
-    var args = try std.process.argsWithAllocator(gpa);
-    defer args.deinit();
+    var flags = stdx.Flags.init(gpa);
+    defer flags.deinit();
 
-    const cli_args = stdx.flags(&args, CLIArgs);
+    const cli_args = flags.parse(CLIArgs);
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }

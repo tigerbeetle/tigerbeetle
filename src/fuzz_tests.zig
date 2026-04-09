@@ -98,10 +98,10 @@ pub fn main() !void {
     };
     const gpa = gpa_allocator.allocator();
 
-    var args = try std.process.argsWithAllocator(gpa);
-    defer args.deinit();
+    var flags = stdx.Flags.init(gpa);
+    defer flags.deinit(gpa);
 
-    const cli_args = stdx.flags(&args, CLIArgs);
+    const cli_args = flags.parse(CLIArgs);
 
     switch (cli_args.fuzzer) {
         .smoke => {

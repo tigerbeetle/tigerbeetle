@@ -180,7 +180,7 @@ test "Instant/Duration" {
 }
 
 test "Duration.parse_flag_value" {
-    try stdx.parse_flag_value_fuzz(Duration, Duration.parse_flag_value, .{
+    try stdx.Flags.parse_flag_value_fuzz(Duration, Duration.parse_flag_value, .{
         .ok = &.{
             .{ "1h", .{ .ns = std.time.ns_per_hour } },
             .{ "1m", .{ .ns = std.time.ns_per_min } },
