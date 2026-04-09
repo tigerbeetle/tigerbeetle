@@ -929,19 +929,19 @@ const CLIArgs = union(enum) {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator(); // FIXME: rename
+    var gpa_instance: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    const gpa = gpa_instance.allocator();
 
     var time_os: vsr.time.TimeOS = .{};
     const time = time_os.time();
 
-    var flags = stdx.Flags.init(allocator);
-    defer flags.deinit(allocator);
+    var flags = stdx.Flags.init(gpa);
+    defer flags.deinit(gpa);
 
     const args = flags.parse(CLIArgs);
 
-    const target = try allocator.create(AOFEntry);
-    defer allocator.destroy(target);
+    const target = try gpa.create(AOFEntry);
+    defer gpa.destroy(target);
 
     const IO = @import("io.zig").IO;
     var io = try IO.init(32, 0);
@@ -959,8 +959,8 @@ pub fn main() !void {
             var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
             const addresses_parsed = try vsr.parse_addresses(command.addresses, &addresses_buffer);
             var replay =
-                try AOFReplayClient.init(&io, allocator, time, command.cluster, addresses_parsed);
-            defer replay.deinit(allocator);
+                try AOFReplayClient.init(&io, gpa, time, command.cluster, addresses_parsed);
+            defer replay.deinit(gpa);
 
             try replay.replay(&it);
         },
@@ -998,7 +998,7 @@ pub fn main() !void {
 
             assert(merge.paths.len > 0);
             assert(merge.paths.len <= constants.members_max);
-            try AOF.merge(&io, allocator, merge.paths, "prepared.aof");
+            try AOF.merge(&io, gpa, merge.paths, "prepared.aof");
         },
     }
 }

@@ -110,7 +110,11 @@ pub fn parse(flags: *Flags, comptime CLIArgs: type) CLIArgs {
     return parse_flags(arena, &args, CLIArgs);
 }
 
-fn parse_commands(arena: Allocator, args: *std.process.ArgIterator, comptime Commands: type) Commands {
+fn parse_commands(
+    arena: Allocator,
+    args: *std.process.ArgIterator,
+    comptime Commands: type,
+) Commands {
     comptime assert(@typeInfo(Commands) == .@"union");
     comptime assert(std.meta.fields(Commands).len >= 2);
 
@@ -153,32 +157,29 @@ fn parse_flags(arena: Allocator, args: *std.process.ArgIterator, comptime CLIArg
     assert(@typeInfo(CLIArgs) == .@"struct");
 
     const fields = std.meta.fields(CLIArgs);
-    comptime var fields_named, const fields_positional, const field_extended: ?std.builtin.Type.StructField =
+    comptime var fields_named, var fields_positional: []const std.builtin.Type.StructField =
         for (fields, 0..) |field, index| {
             if (std.mem.eql(u8, field.name, "--")) {
                 assert(field.type == void);
                 const positional_count = fields.len - index - 1;
                 if (positional_count == 0) @panic("expected positional fields");
 
-                if (positional_count == 1 and fields[index + 1].type == []const []const u8) {
-                    break .{
-                        fields[0..index].*,
-                        fields[index + 2 ..].*, // Empty
-                        fields[index + 1],
-                    };
-                }
-
                 break .{
                     fields[0..index].*,
-                    fields[index + 1 ..].*,
-                    null,
+                    fields[index + 1 ..],
                 };
             }
         } else .{
             fields[0..fields.len].*,
-            [_]std.builtin.Type.StructField{},
-            null,
+            &.{},
         };
+
+    comptime var field_extended: ?std.builtin.Type.StructField = null;
+    if (fields_positional.len == 1 and fields_positional[0].type == []const []const u8) {
+        field_extended = fields_positional[0];
+        fields_positional = fields_positional[1..];
+        assert(fields_positional.len == 0);
+    }
 
     var arg_extended: if (field_extended == null) void else std.ArrayListUnmanaged([]const u8) =
         if (field_extended == null) {} else .empty;
