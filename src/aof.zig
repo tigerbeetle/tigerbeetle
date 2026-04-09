@@ -603,7 +603,7 @@ pub fn AOFType(comptime IO: type) type {
             var aof_count: usize = 0;
             defer for (aofs[0..aof_count]) |*it| it.close();
 
-            assert(input_paths.len < aofs.len);
+            assert(input_paths.len <= aofs.len);
 
             const EntryInfo = struct {
                 aof: *Iterator,
@@ -629,6 +629,8 @@ pub fn AOFType(comptime IO: type) type {
                 aofs[aof_count] = try Iterator.init(io, input_path);
                 aof_count += 1;
             }
+            assert(aof_count > 0);
+            assert(aof_count <= constants.members_max);
 
             var output_aof = try AOF.init(io, output_path);
 
@@ -882,7 +884,7 @@ const CLIArgs = union(enum) {
     },
     merge: struct {
         @"--": void,
-        // (One or more AOF file paths.)
+        paths: []const []const u8,
     },
 
     pub const help =
@@ -928,15 +930,15 @@ const CLIArgs = union(enum) {
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = gpa.allocator(); // FIXME: rename
 
     var time_os: vsr.time.TimeOS = .{};
     const time = time_os.time();
 
-    var args_iterator = try std.process.argsWithAllocator(allocator);
-    defer args_iterator.deinit();
+    var flags = stdx.Flags.init(allocator);
+    defer flags.deinit(allocator);
 
-    const args = stdx.flags(&args_iterator, CLIArgs);
+    const args = flags.parse(CLIArgs);
 
     const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
@@ -990,17 +992,13 @@ pub fn main() !void {
                 .{@as(u128, @bitCast(data_checksum[0..@sizeOf(u128)].*))},
             );
         },
-        .merge => |_| {
-            var paths: [constants.members_max][:0]const u8 = undefined;
-            var paths_count: u32 = 0;
-            for (&paths) |*path| {
-                path.* = args_iterator.next() orelse break;
-                paths_count += 1;
-            }
-            if (paths_count == 0) vsr.fatal(.cli, "missing paths", .{});
-            if (args_iterator.next()) |_| vsr.fatal(.cli, "too many paths", .{});
+        .merge => |merge| {
+            if (merge.paths.len == 0) vsr.fatal(.cli, "missing paths", .{});
+            if (merge.paths.len > constants.members_max) vsr.fatal(.cli, "too many paths", .{});
 
-            try AOF.merge(&io, allocator, paths[0..paths_count], "prepared.aof");
+            assert(merge.paths.len > 0);
+            assert(merge.paths.len <= constants.members_max);
+            try AOF.merge(&io, allocator, merge.paths, "prepared.aof");
         },
     }
 }
