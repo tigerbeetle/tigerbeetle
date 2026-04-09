@@ -28,9 +28,22 @@ pub const RubyDocs = Docs{
 
     .client_object_documentation = "",
     .create_accounts_documentation = "",
-    .account_flags_documentation = "",
+    .account_flags_documentation =
+    \\To toggle behavior for an account, combine constants from the
+    \\`TigerBeetle::AccountFlags` module with bitwise-or:
+    \\
+    \\* `AccountFlags::LINKED`
+    \\* `AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS`
+    \\* `AccountFlags::CREDITS_MUST_NOT_EXCEED_DEBITS`
+    \\* `AccountFlags::HISTORY`
+    \\
+    ,
 
-    .create_accounts_errors_documentation = "",
+    .create_accounts_errors_documentation =
+    \\To handle errors you can compare the result status returned
+    \\from `client.create_accounts` with constants in the
+    \\`TigerBeetle::CreateAccountStatus` module.
+    ,
     .create_transfers_documentation = "",
     .create_transfers_errors_documentation = "",
 

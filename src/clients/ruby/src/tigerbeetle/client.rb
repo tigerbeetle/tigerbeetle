@@ -19,5 +19,9 @@ module TigerBeetle
     def closed?
       @native.closed?
     end
+
+    def create_accounts(accounts)
+      @native.submit(Operation::CREATE_ACCOUNTS, accounts)
+    end
   end
 end
