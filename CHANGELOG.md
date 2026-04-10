@@ -5,7 +5,7 @@ to receive notifications about breaking changes!
 
 ## TigerBeetle 0.17.0
 
-Released: 2026-04-03
+Released: 2026-04-10
 
 This release improves `create_accounts` and `create_transfers` operations. They now return
 timestamps of newly created objects, allowing the application to learn the resulting global order
@@ -21,9 +21,16 @@ to the [API changes](https://docs.tigerbeetle.com/coding/api-changes) page for d
   from tying up the global budget.
 
 - [#3618](https://github.com/tigerbeetle/tigerbeetle/pull/3618),
-  [#3623](https://github.com/tigerbeetle/tigerbeetle/pull/3623)
+  [#3623](https://github.com/tigerbeetle/tigerbeetle/pull/3623),
+  [#3630](https://github.com/tigerbeetle/tigerbeetle/pull/3630),
+  [#3638](https://github.com/tigerbeetle/tigerbeetle/pull/3638)
 
-  Add jitter to repair timeouts, to guard against resonance liveness bugs.
+  Add randomness to repair timeouts and faulty block iteration, to guard against
+  resonance liveness bugs.
+
+- [#3612](https://github.com/tigerbeetle/tigerbeetle/pull/3612)
+
+  Test cluster upgrades using real TigerBeetle binaries in Vortex.
 
 ### Features
 
@@ -56,15 +63,37 @@ to the [API changes](https://docs.tigerbeetle.com/coding/api-changes) page for d
 
   Make the Golang client API more idiomatic using `*big.Int`.
 
+- [#3628](https://github.com/tigerbeetle/tigerbeetle/pull/3628)
+
+  While generating a TigerBeetle time-based ID, clients now wrap the random
+  bits and increment the timestamp bits when the former overflows.
+
+  Earlier, clients panicked when random bits overflowed on increment.
+
 ### Internals
 
 - [#3609](https://github.com/tigerbeetle/tigerbeetle/pull/3609)
 
   Cache Zig compiler on CI.
 
-- [#3604](https://github.com/tigerbeetle/tigerbeetle/pull/3604)
+- [#3604](https://github.com/tigerbeetle/tigerbeetle/pull/3604),
+  [#3622](https://github.com/tigerbeetle/tigerbeetle/pull/3622)
 
   IO/Linux: Add another attempt to the flock() retry loop.
+
+- [#3634](https://github.com/tigerbeetle/tigerbeetle/pull/3634),
+  [#3629](https://github.com/tigerbeetle/tigerbeetle/pull/3629),
+  [#3635](https://github.com/tigerbeetle/tigerbeetle/pull/3635)
+
+  Various Vortex and CFO fixes.
+
+- [#3632](https://github.com/tigerbeetle/tigerbeetle/pull/3632)
+
+  Docs: Clarify the number of replicas required for upgrades.
+
+- [#3595](https://github.com/tigerbeetle/tigerbeetle/pull/3595)
+
+  Docs: Fix a flipped account flag in `balance-invariant-transfers.md`.
 
 ### TigerTracks 🎧
 
