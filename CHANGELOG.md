@@ -91,13 +91,7 @@ Released: 2026-03-20
 
   `tigerbeetle inspect constants` now prints out the number of Transfers per table.
 
-- [#3579](https://github.com/tigerbeetle/tigerbeetle/pull/3579),
-  [#3589](https://github.com/tigerbeetle/tigerbeetle/pull/3589),
-  [#3591](https://github.com/tigerbeetle/tigerbeetle/pull/3591),
-  [#3584](https://github.com/tigerbeetle/tigerbeetle/pull/3584),
-  [#3594](https://github.com/tigerbeetle/tigerbeetle/pull/3594)
-
-  Fix the CI release validation job.
+- #3579, #3589, #3591, #3584, #3594: Fix the CI release validation job.
 
 - [#3583](https://github.com/tigerbeetle/tigerbeetle/pull/3583)
 
