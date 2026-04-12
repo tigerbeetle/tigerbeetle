@@ -215,7 +215,8 @@ comptime {
     assert(journal_slot_count >= lsm_compaction_ops * 2);
     assert(journal_slot_count % lsm_compaction_ops == 0);
     // The journal must have at least two pipelines of messages to ensure that a new, fully-repaired
-    // primary has enough headers for a complete SV message, even if the view-change just truncated
+    // primary has enough headers for a complete View message, even if the view-change just
+    // truncated
     // another pipeline of messages. (See op_repair_min()).
     assert(journal_slot_count >= pipeline_prepare_queue_max * 2);
 
@@ -240,7 +241,7 @@ comptime {
     assert(message_size_max >= sector_size);
     assert(message_size_max >= Config.Cluster.message_size_max_min(clients_max));
 
-    // Ensure that JV/SV messages can fit all necessary headers.
+    // Ensure that JV/View messages can fit all necessary headers.
     assert(message_body_size_max >= view_headers_max * @sizeOf(vsr.Header));
 
     assert(message_body_size_max >= @sizeOf(vsr.ReconfigurationRequest));
@@ -271,7 +272,7 @@ comptime {
     assert(pipeline_prepare_queue_max + 1 <= @bitSizeOf(u128));
 }
 
-/// Maximum number of headers from the WAL suffix to include in an SV message.
+/// Maximum number of headers from the WAL suffix to include in a View message.
 /// Must at least cover the full pipeline.
 /// Increasing this reduces likelihood that backups will need to repair their suffix's headers.
 ///
@@ -279,15 +280,15 @@ comptime {
 /// - We must provide enough headers to cover all uncommitted headers so that the new
 ///   primary (if we are in a view change) can decide whether to discard uncommitted headers
 ///   that cannot be repaired because they are gaps. See JVQuorum for more detail.
-/// - +1 to leave room for commit_max, in case a backup converts the SV to a JV.
+/// - +1 to leave room for commit_max, in case a backup converts the View to a JV.
 pub const view_change_headers_suffix_max = config.cluster.view_change_headers_suffix_max;
 
-/// The number of prepare headers to include in the body of a JV/SV.
+/// The number of prepare headers to include in the body of a JV/View.
 ///
 /// view:
 ///
 /// - We must include all uncommitted headers.
-/// - +1 We must include the highest cluster-committed header (in case the SV is converted to a JV
+/// - +1 We must include the highest cluster-committed header (in case the View is converted to a JV
 ///   by the backup). (This is part of view_change_headers_suffix_max).
 /// - +2: We must provide the header corresponding to each checkpoint-trigger in the intact
 ///   suffix of our journal.

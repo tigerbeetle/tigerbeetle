@@ -329,10 +329,10 @@ test "Cluster: recovery: recovering head: idle cluster" {
 test "Cluster: recovery: reformat unrecoverable replica" {
     for ([_]u64{
         // The cluster is still within the first checkpoint.
-        // The recovering replica just needs to load a SV and then it can repair.
+        // The recovering replica just needs to load a View and then it can repair.
         5,
         // The cluster is ahead of the initial checkpoint.
-        // The recovering replica needs to state sync via SV.
+        // The recovering replica needs to state sync via View.
         checkpoint_2,
     }) |op_max| {
         const t = try TestContext.init(.{ .replica_count = 3 });
@@ -369,7 +369,7 @@ test "Cluster: recovery: reformat unrecoverable replica: too many faults" {
     b2.stop();
 
     // Restart A0 to force it out of normal mode.
-    // Otherwise it would just share a SV, repairing the recovering replicas.
+    // Otherwise it would just share a View, repairing the recovering replicas.
     a0.stop();
     try a0.open();
 
@@ -1304,9 +1304,9 @@ test "Cluster: sync: slightly lagging replica" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_max + 2);
 }
 
-test "Cluster: sync: using SV from durable checkpoint" {
-    // Primary sends a SV message to backups when a checkpoint becomes durable. A lagging backup
-    // must use this SV message to state sync to the checkpoint.
+test "Cluster: sync: using View from durable checkpoint" {
+    // Primary sends a View message to backups when a checkpoint becomes durable. A lagging backup
+    // must use this View message to state sync to the checkpoint.
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -1330,14 +1330,14 @@ test "Cluster: sync: using SV from durable checkpoint" {
 
     try b2.open();
 
-    // Ensure b2 doesn't use repair_sync_timeout to initiate state sync and instead uses a SV
+    // Ensure b2 doesn't use repair_sync_timeout to initiate state sync and instead uses a View
     // message that a0 sends on checkpoint durability.
     const b2_replica = &t.cluster.replicas[b2.replicas.get(0)];
     b2_replica.repair_sync_timeout.stop();
 
     // b2 at first only accepts prepares up till checkpoint_1_prepare_max. When a0 and b1 commit
-    // past checkpoint_2_prepare_ok_max and checkpoint_2 is durable, a0 sends a SV message to
-    // the backups. b2 uses this SV message to state sync to checkpoint_2.
+    // past checkpoint_2_prepare_ok_max and checkpoint_2 is durable, a0 sends a View message to
+    // the backups. b2 uses this View message to state sync to checkpoint_2.
     try c.request(checkpoint_2_prepare_ok_max + 1, checkpoint_2_prepare_ok_max + 1);
 
     try expectEqual(a0.commit(), checkpoint_2_prepare_ok_max + 1);

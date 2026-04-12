@@ -71,7 +71,7 @@ pub fn signal(detector: *FaultDetector, now: Instant) void {
 /// * red    --- signaler is likely dead
 ///
 /// On yellow, the primary injects a Commit.
-/// On red, a backup sends SV.
+/// On red, a backup sends ExitView.
 ///
 /// Rough model:
 /// - Random delays, but 2X delay is suspicious.

@@ -1209,8 +1209,8 @@ pub const Header = extern struct {
         /// Set to zero for a new view, and to a nonce from an RV when responding to the RV.
         nonce: u128,
         op: u64,
-        /// Equal to `commit_min` if the SV message is being sent by a .normal primary, but may not
-        /// be equal if the SV message is being sent by potential primary in .view_change status.
+        /// Equal to `commit_min` if the View message is being sent by a .normal primary,
+        /// but may not be equal if sent by potential primary in .view_change status.
         commit_max: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,

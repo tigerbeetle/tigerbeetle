@@ -1285,7 +1285,7 @@ pub const Headers = struct {
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
-    /// - SV headers (consecutive chain)
+    /// - View headers (consecutive chain)
     /// - JV headers (disjoint chain)
     pub const ViewChangeSlice = ViewChangeHeadersSlice;
     pub const ViewChangeArray = ViewChangeHeadersArray;
@@ -1344,7 +1344,7 @@ const ViewChangeHeadersSlice = struct {
 
         const head = &headers.slice[0];
         // A JV's head op is never a gap or faulty.
-        // A SV never includes gaps or faulty headers.
+        // A View never includes gaps or faulty headers.
         assert(Headers.jv_header_type(head) == .valid);
 
         var child = head;
@@ -1355,7 +1355,7 @@ const ViewChangeHeadersSlice = struct {
             assert(header.op < child.op);
 
             // JV: Ops are consecutive (with explicit blank headers).
-            // SV: The first "pipeline + 1" ops of the SV are consecutive.
+            // View: The first "pipeline + 1" ops of the View are consecutive.
             if (headers.command == .join_view or
                 (headers.command == .view and
                     index < constants.pipeline_prepare_queue_max + 1))
@@ -1365,7 +1365,7 @@ const ViewChangeHeadersSlice = struct {
 
             switch (Headers.jv_header_type(header)) {
                 .blank => {
-                    // We can't verify that SV headers contain no gaps headers here:
+                    // We can't verify that View headers contain no gaps headers here:
                     // superblock.checkpoint could make .join_view headers durable instead of
                     // .view headers when view == log_view (see `commit_checkpoint_superblock`
                     // in `replica.zig`). When these headers are loaded from the superblock on
@@ -1401,7 +1401,7 @@ const ViewChangeHeadersSlice = struct {
     ///
     /// - When these are JV headers for a log_view=V, we must be in view_change status working to
     ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
-    /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
+    /// - When these are View headers for a log_view=V, we can continue to add to them (by preparing
     ///   more ops), but those ops will always be part of the log_view. If they were prepared during
     ///   a view prior to the log_view, they would already be part of the headers.
     pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
@@ -1487,7 +1487,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
     try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
 }
 
-/// The headers of a SV or JV message.
+/// The headers of a View or JV message.
 const ViewChangeHeadersArray = struct {
     command: ViewChangeCommand,
     array: Headers.Array,

@@ -52,7 +52,7 @@ pub const Status = enum {
     /// Replica transitions from `.recovering` to `.recovering_head` at startup
     /// if it finds its persistent state corrupted. In this case, replica can
     /// not participate in consensus, as it might have forgotten some of the
-    /// messages it has sent or received before. Instead, it waits for a SV
+    /// messages it has sent or received before. Instead, it waits for a View
     /// message to get into a consistent state.
     recovering_head,
 };
@@ -341,7 +341,7 @@ pub fn ReplicaType(
         opened: bool,
 
         syncing: SyncStage = .idle,
-        // Holds onto the SV message that triggered a state sync during async cancelation phase.
+        // Holds onto the View message that triggered a state sync during async cancelation phase.
         //
         // Invariants:
         // - (sync_view ≠ null) ⇔ (syncing ∈ {.canceling_commit, .canceling_checkpoint})
@@ -389,7 +389,7 @@ pub fn ReplicaType(
 
         /// The latest view where
         /// - the replica was a primary and acquired a JV quorum, or
-        /// - the replica was a backup and processed a SV message.
+        /// - the replica was a backup and processed a View message.
         /// i.e. the latest view in which this replica changed its head message.
         ///
         /// Initialized from the superblock's VSRState.
@@ -472,7 +472,7 @@ pub fn ReplicaType(
         routing: vsr.Routing,
 
         /// When "log_view < view": The JV headers.
-        /// When "log_view = view": The SV headers. (Just as a cache,
+        /// When "log_view = view": The View headers. (Just as a cache,
         /// since they are regenerated for every request_view).
         ///
         /// Invariants:
@@ -764,7 +764,7 @@ pub fn ReplicaType(
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
 
             const view_headers = self.superblock.working.view_headers();
-            // If we were a lagging backup that installed an SV but didn't finish fast-forwarding,
+            // If we were a lagging backup that installed a View but didn't finish fast-forwarding,
             // the view_headers head op may be part of the checkpoint after this one.
             maybe(view_headers.slice[0].op > self.op_prepare_max());
 
@@ -830,8 +830,8 @@ pub fn ReplicaType(
                     break;
                 }
             } else {
-                // This case can occur if we loaded an SV for its hook header but never finished
-                // that SV to a JV (dropping the hooks), and never finished the view change.
+                // This case can occur if we loaded a View for its hook header but never finished
+                // that View to a JV (dropping the hooks), and never finished the view change.
                 if (op_head == null) {
                     assert(self.view > self.log_view);
                     if (self.journal.op_maximum() < self.op_checkpoint() or
@@ -1739,8 +1739,8 @@ pub fn ReplicaType(
             switch (self.syncing) {
                 .idle => {},
                 .canceling_commit, .canceling_grid => {
-                    // Ignore further messages until finishing (asynchronous) processing of sync SV.
-                    // Notably, this prevents our view from jumping ahead of SV.
+                    // Ignore further messages until finishing (asynchronous) processing
+                    // of sync View. This prevents our view from jumping ahead of View.
                     assert(self.sync_view != null);
                     log.warn("{}: on_message: ignoring (syncing)", .{self.log_prefix()});
                     return;
@@ -2746,7 +2746,7 @@ pub fn ReplicaType(
                     message.header.op >= self.op_prepare_max() or
                     message.header.nonce == self.nonce)
                 {
-                    // This SV is guaranteed to have originated after the replica crash,
+                    // This View is guaranteed to have originated after the replica crash,
                     // it is safe to use to determine the head op.
                 } else {
                     log.mark.debug(
@@ -2773,13 +2773,13 @@ pub fn ReplicaType(
             assert(message.header.op - message.header.commit_max <=
                 constants.pipeline_prepare_queue_max);
 
-            // The SV message may be from a primary that hasn't yet committed up to its commit_max,
-            // and the commit_max may be from the primary's *next* checkpoint.
+            // The View message may be from a primary that hasn't yet committed up to
+            // its commit_max, and the commit_max may be from the primary's *next* checkpoint.
             maybe(message.header.commit_max - message.header.checkpoint_op >
                 constants.vsr_checkpoint_ops + constants.lsm_compaction_ops);
 
             if (message.header.view == self.log_view and message.header.op < self.op) {
-                // We were already in this view prior to receiving the SV.
+                // We were already in this view prior to receiving the View.
                 assert(self.status == .normal or self.status == .recovering_head);
 
                 log.debug("{}: on_view view={} (ignoring, old message)", .{
@@ -2808,7 +2808,7 @@ pub fn ReplicaType(
             }
             assert(self.view == message.header.view);
 
-            // Logically, SV atomically updates both the checkpoint state and the log suffix.
+            // Logically, View atomically updates both the checkpoint state and the log suffix.
             // Physically, updating the checkpoint is an asynchronous operation: it requires waiting
             // for in-progress write IOPs to complete. If the checkpoint needs to be updated
             // (set_checkpoint returns true), the replica doesn't update the journal here, and
@@ -2853,8 +2853,8 @@ pub fn ReplicaType(
                 return false;
             }
 
-            // Cluster is at least two checkpoints ahead. Although SV's checkpoint is not guaranteed
-            // be durable on a quorum of replicas, it is safe to sync to it, because prepares in
+            // Cluster is at least two checkpoints ahead. Although View's checkpoint is not
+            // guaranteed to be durable on a quorum, it is safe to sync to it, because prepares in
             // this replica's WAL are no longer needed.
             const far_behind = vsr.Checkpoint.durable(self.op_checkpoint_next() +
                 constants.vsr_checkpoint_ops, message.header.commit_max);
@@ -2866,7 +2866,7 @@ pub fn ReplicaType(
             if (!far_behind and !likely_stuck) return false;
 
             // State sync: at this point, we know we want to replace our checkpoint
-            // with the one from this SV.
+            // with the one from this View.
 
             assert(message.header.commit_max > self.op_checkpoint_next_trigger());
             assert(view_checkpoint.header.op > self.op_checkpoint());
@@ -2914,7 +2914,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle or self.syncing == .updating_checkpoint);
 
             {
-                // Replace our log with the suffix from SV. Transition to sync above guarantees
+                // Replace our log with the suffix from View. Transition to sync above guarantees
                 // that there's at least one message that fits the effective checkpoint, but some
                 // messages might be beyond its prepare_max.
                 maybe(view_headers[0].op > self.op_prepare_max_sync());
@@ -4946,7 +4946,7 @@ pub fn ReplicaType(
             if (self.grid.free_set.checkpoint_durable) return .ready;
             if (!vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_min)) return .ready;
 
-            // Send SV message so lagging replicas can proactively sync to this durable checkpoint.
+            // Send View so lagging replicas can proactively sync to this durable checkpoint.
             if (self.status == .normal and self.primary()) self.primary_send_view();
 
             // Checkpoint is guaranteed to be durable on a commit quorum when a replica is
@@ -5147,7 +5147,7 @@ pub fn ReplicaType(
 
             if (self.status == .view_change and self.view == self.log_view) {
                 // Unconditionally update a potential primary's JV headers; current headers may
-                // contain truncated ops that must not be made durable. We can't update SV
+                // contain truncated ops that must not be made durable. We can't update View
                 // headers for a potential primary because we could arrive here while the potential
                 // primary is still repairing (and thus may still have gaps in its journal).
                 assert(self.join_view_quorum);
@@ -5767,7 +5767,7 @@ pub fn ReplicaType(
             }
         }
 
-        /// Construct a SV message, including attached headers from the current log_view.
+        /// Construct a View message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_view_message(self: *Replica, nonce: u128) *Message.View {
             assert(self.status == .normal or self.status == .view_change);
@@ -5780,7 +5780,7 @@ pub fn ReplicaType(
             if (self.status == .normal) {
                 assert(self.commit_min == self.commit_max);
             } else {
-                // Potential primaries may send a SV message before committing up to commit_max.
+                // Potential primaries may send a View message before committing up to commit_max.
                 // (see `repair`).
                 assert(self.status == .view_change);
                 assert(self.join_view_quorum);
@@ -5850,7 +5850,7 @@ pub fn ReplicaType(
             }
             assert(self.view_headers.array.count() + 2 <= constants.view_headers_max);
 
-            // The SV includes headers corresponding to the op_prepare_max for preceding
+            // The View includes headers corresponding to the op_prepare_max for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
             for ([_]u64{
                 self.op_prepare_max() -| constants.vsr_checkpoint_ops,
@@ -6787,7 +6787,7 @@ pub fn ReplicaType(
                         return true;
                     }
 
-                    // Syncing replicas must be careful about receiving SV messages, since they
+                    // Syncing replicas must be careful about receiving View messages, since they
                     // may have fast-forwarded their commit_max via their checkpoint target.
                     if (message_header.commit_max < self.op_checkpoint()) {
                         log.debug("{}: on_{s}: ignoring (older checkpoint)", .{
@@ -7484,9 +7484,9 @@ pub fn ReplicaType(
         ///
         /// 1. If we are a backup and have fallen too far behind the primary, initiate state sync.
         /// 2. Advance the head op to `op_repair_max = min(op_prepare_max, commit_max)`.
-        ///    To advance the head op we request+await a SV. Either:
-        ///    - the SV's "hook" headers include op_prepare_max (if we are ≤1 wrap behind), or
-        ///    - the SV is too far ahead, so we will fall back from WAL repair to state sync.
+        ///    To advance the head op we request+await a View. Either:
+        ///    - the View's "hook" headers include op_prepare_max (if we are ≤1 wrap behind), or
+        ///    - the View is too far ahead, so we will fall back from WAL repair to state sync.
         /// 3. Acquire missing or disconnected headers in reverse chronological order, backwards
         ///    from op_repair_max.
         ///    A header is disconnected if it breaks the chain with its newer neighbor to the right.
@@ -7561,7 +7561,7 @@ pub fn ReplicaType(
                 const op_header_view = self.journal.header_with_op(self.op).?.view;
                 assert(op_header_view <= self.view);
                 if (op_header_view < self.view) {
-                    // Wait for an SV from the primary to make sure the op indeed hash-chains
+                    // Wait for a View from the primary to make sure the op indeed hash-chains
                     // to the actual view state.
                     return;
                 } else {
@@ -8850,7 +8850,7 @@ pub fn ReplicaType(
                 .log_view = self.log_view,
                 .checkpoint_op = self.op_checkpoint(),
                 // This is usually the head op, but it may be farther ahead if we are lagging behind
-                // a checkpoint. (In which case the op is inherited from the SV).
+                // a checkpoint. (In which case the op is inherited from the View).
                 .op = self.view_headers.array.get(0).op,
                 // For command=view, commit_min=commit_max.
                 // For command=join_view, the new primary uses this op to trust extra headers
@@ -9323,7 +9323,7 @@ pub fn ReplicaType(
 
                 // For JVs, EVs, and prepare_oks we must wait for the log_view to be durable:
                 // - A JV includes the log_view.
-                // - A SV or a prepare_ok imply the log_view.
+                // - A View or a prepare_ok imply the log_view.
                 if (message.header.command == .join_view or
                     message.header.command == .view or
                     message.header.command == .prepare_ok)
@@ -9561,14 +9561,14 @@ pub fn ReplicaType(
             const update = self.superblock.staging.vsr_state.log_view < self.log_view or
                 self.superblock.staging.vsr_state.view < self.view;
             const update_jv = update and self.log_view < self.view;
-            const update_v = update and self.log_view == self.view and
+            const update_view = update and self.log_view == self.view and
                 (self.replica != self.primary_index(self.view) or self.status == .normal);
-            assert(!(update_jv and update_v));
+            assert(!(update_jv and update_view));
 
             const update_checkpoint = self.syncing == .updating_checkpoint and
                 self.syncing.updating_checkpoint.header.op > self.op_checkpoint();
 
-            if (update_jv or update_v or update_checkpoint) self.view_durable_update();
+            if (update_jv or update_view or update_checkpoint) self.view_durable_update();
 
             // Reset EV timeout in case the view-durable update took a long time.
             if (self.view_change_status_timeout.ticking) self.view_change_status_timeout.reset();
@@ -9588,7 +9588,7 @@ pub fn ReplicaType(
                         if (!self.join_view_quorum) self.send_join_view();
                     } else {
                         assert(self.log_view == self.view);
-                        // Potential primaries that have updated their SV headers can send out SV
+                        // Potential primaries that have updated View headers can send View
                         // messages (see `repair`)
                         if (self.primary_index(self.view) == self.replica and
                             self.view_headers.command == .view)
@@ -10264,7 +10264,7 @@ pub fn ReplicaType(
             // - During a prior view-change we might have only accepted a single header from the
             //   JV: "header.op = op_prepare_max", and then not completed any
             //   repair.
-            // - Similarly, we might have receive a catch-up SV message and only installed a
+            // - Similarly, we might have receive a catch-up View message and only installed a
             //   single (checkpoint trigger) hook header.
             //
             // JV headers are stitched together from the journal and existing view headers (they
@@ -10308,9 +10308,9 @@ pub fn ReplicaType(
                     if (header_journal) |h| {
                         view_headers_updated.append(h);
                     } else {
-                        // Transition from normal status, but the SV headers were part of the next
+                        // Transition from normal status, but the View headers were part of the next
                         // wrap, so we didn't install them to our journal, and we didn't catch up.
-                        // We will reuse the SV headers as our JV headers to ensure that
+                        // We will reuse the View headers as our JV headers to ensure that
                         // participating in another view-change won't allow the op to backtrack.
                         assert(self.log_view == self.view);
                         view_headers_updated.append(header_view.?);
@@ -10428,7 +10428,7 @@ pub fn ReplicaType(
             var grid_repair_writes = self.grid_repair_writes.iterate();
             while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
 
-            // Resume SV/sync flow.
+            // Resume View/sync flow.
             const message = self.sync_view.?;
             self.sync_view = null;
             defer self.message_bus.unref(message);
@@ -11496,7 +11496,7 @@ pub fn ReplicaType(
 /// Terminology:
 ///
 /// - *JV* refers to a command=join_view message.
-/// - *SV* refers to a command=view message.
+/// - *View* refers to a command=view message.
 ///
 /// - The *head* message (of a view) is the message (committed or uncommitted) within that view with
 ///   the highest op.
@@ -11533,7 +11533,7 @@ pub fn ReplicaType(
 ///   - When `replica.commit_max ≤ replica.op`,
 ///     the JV must include a valid/blank header for every op in that range.
 ///   - When `replica.commit_max > replica.op`, only a single header is included
-///     (`replica.commit_max` if available in the SV, otherwise `replica.op`).
+///     (`replica.commit_max` if available in the View, otherwise `replica.op`).
 ///   - (The JV will need a valid header corresponding to its `commit_max` to complete, since the
 ///     entire pipeline may be truncated, and the new primary still needs a header for its head op.)
 ///

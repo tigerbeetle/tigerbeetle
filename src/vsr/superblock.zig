@@ -89,11 +89,11 @@ pub const SuperBlockHeader = extern struct {
 
     reserved: [1940]u8 = @splat(0),
 
-    /// SV/JV header suffix. Headers are ordered from high-to-low op.
+    /// View/JV header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after view_headers_count) are zeroed.
     ///
     /// When `vsr_state.log_view < vsr_state.view`, the headers are for a JV.
-    /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
+    /// When `vsr_state.log_view = vsr_state.view`, the headers are for a View.
     view_headers_all: [constants.view_headers_max]vsr.Header.Prepare,
     view_headers_reserved: [view_headers_reserved_size]u8 = @splat(0),
 
