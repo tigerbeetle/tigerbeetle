@@ -244,10 +244,10 @@ pub const Command = enum(u8) {
     reply = 8,
     commit = 9,
 
-    start_view_change = 10,
-    do_view_change = 11,
+    exit_view = 10,
+    join_view = 11,
 
-    request_start_view = 13,
+    request_view = 13,
     request_headers = 14,
     request_prepare = 15,
     request_reply = 16,
@@ -258,13 +258,13 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
-    start_view = 24,
+    view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
-    deprecated_12 = 12, // start_view without checkpoint
+    deprecated_12 = 12, // view without checkpoint
     deprecated_21 = 21, // request_sync_checkpoint
     deprecated_22 = 22, // sync_checkpoint
-    deprecated_23 = 23, // start_view with an older version of CheckpointState
+    deprecated_23 = 23, // view with an older version of CheckpointState
 
     comptime {
         for (std.enums.values(Command)) |command| {
@@ -1286,11 +1286,11 @@ pub const Headers = struct {
     /// One of the following:
     ///
     /// - SV headers (consecutive chain)
-    /// - DVC headers (disjoint chain)
+    /// - JV headers (disjoint chain)
     pub const ViewChangeSlice = ViewChangeHeadersSlice;
     pub const ViewChangeArray = ViewChangeHeadersArray;
 
-    fn dvc_blank(op: u64) Header.Prepare {
+    fn jv_blank(op: u64) Header.Prepare {
         return .{
             .command = .prepare,
             .release = Release.zero,
@@ -1308,8 +1308,8 @@ pub const Headers = struct {
         };
     }
 
-    pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
-        if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
+    pub fn jv_header_type(header: *const Header.Prepare) enum { blank, valid } {
+        if (std.meta.eql(header.*, Headers.jv_blank(header.op))) return .blank;
 
         assert(header.valid_checksum());
         assert(header.command == .prepare);
@@ -1319,7 +1319,7 @@ pub const Headers = struct {
     }
 };
 
-pub const ViewChangeCommand = enum { do_view_change, start_view };
+pub const ViewChangeCommand = enum { join_view, view };
 
 const ViewChangeHeadersSlice = struct {
     command: ViewChangeCommand,
@@ -1343,9 +1343,9 @@ const ViewChangeHeadersSlice = struct {
         assert(headers.slice.len <= constants.view_headers_max);
 
         const head = &headers.slice[0];
-        // A DVC's head op is never a gap or faulty.
+        // A JV's head op is never a gap or faulty.
         // A SV never includes gaps or faulty headers.
-        assert(Headers.dvc_header_type(head) == .valid);
+        assert(Headers.jv_header_type(head) == .valid);
 
         var child = head;
         for (headers.slice[1..], 0..) |*header, i| {
@@ -1354,25 +1354,25 @@ const ViewChangeHeadersSlice = struct {
             maybe(header.operation == .reserved);
             assert(header.op < child.op);
 
-            // DVC: Ops are consecutive (with explicit blank headers).
+            // JV: Ops are consecutive (with explicit blank headers).
             // SV: The first "pipeline + 1" ops of the SV are consecutive.
-            if (headers.command == .do_view_change or
-                (headers.command == .start_view and
+            if (headers.command == .join_view or
+                (headers.command == .view and
                     index < constants.pipeline_prepare_queue_max + 1))
             {
                 assert(header.op == head.op - index);
             }
 
-            switch (Headers.dvc_header_type(header)) {
+            switch (Headers.jv_header_type(header)) {
                 .blank => {
                     // We can't verify that SV headers contain no gaps headers here:
-                    // superblock.checkpoint could make .do_view_change headers durable instead of
-                    // .start_view headers when view == log_view (see `commit_checkpoint_superblock`
+                    // superblock.checkpoint could make .join_view headers durable instead of
+                    // .view headers when view == log_view (see `commit_checkpoint_superblock`
                     // in `replica.zig`). When these headers are loaded from the superblock on
-                    // startup, they are considered to be .start_view headers (see `view_headers` in
+                    // startup, they are considered to be .view headers (see `view_headers` in
                     // `superblock.zig`).
-                    maybe(headers.command == .do_view_change);
-                    maybe(headers.command == .start_view);
+                    maybe(headers.command == .join_view);
+                    maybe(headers.command == .view);
                     continue; // Don't update "child".
                 },
                 .valid => {
@@ -1399,7 +1399,7 @@ const ViewChangeHeadersSlice = struct {
     /// Returns the range of possible views (of prepare, not commit) for a message that is part of
     /// the same log_view as these headers.
     ///
-    /// - When these are DVC headers for a log_view=V, we must be in view_change status working to
+    /// - When these are JV headers for a log_view=V, we must be in view_change status working to
     ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
     /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
     ///   more ops), but those ops will always be part of the log_view. If they were prepared during
@@ -1409,7 +1409,7 @@ const ViewChangeHeadersSlice = struct {
         const header_oldest = blk: {
             var oldest: ?usize = null;
             for (headers.slice, 0..) |*header, i| {
-                switch (Headers.dvc_header_type(header)) {
+                switch (Headers.jv_header_type(header)) {
                     .blank => assert(i > 0),
                     .valid => oldest = i,
                 }
@@ -1424,16 +1424,16 @@ const ViewChangeHeadersSlice = struct {
         if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
 
         for (headers.slice) |*header| {
-            if (Headers.dvc_header_type(header) == .valid and header.op == op) {
+            if (Headers.jv_header_type(header) == .valid and header.op == op) {
                 return .{ .min = header.view, .max = header.view };
             }
         }
 
         var header_next = &headers.slice[0];
-        assert(Headers.dvc_header_type(header_next) == .valid);
+        assert(Headers.jv_header_type(header_next) == .valid);
 
         for (headers.slice[1..]) |*header_prev| {
-            if (Headers.dvc_header_type(header_prev) == .valid) {
+            if (Headers.jv_header_type(header_prev) == .valid) {
                 if (header_prev.op < op and op < header_next.op) {
                     return .{ .min = header_prev.view, .max = header_next.view };
                 }
@@ -1457,8 +1457,8 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .view = 10,
             .timestamp = 11,
         }),
-        Headers.dvc_blank(8),
-        Headers.dvc_blank(7),
+        Headers.jv_blank(8),
+        Headers.jv_blank(7),
         std.mem.zeroInit(Header.Prepare, .{
             .checksum = undefined,
             .client = 3,
@@ -1470,13 +1470,13 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .view = 7,
             .timestamp = 8,
         }),
-        Headers.dvc_blank(5),
+        Headers.jv_blank(5),
     };
 
     headers_array[0].set_checksum();
     headers_array[3].set_checksum();
 
-    const headers = Headers.ViewChangeSlice.init(.do_view_change, &headers_array);
+    const headers = Headers.ViewChangeSlice.init(.join_view, &headers_array);
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
@@ -1487,13 +1487,13 @@ test "Headers.ViewChangeSlice.view_for_op" {
     try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
 }
 
-/// The headers of a SV or DVC message.
+/// The headers of a SV or JV message.
 const ViewChangeHeadersArray = struct {
     command: ViewChangeCommand,
     array: Headers.Array,
 
     pub fn root(cluster: u128) ViewChangeHeadersArray {
-        return ViewChangeHeadersArray.init(.start_view, &.{
+        return ViewChangeHeadersArray.init(.view, &.{
             Header.Prepare.root(cluster),
         });
     }
@@ -1535,9 +1535,9 @@ const ViewChangeHeadersArray = struct {
     }
 
     pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
-        assert(headers.command == .do_view_change);
+        assert(headers.command == .join_view);
         assert(headers.array.count() > 0);
-        headers.array.push(Headers.dvc_blank(op));
+        headers.array.push(Headers.jv_blank(op));
     }
 };
 

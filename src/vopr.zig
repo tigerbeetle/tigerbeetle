@@ -898,7 +898,7 @@ pub const Simulator = struct {
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,
     // the core might fail to converge, as parts of the repair protocol rely on primary-sent
-    // `.start_view_change` messages. Until we fix this issue, we special-case this scenario in
+    // `.exit_view` messages. Until we fix this issue, we special-case this scenario in
     // VOPR and don't treat it as a liveness failure.
     //
     // TODO: make sure that .recovering_head replicas can transition to normal even without direct
@@ -1035,7 +1035,7 @@ pub const Simulator = struct {
                                 replica.superblock.working.view_headers_all[0..headers_count];
                             for (headers) |*header| {
                                 if (header.op == op) {
-                                    break :header switch (vsr.Headers.dvc_header_type(header)) {
+                                    break :header switch (vsr.Headers.jv_header_type(header)) {
                                         .valid => header,
                                         .blank => null,
                                     };
@@ -1104,7 +1104,7 @@ pub const Simulator = struct {
 
         // Check whether any of the uncommitted headers is corrupted on more than a nack
         // quorum of replicas. If so, the cluster cannot initiate repair or commit (see the
-        // awaiting_repair and complete_invalid cases in the DVCQuorum).
+        // awaiting_repair and complete_invalid cases in the JVQuorum).
         const nack_quorum = vsr.quorums(replica_count).nack_prepare;
         for (cluster_commit_max..cluster_op_head + 1) |op| {
             if (replicas_missing_ops[op - cluster_op_repair_min].count() >= nack_quorum) {

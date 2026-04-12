@@ -36,10 +36,10 @@ Storage:
 |              `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
 |                   `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                  `commit` | primary |       backup | [Normal](#protocol-normal)                                                                                                                 |
-|       `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                                                                           |
-|          `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                                                                                       |
-|              `start_view` | primary |       backup | [Request/Start View](#protocol-requeststart-view), [State Sync](./sync.md)                                                                 |
-|      `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                                                                          |
+|               `exit_view` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                                                                           |
+|               `join_view` | replica | all replicas | [View-Change](#protocol-view-change)                                                                                                       |
+|                    `view` | primary |       backup | [Request/Start View](#protocol-requeststart-view), [State Sync](./sync.md)                                                                 |
+|            `request_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                                                                          |
 |         `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                                                                                 |
 |         `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                                                                                         |
 |           `request_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies)                             |
@@ -103,19 +103,19 @@ See also:
 
 ### Protocol: Start-View-Change
 
-Start-View-Change (SVC) protocol initiates [view-changes](#protocol-view-change) with minimal disruption.
+Start-View-Change (EV) protocol initiates [view-changes](#protocol-view-change) with minimal disruption.
 
 Unlike the Start-View-Change described in [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) §4.2, this protocol runs in both `status=normal` and `status=view_change` (not just `status=view_change`).
 
 1. Depending on the replica's status:
    - `status=normal` & primary: When the replica has not recently received a `prepare_ok` (and it has a prepare in flight), pause broadcasting `command=commit`.
-   - `status=normal` & backup: When the replica has not recently received a `command=commit`, broadcast `command=start_view_change` to all replicas (including self).
-   - `status=view_change`: If the replica has not completed a view-change recently, send a `command=start_view_change` to all replicas (including self).
-2. (Periodically retry sending the SVC).
-3. If the backup receives a `command=commit` or changes views (respectively), stop the `command=start_view_change` retries.
-4. If the replica collects a [view-change quorum](#quorums) of SVC messages, transition to `status=view_change` for the next view. (That is, increment the replica's view and start sending a DVC).
+   - `status=normal` & backup: When the replica has not recently received a `command=commit`, broadcast `command=exit_view` to all replicas (including self).
+   - `status=view_change`: If the replica has not completed a view-change recently, send a `command=exit_view` to all replicas (including self).
+2. (Periodically retry sending the EV).
+3. If the backup receives a `command=commit` or changes views (respectively), stop the `command=exit_view` retries.
+4. If the replica collects a [view-change quorum](#quorums) of EV messages, transition to `status=view_change` for the next view. (That is, increment the replica's view and start sending a JV).
 
-This protocol approach enables liveness under asymmetric network partitions. For example, a replica which can send to the cluster but not receive may send SVCs, but if the remainder of the cluster is healthy, they will never achieve a quorum, so the view is stable. When the partition heals, the formerly-isolated replica may rejoin the original view (if it was isolated in `status=normal`) or a new view (if it was isolated in `status=view_change`).
+This protocol approach enables liveness under asymmetric network partitions. For example, a replica which can send to the cluster but not receive may send EVs, but if the remainder of the cluster is healthy, they will never achieve a quorum, so the view is stable. When the partition heals, the formerly-isolated replica may rejoin the original view (if it was isolated in `status=normal`) or a new view (if it was isolated in `status=view_change`).
 
 See also:
 
@@ -124,12 +124,12 @@ See also:
 
 ### Protocol: View-Change
 
-A replica sends `command=do_view_change` to all replicas, with the `view` it is attempting to start.
+A replica sends `command=join_view` to all replicas, with the `view` it is attempting to start.
 
-- The _primary_ of the `view` collects a [view-change quorum](#quorums) of DVCs.
-- The _backup_ of the `view` uses to `do_view_change` to update its current `view` (transitioning to `status=view_change`).
+- The _primary_ of the `view` collects a [view-change quorum](#quorums) of JVs.
+- The _backup_ of the `view` uses to `join_view` to update its current `view` (transitioning to `status=view_change`).
 
-DVCs include headers from prepares which are:
+JVs include headers from prepares which are:
 
 - _present_: A valid header, corresponding to a valid prepare in the replica's WAL.
 - _missing_: A valid header, corresponding to a prepare that the replica has not prepared/acked.
@@ -141,24 +141,24 @@ If the new primary collects a _nack quorum_ of _blank_ headers for a particular 
 
 These cases are farther distinguished during [WAL repair](#protocol-repair-wal).
 
-When the primary collects its DVC quorum:
+When the primary collects its JV quorum:
 
-1. If any DVC in the quorum is ahead of the primary by more than one checkpoint,
+1. If any JV in the quorum is ahead of the primary by more than one checkpoint,
    the new primary "forfeits" (that is, it immediately triggers another view change).
-2. If any DVC in the quorum is ahead of the primary by more than one checkpoint,
+2. If any JV in the quorum is ahead of the primary by more than one checkpoint,
    and any messages in the next checkpoint are possibly committed,
    the new primary forfeits.
 3. The primary installs the headers to its suffix.
 4. Then the primary repairs its headers. ([Protocol: Repair Journal](#protocol-repair-journal)).
 5. Then the primary repairs its prepares. ([Protocol: Repair WAL](#protocol-repair-wal)) (and potentially truncates uncommitted ops).
 6. Then primary commits all prepares which are not known to be uncommitted.
-7. Then the primary transitions to `status=normal` and broadcasts a `command=start_view`.
+7. Then the primary transitions to `status=normal` and broadcasts a `command=view`.
 
 ### Protocol: Request/Start View
 
-#### `request_start_view`
+#### `request_view`
 
-A backup sends a `command=request_start_view` to the primary of a view when any of the following occur:
+A backup sends a `command=request_view` to the primary of a view when any of the following occur:
 
 - the backup learns about a newer view via a `command=commit` message, or
 - the backup learns about a newer view via a `command=prepare` message, or
@@ -166,18 +166,18 @@ A backup sends a `command=request_start_view` to the primary of a view when any 
 - the backup can't make progress committing and needs to state sync, or
 - a replica recovers to `status=recovering_head`
 
-#### `start_view`
+#### `view`
 
-When a `status=normal` primary receives `command=request_start_view`, it replies with a `command=start_view`.
-`command=start_view` includes:
+When a `status=normal` primary receives `command=request_view`, it replies with a `command=view`.
+`command=view` includes:
 - The view's current suffix — the headers of the latest messages in the view.
 - The current checkpoint (see [State Sync](./sync.md)).
 
 Together, the checkpoint and the view headers fully specify the logical and physical state of the view.
 
-Upon receiving a `start_view` for the new view, the backup installs the checkpoint if needed, installs the suffix, transitions to `status=normal`, and begins repair.
+Upon receiving a `view` for the new view, the backup installs the checkpoint if needed, installs the suffix, transitions to `status=normal`, and begins repair.
 
-A `start_view` contains the following headers (which may overlap):
+A `view` contains the following headers (which may overlap):
 
 - The suffix: `pipeline_prepare_queue_max` headers from the head op down.
 - The "hooks": the header of any previous checkpoint triggers within our repairable range.

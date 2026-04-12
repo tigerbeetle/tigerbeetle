@@ -8,16 +8,16 @@
 //! 3. The recovery process exits. Now running `tigerbeetle start` as normal will work.
 //!
 //! The `pipeline_prepare_queue_max` committed requests ensure that if the newly recovered replica
-//! nacks uncommitted ops via a DVC message, it is nacking ops which were definitely not received by
+//! nacks uncommitted ops via a JV message, it is nacking ops which were definitely not received by
 //! the previous version of the replica.
 //!
 //! The +2 is because:
 //! - We don't want to join in the same view, since the replica might have participated in it before
 //!   being lost, and we can't remember any promises we made.
-//! - Likewise, we don't want to go to view + 1 -- if we were the first to collect a SVC quorum
-//!   before being lost, we might have sent a DVC. Since we don't remember, we must skip past
-//!   `view + 11 to ensure that we don't send a different DVC. (We have the invariant that if a
-//!   replica sends a DVC for a given view, then all DVC's it sends for that view will be
+//! - Likewise, we don't want to go to view + 1 -- if we were the first to collect a EV quorum
+//!   before being lost, we might have sent a JV. Since we don't remember, we must skip past
+//!   `view + 11 to ensure that we don't send a different JV. (We have the invariant that if a
+//!   replica sends a JV for a given view, then all JV's it sends for that view will be
 //!   identical.)
 const std = @import("std");
 const assert = std.debug.assert;
@@ -145,7 +145,7 @@ pub fn ReplicaReformatType(
 
             reformat.requests_done += 1;
             if (reformat.requests_done == constants.pipeline_prepare_queue_max) {
-                // +2 since we might have sent a DVC as part of +1 before we crashed.
+                // +2 since we might have sent a JV as part of +1 before we crashed.
                 reformat.options.view = reformat.client.view + 2;
                 format(
                     Storage,

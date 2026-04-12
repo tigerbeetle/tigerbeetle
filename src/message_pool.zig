@@ -71,8 +71,8 @@ pub const Options = union(vsr.ProcessType) {
         sum += 1; // Replica.loopback_queue
         sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
         sum += 1; // Replica.commit_prepare
-        sum += 1; // Replica.sync_start_view
-        // Replica.do_view_change_from_all_replicas quorum:
+        sum += 1; // Replica.sync_view
+        // Replica.join_view_from_all_replicas quorum:
         // All other quorums are bitsets.
         //
         // This should be set to the runtime replica_count, but we don't know that precisely
@@ -116,10 +116,10 @@ pub const MessagePool = struct {
         pub const PrepareOk = CommandMessageType(.prepare_ok);
         pub const Reply = CommandMessageType(.reply);
         pub const Commit = CommandMessageType(.commit);
-        pub const StartViewChange = CommandMessageType(.start_view_change);
-        pub const DoViewChange = CommandMessageType(.do_view_change);
-        pub const StartView = CommandMessageType(.start_view);
-        pub const RequestStartView = CommandMessageType(.request_start_view);
+        pub const ExitView = CommandMessageType(.exit_view);
+        pub const JoinView = CommandMessageType(.join_view);
+        pub const View = CommandMessageType(.view);
+        pub const RequestView = CommandMessageType(.request_view);
         pub const RequestHeaders = CommandMessageType(.request_headers);
         pub const RequestPrepare = CommandMessageType(.request_prepare);
         pub const RequestReply = CommandMessageType(.request_reply);

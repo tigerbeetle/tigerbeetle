@@ -251,7 +251,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
 test "Cluster: recovery: recovering_head, outdated start view" {
     // 1. Wait for B1 to ok op=3.
     // 2. Restart B1 while corrupting op=3, so that it gets into a .recovering_head with op=2.
-    // 3. Try make B1 forget about op=3 by delivering it an outdated .start_view with op=2.
+    // 3. Try make B1 forget about op=3 by delivering it an outdated .view with op=2.
     const t = try TestContext.init(.{
         .replica_count = 3,
     });
@@ -271,7 +271,7 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     try expectEqual(b1.status(), .recovering_head);
     try expectEqual(b1.op_head(), 1);
 
-    b1.record(.A0, .incoming, .start_view);
+    b1.record(.A0, .incoming, .view);
     t.run();
     try expectEqual(b1.status(), .normal);
     try expectEqual(b1.op_head(), 2);
@@ -629,7 +629,7 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     b1.pass_all(.__, .bidirectional);
     a0.drop_all(.__, .bidirectional);
     // TODO: make sure that B1 uses WAL repair rather than state sync here.
-    const mark = marks.check("on_do_view_change: lagging primary; forfeiting");
+    const mark = marks.check("on_join_view: lagging primary; forfeiting");
     t.run();
     try mark.expect_hit();
 
@@ -674,7 +674,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     b1.stop();
     b1.corrupt(.{ .wal_prepare = 4 });
 
-    // We can't learn op=4's prepare, only its header (via start_view).
+    // We can't learn op=4's prepare, only its header (via view).
     b1.drop(.R_, .bidirectional, .prepare);
     try b1.open();
     try expectEqual(b1.status(), .recovering_head);
@@ -710,7 +710,7 @@ test "Cluster: repair: corrupt reply" {
     try expectEqual(t.replica(.R_).commit(), 2);
 
     // Prevent any view changes, to ensure A0 repairs its corrupt prepare.
-    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .join_view);
 
     // Block the client from seeing the reply from the cluster.
     t.replica(.R_).drop(.C_, .outgoing, .reply);
@@ -746,8 +746,8 @@ test "Cluster: repair: ack committed prepare" {
 
     // A0 commits 3.
     // B1 prepares 3, but does not commit.
-    t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
-    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .exit_view);
+    t.replica(.R_).drop(.R_, .bidirectional, .join_view);
     p.drop(.__, .outgoing, .commit);
     b2.drop(.__, .incoming, .prepare);
     try c.request(3, 3);
@@ -765,11 +765,11 @@ test "Cluster: repair: ack committed prepare" {
 
     // Change views. B1/B2 participate. Don't allow B2 to repair op=3.
     try expectEqual(p.role(), .primary);
-    t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
-    t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
+    t.replica(.R_).pass(.R_, .bidirectional, .exit_view);
+    t.replica(.R_).pass(.R_, .bidirectional, .join_view);
     p.drop(.__, .bidirectional, .prepare);
-    p.drop(.__, .bidirectional, .do_view_change);
-    p.drop(.__, .bidirectional, .start_view_change);
+    p.drop(.__, .bidirectional, .join_view);
+    p.drop(.__, .bidirectional, .exit_view);
     t.run();
     try expectEqual(b1.commit(), 2);
     try expectEqual(b2.commit(), 2);
@@ -784,8 +784,8 @@ test "Cluster: repair: ack committed prepare" {
     p.pass_all(.__, .bidirectional);
     b1.pass_all(.__, .bidirectional);
     b2.drop_all(.__, .bidirectional);
-    t.replica(.R_).drop(.R_, .bidirectional, .start_view_change);
-    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .exit_view);
+    t.replica(.R_).drop(.R_, .bidirectional, .join_view);
     t.run();
 
     try expectEqual(p.status(), .normal);
@@ -843,7 +843,7 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     try expectEqual(b1.commit(), checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
 }
 
-test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
+test "Cluster: view-change: JV, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -878,7 +878,7 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     try expectEqual(t.replica(.R_).commit(), 4);
 }
 
-test "Cluster: view-change: DVC, 2/3 faulty header stall" {
+test "Cluster: view-change: JV, 2/3 faulty header stall" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -925,7 +925,7 @@ test "Cluster: view-change: duel of the primaries" {
     t.replica(.R2).pass_all(.R_, .bidirectional);
     t.replica(.R1).drop_all(.R_, .bidirectional);
     t.replica(.R2).drop(.R0, .bidirectional, .prepare_ok);
-    t.replica(.R2).drop(.R0, .outgoing, .do_view_change);
+    t.replica(.R2).drop(.R0, .outgoing, .join_view);
     t.run();
 
     // The stage is set: we have two primaries in different views, R2 is about to abdicate.
@@ -1004,8 +1004,8 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
     b2.stop();
 
     a0.stop();
-    // Drop incoming DVCs to a0 to check if b1 steps up as primary.
-    a0.drop(.R_, .incoming, .do_view_change);
+    // Drop incoming JVs to a0 to check if b1 steps up as primary.
+    a0.drop(.R_, .incoming, .join_view);
     try a0.open();
 
     try b1.open();
@@ -1050,7 +1050,7 @@ test "Cluster: view-change: primary with dirty log" {
 
     // Crash A0, and force B2 to become the primary.
     a0.stop();
-    b1.drop(.__, .incoming, .do_view_change);
+    b1.drop(.__, .incoming, .join_view);
 
     // B2 tries to become primary. (Don't let B1 become primary – it would not realize its
     // checkpoint entry is corrupt, which would defeat the purpose of this test).
@@ -1088,9 +1088,9 @@ test "Cluster: view-change: nack older view" {
 
     t.replica(.R_).pass(.R_, .bidirectional, .ping);
     t.replica(.R_).pass(.R_, .bidirectional, .pong);
-    b1.pass(.R_, .bidirectional, .start_view_change);
-    b1.pass(.R_, .incoming, .do_view_change);
-    b1.pass(.R_, .outgoing, .start_view);
+    b1.pass(.R_, .bidirectional, .exit_view);
+    b1.pass(.R_, .incoming, .join_view);
+    b1.pass(.R_, .outgoing, .view);
     a0.drop_all(.R_, .bidirectional);
     b2.pass(.R_, .incoming, .prepare);
     b2.drop_fn(.R_, .incoming, struct {
@@ -1256,14 +1256,14 @@ test "Cluster: sync: view-change with lagging replica" {
     a0.drop_all(.R_, .bidirectional);
 
     // Let the cluster run for some time without B2 state syncing.
-    b2.drop(.R_, .bidirectional, .start_view);
+    b2.drop(.R_, .bidirectional, .view);
     t.run();
     try expectEqual(b2.status(), .view_change);
     try expectEqual(b2.op_checkpoint(), 0);
     try c.request(checkpoint_2_trigger + 1, checkpoint_2_trigger); // Cluster is blocked.
 
     // Let B2 state sync. This unblocks the cluster.
-    b2.pass(.R_, .bidirectional, .start_view);
+    b2.pass(.R_, .bidirectional, .view);
     t.run();
     try expectEqual(b1.role(), .primary);
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -1371,7 +1371,7 @@ test "Cluster: sync: checkpoint from a newer view" {
         // only allow B1 to learn about A0 prepares.
         t.replica(.R_).drop(.R_, .incoming, .prepare);
         t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
-        t.replica(.R_).drop(.R_, .incoming, .start_view_change);
+        t.replica(.R_).drop(.R_, .incoming, .exit_view);
 
         // Force b1 to sync, rather than repair, by making op=checkpoint_1 - 1 unavailable.
         b1.stop();
@@ -1397,7 +1397,7 @@ test "Cluster: sync: checkpoint from a newer view" {
         // Make the rest of cluster prepare and commit a different sequence of prepares.
         t.replica(.R_).pass(.R_, .incoming, .prepare);
         t.replica(.R_).pass(.R_, .incoming, .prepare_ok);
-        t.replica(.R_).pass(.R_, .incoming, .start_view_change);
+        t.replica(.R_).pass(.R_, .incoming, .exit_view);
 
         a0.drop_all(.R_, .bidirectional);
         b1.drop_all(.R_, .bidirectional);
@@ -1407,7 +1407,7 @@ test "Cluster: sync: checkpoint from a newer view" {
     {
         // Let B1 rejoin, but prevent it from jumping into view change.
         b1.pass_all(.R_, .bidirectional);
-        b1.drop(.R_, .bidirectional, .start_view);
+        b1.drop(.R_, .bidirectional, .view);
         b1.drop(.R_, .incoming, .ping);
         b1.drop(.R_, .incoming, .pong);
 
@@ -1527,7 +1527,7 @@ test "Cluster: upgrade: state-sync to new release" {
     // R2 is advertising the new release (so that the upgrade can begin) but it doesn't actually
     // join in yet.
     t.replica(.R2).drop(.__, .bidirectional, .prepare);
-    t.replica(.R2).drop(.__, .bidirectional, .start_view); // Prevent state sync.
+    t.replica(.R2).drop(.__, .bidirectional, .view); // Prevent state sync.
     t.run();
 
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
@@ -1753,12 +1753,12 @@ test "Cluster: eviction: session_too_low" {
     try expectEqual(c0.eviction_reason(), .session_too_low);
 }
 
-test "Cluster: view_change: DVC header doesn't match current header in journal" {
-    // It could be the case that a replica's DVC headers don't match the journal's current state.
-    // For example, a header could be blank in the DVC but present in the journal (could happen if
-    // the DVC was computed when that header was corrupt/missing in the replica's journal, and the
-    // replica is simply reusing an old DVC). The replica must check the journal before
-    // broadcasating its DVC, so it appropriately acks/nacks headers in the DVC based on the current
+test "Cluster: view_change: JV header doesn't match current header in journal" {
+    // It could be the case that a replica's JV headers don't match the journal's current state.
+    // For example, a header could be blank in the JV but present in the journal (could happen if
+    // the JV was computed when that header was corrupt/missing in the replica's journal, and the
+    // replica is simply reusing an old JV). The replica must check the journal before
+    // broadcasating its JV, so it appropriately acks/nacks headers in the JV based on the current
     // state of the journal.
 
     const t = try TestContext.init(.{ .replica_count = 3 });
@@ -1807,7 +1807,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     b2.stop();
     a0.stop();
 
-    // Corrupt op_head() - 1 to ensure that the DVC headers computed by a0 on startup contain a
+    // Corrupt op_head() - 1 to ensure that the JV headers computed by a0 on startup contain a
     // blank header for op_header() - 1.
     a0.corrupt(.{ .wal_prepare = (a0.op_head() - 1) % slot_count });
 
@@ -1819,7 +1819,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     t.run();
 
     // The two replicas are stuck in view change:
-    // B1 is still on checkpoint_1, it's DVC header lagging behind A0's. A0's DVC headers contain a
+    // B1 is still on checkpoint_1, it's JV header lagging behind A0's. A0's JV headers contain a
     // blank header for op_head() - 1, which it can't nack/ack because it is corrupted in the
     // journal. There aren't enough nacks for truncating op_head() -1 (nack_quorum=2), and no acks
     // for it to be retained in the view change.
@@ -1837,7 +1837,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
 
     t.run();
 
-    // The two replicas are stuck in view change still. a0 reuses its old DVC headers with a blank
+    // The two replicas are stuck in view change still. a0 reuses its old JV headers with a blank
     // header for op_head() - 1, but it still can't ack/nack it.
     try mark2.expect_hit();
     try expectEqual(a0.status(), .view_change);
@@ -1853,9 +1853,9 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     try expectEqual(t.replica(.R0).commit_max(), checkpoint_2_prepare_max);
 }
 
-test "Cluster: view_change: lagging replica repairs WAL using start_view from potential primary" {
+test "Cluster: view_change: lagging replica repairs WAL using view from potential primary" {
     // It could be the case that the replica with the most advanced checkpoint has a corruption in
-    // its grid. In this case, a replica on an older checkpoint can use a start_view message from
+    // its grid. In this case, a replica on an older checkpoint can use a view message from
     // the most up-to-date replica to repair its WAL, advance its checkpoint, and become primary.
 
     const t = try TestContext.init(.{ .replica_count = 3 });
@@ -1922,12 +1922,12 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
     const committing_prepare = a0_replica.pipeline.queue.prepare_queue.head_ptr_const().?;
     a0_replica.commit_prepare = committing_prepare.message.ref();
 
-    // Partition a0, force b1 & b2 into view_change by blocking outgoing .do_view_change messages.
+    // Partition a0, force b1 & b2 into view_change by blocking outgoing .join_view messages.
     a0.drop_all(.R_, .bidirectional);
 
     try b1.open();
-    b1.drop(.R_, .outgoing, .do_view_change);
-    b2.drop(.R_, .outgoing, .do_view_change);
+    b1.drop(.R_, .outgoing, .join_view);
+    b2.drop(.R_, .outgoing, .join_view);
 
     t.run();
 
@@ -1936,12 +1936,12 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
 
     // Stop b2, allow a0 and b1 to view change. a0 can't step up as primary since it has a
     // corruption in its grid, due to which it can't make progress on its commit pipeline. However,
-    // since it has an intact WAL, it is able to send a .start_view message to b1. With the help
-    // of the .start_view message, b1 can repair, commit, advance from checkpoint_1 -> checkpoint_3,
+    // since it has an intact WAL, it is able to send a .view message to b1. With the help
+    // of the .view message, b1 can repair, commit, advance from checkpoint_1 -> checkpoint_3,
     // and step up as primary.
     b2.stop();
     a0.pass_all(.R_, .bidirectional);
-    b1.pass(.R_, .outgoing, .do_view_change);
+    b1.pass(.R_, .outgoing, .join_view);
 
     t.run();
     t.run();
@@ -1975,9 +1975,9 @@ test "Cluster: partitioned replica with higher view cannot lock out client" {
     const b2 = t.replica(.B2);
 
     // Partition primary, allow one of the backups to increment its view to 2 but the other to
-    // maintain its view at 1. Block exchange of DVC messages to avoid view change.
+    // maintain its view at 1. Block exchange of JV messages to avoid view change.
     a0.drop_all(.R_, .bidirectional);
-    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    t.replica(.R_).drop(.R_, .bidirectional, .join_view);
     b1.drop_all(.R_, .incoming);
 
     t.run();
@@ -2013,7 +2013,7 @@ test "Cluster: broken hash chain within the same view does not stall commit via 
     const b2_replica = &t.cluster.replicas[b2.replicas.get(0)];
     b2_replica.commit_stage = .compact;
 
-    // Disallow receiving a specific prepare, and repairing headers via repair and start_view, to
+    // Disallow receiving a specific prepare, and repairing headers via repair and view, to
     // force a hash chain break.
     b2.drop_fn(.R_, .incoming, struct {
         fn drop_message(message: *const Message) bool {
@@ -2022,7 +2022,7 @@ test "Cluster: broken hash chain within the same view does not stall commit via 
         }
     }.drop_message);
     b2.drop(.R_, .outgoing, .request_headers);
-    b2.drop(.R_, .incoming, .start_view);
+    b2.drop(.R_, .incoming, .view);
 
     var c = t.clients(.{});
     try c.request(
@@ -2071,8 +2071,8 @@ test "Cluster: backups prepare past prepare_max if the next checkpoint is durabl
     // but not advance its checkpoint past 0. Meanwhile, the rest
     // of the cluster moves to checkpoint=checkpoint_2. Setting the
     // stage to checkpoint_superblock also ensures that if we receive
-    // any start_view message from the primary, we don't use it to
-    // start state sync (see `on_start_view_set_checkpoint`).
+    // any view message from the primary, we don't use it to
+    // start state sync (see `on_view_set_checkpoint`).
     b2_replica.commit_stage = .checkpoint_superblock;
 
     try c.request(checkpoint_2_prepare_max, checkpoint_2_prepare_max);

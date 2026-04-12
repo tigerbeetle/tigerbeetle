@@ -28,7 +28,7 @@ the latest checkpoint (or very close to it), then we can transition back to a he
 State sync is lazy — logically, sync is completed when the superblock is synced. The data
 pointed to by the new superblock can be transferred on-demand.
 
-The state (superblock) and the WAL are updated atomically — [`start_view`](./vsr.md#start_view)
+The state (superblock) and the WAL are updated atomically — [`view`](./vsr.md#view)
 message includes both.
 
 ## Glossary
@@ -49,7 +49,7 @@ Checkpoints:
 ## Algorithm
 
 0. [Sync is needed](#0-scenarios).
-1. [Trigger sync in response to `start_view`](#1-triggers).
+1. [Trigger sync in response to `view`](#1-triggers).
 2. Interrupt the in-progress commit process:
   2.1. Wait for write operations to finish.
   2.2. Cancel potentially stalled read operations. (See `Grid.cancel()`.)
@@ -102,11 +102,11 @@ Deciding between WAL repair and state sync:
 
 ### 1: Triggers
 
-State sync is triggered when a replica receives a `start_view` message with a more advanced
+State sync is triggered when a replica receives a `view` message with a more advanced
 checkpoint.
 
 If a replica isn't making progress committing because a grid block or a prepare can't be repaired
-for some time, the replica proactively sends `request_start_view` to initiate the sync (see
+for some time, the replica proactively sends `request_view` to initiate the sync (see
 `repair_sync_timeout`).
 
 ### 5: Conclusion
