@@ -248,7 +248,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 }
 
-test "Cluster: recovery: recovering_head, outdated start view" {
+test "Cluster: recovery: recovering_head, outdated View" {
     // 1. Wait for B1 to ok op=3.
     // 2. Restart B1 while corrupting op=3, so that it gets into a .recovering_head with op=2.
     // 3. Try make B1 forget about op=3 by delivering it an outdated .view with op=2.

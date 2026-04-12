@@ -14,6 +14,8 @@ Consensus:
 - _superblock_: All local state for the replica that cannot be replicated remotely. Loss is protected against by storing `config.superblock_copies` copies of the superblock.
 - _view_: A replica is _primary_ for one view. Views are monotonically increasing integers that are incremented each time a new primary is selected.
 
+Consensus terminology generally follows [VRR] paper, but uses ExitView/JoinView/View instead of StartViewChange/DoViewChange/StartView.
+
 Storage:
 
 - _zone_: The TigerBeetle data file is made up of zones. The superblock is one zone.
@@ -38,8 +40,8 @@ Storage:
 |                  `commit` | primary |       backup | [Normal](#protocol-normal)                                                                                                                 |
 |               `exit_view` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                                                                           |
 |               `join_view` | replica | all replicas | [View-Change](#protocol-view-change)                                                                                                       |
-|                    `view` | primary |       backup | [Request/Start View](#protocol-requeststart-view), [State Sync](./sync.md)                                                                 |
-|            `request_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                                                                          |
+|                    `view` | primary |       backup | [Request/View](#protocol-request-view), [State Sync](./sync.md)                                                                 |
+|            `request_view` |  backup |      primary | [Request/View](#protocol-request-view)                                                                                          |
 |         `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                                                                                 |
 |         `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                                                                                         |
 |           `request_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies)                             |
@@ -50,7 +52,7 @@ Storage:
 
 ### Recovery
 
-Unlike [VRR](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf), TigerBeetle does not implement Recovery Protocol (see §4.3).
+Unlike [VRR], TigerBeetle does not implement Recovery Protocol (see §4.3).
 Instead, replicas persist their VSR state to the superblock.
 This ensures that a recovering replica never backtracks to an older view (from the point of view of the cluster).
 
@@ -103,7 +105,7 @@ See also:
 
 ### Protocol: Start-View-Change
 
-Start-View-Change (EV) protocol initiates [view-changes](#protocol-view-change) with minimal disruption.
+Start-View-Change (ExitView, EV) protocol initiates [view-changes](#protocol-view-change) with minimal disruption.
 
 Unlike the Start-View-Change described in [VRR](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) §4.2, this protocol runs in both `status=normal` and `status=view_change` (not just `status=view_change`).
 
@@ -154,7 +156,7 @@ When the primary collects its JV quorum:
 6. Then primary commits all prepares which are not known to be uncommitted.
 7. Then the primary transitions to `status=normal` and broadcasts a `command=view`.
 
-### Protocol: Request/Start View
+### Protocol: Request/View
 
 #### `request_view`
 
@@ -294,3 +296,5 @@ See also:
 ## Further reading
 - [Viewstamped Replication Revisited](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf)
 - [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)
+
+[VRR]: https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf

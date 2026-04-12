@@ -17,7 +17,7 @@ In the context of state sync, "state" refers to:
 
 State sync consists of four protocols:
 
-- [Sync Superblock](./vsr.md#protocol-requeststart-view) (syncs 1)
+- [Sync Superblock](./vsr.md#protocol-request-view) (syncs 1)
 - [Repair Grid](./vsr.md#protocol-repair-grid) (syncs 2)
 - [Sync Forest](./vsr.md#protocol-sync-forest) (syncs 3)
 - [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 4)
