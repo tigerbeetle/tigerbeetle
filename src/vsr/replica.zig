@@ -2687,10 +2687,10 @@ pub fn ReplicaType(
                     const next_primary = self.primary_index(next_view);
                     assert(next_primary != self.replica);
 
-                    if (self.join_view_from_all_replicas[next_primary]) |dvc| {
-                        assert(dvc.header.replica == next_primary);
+                    if (self.join_view_from_all_replicas[next_primary]) |jv| {
+                        assert(jv.header.replica == next_primary);
 
-                        const jv_checkpoint = dvc.header.checkpoint_op;
+                        const jv_checkpoint = jv.header.checkpoint_op;
                         if (jv_checkpoint == op_checkpoint_max) break next_view;
                     }
                 } else unreachable;
@@ -3704,9 +3704,9 @@ pub fn ReplicaType(
             if (self.standby()) return;
 
             // Don't reset our own EV; it will be reset if/when we receive a heartbeat.
-            const svc = self.exit_view_from_all_replicas.is_set(self.replica);
+            const exit_view = self.exit_view_from_all_replicas.is_set(self.replica);
             self.reset_quorum_exit_view();
-            if (svc) self.exit_view_from_all_replicas.set(self.replica);
+            if (exit_view) self.exit_view_from_all_replicas.set(self.replica);
         }
 
         fn on_exit_view_message_timeout(self: *Replica) void {
@@ -6833,7 +6833,7 @@ pub fn ReplicaType(
                     }
 
                     if (self.primary_index(self.view) != self.replica) {
-                        for (self.join_view_from_all_replicas) |dvc| assert(dvc == null);
+                        for (self.join_view_from_all_replicas) |jv| assert(jv == null);
 
                         log.debug("{}: on_{s}: ignoring (backup awaiting view)", .{
                             self.log_prefix(),
@@ -9560,15 +9560,15 @@ pub fn ReplicaType(
             // Check staging as superblock.checkpoint() may currently be updating view/log_view.
             const update = self.superblock.staging.vsr_state.log_view < self.log_view or
                 self.superblock.staging.vsr_state.view < self.view;
-            const update_dvc = update and self.log_view < self.view;
-            const update_sv = update and self.log_view == self.view and
+            const update_jv = update and self.log_view < self.view;
+            const update_v = update and self.log_view == self.view and
                 (self.replica != self.primary_index(self.view) or self.status == .normal);
-            assert(!(update_dvc and update_sv));
+            assert(!(update_jv and update_v));
 
             const update_checkpoint = self.syncing == .updating_checkpoint and
                 self.syncing.updating_checkpoint.header.op > self.op_checkpoint();
 
-            if (update_dvc or update_sv or update_checkpoint) self.view_durable_update();
+            if (update_jv or update_v or update_checkpoint) self.view_durable_update();
 
             // Reset EV timeout in case the view-durable update took a long time.
             if (self.view_change_status_timeout.ticking) self.view_change_status_timeout.reset();
@@ -9730,7 +9730,7 @@ pub fn ReplicaType(
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
             assert(header_head.op <= self.op_prepare_max());
-            for (jvs_all.const_slice()) |dvc| assert(header_head.op >= dvc.header.commit_min);
+            for (jvs_all.const_slice()) |jv| assert(header_head.op >= jv.header.commit_min);
 
             assert(self.commit_min >=
                 self.join_view_from_all_replicas[self.replica].?.header.commit_min);
@@ -9791,30 +9791,30 @@ pub fn ReplicaType(
             assert(self.view > self.log_view);
 
             const jvs_all = JVQuorum.jvs_all(self.join_view_from_all_replicas);
-            for (jvs_all.const_slice()) |dvc| {
+            for (jvs_all.const_slice()) |jv| {
                 log.debug(
-                    "{}: {s}: dvc: replica={} log_view={} op={} commit_min={} checkpoint={}",
+                    "{}: {s}: jv: replica={} log_view={} op={} commit_min={} checkpoint={}",
                     .{
                         self.log_prefix(),
                         context,
-                        dvc.header.replica,
-                        dvc.header.log_view,
-                        dvc.header.op,
-                        dvc.header.commit_min,
-                        dvc.header.checkpoint_op,
+                        jv.header.replica,
+                        jv.header.log_view,
+                        jv.header.op,
+                        jv.header.commit_min,
+                        jv.header.checkpoint_op,
                     },
                 );
 
                 const BitSet = stdx.BitSetType(128);
-                const jv_headers = message_body_as_view_headers(dvc.base_const());
-                const jv_nacks = BitSet{ .bits = dvc.header.nack_bitset };
-                const jv_present = BitSet{ .bits = dvc.header.present_bitset };
+                const jv_headers = message_body_as_view_headers(jv.base_const());
+                const jv_nacks = BitSet{ .bits = jv.header.nack_bitset };
+                const jv_present = BitSet{ .bits = jv.header.present_bitset };
                 for (jv_headers.slice, 0..) |*header, i| {
-                    log.debug("{}: {s}: dvc: header: " ++
+                    log.debug("{}: {s}: jv: header: " ++
                         "replica={} op={} checksum={x:0>32} nack={} present={} type={s}", .{
                         self.log_prefix(),
                         context,
-                        dvc.header.replica,
+                        jv.header.replica,
                         header.op,
                         header.checksum,
                         jv_nacks.is_set(i),
@@ -11569,8 +11569,8 @@ pub fn ReplicaType(
 ///
 /// - The valid headers of every JV with the same log_view must not conflict.
 ///   - In other words:
-///     dvc₁.headers[i].op       == dvc₂.headers[j].op implies
-///     dvc₁.headers[i].checksum == dvc₂.headers[j].checksum.
+///     jv₁.headers[i].op       == jv₂.headers[j].op implies
+///     jv₁.headers[i].checksum == jv₂.headers[j].checksum.
 ///   - Reason: the headers bundled with the JV(s) with the highest log_view will be
 ///     loaded into the new primary with `replace_header()`, not `repair_header()`.
 /// - Any pipeline message which could have been committed is included in some canonical JV.
@@ -11586,12 +11586,12 @@ const JVQuorum = struct {
     const JVArray = stdx.BoundedArrayType(*const Message.JoinView, constants.replicas_max);
 
     fn verify(jv_quorum: JVQuorumMessages) void {
-        const dvcs = JVQuorum.jvs_all(jv_quorum);
-        for (dvcs.const_slice()) |message| verify_message(message);
+        const jvs = JVQuorum.jvs_all(jv_quorum);
+        for (jvs.const_slice()) |message| verify_message(message);
 
         // Verify that JVs with the same log_view do not conflict.
-        for (dvcs.const_slice(), 0..) |jv_a, i| {
-            for (dvcs.const_slice()[0..i]) |jv_b| {
+        for (jvs.const_slice(), 0..) |jv_a, i| {
+            for (jvs.const_slice()[0..i]) |jv_b| {
                 if (jv_a.header.log_view != jv_b.header.log_view) continue;
 
                 const headers_a = message_body_as_view_headers(jv_a.base_const());
@@ -11669,8 +11669,8 @@ const JVQuorum = struct {
 
     fn jvs_with_log_view(jv_quorum: JVQuorumMessages, log_view: u32) JVArray {
         var array = JVArray{};
-        const dvcs = JVQuorum.jvs_all(jv_quorum);
-        for (dvcs.const_slice()) |message| {
+        const jvs = JVQuorum.jvs_all(jv_quorum);
+        for (jvs.const_slice()) |message| {
             if (message.header.log_view == log_view) {
                 array.push(message);
             }
@@ -11681,8 +11681,8 @@ const JVQuorum = struct {
     fn jvs_uncanonical(jv_quorum: JVQuorumMessages) JVArray {
         const log_view_max_ = JVQuorum.log_view_max(jv_quorum);
         var array = JVArray{};
-        const dvcs = JVQuorum.jvs_all(jv_quorum);
-        for (dvcs.const_slice()) |message| {
+        const jvs = JVQuorum.jvs_all(jv_quorum);
+        for (jvs.const_slice()) |message| {
             assert(message.header.log_view <= log_view_max_);
 
             if (message.header.log_view < log_view_max_) {
@@ -11694,9 +11694,9 @@ const JVQuorum = struct {
 
     fn op_checkpoint_max(jv_quorum: JVQuorumMessages) u64 {
         var checkpoint_max: ?u64 = null;
-        const dvcs = jvs_all(jv_quorum);
-        for (dvcs.const_slice()) |dvc| {
-            const jv_checkpoint = dvc.header.checkpoint_op;
+        const jvs = jvs_all(jv_quorum);
+        for (jvs.const_slice()) |jv| {
+            const jv_checkpoint = jv.header.checkpoint_op;
             if (checkpoint_max == null or checkpoint_max.? < jv_checkpoint) {
                 checkpoint_max = jv_checkpoint;
             }
@@ -11710,8 +11710,8 @@ const JVQuorum = struct {
     /// the replica has knowledge of previous view changes in which headers were replaced.
     fn log_view_max(jv_quorum: JVQuorumMessages) u32 {
         var log_view_max_: ?u32 = null;
-        const dvcs = JVQuorum.jvs_all(jv_quorum);
-        for (dvcs.const_slice()) |message| {
+        const jvs = JVQuorum.jvs_all(jv_quorum);
+        for (jvs.const_slice()) |message| {
             // `log_view` is the view when this replica was last in normal status, which:
             // * may be higher than the view in any of the prepare headers.
             // * must be lower than the view of this view change.
@@ -11725,23 +11725,23 @@ const JVQuorum = struct {
     }
 
     fn commit_max(jv_quorum: JVQuorumMessages) u64 {
-        const dvcs = JVQuorum.jvs_all(jv_quorum);
-        assert(dvcs.count() > 0);
+        const jvs = JVQuorum.jvs_all(jv_quorum);
+        assert(jvs.count() > 0);
 
         var commit_max_: u64 = 0;
-        for (dvcs.const_slice()) |dvc| {
-            const jv_headers = message_body_as_view_headers(dvc.base_const());
+        for (jvs.const_slice()) |jv| {
+            const jv_headers = message_body_as_view_headers(jv.base_const());
             // JV generation stops when a header with op ≤ commit_max is appended.
             const jv_commit_max_tail = jv_headers.slice[jv_headers.slice.len - 1].op;
             // An op cannot be uncommitted if it is definitely outside the pipeline.
             // Use `join_view_op_head` instead of `replica.op` since the former is
             // about to become the new `replica.op`.
             const jv_commit_max_pipeline =
-                dvc.header.op -| constants.pipeline_prepare_queue_max;
+                jv.header.op -| constants.pipeline_prepare_queue_max;
 
             commit_max_ = @max(commit_max_, jv_commit_max_tail);
             commit_max_ = @max(commit_max_, jv_commit_max_pipeline);
-            commit_max_ = @max(commit_max_, dvc.header.commit_min);
+            commit_max_ = @max(commit_max_, jv.header.commit_min);
             commit_max_ = @max(commit_max_, jv_headers.slice[0].commit);
         }
         return commit_max_;
@@ -11750,9 +11750,9 @@ const JVQuorum = struct {
     /// Returns the highest `timestamp` from any replica.
     fn timestamp_max(jv_quorum: JVQuorumMessages) u64 {
         var timestamp_max_: ?u64 = null;
-        const dvcs = JVQuorum.jvs_all(jv_quorum);
-        for (dvcs.const_slice()) |dvc| {
-            const jv_headers = message_body_as_view_headers(dvc.base_const());
+        const jvs = JVQuorum.jvs_all(jv_quorum);
+        for (jvs.const_slice()) |jv| {
+            const jv_headers = message_body_as_view_headers(jv.base_const());
             const jv_head = &jv_headers.slice[0];
             if (timestamp_max_ == null or timestamp_max_.? < jv_head.timestamp) {
                 timestamp_max_ = jv_head.timestamp;
@@ -11763,8 +11763,8 @@ const JVQuorum = struct {
 
     fn op_max_canonical(jv_quorum: JVQuorumMessages) u64 {
         var op_max: ?u64 = null;
-        const dvcs = JVQuorum.jvs_canonical(jv_quorum);
-        for (dvcs.const_slice()) |message| {
+        const jvs = JVQuorum.jvs_canonical(jv_quorum);
+        for (jvs.const_slice()) |message| {
             if (op_max == null or op_max.? < message.header.op) {
                 op_max = message.header.op;
             }
@@ -11821,12 +11821,12 @@ const JVQuorum = struct {
         // Iterate the highest definitely committed op and all maybe-uncommitted ops.
         var op = op_head_min;
         const op_head = while (op <= op_head_max) : (op += 1) {
-            const header_canonical = for (jvs_canonical_.const_slice()) |dvc| {
+            const header_canonical = for (jvs_canonical_.const_slice()) |jv| {
                 // This JV is canonical, but lagging far behind.
-                if (dvc.header.op < op) continue;
+                if (jv.header.op < op) continue;
 
-                const headers = message_body_as_view_headers(dvc.base_const());
-                const header_index = dvc.header.op - op;
+                const headers = message_body_as_view_headers(jv.base_const());
+                const header_index = jv.header.op - op;
                 assert(header_index <= headers.slice.len);
 
                 const header = &headers.slice[header_index];
@@ -11837,14 +11837,14 @@ const JVQuorum = struct {
 
             var copies: usize = 0;
             var nacks: usize = 0;
-            for (jvs_all_.const_slice()) |dvc| {
-                if (dvc.header.op < op) {
+            for (jvs_all_.const_slice()) |jv| {
+                if (jv.header.op < op) {
                     nacks += 1;
                     continue;
                 }
 
-                const headers = message_body_as_view_headers(dvc.base_const());
-                const header_index = dvc.header.op - op;
+                const headers = message_body_as_view_headers(jv.base_const());
+                const header_index = jv.header.op - op;
                 if (header_index >= headers.slice.len) {
                     nacks += 1;
                     continue;
@@ -11855,10 +11855,10 @@ const JVQuorum = struct {
                 assert(header.view <= log_view_canonical);
 
                 const header_nacks = stdx.BitSetType(128){
-                    .bits = dvc.header.nack_bitset,
+                    .bits = jv.header.nack_bitset,
                 };
                 const header_present = stdx.BitSetType(128){
-                    .bits = dvc.header.present_bitset,
+                    .bits = jv.header.present_bitset,
                 };
 
                 if (vsr.Headers.jv_header_type(header) == .valid and
@@ -11875,13 +11875,13 @@ const JVQuorum = struct {
                     if (header_canonical != null and
                         header_canonical.?.checksum != header.checksum)
                     {
-                        assert(dvc.header.log_view < log_view_canonical);
+                        assert(jv.header.log_view < log_view_canonical);
                         // The op is nacked implicitly, because the replica has a different header.
                         nacks += 1;
                     }
                     if (header_canonical == null) {
                         assert(header.view < log_view_canonical);
-                        assert(dvc.header.log_view < log_view_canonical);
+                        assert(jv.header.log_view < log_view_canonical);
                         // The op is nacked implicitly, because the header has already been
                         // truncated in the latest log_view.
                         nacks += 1;
@@ -11915,7 +11915,7 @@ const JVQuorum = struct {
         assert(op_head <= op_head_max);
 
         return .{ .complete_valid = HeaderIterator{
-            .dvcs = jvs_canonical_,
+            .jvs = jvs_canonical_,
             .op_max = op_head,
             .op_min = op_head_min,
         } };
@@ -11923,14 +11923,14 @@ const JVQuorum = struct {
 
     /// Iterate the consecutive headers of a set of (same-log_view) JVs, from high-to-low op.
     const HeaderIterator = struct {
-        dvcs: JVArray,
+        jvs: JVArray,
         op_max: u64,
         op_min: u64,
         child_op: ?u64 = null,
         child_parent: ?u128 = null,
 
         fn next(iterator: *HeaderIterator) ?*const Header.Prepare {
-            assert(iterator.dvcs.count() > 0);
+            assert(iterator.jvs.count() > 0);
             assert(iterator.op_min <= iterator.op_max);
             assert((iterator.child_op == null) == (iterator.child_parent == null));
 
@@ -11940,14 +11940,14 @@ const JVQuorum = struct {
 
             var header: ?*const Header.Prepare = null;
 
-            const log_view = iterator.dvcs.get(0).header.log_view;
-            for (iterator.dvcs.const_slice()) |dvc| {
-                assert(log_view == dvc.header.log_view);
+            const log_view = iterator.jvs.get(0).header.log_view;
+            for (iterator.jvs.const_slice()) |jv| {
+                assert(log_view == jv.header.log_view);
 
-                if (op > dvc.header.op) continue;
+                if (op > jv.header.op) continue;
 
-                const jv_headers = message_body_as_view_headers(dvc.base_const());
-                const jv_header_index = dvc.header.op - op;
+                const jv_headers = message_body_as_view_headers(jv.base_const());
+                const jv_header_index = jv.header.op - op;
                 if (jv_header_index >= jv_headers.slice.len) continue;
 
                 const jv_header = &jv_headers.slice[jv_header_index];
