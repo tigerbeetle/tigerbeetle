@@ -87,6 +87,7 @@ DVCs
 EAGAIN
 Edsger
 EHOSTUNREACH
+EVs
 enqueues
 enum
 enums
@@ -154,6 +155,7 @@ Joran
 jorispz
 journalctl
 journalling
+JVs
 Karlton
 kcov
 Kostas
