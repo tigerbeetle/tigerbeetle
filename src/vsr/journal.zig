@@ -1299,7 +1299,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // Discard headers which we are certain do not belong in the current log_view.
             // - This ensures that we don't accidentally set our new head op to be a message
             //   which was truncated but not yet overwritten.
-            // - This is also necessary to ensure that generated DVC's headers are complete.
+            // - This is also necessary to ensure that generated JV's headers are complete.
             //
             // It is essential that this is performed:
             // - after prepare_op_max is computed,

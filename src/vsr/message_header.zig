@@ -86,10 +86,10 @@ pub const Header = extern struct {
             .prepare_ok => PrepareOk,
             .reply => Reply,
             .commit => Commit,
-            .start_view_change => StartViewChange,
-            .do_view_change => DoViewChange,
-            .start_view => StartView,
-            .request_start_view => RequestStartView,
+            .exit_view => ExitView,
+            .join_view => JoinView,
+            .view => View,
+            .request_view => RequestView,
             .request_headers => RequestHeaders,
             .request_prepare => RequestPrepare,
             .request_reply => RequestReply,
@@ -218,10 +218,10 @@ pub const Header = extern struct {
             .pong_client,
             .prepare_ok,
             .commit,
-            .start_view_change,
-            .do_view_change,
-            .start_view,
-            .request_start_view,
+            .exit_view,
+            .join_view,
+            .view,
+            .request_view,
             .request_headers,
             .request_prepare,
             .request_reply,
@@ -1096,7 +1096,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const StartViewChange = extern struct {
+    pub const ExitView = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1126,7 +1126,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .start_view_change);
+            assert(self.command == .exit_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.release.value != 0) return "release != 0";
@@ -1135,7 +1135,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const DoViewChange = extern struct {
+    pub const JoinView = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1160,7 +1160,7 @@ pub const Header = extern struct {
         nack_bitset: u128,
         op: u64,
         /// Set to `commit_min`, to indicate the sending replica's progress.
-        /// The sending replica may continue to commit after sending the DVC.
+        /// The sending replica may continue to commit after sending the JV.
         commit_min: u64,
         checkpoint_op: u64,
         log_view: u32,
@@ -1178,7 +1178,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .do_view_change);
+            assert(self.command == .join_view);
             if ((self.size - @sizeOf(Header)) % @sizeOf(Header) != 0) {
                 return "size multiple invalid";
             }
@@ -1190,7 +1190,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const StartView = extern struct {
+    pub const View = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1206,11 +1206,11 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [12]u8 = @splat(0),
 
-        /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
+        /// Set to zero for a new view, and to a nonce from an RV when responding to the RV.
         nonce: u128,
         op: u64,
-        /// Equal to `commit_min` if the SV message is being sent by a .normal primary, but may not
-        /// be equal if the SV message is being sent by potential primary in .view_change status.
+        /// Equal to `commit_min` if the View message is being sent by a .normal primary,
+        /// but may not be equal if sent by potential primary in .view_change status.
         commit_max: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,
@@ -1228,7 +1228,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .start_view);
+            assert(self.command == .view);
             const body_size = self.size - @sizeOf(Header);
             if (body_size < @sizeOf(vsr.CheckpointState)) return "checkpointstate missing";
             const headers_size = body_size - @sizeOf(vsr.CheckpointState);
@@ -1243,7 +1243,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const RequestStartView = extern struct {
+    pub const RequestView = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1274,7 +1274,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_start_view);
+            assert(self.command == .request_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.release.value != 0) return "release != 0";

@@ -12,7 +12,7 @@
 //!
 //! Applying to TigerBeetle, let's consider the case where the cluster is under stable load and
 //! prepares are flowing regularly. In this case, a backup uses a sliding window to compute current
-//! rate of prepares, and sounds an alarm (StartViewChange) if the flow stops.
+//! rate of prepares, and sounds an alarm (ExitView) if the flow stops.
 //!
 //! To solve the case of an idle cluster, primary broadcasts Commit messages periodically, which are
 //! interchangeable with Prepare messages as a signal that the primary is alive.
@@ -71,7 +71,7 @@ pub fn signal(detector: *FaultDetector, now: Instant) void {
 /// * red    --- signaler is likely dead
 ///
 /// On yellow, the primary injects a Commit.
-/// On red, a backup sends SV.
+/// On red, a backup sends ExitView.
 ///
 /// Rough model:
 /// - Random delays, but 2X delay is suspicious.

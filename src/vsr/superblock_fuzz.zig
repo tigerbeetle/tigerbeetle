@@ -369,7 +369,7 @@ const Environment = struct {
             .log_view = vsr_state.log_view,
             .view = vsr_state.view,
             .headers = &.{
-                .command = .do_view_change,
+                .command = .join_view,
                 .array = view_headers,
             },
             .sync_checkpoint = null,

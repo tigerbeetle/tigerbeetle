@@ -181,7 +181,7 @@ const ConfigCluster = struct {
     pub const clients_max_min = 1;
 
     /// The smallest possible message_size_max (for use in the simulator to improve performance).
-    /// The message body must have room for pipeline_prepare_queue_max headers in the DVC.
+    /// The message body must have room for pipeline_prepare_queue_max headers in the JV.
     pub fn message_size_max_min(clients_max: u32) u32 {
         return @max(
             sector_size,

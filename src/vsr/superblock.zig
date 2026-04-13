@@ -89,11 +89,11 @@ pub const SuperBlockHeader = extern struct {
 
     reserved: [1940]u8 = @splat(0),
 
-    /// SV/DVC header suffix. Headers are ordered from high-to-low op.
+    /// View/JV header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after view_headers_count) are zeroed.
     ///
-    /// When `vsr_state.log_view < vsr_state.view`, the headers are for a DVC.
-    /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
+    /// When `vsr_state.log_view < vsr_state.view`, the headers are for a JV.
+    /// When `vsr_state.log_view = vsr_state.view`, the headers are for a View.
     view_headers_all: [constants.view_headers_max]vsr.Header.Prepare,
     view_headers_reserved: [view_headers_reserved_size]u8 = @splat(0),
 
@@ -316,7 +316,7 @@ pub const SuperBlockHeader = extern struct {
 
     /// The content of CheckpointState is deterministic for the corresponding checkpoint.
     ///
-    /// This struct is sent in a `start_view` message from the primary to a syncing replica.
+    /// This struct is sent in a View message from the primary to a syncing replica.
     pub const CheckpointState = extern struct {
         /// The last prepare of the checkpoint committed to the state machine.
         /// At startup, replay the log hereafter.
@@ -485,9 +485,9 @@ pub const SuperBlockHeader = extern struct {
     pub fn view_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
         return vsr.Headers.ViewChangeSlice.init(
             if (superblock.vsr_state.log_view < superblock.vsr_state.view)
-                .do_view_change
+                .join_view
             else
-                .start_view,
+                .view,
             superblock.view_headers_all[0..superblock.view_headers_count],
         );
     }
@@ -1020,8 +1020,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view or
                 update.sync_checkpoint != null);
-            assert((update.headers.command == .start_view and update.log_view == update.view) or
-                (update.headers.command == .do_view_change and update.log_view < update.view));
+            assert((update.headers.command == .view and update.log_view == update.view) or
+                (update.headers.command == .join_view and update.log_view < update.view));
             assert(
                 superblock.staging.vsr_state.checkpoint.header.op <= update.headers.array.get(0).op,
             );
