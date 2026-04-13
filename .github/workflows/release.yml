@@ -18,6 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 2147483647
+          fetch-tags: true # Fetch full history for tidy.
           ref: release # Use the 'release' branch even if triggered manually
 
       - uses: actions/setup-dotnet@v4
