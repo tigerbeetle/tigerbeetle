@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 2147483647
+          fetch-tags: true # Fetch full history for tidy.
           ref: main
 
       # TODO: move this to be after tag checkout once #3613 is released
