@@ -206,6 +206,8 @@ static size_t rb_tb_event_size(TB_OPERATION operation) {
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
         return sizeof(tb_account_t);
+    case TB_OPERATION_CREATE_TRANSFERS:
+        return sizeof(tb_transfer_t);
     case TB_OPERATION_LOOKUP_ACCOUNTS:
         return sizeof(tb_uint128_t);
     default:
@@ -252,10 +254,35 @@ static void rb_tb_serialize_lookup_ids(VALUE items_rb, uint8_t *buf, long count)
     }
 }
 
+static void rb_tb_serialize_transfers(VALUE items_rb, uint8_t *buf, long count) {
+    tb_transfer_t *transfers = (tb_transfer_t *)buf;
+    for (long i = 0; i < count; i++) {
+        VALUE item = RARRAY_AREF(items_rb, i);
+        tb_transfer_t *t = &transfers[i];
+        memset(t, 0, sizeof(tb_transfer_t));
+        pack_u128(rb_ivar_get(item, rb_intern("@id")), &t->id);
+        pack_u128(rb_ivar_get(item, rb_intern("@debit_account_id")), &t->debit_account_id);
+        pack_u128(rb_ivar_get(item, rb_intern("@credit_account_id")), &t->credit_account_id);
+        pack_u128(rb_ivar_get(item, rb_intern("@amount")), &t->amount);
+        pack_u128(rb_ivar_get(item, rb_intern("@pending_id")), &t->pending_id);
+        pack_u128(rb_ivar_get(item, rb_intern("@user_data_128")), &t->user_data_128);
+        t->user_data_64 = NUM2ULL(rb_ivar_get(item, rb_intern("@user_data_64")));
+        t->user_data_32 = NUM2UINT(rb_ivar_get(item, rb_intern("@user_data_32")));
+        t->timeout = NUM2UINT(rb_ivar_get(item, rb_intern("@timeout")));
+        t->ledger = NUM2UINT(rb_ivar_get(item, rb_intern("@ledger")));
+        t->code = (uint16_t)NUM2UINT(rb_ivar_get(item, rb_intern("@code")));
+        t->flags = (uint16_t)NUM2UINT(rb_ivar_get(item, rb_intern("@flags")));
+        t->timestamp = NUM2ULL(rb_ivar_get(item, rb_intern("@timestamp")));
+    }
+}
+
 static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf, long count) {
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
         rb_tb_serialize_accounts(items_rb, buf, count);
+        break;
+    case TB_OPERATION_CREATE_TRANSFERS:
+        rb_tb_serialize_transfers(items_rb, buf, count);
         break;
     case TB_OPERATION_LOOKUP_ACCOUNTS:
         rb_tb_serialize_lookup_ids(items_rb, buf, count);
@@ -273,6 +300,22 @@ rb_tb_deserialize_create_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32
     for (long i = 0; i < count; i++) {
         const tb_create_account_result_t *res =
             (const tb_create_account_result_t *)(buf + i * sizeof(tb_create_account_result_t));
+        VALUE obj = rb_obj_alloc(cClass);
+        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(res->timestamp));
+        rb_ivar_set(obj, rb_intern("@status"), UINT2NUM(res->status));
+        rb_ary_push(results, obj);
+    }
+    return results;
+}
+
+static VALUE
+rb_tb_deserialize_create_transfers(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
+    long count = (long)(buf_size / sizeof(tb_create_transfer_result_t));
+    VALUE results = rb_ary_new_capa(count);
+    VALUE cClass = rb_const_get(mTigerBeetle, rb_intern("CreateTransferResult"));
+    for (long i = 0; i < count; i++) {
+        const tb_create_transfer_result_t *res =
+            (const tb_create_transfer_result_t *)(buf + i * sizeof(tb_create_transfer_result_t));
         VALUE obj = rb_obj_alloc(cClass);
         rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(res->timestamp));
         rb_ivar_set(obj, rb_intern("@status"), UINT2NUM(res->status));
@@ -309,6 +352,8 @@ static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint3
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
         return rb_tb_deserialize_create_accounts(rb_mTigerBeetle, buf, buf_size);
+    case TB_OPERATION_CREATE_TRANSFERS:
+        return rb_tb_deserialize_create_transfers(rb_mTigerBeetle, buf, buf_size);
     case TB_OPERATION_LOOKUP_ACCOUNTS:
         return rb_tb_deserialize_accounts(rb_mTigerBeetle, buf, buf_size);
     default:

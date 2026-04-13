@@ -24,6 +24,10 @@ module TigerBeetle
       @native.submit(Operation::CREATE_ACCOUNTS, accounts)
     end
 
+    def create_transfers(transfers)
+      @native.submit(Operation::CREATE_TRANSFERS, transfers)
+    end
+
     def lookup_accounts(ids)
       @native.submit(Operation::LOOKUP_ACCOUNTS, ids)
     end
