@@ -818,6 +818,7 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
         \\dotnet nuget push
         \\    --api-key {nuget_key}
         \\    --source https://api.nuget.org/v3/index.json
+        \\    --skip-duplicate
         \\    {package}
     , .{
         .nuget_key = nuget_key,
