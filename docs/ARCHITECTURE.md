@@ -668,7 +668,7 @@ The collection of logical and magical art behind TigerBeetle:
   simple way to curb latency variability is to issue the same request to multiple replicas and use
   the results from whichever replica responds first."
 
-- [Viewstamped Replication Revisited](http://hdl.handle.net/1721.1/71763)
+- [Viewstamped Replication Revisited](https://hdl.handle.net/1721.1/71763)
 
 - [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed
   Systems](http://pmg.csail.mit.edu/papers/vr.pdf)

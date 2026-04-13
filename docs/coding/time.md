@@ -7,7 +7,7 @@ relative to each other, and physical time is the everyday time, a numeric timest
 ## Logical Time
 
 TigerBeetle uses a consensus protocol ([Viewstamped
-Replication](http://hdl.handle.net/1721.1/71763)) to guarantee [strict
+Replication](https://hdl.handle.net/1721.1/71763)) to guarantee [strict
 serializability](http://www.bailis.org/blog/linearizability-versus-serializability/) for all
 operations.
 

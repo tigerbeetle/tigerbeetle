@@ -316,7 +316,7 @@ pub const SuperBlockHeader = extern struct {
 
     /// The content of CheckpointState is deterministic for the corresponding checkpoint.
     ///
-    /// This struct is sent in a `view` message from the primary to a syncing replica.
+    /// This struct is sent in a View message from the primary to a syncing replica.
     pub const CheckpointState = extern struct {
         /// The last prepare of the checkpoint committed to the state machine.
         /// At startup, replay the log hereafter.

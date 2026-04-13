@@ -285,7 +285,7 @@ pub const view_change_headers_suffix_max = config.cluster.view_change_headers_su
 
 /// The number of prepare headers to include in the body of a JV/View.
 ///
-/// view:
+/// View:
 ///
 /// - We must include all uncommitted headers.
 /// - +1 We must include the highest cluster-committed header (in case the View is converted to a JV
@@ -296,7 +296,7 @@ pub const view_change_headers_suffix_max = config.cluster.view_change_headers_su
 ///   - There are at most two of these in the journal.
 ///     (There are 2 immediately after we checkpoint, until we prepare enough to overwrite one).
 ///
-/// join_view:
+/// JoinView:
 ///
 /// - We must include all uncommitted headers.
 /// - +1 We must include the highest cluster-committed header, so that the new primary still has a

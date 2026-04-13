@@ -101,7 +101,7 @@ sequenceDiagram
 
 See also:
 
-- [VRR](http://hdl.handle.net/1721.1/71763) §4.1
+- [VRR](https://hdl.handle.net/1721.1/71763) §4.1
 
 ### Protocol: Start-View-Change
 
@@ -294,7 +294,7 @@ See also:
 - [Flexible Paxos](https://fpaxos.github.io/)
 
 ## Further reading
-- [Viewstamped Replication Revisited](http://hdl.handle.net/1721.1/71763)
+- [Viewstamped Replication Revisited](https://hdl.handle.net/1721.1/71763)
 - [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)
 
-[VRR]: http://hdl.handle.net/1721.1/71763
+[VRR]: https://hdl.handle.net/1721.1/71763

@@ -1740,7 +1740,7 @@ pub fn ReplicaType(
                 .idle => {},
                 .canceling_commit, .canceling_grid => {
                     // Ignore further messages until finishing (asynchronous) processing
-                    // of sync View. This prevents our view from jumping ahead of View.
+                    // of sync View. This prevents our view number from jumping ahead of View.
                     assert(self.sync_view != null);
                     log.warn("{}: on_message: ignoring (syncing)", .{self.log_prefix()});
                     return;
@@ -1918,7 +1918,7 @@ pub fn ReplicaType(
         /// When there is free space in the pipeline's prepare queue:
         ///   The primary advances op-number, adds the request to the end of the log, and updates
         ///   the information for this client in the client-table to contain the new request number.
-        ///   Then it sends a ⟨PREPARE v, m, n, k⟩ message to the other replicas, where v is the
+        ///   Then it sends a ⟨Prepare v, m, n, k⟩ message to the other replicas, where v is the
         ///   current view-number, m is the message it received from the client, n is the op-number
         ///   it assigned to the request, and k is the commit-number.
         /// Otherwise, when there is room in the pipeline's request queue:
@@ -2035,7 +2035,7 @@ pub fn ReplicaType(
             // Use `has_prepare` (checks whether a replica has both the header and the corresponding
             // prepare) instead of `has_header` (checks whether the replica has the header). The
             // latter is prone to a race wherein a replica that receives a future header *before*
-            // the corresponding prepare (via `view` for instance) would end up not forwarding
+            // the corresponding prepare (via View for instance) would end up not forwarding
             // the prepare, thereby breaking the replication chain.
             if (message.header.op > self.commit_min and !self.journal.has_prepare(message.header)) {
                 self.replicate(message);
@@ -2422,7 +2422,7 @@ pub fn ReplicaType(
                 } else if (self.valid_hash_chain_between(message.header.commit, self.op)) {
                     @panic("commit checksum verification failed");
                 } else {
-                    // We may still be repairing after receiving the view message.
+                    // We may still be repairing after receiving the View message.
                     log.debug("{}: on_commit: skipping checksum verification", .{
                         self.log_prefix(),
                     });
@@ -2475,7 +2475,7 @@ pub fn ReplicaType(
 
             if (message.header.release.value > self.release.value) {
                 // This case is possible if we advanced self.op to a prepare from the next
-                // checkpoint (which is on a higher version) via a `view`.
+                // checkpoint (which is on a higher version) via a View.
                 // This would be safe to prepare, but rejecting it simplifies assertions.
                 assert(message.header.op > self.op_checkpoint_next_trigger());
 
@@ -2581,7 +2581,7 @@ pub fn ReplicaType(
         /// to that of the topmost entry in the new log, sets its commit number to the largest such
         /// number it received in the join_view messages, changes its status to normal, and
         /// informs the other replicas of the completion of the view change by sending
-        /// ⟨view v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
+        /// ⟨View v, l, n, k⟩ messages to the other replicas, where l is the new log, n is the
         /// op number, and k is the commit number.
         ///
         /// When a new backup receives a join_view message for a new view, it transitions to
@@ -2729,11 +2729,11 @@ pub fn ReplicaType(
             }
         }
 
-        // When other replicas receive the view message, they replace their log and
+        // When other replicas receive the View message, they replace their log and
         // checkpoint with the ones in the message, set their op number to that of the latest entry
         // in the log, set their view number to the view number in the message, change their status
         // to normal, and update the information in their client table. If there are non-committed
-        // operations in the log, they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n
+        // operations in the log, they send a ⟨PrepareOk, v, n, i⟩ message to the primary; here n
         // is the op-number. Then they execute all operations known to be committed that they
         // haven’t executed previously, advance their commit number, and update the information in
         // their client table.
@@ -5958,9 +5958,9 @@ pub fn ReplicaType(
             //    asynchronous prepare_ok to itself.
             // 3. In transition_to_view_change_status(), the new primary sends a synchronous JV to
             //    itself.
-            // 4. In primary_view_as_the_new_primary(), the new primary sends itself a
+            // 4. In primary_start_view_as_the_new_primary(), the new primary sends itself a
             //    prepare_ok message for each uncommitted message.
-            // 5. In send_exit_view(), a replica sends itself a exit_view message.
+            // 5. In send_exit_view(), a replica sends itself a EV message.
             if (self.loopback_queue) |message| {
                 defer self.message_bus.unref(message);
 
@@ -6835,7 +6835,7 @@ pub fn ReplicaType(
                     if (self.primary_index(self.view) != self.replica) {
                         for (self.join_view_from_all_replicas) |jv| assert(jv == null);
 
-                        log.debug("{}: on_{s}: ignoring (backup awaiting view)", .{
+                        log.debug("{}: on_{s}: ignoring (backup awaiting View)", .{
                             self.log_prefix(),
                             command,
                         });
@@ -7673,7 +7673,7 @@ pub fn ReplicaType(
                     switch (self.primary_repair_pipeline()) {
                         // primary_repair_pipeline() is already working.
                         .busy => {},
-                        .done => self.primary_view_as_the_new_primary(),
+                        .done => self.primary_start_view_as_the_new_primary(),
                     }
                 }
             }
@@ -7695,13 +7695,13 @@ pub fn ReplicaType(
         /// * The latest op makes sense of everything else and must not be replaced with a different
         /// op or advanced except by the primary in the current view.
         ///
-        /// * Do not jump to a view in normal status without receiving a view message.
+        /// * Do not jump to a view in normal status without receiving a View message.
         ///
         /// * Do not commit until the hash chain between `self.commit_min` and `self.op` is fully
         /// connected, to ensure that all the ops in this range are correct.
         ///
         /// * Ensure that `self.commit_max` is never advanced for a newer view without first
-        /// receiving a view message, otherwise `self.commit_max` may refer to different ops.
+        /// receiving a View message, otherwise `self.commit_max` may refer to different ops.
         ///
         /// * Ensure that `self.op` is never advanced by a repair since repairs may occur in a view
         /// change where the view has not yet started.
@@ -9825,7 +9825,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn primary_view_as_the_new_primary(self: *Replica) void {
+        fn primary_start_view_as_the_new_primary(self: *Replica) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.syncing == .idle);
@@ -10139,9 +10139,9 @@ pub fn ReplicaType(
         }
 
         /// A replica i that notices the need for a view change advances its view, sets its status
-        /// to view_change, and sends a ⟨join_view v, i⟩ message to all the other replicas,
+        /// to view_change, and sends a ⟨JoinView v, i⟩ message to all the other replicas,
         /// where v identifies the new view. A replica notices the need for a view change either
-        /// based on its own timer, or because it receives a exit_view or join_view
+        /// based on its own timer, or because it receives a ExitView or JoinView
         /// message for a view with a larger number than its own view.
         fn transition_to_view_change_status(self: *Replica, view_new_min: u32) void {
             assert(self.status == .normal or
@@ -11075,7 +11075,7 @@ pub fn ReplicaType(
                 .view_change => switch (to) {
                     // This is an interesting special case:
                     // If the transition is to `.normal` in the same view, then we missed the
-                    // `view` message and we must also consider this a view jump:
+                    // View message and we must also consider this a view jump:
                     // If we don't handle this below then our `view_change_status_timeout` will fire
                     // and we will disrupt the cluster with another view change for a newer view.
                     .normal => {},
@@ -11083,7 +11083,7 @@ pub fn ReplicaType(
                     .view_change => if (header.view == self.view) return,
                     else => unreachable,
                 },
-                // We need a view from any other replica — don't request it from ourselves.
+                // We need a View from any other replica — don't request it from ourselves.
                 .recovering_head => if (self.primary_index(header.view) == self.replica) return,
                 .recovering => return,
             }
@@ -11110,7 +11110,7 @@ pub fn ReplicaType(
 
                     // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
                     // (Using request_view_message_timeout).
-                    log.debug("{}: jump_view: requesting view message", .{
+                    log.debug("{}: jump_view: requesting View message", .{
                         self.log_prefix(),
                     });
                     self.send_header_to_replica(

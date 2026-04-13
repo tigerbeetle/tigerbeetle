@@ -261,10 +261,10 @@ pub const Command = enum(u8) {
     view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
-    deprecated_12 = 12, // view without checkpoint
-    deprecated_21 = 21, // request_sync_checkpoint
-    deprecated_22 = 22, // sync_checkpoint
-    deprecated_23 = 23, // view with an older version of CheckpointState
+    deprecated_12 = 12, // .view without checkpoint
+    deprecated_21 = 21, // .request_sync_checkpoint
+    deprecated_22 = 22, // .sync_checkpoint
+    deprecated_23 = 23, // .view with an older version of CheckpointState
 
     comptime {
         for (std.enums.values(Command)) |command| {

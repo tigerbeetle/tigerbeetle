@@ -251,7 +251,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
 test "Cluster: recovery: recovering_head, outdated View" {
     // 1. Wait for B1 to ok op=3.
     // 2. Restart B1 while corrupting op=3, so that it gets into a .recovering_head with op=2.
-    // 3. Try make B1 forget about op=3 by delivering it an outdated .view with op=2.
+    // 3. Try make B1 forget about op=3 by delivering it an outdated View with op=2.
     const t = try TestContext.init(.{
         .replica_count = 3,
     });
@@ -674,7 +674,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     b1.stop();
     b1.corrupt(.{ .wal_prepare = 4 });
 
-    // We can't learn op=4's prepare, only its header (via view).
+    // We can't learn op=4's prepare, only its header (via View).
     b1.drop(.R_, .bidirectional, .prepare);
     try b1.open();
     try expectEqual(b1.status(), .recovering_head);
@@ -1853,9 +1853,9 @@ test "Cluster: view_change: JV header doesn't match current header in journal" {
     try expectEqual(t.replica(.R0).commit_max(), checkpoint_2_prepare_max);
 }
 
-test "Cluster: view_change: lagging replica repairs WAL using view from potential primary" {
+test "Cluster: view_change: lagging replica repairs WAL using View from potential primary" {
     // It could be the case that the replica with the most advanced checkpoint has a corruption in
-    // its grid. In this case, a replica on an older checkpoint can use a view message from
+    // its grid. In this case, a replica on an older checkpoint can use a View message from
     // the most up-to-date replica to repair its WAL, advance its checkpoint, and become primary.
 
     const t = try TestContext.init(.{ .replica_count = 3 });
@@ -2071,7 +2071,7 @@ test "Cluster: backups prepare past prepare_max if the next checkpoint is durabl
     // but not advance its checkpoint past 0. Meanwhile, the rest
     // of the cluster moves to checkpoint=checkpoint_2. Setting the
     // stage to checkpoint_superblock also ensures that if we receive
-    // any view message from the primary, we don't use it to
+    // any View message from the primary, we don't use it to
     // start state sync (see `on_view_set_checkpoint`).
     b2_replica.commit_stage = .checkpoint_superblock;
 
