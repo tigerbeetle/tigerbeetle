@@ -865,7 +865,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     try shell.exec("git add .", .{});
     // Native libraries are ignored in this repository, but we want to push them to the
     // tigerbeetle-go one!
-    try shell.exec("git add --force pkg/native", .{});
+    try shell.exec("git add --force native", .{});
 
     try shell.git_env_setup(.{ .use_hostname = false });
     try shell.exec("git commit --message {message}", .{
