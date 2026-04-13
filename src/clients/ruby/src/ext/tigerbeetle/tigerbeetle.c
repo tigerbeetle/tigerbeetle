@@ -206,6 +206,8 @@ static size_t rb_tb_event_size(TB_OPERATION operation) {
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
         return sizeof(tb_account_t);
+    case TB_OPERATION_LOOKUP_ACCOUNTS:
+        return sizeof(tb_uint128_t);
     default:
         rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
         return 0; // unreachable
@@ -243,19 +245,28 @@ static void rb_tb_serialize_accounts(VALUE items_rb, uint8_t *buf, long count) {
     }
 }
 
+static void rb_tb_serialize_lookup_ids(VALUE items_rb, uint8_t *buf, long count) {
+    tb_uint128_t *ids = (tb_uint128_t *)buf;
+    for (long i = 0; i < count; i++) {
+        rb_integer_pack(RARRAY_AREF(items_rb, i), &ids[i], 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
+    }
+}
+
 static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf, long count) {
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
         rb_tb_serialize_accounts(items_rb, buf, count);
+        break;
+    case TB_OPERATION_LOOKUP_ACCOUNTS:
+        rb_tb_serialize_lookup_ids(items_rb, buf, count);
         break;
     default:
         rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
     }
 }
 
-static VALUE rb_tb_deserialize_create_accounts(
-    VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size
-) {
+static VALUE
+rb_tb_deserialize_create_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
     long count = (long)(buf_size / sizeof(tb_create_account_result_t));
     VALUE results = rb_ary_new_capa(count);
     VALUE cClass = rb_const_get(mTigerBeetle, rb_intern("CreateAccountResult"));
@@ -270,12 +281,36 @@ static VALUE rb_tb_deserialize_create_accounts(
     return results;
 }
 
-static VALUE rb_tb_deserialize(
-    TB_OPERATION operation, const uint8_t *buf, uint32_t buf_size
-) {
+static VALUE rb_tb_deserialize_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
+    long count = (long)(buf_size / sizeof(tb_account_t));
+    VALUE results = rb_ary_new_capa(count);
+    VALUE cClass = rb_const_get(mTigerBeetle, rb_intern("Account"));
+    for (long i = 0; i < count; i++) {
+        const tb_account_t *a = (const tb_account_t *)(buf + i * sizeof(tb_account_t));
+        VALUE obj = rb_obj_alloc(cClass);
+        rb_ivar_set(obj, rb_intern("@id"), unpack_u128(&a->id));
+        rb_ivar_set(obj, rb_intern("@debits_pending"), unpack_u128(&a->debits_pending));
+        rb_ivar_set(obj, rb_intern("@debits_posted"), unpack_u128(&a->debits_posted));
+        rb_ivar_set(obj, rb_intern("@credits_pending"), unpack_u128(&a->credits_pending));
+        rb_ivar_set(obj, rb_intern("@credits_posted"), unpack_u128(&a->credits_posted));
+        rb_ivar_set(obj, rb_intern("@user_data_128"), unpack_u128(&a->user_data_128));
+        rb_ivar_set(obj, rb_intern("@user_data_64"), ULL2NUM(a->user_data_64));
+        rb_ivar_set(obj, rb_intern("@user_data_32"), UINT2NUM(a->user_data_32));
+        rb_ivar_set(obj, rb_intern("@ledger"), UINT2NUM(a->ledger));
+        rb_ivar_set(obj, rb_intern("@code"), UINT2NUM(a->code));
+        rb_ivar_set(obj, rb_intern("@flags"), UINT2NUM(a->flags));
+        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(a->timestamp));
+        rb_ary_push(results, obj);
+    }
+    return results;
+}
+
+static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint32_t buf_size) {
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
         return rb_tb_deserialize_create_accounts(rb_mTigerBeetle, buf, buf_size);
+    case TB_OPERATION_LOOKUP_ACCOUNTS:
+        return rb_tb_deserialize_accounts(rb_mTigerBeetle, buf, buf_size);
     default:
         rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
     }
