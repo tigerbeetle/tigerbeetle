@@ -14,7 +14,7 @@ Consensus:
 - _superblock_: All local state for the replica that cannot be replicated remotely. Loss is protected against by storing `config.superblock_copies` copies of the superblock.
 - _view_: A replica is _primary_ for one view. Views are monotonically increasing integers that are incremented each time a new primary is selected.
 
-Consensus terminology generally follows [VRR] paper, but uses ExitView/JoinView/View instead of StartViewChange/DoViewChange/StartView.
+Consensus terminology largely follows the [VRR] paper, but uses `JoinView`/`View`/`ExitView` instead of `DoViewChange`/`StartView`/`StartViewChange`, to put the state (`View`) into the spotlight, as per Fred Brooks.
 
 Storage:
 
@@ -101,7 +101,7 @@ sequenceDiagram
 
 See also:
 
-- [VRR](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf) §4.1
+- [VRR](http://hdl.handle.net/1721.1/71763) §4.1
 
 ### Protocol: Start-View-Change
 
@@ -294,7 +294,7 @@ See also:
 - [Flexible Paxos](https://fpaxos.github.io/)
 
 ## Further reading
-- [Viewstamped Replication Revisited](https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf)
+- [Viewstamped Replication Revisited](http://hdl.handle.net/1721.1/71763)
 - [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)
 
-[VRR]: https://dspace.mit.edu/bitstream/handle/1721.1/71763/MIT-CSAIL-TR-2012-021.pdf
+[VRR]: http://hdl.handle.net/1721.1/71763
