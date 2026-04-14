@@ -51,21 +51,14 @@ The result types <code>CreateAccount<b>s</b>Result</code> and
 <code>CreateTransfer<b>s</b>Result</code> were renamed to the singular form,
 <code>CreateAccountResult</code> and <code>CreateTransferResult</code>.
 
-<table>
-<tr><th>Before</th><th>After</th></tr>
-<tr><td>
-
 ```zig
+// Before:
 pub const CreateAccountsResult = extern struct {
     index: u32,
     result: CreateAccountResult,
 };
 
-```
-
-</td><td>
-
-```zig
+// After:
 pub const CreateAccountResult = extern struct {
     timestamp: u64,
     status: CreateAccountStatus,
@@ -73,30 +66,20 @@ pub const CreateAccountResult = extern struct {
 };
 ```
 
-</td></tr>
-<tr><!-- Empty row to avoid the zebra stripe style--></tr>
-<tr><td>
-
 ```zig
+// Before:
 pub const CreateTransfersResult = extern struct {
     index: u32,
     result: CreateTransferResult,
 };
 
-```
-
-</td><td>
-
-```zig
+// After:
 pub const CreateTransferResult = extern struct {
     timestamp: u64,
     status: CreateTransferStatus,
     reserved: u32 = 0,
 };
 ```
-
-</td></tr>
-</table>
 
 ### Query limits.
 
