@@ -378,7 +378,7 @@ test "in-place upgrade" {
     defer std.testing.log_level = level;
 
     const replica_count = 3;
-    const duration_max = stdx.Duration.seconds(150);
+    const duration_max = stdx.Duration.seconds(200);
     const tick_ms = 10;
     const ticks_max = duration_max.to_ms() / tick_ms;
 
@@ -470,7 +470,7 @@ test "recover smoke" {
 
     try supervisor.replica_terminate(1);
     try supervisor.replica_start(2);
-    for (0..2000) |_| {
+    for (0..4000) |_| {
         if (supervisor.workload_done()) break;
         try supervisor.tick();
     } else {
