@@ -3,14 +3,14 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
-const maybe = stdx.maybe;
 
 const stdx = @import("stdx");
-const constants = @import("../constants.zig");
-const lsm = @import("tree.zig");
-const binary_search = @import("binary_search.zig");
+const maybe = stdx.maybe;
 
+const constants = @import("../constants.zig");
 const Direction = @import("../direction.zig").Direction;
+const binary_search = @import("binary_search.zig");
+const lsm = @import("tree.zig");
 const SortedSegmentedArrayType = @import("segmented_array.zig").SortedSegmentedArrayType;
 
 pub fn ManifestLevelType(
@@ -566,54 +566,113 @@ pub fn ManifestLevelType(
         /// is invoked and B is the other level), finds a table in Level A that
         /// overlaps with the least number of tables in Level B.
         ///
+        /// Uses a two-pointer sweep over both levels for O(n_a + n_b) overlap
+        /// counting, then a single binary search to retrieve the full overlap
+        /// range for the chosen table.
+        ///
         /// * Exits early if it finds a table that doesn't overlap with any
         ///   tables in the second level.
+        /// * Ties are resolved by smaller key and then smaller snapshot.
         pub fn table_with_least_overlap(
             level_a: *const ManifestLevel,
             level_b: *const ManifestLevel,
             snapshot: u64,
             max_overlapping_tables: usize,
-        ) ?LeastOverlapTable {
+        ) LeastOverlapTable {
             assert(max_overlapping_tables <= constants.lsm_growth_factor);
+            assert(level_a.table_count_visible > 0);
 
-            var optimal: ?LeastOverlapTable = null;
             const snapshots = [1]u64{snapshot};
-            var iterations: usize = 0;
-            var it = level_a.iterator(
-                .visible,
-                &snapshots,
-                .ascending,
-                null, // All visible tables in the level therefore no KeyRange filter.
-            );
 
-            while (it.next()) |table| {
-                iterations += 1;
+            // Two-pointer sweep to count overlaps in O(n_a + n_b).
+            //
+            // Both levels are sorted. As we advance through A left-to-right,
+            // the B pointers only move forward (monotonic), so total work
+            // across all A-tables is O(n_b) for each pointer.
+            //
+            // For each a_table, we maintain two counts into B:
+            //
+            //   b_lower_count: B-tables with key_max  < a_table.key_min  (left of A)
+            //   b_upper_count: B-tables with key_min <= a_table.key_max  (started before A ends)
+            //
+            //   overlap = b_upper_count - b_lower_count
+            //
+            // Example: 4 B-tables, a_table overlaps B2 and B3:
+            //        Level A:               |= a_table ===|
+            //        Level B:  |=B0=| |=B1=| |==B2==| |==B3==|  |=B4=|
+            //                  ├───────────┤              :
+            //                  b_lower_count = 2          :
+            //                  (B0, B1 end before         :
+            //                   a_table starts)           :
+            //                  ├──────────────────────────┤
+            //                  b_upper_count = 4
+            //                  (B0, B1, B2, B3 start before a_table ends)
+            //                  overlap = 4 - 2 = 2  (B2, B3)
+            var a_iterator = level_a.iterator(.visible, &snapshots, .ascending, null);
 
-                const range = level_b.tables_overlapping_with_key_range(
-                    table.key_min,
-                    table.key_max,
-                    snapshot,
-                    max_overlapping_tables,
-                ) orelse continue;
-                assert(range.tables.count() <= max_overlapping_tables);
+            var b_lower_iterator = level_b.iterator(.visible, &snapshots, .ascending, null);
+            var b_lower_count: usize = 0;
+            var b_lower: ?*TableInfo = b_lower_iterator.next();
+            var b_upper_iterator = level_b.iterator(.visible, &snapshots, .ascending, null);
+            var b_upper_count: usize = 0;
+            var b_upper: ?*TableInfo = b_upper_iterator.next();
 
-                if (optimal == null or range.tables.count() < optimal.?.range.tables.count()) {
-                    optimal = LeastOverlapTable{
-                        .table = TableInfoReference{
-                            .table_info = table,
-                            .generation = level_a.generation,
-                        },
-                        .range = range,
-                    };
+            const table_a_optimal, const table_a_overlap_count = optimal: {
+                var optimal_table: ?*TableInfo = null;
+                var optimal_overlap: usize = max_overlapping_tables + 1;
+                var iterations: usize = 0;
+
+                while (a_iterator.next()) |a_table| {
+                    iterations += 1;
+
+                    while (b_lower != null and b_lower.?.key_max < a_table.key_min) {
+                        b_lower_count += 1; // TODO move this to continuation.
+                        b_lower = b_lower_iterator.next();
+                    }
+                    if (b_lower != null) assert(a_table.key_min <= b_lower.?.key_max);
+
+                    while (b_upper != null and b_upper.?.key_min <= a_table.key_max) {
+                        b_upper_count += 1; // TODO move this to continuation.
+                        b_upper = b_upper_iterator.next();
+                    }
+                    if (b_upper != null) assert(a_table.key_max < b_upper.?.key_min);
+
+                    const overlap = b_upper_count - b_lower_count;
+
+                    if (overlap > max_overlapping_tables) continue;
+
+                    // Zero overlap is already optimal.
+                    if (optimal_overlap == 0) break;
+
+                    if (overlap < optimal_overlap) {
+                        optimal_table = a_table;
+                        optimal_overlap = overlap;
+                    }
                 }
-                // If the table can be moved directly between levels then that is already optimal.
-                if (optimal.?.range.tables.empty()) break;
-            }
-            assert(iterations > 0);
-            assert(iterations == level_a.table_count_visible or
-                optimal.?.range.tables.empty());
+                assert(iterations > 0);
+                assert(iterations == level_a.table_count_visible or optimal_overlap == 0);
+                assert(optimal_overlap <= max_overlapping_tables);
 
-            return optimal.?;
+                break :optimal .{ optimal_table.?, optimal_overlap };
+            };
+
+            // Retrieve the full OverlapRange for the chosen table.
+            const range = level_b.tables_overlapping_with_key_range(
+                table_a_optimal.key_min,
+                table_a_optimal.key_max,
+                snapshot,
+                max_overlapping_tables,
+            ).?;
+            assert(range.tables.count() == table_a_overlap_count);
+            assert(range.tables.count() <= max_overlapping_tables);
+
+            return LeastOverlapTable{
+                .table = TableInfoReference{
+                    .table_info = table_a_optimal,
+                    .generation = level_a.generation,
+                },
+                .range = range,
+            };
         }
 
         /// Returns the next table in the range, after `key_exclusive` if provided.
@@ -1259,6 +1318,159 @@ pub fn TestContextType(
         inline fn key_min_from_table(table: *const TableInfo) Key {
             return table.key_min;
         }
+
+        fn run_fuzz_overlap() !void {
+            const Level = TestContext.TestLevel;
+            const Pool = TestContext.TestPool;
+
+            const node_count = Level.Keys.node_count_max + Level.Tables.node_count_max;
+            const a_tables_max = 20;
+            const b_tables_max = a_tables_max * constants.lsm_growth_factor;
+
+            var prng = stdx.PRNG.from_seed_testing();
+
+            for (0..100) |_| {
+                var pool_a: Pool = undefined;
+                try pool_a.init(std.testing.allocator, node_count);
+                defer pool_a.deinit(std.testing.allocator);
+
+                var pool_b: Pool = undefined;
+                try pool_b.init(std.testing.allocator, node_count);
+                defer pool_b.deinit(std.testing.allocator);
+
+                var level_a: Level = undefined;
+                try level_a.init(std.testing.allocator, &pool_a);
+                defer level_a.deinit(std.testing.allocator, &pool_a);
+
+                var level_b: Level = undefined;
+                try level_b.init(std.testing.allocator, &pool_b);
+                defer level_b.deinit(std.testing.allocator, &pool_b);
+
+                const count_a = prng.range_inclusive(usize, 1, a_tables_max);
+                // Skew count_b <= count_a * growth_factor so that by the pigeonhole
+                // principle at least one A table has overlap <= growth_factor in most
+                // iterations. This mirrors the real LSM invariant.
+                const count_b = prng.int_inclusive(
+                    usize,
+                    count_a * constants.lsm_growth_factor,
+                );
+                const max_overlap = constants.lsm_growth_factor;
+
+                // Generate non-overlapping tables for level A.
+                var a_tables: [a_tables_max]TableInfo = undefined;
+                var key: u64 = prng.int_inclusive(u64, 500);
+                for (a_tables[0..count_a]) |*table| {
+                    key += prng.range_inclusive(u64, 1, 31);
+                    const key_min = key;
+                    key += prng.int_inclusive(u64, 32);
+                    table.* = random_table(key_min, key, &prng);
+                    level_a.insert_table(&pool_a, table);
+                }
+
+                // Generate non-overlapping tables for level B.
+                var b_tables: [b_tables_max]TableInfo = undefined;
+                key = prng.int_inclusive(u64, 500);
+                for (b_tables[0..count_b]) |*table| {
+                    key += prng.range_inclusive(u64, 1, 31);
+                    const key_min = key;
+                    key += prng.int_inclusive(u64, 32);
+                    table.* = random_table(key_min, key, &prng);
+                    level_b.insert_table(&pool_b, table);
+                }
+
+                const expected = brute_force_least_overlap(
+                    &level_a,
+                    &level_b,
+                    max_overlap,
+                );
+
+                const result = Level.table_with_least_overlap(
+                    &level_a,
+                    &level_b,
+                    lsm.snapshot_latest,
+                    max_overlap,
+                );
+
+                try std.testing.expectEqual(
+                    expected.table.key_min,
+                    result.table.table_info.key_min,
+                );
+                try std.testing.expectEqual(
+                    expected.table.key_max,
+                    result.table.table_info.key_max,
+                );
+                try std.testing.expectEqual(
+                    expected.b_tables.count(),
+                    result.range.tables.count(),
+                );
+                for (expected.b_tables.const_slice(), 0..) |expected_b, i| {
+                    const actual_b = result.range.tables.get(i).table_info;
+                    try std.testing.expectEqual(expected_b.key_min, actual_b.key_min);
+                    try std.testing.expectEqual(expected_b.key_max, actual_b.key_max);
+                }
+            }
+        }
+
+        const BruteForceLeastOverlapResult = struct {
+            table: *TableInfo,
+            b_tables: stdx.BoundedArrayType(
+                *TableInfo,
+                constants.lsm_growth_factor,
+            ),
+        };
+
+        fn brute_force_least_overlap(
+            level_a: *const TestLevel,
+            level_b: *const TestLevel,
+            max_overlap: usize,
+        ) BruteForceLeastOverlapResult {
+            const snapshots = [1]u64{lsm.snapshot_latest};
+            var best_table: ?*TableInfo = null;
+            var best_overlap: usize = math.maxInt(usize);
+            var best_b_tables: stdx.BoundedArrayType(*TableInfo, constants.lsm_growth_factor) = .{};
+
+            var it_a = level_a.iterator(.visible, &snapshots, .ascending, null);
+            while (it_a.next()) |table_a| {
+                var overlap: usize = 0;
+                var it_b = level_b.iterator(.visible, &snapshots, .ascending, null);
+                while (it_b.next()) |table_b| {
+                    if (table_b.key_max >= table_a.key_min and table_b.key_min <= table_a.key_max) {
+                        overlap += 1;
+                    }
+                }
+                if (overlap <= max_overlap and overlap < best_overlap) {
+                    best_table = table_a;
+                    best_overlap = overlap;
+                    best_b_tables.clear();
+
+                    var it_b2 = level_b.iterator(.visible, &snapshots, .ascending, null);
+                    while (it_b2.next()) |table_b| {
+                        if (table_b.key_max >= table_a.key_min and
+                            table_b.key_min <= table_a.key_max)
+                        {
+                            best_b_tables.push(table_b);
+                        }
+                    }
+                }
+                if (best_overlap == 0) break;
+            }
+            return .{ .table = best_table.?, .b_tables = best_b_tables };
+        }
+
+        fn random_table(
+            key_min: u64,
+            key_max: u64,
+            prng: *stdx.PRNG,
+        ) TableInfo {
+            return .{
+                .checksum = prng.int(u128),
+                .address = prng.int(u64),
+                .snapshot_min = 1,
+                .key_min = key_min,
+                .key_max = key_max,
+                .value_count = prng.int(u32),
+            };
+        }
     };
 }
 
@@ -1291,4 +1503,8 @@ test "ManifestLevel" {
 
         try context.run();
     }
+}
+
+test "fuzz: table_with_least_overlap random levels" {
+    try TestContextType(256, u64, 1024).run_fuzz_overlap();
 }
