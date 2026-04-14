@@ -621,11 +621,6 @@ pub fn ManifestLevelType(
                 var optimal_table: ?*TableInfo = null;
                 var optimal_overlap: usize = max_overlapping_tables + 1;
                 var iterations: usize = 0;
-                defer {
-                    assert(iterations > 0);
-                    assert(iterations == level_a.table_count_visible or optimal_overlap == 0);
-                    assert(optimal_overlap <= max_overlapping_tables);
-                }
 
                 while (a_iterator.next()) |a_table| {
                     iterations += 1;
@@ -654,6 +649,10 @@ pub fn ManifestLevelType(
                         optimal_overlap = overlap;
                     }
                 }
+                assert(iterations > 0);
+                assert(iterations == level_a.table_count_visible or optimal_overlap == 0);
+                assert(optimal_overlap <= max_overlapping_tables);
+
                 break :optimal .{ optimal_table.?, optimal_overlap };
             };
 
