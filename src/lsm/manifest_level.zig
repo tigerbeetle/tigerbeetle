@@ -664,7 +664,6 @@ pub fn ManifestLevelType(
                 snapshot,
                 max_overlapping_tables,
             ).?;
-
             assert(range.tables.count() == table_a_overlap_count);
             assert(range.tables.count() <= max_overlapping_tables);
 
