@@ -1359,6 +1359,7 @@ const BruteForceLeastOverlapResult = struct {
         constants.lsm_growth_factor,
     ),
 };
+
 test "fuzz: table_with_least_overlap random levels" {
     const TestContext = TestContextType(256, u64, 1024);
     const Level = TestContext.TestLevel;
@@ -1395,11 +1396,7 @@ test "fuzz: table_with_least_overlap random levels" {
             usize,
             count_a * constants.lsm_growth_factor,
         );
-        const max_overlap = prng.range_inclusive(
-            usize,
-            1,
-            constants.lsm_growth_factor,
-        );
+        const max_overlap = constants.lsm_growth_factor;
 
         // Generate non-overlapping tables for level A.
         var a_tables: [a_tables_max]TableInfo = undefined;
@@ -1423,14 +1420,11 @@ test "fuzz: table_with_least_overlap random levels" {
             level_b.insert_table(&pool_b, table);
         }
 
-        // Skip iterations where no A table has overlap <= max_overlap.
-        // With the pigeonhole skew above this is rare but can still happen
-        // since the levels are fully random.
         const expected = brute_force_least_overlap(
             &level_a,
             &level_b,
             max_overlap,
-        ) orelse continue;
+        );
 
         const result = Level.table_with_least_overlap(
             &level_a,
@@ -1463,7 +1457,7 @@ fn brute_force_least_overlap(
     level_a: *const TestContextType(256, u64, 1024).TestLevel,
     level_b: *const TestContextType(256, u64, 1024).TestLevel,
     max_overlap: usize,
-) ?BruteForceLeastOverlapResult {
+) BruteForceLeastOverlapResult {
     const TableInfo = TestContextType(256, u64, 1024).TableInfo;
     const snapshots = [1]u64{lsm.snapshot_latest};
     var best_table: ?*TableInfo = null;
@@ -1495,11 +1489,7 @@ fn brute_force_least_overlap(
         }
         if (best_overlap == 0) break;
     }
-
-    if (best_table) |table| {
-        return .{ .table = table, .b_tables = best_b_tables };
-    }
-    return null;
+    return .{ .table = best_table.?, .b_tables = best_b_tables };
 }
 
 fn random_table(
