@@ -209,6 +209,7 @@ static size_t rb_tb_event_size(TB_OPERATION operation) {
     case TB_OPERATION_CREATE_TRANSFERS:
         return sizeof(tb_transfer_t);
     case TB_OPERATION_LOOKUP_ACCOUNTS:
+    case TB_OPERATION_LOOKUP_TRANSFERS:
         return sizeof(tb_uint128_t);
     default:
         rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
@@ -285,6 +286,7 @@ static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf
         rb_tb_serialize_transfers(items_rb, buf, count);
         break;
     case TB_OPERATION_LOOKUP_ACCOUNTS:
+    case TB_OPERATION_LOOKUP_TRANSFERS:
         rb_tb_serialize_lookup_ids(items_rb, buf, count);
         break;
     default:
@@ -348,6 +350,32 @@ static VALUE rb_tb_deserialize_accounts(VALUE mTigerBeetle, const uint8_t *buf, 
     return results;
 }
 
+static VALUE
+rb_tb_deserialize_transfers(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
+    long count = (long)(buf_size / sizeof(tb_transfer_t));
+    VALUE results = rb_ary_new_capa(count);
+    VALUE cClass = rb_const_get(mTigerBeetle, rb_intern("Transfer"));
+    for (long i = 0; i < count; i++) {
+        const tb_transfer_t *t = (const tb_transfer_t *)(buf + i * sizeof(tb_transfer_t));
+        VALUE obj = rb_obj_alloc(cClass);
+        rb_ivar_set(obj, rb_intern("@id"), unpack_u128(&t->id));
+        rb_ivar_set(obj, rb_intern("@debit_account_id"), unpack_u128(&t->debit_account_id));
+        rb_ivar_set(obj, rb_intern("@credit_account_id"), unpack_u128(&t->credit_account_id));
+        rb_ivar_set(obj, rb_intern("@amount"), unpack_u128(&t->amount));
+        rb_ivar_set(obj, rb_intern("@pending_id"), unpack_u128(&t->pending_id));
+        rb_ivar_set(obj, rb_intern("@user_data_128"), unpack_u128(&t->user_data_128));
+        rb_ivar_set(obj, rb_intern("@user_data_64"), ULL2NUM(t->user_data_64));
+        rb_ivar_set(obj, rb_intern("@user_data_32"), UINT2NUM(t->user_data_32));
+        rb_ivar_set(obj, rb_intern("@timeout"), UINT2NUM(t->timeout));
+        rb_ivar_set(obj, rb_intern("@ledger"), UINT2NUM(t->ledger));
+        rb_ivar_set(obj, rb_intern("@code"), UINT2NUM(t->code));
+        rb_ivar_set(obj, rb_intern("@flags"), UINT2NUM(t->flags));
+        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(t->timestamp));
+        rb_ary_push(results, obj);
+    }
+    return results;
+}
+
 static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint32_t buf_size) {
     switch (operation) {
     case TB_OPERATION_CREATE_ACCOUNTS:
@@ -356,6 +384,8 @@ static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint3
         return rb_tb_deserialize_create_transfers(rb_mTigerBeetle, buf, buf_size);
     case TB_OPERATION_LOOKUP_ACCOUNTS:
         return rb_tb_deserialize_accounts(rb_mTigerBeetle, buf, buf_size);
+    case TB_OPERATION_LOOKUP_TRANSFERS:
+        return rb_tb_deserialize_transfers(rb_mTigerBeetle, buf, buf_size);
     default:
         rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
     }

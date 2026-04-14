@@ -169,14 +169,14 @@ class TestTransfers < Minitest::Test
     id = TigerBeetle.generate_id
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new { |t|
+        TigerBeetle::Transfer.new do |t|
           t.id = id
           t.debit_account_id = @a1_id
           t.credit_account_id = @a2_id
           t.amount = 42
           t.ledger = 1
           t.code = 1
-        }
+        end
       ]
     )
 
@@ -198,22 +198,22 @@ class TestTransfers < Minitest::Test
     id2 = TigerBeetle.generate_id
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new { |t|
+        TigerBeetle::Transfer.new do |t|
           t.id = id1
           t.debit_account_id = @a1_id
           t.credit_account_id = @a2_id
           t.amount = 10
           t.ledger = 1
           t.code = 1
-        },
-        TigerBeetle::Transfer.new { |t|
+        end,
+        TigerBeetle::Transfer.new do |t|
           t.id = id2
           t.debit_account_id = @a1_id
           t.credit_account_id = @a2_id
           t.amount = 20
           t.ledger = 1
           t.code = 1
-        }
+        end
       ]
     )
 
@@ -232,14 +232,14 @@ class TestTransfers < Minitest::Test
     missing_id = TigerBeetle.generate_id
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new { |t|
+        TigerBeetle::Transfer.new do |t|
           t.id = existing_id
           t.debit_account_id = @a1_id
           t.credit_account_id = @a2_id
           t.amount = 5
           t.ledger = 1
           t.code = 1
-        }
+        end
       ]
     )
 
@@ -260,7 +260,7 @@ class TestTransfers < Minitest::Test
     user_data_32 = 54321
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new { |t|
+        TigerBeetle::Transfer.new do |t|
           t.id = id
           t.debit_account_id = @a1_id
           t.credit_account_id = @a2_id
@@ -270,7 +270,7 @@ class TestTransfers < Minitest::Test
           t.user_data_128 = user_data_128
           t.user_data_64 = user_data_64
           t.user_data_32 = user_data_32
-        }
+        end
       ]
     )
 

@@ -31,5 +31,9 @@ module TigerBeetle
     def lookup_accounts(ids)
       @native.submit(Operation::LOOKUP_ACCOUNTS, ids)
     end
+
+    def lookup_transfers(ids)
+      @native.submit(Operation::LOOKUP_TRANSFERS, ids)
+    end
   end
 end
