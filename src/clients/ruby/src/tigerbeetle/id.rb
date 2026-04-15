@@ -2,6 +2,9 @@ require "securerandom"
 
 module TigerBeetle
   class IdGenerator
+    RANDOM_MAX = 2 ** 80
+    TIMESTAMP_MAX = 2 ** 48
+
     def initialize
       @last_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
       @random = next_random
@@ -17,9 +20,13 @@ module TigerBeetle
       end
 
       @random += 1
-      raise "random bits overflow on monotonic increment" if @random == 2 ** 80
+      if @random >= RANDOM_MAX
+        @last_ms += 1
+        raise "Timestamp bits overflow on monotonic increment" if @last_ms >= TIMESTAMP_MAX
+        @random = 0
+      end
 
-      (ms << 80) | @random
+      (@last_ms << 80) | @random
     end
 
     private
