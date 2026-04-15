@@ -12,11 +12,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account
-    account = TigerBeetle::Account.new do |a|
-      a.id = TigerBeetle.generate_id
-      a.ledger = 1
-      a.code = 1
-    end
+    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 1)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -25,11 +21,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_duplicate
-    account = TigerBeetle::Account.new do |a|
-      a.id = TigerBeetle.generate_id
-      a.ledger = 1
-      a.code = 1
-    end
+    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 1)
 
     @client.create_accounts([account])
 
@@ -39,11 +31,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_id_zero
-    account = TigerBeetle::Account.new do |a|
-      a.id = 0
-      a.ledger = 1
-      a.code = 1
-    end
+    account = TigerBeetle::Account.new(id: 0, ledger: 1, code: 1)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -51,11 +39,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_ledger_zero
-    account = TigerBeetle::Account.new do |a|
-      a.id = TigerBeetle.generate_id
-      a.ledger = 0
-      a.code = 1
-    end
+    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 0, code: 1)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -63,11 +47,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_code_zero
-    account = TigerBeetle::Account.new do |a|
-      a.id = TigerBeetle.generate_id
-      a.ledger = 1
-      a.code = 0
-    end
+    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 0)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -75,13 +55,13 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_mutually_exclusive_flags
-    account = TigerBeetle::Account.new do |a|
-      a.id = TigerBeetle.generate_id
-      a.ledger = 1
-      a.code = 1
-      a.flags = TigerBeetle::AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS |
+    account = TigerBeetle::Account.new(
+      id: TigerBeetle.generate_id,
+      ledger: 1,
+      code: 1,
+      flags: TigerBeetle::AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS |
         TigerBeetle::AccountFlags::CREDITS_MUST_NOT_EXCEED_DEBITS
-    end
+    )
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -90,11 +70,7 @@ class TestAccounts < Minitest::Test
 
   def test_lookup_account
     id = TigerBeetle.generate_id
-    account = TigerBeetle::Account.new do |a|
-      a.id = id
-      a.ledger = 1
-      a.code = 1
-    end
+    account = TigerBeetle::Account.new(id: id, ledger: 1, code: 1)
 
     @client.create_accounts([account])
 
@@ -117,16 +93,8 @@ class TestAccounts < Minitest::Test
     id2 = TigerBeetle.generate_id
     @client.create_accounts(
       [
-        TigerBeetle::Account.new do |a|
-          a.id = id1
-          a.ledger = 1
-          a.code = 1
-        end,
-        TigerBeetle::Account.new do |a|
-          a.id = id2
-          a.ledger = 2
-          a.code = 2
-        end
+        TigerBeetle::Account.new(id: id1, ledger: 1, code: 1),
+        TigerBeetle::Account.new(id: id2, ledger: 2, code: 2)
       ]
     )
 
@@ -144,13 +112,7 @@ class TestAccounts < Minitest::Test
     existing_id = TigerBeetle.generate_id
     missing_id = TigerBeetle.generate_id
     @client.create_accounts(
-      [
-        TigerBeetle::Account.new do |a|
-          a.id = existing_id
-          a.ledger = 1
-          a.code = 1
-        end
-      ]
+      [TigerBeetle::Account.new(id: existing_id, ledger: 1, code: 1)]
     )
 
     results = @client.lookup_accounts([existing_id, missing_id])
@@ -170,15 +132,15 @@ class TestAccounts < Minitest::Test
     user_data_32 = 12345
     @client.create_accounts(
       [
-        TigerBeetle::Account.new do |a|
-          a.id = id
-          a.ledger = 7
-          a.code = 42
-          a.user_data_128 = user_data_128
-          a.user_data_64 = user_data_64
-          a.user_data_32 = user_data_32
-          a.flags = TigerBeetle::AccountFlags::HISTORY
-        end
+        TigerBeetle::Account.new(
+          id: id,
+          ledger: 7,
+          code: 42,
+          user_data_128: user_data_128,
+          user_data_64: user_data_64,
+          user_data_32: user_data_32,
+          flags: TigerBeetle::AccountFlags::HISTORY
+        )
       ]
     )
 

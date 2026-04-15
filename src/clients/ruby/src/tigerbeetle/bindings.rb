@@ -165,21 +165,32 @@ module TigerBeetle
     attr_accessor :flags
     attr_accessor :timestamp
 
-    def initialize
-      @id = 0
-      @debits_pending = 0
-      @debits_posted = 0
-      @credits_pending = 0
-      @credits_posted = 0
-      @user_data_128 = 0
-      @user_data_64 = 0
-      @user_data_32 = 0
-      @ledger = 0
-      @code = 0
-      @flags = AccountFlags::NONE
-      @timestamp = 0
-
-      yield self if block_given?
+    def initialize(
+      id: 0,
+      debits_pending: 0,
+      debits_posted: 0,
+      credits_pending: 0,
+      credits_posted: 0,
+      user_data_128: 0,
+      user_data_64: 0,
+      user_data_32: 0,
+      ledger: 0,
+      code: 0,
+      flags: AccountFlags::NONE,
+      timestamp: 0
+    )
+      @id = id
+      @debits_pending = debits_pending
+      @debits_posted = debits_posted
+      @credits_pending = credits_pending
+      @credits_posted = credits_posted
+      @user_data_128 = user_data_128
+      @user_data_64 = user_data_64
+      @user_data_32 = user_data_32
+      @ledger = ledger
+      @code = code
+      @flags = flags
+      @timestamp = timestamp
     end
   end
 
@@ -198,22 +209,34 @@ module TigerBeetle
     attr_accessor :flags
     attr_accessor :timestamp
 
-    def initialize
-      @id = 0
-      @debit_account_id = 0
-      @credit_account_id = 0
-      @amount = 0
-      @pending_id = 0
-      @user_data_128 = 0
-      @user_data_64 = 0
-      @user_data_32 = 0
-      @timeout = 0
-      @ledger = 0
-      @code = 0
-      @flags = TransferFlags::NONE
-      @timestamp = 0
-
-      yield self if block_given?
+    def initialize(
+      id: 0,
+      debit_account_id: 0,
+      credit_account_id: 0,
+      amount: 0,
+      pending_id: 0,
+      user_data_128: 0,
+      user_data_64: 0,
+      user_data_32: 0,
+      timeout: 0,
+      ledger: 0,
+      code: 0,
+      flags: TransferFlags::NONE,
+      timestamp: 0
+    )
+      @id = id
+      @debit_account_id = debit_account_id
+      @credit_account_id = credit_account_id
+      @amount = amount
+      @pending_id = pending_id
+      @user_data_128 = user_data_128
+      @user_data_64 = user_data_64
+      @user_data_32 = user_data_32
+      @timeout = timeout
+      @ledger = ledger
+      @code = code
+      @flags = flags
+      @timestamp = timestamp
     end
   end
 
@@ -228,18 +251,26 @@ module TigerBeetle
     attr_accessor :limit
     attr_accessor :flags
 
-    def initialize
-      @account_id = 0
-      @user_data_128 = 0
-      @user_data_64 = 0
-      @user_data_32 = 0
-      @code = 0
-      @timestamp_min = 0
-      @timestamp_max = 0
-      @limit = 0
-      @flags = AccountFilterFlags::NONE
-
-      yield self if block_given?
+    def initialize(
+      account_id: 0,
+      user_data_128: 0,
+      user_data_64: 0,
+      user_data_32: 0,
+      code: 0,
+      timestamp_min: 0,
+      timestamp_max: 0,
+      limit: 0,
+      flags: AccountFilterFlags::NONE
+    )
+      @account_id = account_id
+      @user_data_128 = user_data_128
+      @user_data_64 = user_data_64
+      @user_data_32 = user_data_32
+      @code = code
+      @timestamp_min = timestamp_min
+      @timestamp_max = timestamp_max
+      @limit = limit
+      @flags = flags
     end
   end
 
@@ -254,18 +285,26 @@ module TigerBeetle
     attr_accessor :limit
     attr_accessor :flags
 
-    def initialize
-      @user_data_128 = 0
-      @user_data_64 = 0
-      @user_data_32 = 0
-      @ledger = 0
-      @code = 0
-      @timestamp_min = 0
-      @timestamp_max = 0
-      @limit = 0
-      @flags = QueryFilterFlags::NONE
-
-      yield self if block_given?
+    def initialize(
+      user_data_128: 0,
+      user_data_64: 0,
+      user_data_32: 0,
+      ledger: 0,
+      code: 0,
+      timestamp_min: 0,
+      timestamp_max: 0,
+      limit: 0,
+      flags: QueryFilterFlags::NONE
+    )
+      @user_data_128 = user_data_128
+      @user_data_64 = user_data_64
+      @user_data_32 = user_data_32
+      @ledger = ledger
+      @code = code
+      @timestamp_min = timestamp_min
+      @timestamp_max = timestamp_max
+      @limit = limit
+      @flags = flags
     end
   end
 

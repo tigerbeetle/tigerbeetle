@@ -83,6 +83,16 @@ fn emit_enum_module(
     buffer.print("  end\n\n", .{});
 }
 
+fn emit_field_default(buffer: *Buffer, comptime FieldType: type) void {
+    const type_info = @typeInfo(FieldType);
+    const is_flags = type_info == .@"struct" and type_info.@"struct".layout == .@"packed";
+    if (is_flags) {
+        buffer.print("{s}::NONE", .{comptime ruby_flags_name_from_type(FieldType).?});
+    } else {
+        buffer.print("0", .{});
+    }
+}
+
 fn emit_struct_class(
     buffer: *Buffer,
     comptime Type: type,
@@ -102,23 +112,30 @@ fn emit_struct_class(
     }
     buffer.print("\n", .{});
 
-    buffer.print("    def initialize\n", .{});
-    inline for (fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-        const field_type_info = @typeInfo(field.type);
-        const is_flags = field_type_info == .@"struct" and
-            field_type_info.@"struct".layout == .@"packed";
-        if (is_flags) {
-            const flags_ruby_name = comptime ruby_flags_name_from_type(field.type).?;
-            buffer.print("      @{s} = {s}::NONE\n", .{ field.name, flags_ruby_name });
-        } else {
+    if (!read_only) {
+        buffer.print("    def initialize(\n", .{});
+        comptime var sep: []const u8 = "";
+        inline for (fields) |field| {
+            if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
+            if (sep.len > 0) buffer.print("{s}", .{sep});
+            buffer.print("      {s}: ", .{field.name});
+            emit_field_default(buffer, field.type);
+            sep = ",\n";
+        }
+        buffer.print("\n    )\n", .{});
+        inline for (fields) |field| {
+            if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
+            buffer.print("      @{s} = {s}\n", .{ field.name, field.name });
+        }
+        buffer.print("    end\n", .{});
+    } else {
+        buffer.print("    def initialize\n", .{});
+        inline for (fields) |field| {
+            if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
             buffer.print("      @{s} = 0\n", .{field.name});
         }
+        buffer.print("    end\n", .{});
     }
-    if (!read_only) {
-        buffer.print("\n      yield self if block_given?\n", .{});
-    }
-    buffer.print("    end\n", .{});
     buffer.print("  end\n\n", .{});
 }
 

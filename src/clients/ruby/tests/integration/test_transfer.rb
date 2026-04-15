@@ -10,16 +10,8 @@ class TestTransfers < Minitest::Test
     @a2_id = TigerBeetle.generate_id
     @client.create_accounts(
       [
-        TigerBeetle::Account.new do |a|
-          a.id = @a1_id
-          a.ledger = 1
-          a.code = 1
-        end,
-        TigerBeetle::Account.new do |a|
-          a.id = @a2_id
-          a.ledger = 1
-          a.code = 1
-        end
+        TigerBeetle::Account.new(id: @a1_id, ledger: 1, code: 1),
+        TigerBeetle::Account.new(id: @a2_id, ledger: 1, code: 1)
       ]
     )
   end
@@ -31,14 +23,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = TigerBeetle.generate_id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 100
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.generate_id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 100,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -47,14 +39,14 @@ class TestTransfers < Minitest::Test
   end
 
   def test_create_transfer_duplicate
-    transfer = TigerBeetle::Transfer.new do |t|
-      t.id = TigerBeetle.generate_id
-      t.debit_account_id = @a1_id
-      t.credit_account_id = @a2_id
-      t.amount = 10
-      t.ledger = 1
-      t.code = 1
-    end
+    transfer = TigerBeetle::Transfer.new(
+      id: TigerBeetle.generate_id,
+      debit_account_id: @a1_id,
+      credit_account_id: @a2_id,
+      amount: 10,
+      ledger: 1,
+      code: 1
+    )
 
     @client.create_transfers([transfer])
 
@@ -66,14 +58,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer_id_zero
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = 0
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 10
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: 0,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -83,14 +75,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer_debit_account_id_zero
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = TigerBeetle.generate_id
-          t.debit_account_id = 0
-          t.credit_account_id = @a2_id
-          t.amount = 10
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.generate_id,
+          debit_account_id: 0,
+          credit_account_id: @a2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -100,14 +92,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer_credit_account_id_zero
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = TigerBeetle.generate_id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = 0
-          t.amount = 10
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.generate_id,
+          debit_account_id: @a1_id,
+          credit_account_id: 0,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -117,14 +109,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer_accounts_must_be_different
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = TigerBeetle.generate_id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a1_id
-          t.amount = 10
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.generate_id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a1_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -134,14 +126,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer_ledger_zero
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = TigerBeetle.generate_id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 10
-          t.ledger = 0
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.generate_id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 10,
+          ledger: 0,
+          code: 1
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -151,14 +143,14 @@ class TestTransfers < Minitest::Test
   def test_create_transfer_code_zero
     results = @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = TigerBeetle.generate_id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 10
-          t.ledger = 1
-          t.code = 0
-        end
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.generate_id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 10,
+          ledger: 1,
+          code: 0
+        )
       ]
     )
     assert_equal(1, results.length)
@@ -169,14 +161,14 @@ class TestTransfers < Minitest::Test
     id = TigerBeetle.generate_id
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 42
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 42,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
 
@@ -198,22 +190,22 @@ class TestTransfers < Minitest::Test
     id2 = TigerBeetle.generate_id
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = id1
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 10
-          t.ledger = 1
-          t.code = 1
-        end,
-        TigerBeetle::Transfer.new do |t|
-          t.id = id2
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 20
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: id1,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: id2,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
 
@@ -232,14 +224,14 @@ class TestTransfers < Minitest::Test
     missing_id = TigerBeetle.generate_id
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = existing_id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 5
-          t.ledger = 1
-          t.code = 1
-        end
+        TigerBeetle::Transfer.new(
+          id: existing_id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 5,
+          ledger: 1,
+          code: 1
+        )
       ]
     )
 
@@ -260,17 +252,17 @@ class TestTransfers < Minitest::Test
     user_data_32 = 54321
     @client.create_transfers(
       [
-        TigerBeetle::Transfer.new do |t|
-          t.id = id
-          t.debit_account_id = @a1_id
-          t.credit_account_id = @a2_id
-          t.amount = 99
-          t.ledger = 1
-          t.code = 7
-          t.user_data_128 = user_data_128
-          t.user_data_64 = user_data_64
-          t.user_data_32 = user_data_32
-        end
+        TigerBeetle::Transfer.new(
+          id: id,
+          debit_account_id: @a1_id,
+          credit_account_id: @a2_id,
+          amount: 99,
+          ledger: 1,
+          code: 7,
+          user_data_128: user_data_128,
+          user_data_64: user_data_64,
+          user_data_32: user_data_32
+        )
       ]
     )
 
