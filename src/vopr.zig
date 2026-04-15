@@ -165,6 +165,12 @@ pub fn main() !void {
         options.requests_max = requests_max;
     }
 
+    if (options.replica_missing_until_request != null and
+        options.requests_max < options.replica_missing_until_request.?)
+    {
+        return vsr.fatal(.cli, "--requests-max < --replica-missing-until-request", .{});
+    }
+
     log.info(
         \\
         \\          SEED={}
@@ -282,10 +288,28 @@ pub fn main() !void {
         if (requests_done and upgrades_done) break;
     }
 
-    if (cli_args.lite or
-        (cli_args.performance and cli_args.replica_missing_until_request == null))
-    {
+    if (cli_args.lite) {
         // Don't care about convergence.
+    } else if (cli_args.performance) {
+        assert(requests_done and upgrades_done);
+
+        var core = full_core(
+            simulator.options.cluster.replica_count,
+            simulator.options.cluster.standby_count,
+        );
+        if (cli_args.replica_missing) |replica_missing| {
+            // If replica is permanently missing then exclude it from the core.
+            if (cli_args.replica_missing_until_request == null) core.unset(replica_missing);
+        }
+        simulator.transition_to_liveness_mode(core);
+
+        tick = 0;
+        while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
+            simulator.tick();
+            tick_total += 1;
+            if (simulator.pending() == null) break;
+        }
+        assert(simulator.pending() == null);
     } else {
         const core = if (requests_done and upgrades_done)
             // Liveness: a core set of replicas is up and fully connected. The rest of the replicas
@@ -832,7 +856,7 @@ pub const Simulator = struct {
         if (simulator.options.replica_missing_until_request) |request| {
             if (simulator.requests_replied >= request) {
                 simulator.options.replica_missing_until_request = null;
-                simulator.replica_crash_stability[simulator.options.replica_missing.?] = 1;
+                simulator.replica_restart(simulator.options.replica_missing.?, false);
             }
         }
     }
