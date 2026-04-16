@@ -459,8 +459,7 @@ fn build_ci(
 ) void {
     const CIMode = enum {
         smoke, // Quickly check formatting and such.
-        @"test", // Main test suite, excluding VOPR and clients.
-        fuzz, // Smoke tests for fuzzers and VOPR.
+        @"test", // Main test suite + VOPR + fuzzers, excluding clients.
         aof, // Dedicated test for AOF, which is somewhat slow to run.
 
         clients, // Tests for all language clients below.
@@ -505,11 +504,9 @@ fn build_ci(
     }
     if (default or mode == .@"test") {
         build_ci_step(b, step_ci, .{"test"});
-        build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
         build_ci_step(b, step_ci, .{"clients:c:sample"});
         build_ci_script(b, step_ci, options.scripts, &.{"--help"});
-    }
-    if (default or mode == .fuzz) {
+
         build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
         inline for (.{ "testing", "accounting" }) |state_machine| {
             build_ci_step(b, step_ci, .{
