@@ -506,11 +506,6 @@ pub fn ReplicaType(
         /// Unique join_view messages for the same view from ALL replicas (including ourself).
         join_view_from_all_replicas: JVQuorumMessages = jv_quorum_messages_null,
 
-        // The op number which should be set as op_min for the next request_headers call.
-        // This is an optimization that ensures op_min is not always set to op_repair_min (reducing
-        // the number of headers requested).
-        repair_header_op_next: u64 = 0,
-
         /// Whether the primary has received a quorum of join_view messages for the view
         /// change. Determines whether the primary may effect repairs according to the CTRL
         /// protocol.
@@ -7570,6 +7565,28 @@ pub fn ReplicaType(
                 }
             }
 
+            const repair_op_max: u64 = repair: {
+                // Every 50 timeouts, unconditionally repair. This
+                // allows backups to repair journal faults in an idle
+                // cluster where the the head op does not progress.
+                if (self.journal_repair_timeout.attempts % 50 == 0) break :repair self.op;
+
+                // View changing replicas must unconditionally repair,
+                // as transitioning to normal status requires them to
+                // repair their journal.
+                if (self.status == .view_change) break :repair self.op;
+
+                // Missing prepares/headers are expected during normal
+                // processing. This is by virtue of experimental ops in
+                // adaptive replication routing (see routing.zig), which
+                // cause replicas that usually receive ops in 2 hops to
+                // receive *some* ops in 1 hop (and vice versa). So, if a
+                // missing prepare/header exists within a pipeline of ops
+                // from the head, wait for it to arrive via normal
+                // replication, instead of eagerly repairing it.
+                break :repair self.op -| constants.pipeline_prepare_queue_max;
+            };
+
             const header_break = self.journal.find_latest_headers_break_between(
                 self.op_repair_min(),
                 self.op,
@@ -7581,37 +7598,53 @@ pub fn ReplicaType(
                 assert(range.op_min >= self.op_repair_min());
                 assert(range.op_max < self.op);
 
-                log.debug(
-                    "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
-                    .{
-                        self.log_prefix(),
-                        self.view,
-                        range.op_min,
-                        range.op_max,
-                        self.commit_min,
-                        self.commit_max,
-                        self.op,
-                    },
-                );
+                if (range.op_min <= repair_op_max) {
+                    const op_min = range.op_min;
+                    const op_max = @min(range.op_max, repair_op_max);
+                    assert(op_min <= op_max);
 
-                self.send_header_to_replica(
-                    self.choose_any_other_replica(),
-                    @bitCast(Header.RequestHeaders{
-                        .command = .request_headers,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        // Pessimistically request extra headers. Requesting/sending extra
-                        // headers is inexpensive, and it may save us extra round-trips to
-                        // repair earlier breaks.
-                        .op_min = @min(range.op_min, self.repair_header_op_next),
-                        .op_max = range.op_max,
-                    }),
-                );
-                self.repair_header_op_next = @max(self.repair_header_op_next, range.op_max + 1);
+                    log.debug(
+                        "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
+                        .{
+                            self.log_prefix(),
+                            self.view,
+                            op_min,
+                            op_max,
+                            self.commit_min,
+                            self.commit_max,
+                            self.op,
+                        },
+                    );
+                    self.send_header_to_replica(
+                        self.choose_any_other_replica(),
+                        @bitCast(Header.RequestHeaders{
+                            .command = .request_headers,
+                            .cluster = self.cluster,
+                            .replica = self.replica,
+                            // Pessimistically request extra headers. Requesting/sending extra
+                            // headers is inexpensive, and it may save us extra round-trips to
+                            // repair earlier breaks.
+                            .op_min = op_min,
+                            .op_max = op_max,
+                        }),
+                    );
+                }
             }
 
-            // Request and repair any missing, dirty, or faulty prepares.
-            self.repair_prepares();
+            // Iterate through [op_repair_min, self.op], but make sure to first iterate through
+            // [commit_min+1, self.op] and then [op_repair_min, commit_min]:
+            // - our first priority is to commit further,
+            // - afterwards, repair committed prepares which are at risk of getting evicted from
+            //   the journal, to help repair any lagging replicas.
+            if (self.commit_min + 1 <= repair_op_max) {
+                self.repair_prepares_between(self.commit_min + 1, repair_op_max);
+            }
+
+            if (self.op_repair_min() <= self.commit_min) {
+                self.repair_prepares_between(self.op_repair_min(), self.commit_min);
+            }
+
+            self.repair_clean_out_of_bound_prepares();
 
             if (self.commit_min < self.commit_max) {
                 // Try to the commit prepares we already have, even if we don't have all of them.
@@ -8173,61 +8206,25 @@ pub fn ReplicaType(
             }
         }
 
-        fn repair_prepares(self: *Replica) void {
+        fn repair_clean_out_of_bound_prepares(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             maybe(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
 
-            if (self.op < constants.journal_slot_count) {
-                // The op is known, and this is the first WAL cycle.
-                // Therefore, any faulty ops to the right of `replica.op` are corrupt reserved
-                // entries from the initial format, or corrupt prepares which were since truncated.
-                var op: usize = self.op + 1;
-                while (op < constants.journal_slot_count) : (op += 1) {
-                    const slot = self.journal.slot_for_op(op);
-                    assert(slot.index == op);
-
-                    if (self.journal.faulty.bit(slot)) {
-                        assert(self.journal.headers[op].operation == .reserved);
-                        assert(self.journal.headers_redundant[op].operation == .reserved);
-                        self.journal.dirty.clear(slot);
-                        self.journal.faulty.clear(slot);
-                        log.debug("{}: repair_prepares: remove slot={} " ++
-                            "(faulty, op known, first cycle)", .{
-                            self.log_prefix(),
-                            slot.index,
-                        });
-                    }
-                }
-            }
-
-            // Iterate through [op_repair_min, self.op], but make sure to first iterate through
-            // [commit_min+1, self.op] and then [op_repair_min, commit_min]:
-            // - our first priority is to commit further,
-            // - afterwards, repair committed prepares which are at risk of getting evicted from
-            //   the journal, to help repair any lagging replicas.
-            if (self.commit_min + 1 <= self.op) {
-                self.repair_prepares_between(self.commit_min + 1, self.op);
-            }
-
-            if (self.op_repair_min() <= self.commit_min) {
-                self.repair_prepares_between(self.op_repair_min(), self.commit_min);
-            }
-
             // Clean up out-of-bounds dirty slots so repair() can finish.
             const slots_repaired = vsr.SlotRange{
                 .head = self.journal.slot_for_op(self.op_repair_min()),
                 .tail = self.journal.slot_with_op(self.op).?,
             };
-            var slot_index: usize = 0;
-            while (slot_index < constants.journal_slot_count) : (slot_index += 1) {
+            for (0..constants.journal_slot_count) |slot_index| {
                 const slot = self.journal.slot_for_op(slot_index);
                 if (slots_repaired.head.index == slots_repaired.tail.index or
                     slots_repaired.contains(slot))
                 {
-                    // In-bounds — handled by the previous loop. The slot is either already
+                    // In-bounds — handled by the repair_prepares_between invocations
+                    // before this function is invoked. The slot is either already
                     // repaired, or we sent a request_prepare and are waiting for a reply.
                 } else {
                     // This op must be either:

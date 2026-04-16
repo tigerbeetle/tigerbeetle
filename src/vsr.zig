@@ -755,7 +755,7 @@ pub const Timeout = struct {
     }
 
     pub fn reset_with_jitter(self: *Timeout, prng: *stdx.PRNG) void {
-        self.attempts = 0;
+        self.attempts +%= 1;
         self.ticks = 0;
         assert(self.ticking);
 
