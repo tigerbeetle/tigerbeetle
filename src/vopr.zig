@@ -109,7 +109,7 @@ pub fn main() !void {
     const gpa = gpa_instance.allocator();
 
     var flags = stdx.Flags.init(gpa);
-    defer flags.deinit();
+    defer flags.deinit(gpa);
 
     const cli_args = flags.parse(CLIArgs);
     if (cli_args.lite and cli_args.performance) {
