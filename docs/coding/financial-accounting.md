@@ -188,5 +188,4 @@ determines whether the given type of account is increased with a debit or a cred
 
 The TigerBeetle team can support you to design your chart of accounts, and leverage 
 the power of fully managed TigerBeetle in your architecture. Contact us at 
-<sales@tigerbeetle.com> to set up a call. There is also a 
-[Startup Program](https://tigerbeetle.com/startup) for early-stage businesses.
+<sales@tigerbeetle.com> to set up a call.
