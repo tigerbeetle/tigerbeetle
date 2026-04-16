@@ -51,9 +51,10 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var args = try std.process.argsWithAllocator(allocator);
+    var flags = stdx.Flags.init(allocator);
+    defer flags.deinit(allocator);
 
-    const cli_args = stdx.flags(&args, CLIArgs);
+    const cli_args = flags.parse(CLIArgs);
 
     const line_buffer = try allocator.alloc(u8, MiB);
     const func_buf = try allocator.alloc(u8, 4096);

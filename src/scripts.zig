@@ -89,10 +89,10 @@ pub fn main() !void {
     const shell = try Shell.create(gpa);
     defer shell.destroy();
 
-    var args = try std.process.argsWithAllocator(gpa);
-    defer args.deinit();
+    var flags = stdx.Flags.init(gpa);
+    defer flags.deinit(gpa);
 
-    const cli_args = stdx.flags(&args, CLIArgs);
+    const cli_args = flags.parse(CLIArgs);
 
     switch (cli_args) {
         .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),

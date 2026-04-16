@@ -42,6 +42,24 @@ const stdx = @import("stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const Allocator = std.mem.Allocator;
+
+arena: std.heap.ArenaAllocator,
+
+const Flags = @This();
+
+pub fn init(gpa: Allocator) Flags {
+    return .{
+        .arena = std.heap.ArenaAllocator.init(gpa),
+    };
+}
+
+pub fn deinit(flags: *Flags, gpa: Allocator) void {
+    assert(std.meta.eql(flags.arena.child_allocator, gpa));
+    flags.arena.deinit();
+    flags.* = undefined;
+}
+
 /// Format and print an error message to stderr, then exit with an exit code of 1.
 fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
@@ -51,6 +69,10 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     // the implementation of fatal function, but let's be pragmatic here and just match the behavior
     // manually.
     std.process.exit(1);
+}
+
+fn oom(_: error{OutOfMemory}) noreturn {
+    fatal("error: out of memory when parsing cli", .{});
 }
 
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
@@ -77,13 +99,22 @@ fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 ///
 /// Value parsing can be customized on per-type basis via `parse_flag_value` customization point.
-pub fn parse(args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
+pub fn parse(flags: *Flags, comptime CLIArgs: type) CLIArgs {
     comptime assert(CLIArgs != void);
-    assert(args.skip()); // Discard executable name.
-    return parse_flags(args, CLIArgs);
+
+    const arena = flags.arena.allocator();
+
+    var args = std.process.argsWithAllocator(arena) catch |err| oom(err);
+    if (!args.skip()) fatal("executable name missing", .{});
+
+    return parse_flags(arena, &args, CLIArgs);
 }
 
-fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
+fn parse_commands(
+    arena: Allocator,
+    args: *std.process.ArgIterator,
+    comptime Commands: type,
+) Commands {
     comptime assert(@typeInfo(Commands) == .@"union");
     comptime assert(std.meta.fields(Commands).len >= 2);
 
@@ -103,52 +134,64 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     inline for (comptime std.meta.fields(Commands)) |field| {
         comptime assert(std.mem.indexOfScalar(u8, field.name, '_') == null);
         if (std.mem.eql(u8, first_arg, field.name)) {
-            return @unionInit(Commands, field.name, parse_flags(args, field.type));
+            return @unionInit(Commands, field.name, parse_flags(arena, args, field.type));
         }
     }
     fatal("unknown subcommand: '{s}'", .{first_arg});
 }
 
-fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
+fn parse_flags(arena: Allocator, args: *std.process.ArgIterator, comptime CLIArgs: type) CLIArgs {
     @setEvalBranchQuota(5_000);
 
-    if (Flags == void) {
+    if (CLIArgs == void) {
         if (args.next()) |arg| {
             fatal("unexpected argument: '{s}'", .{arg});
         }
         return {};
     }
 
-    if (@typeInfo(Flags) == .@"union") {
-        return parse_commands(args, Flags);
+    if (@typeInfo(CLIArgs) == .@"union") {
+        return parse_commands(arena, args, CLIArgs);
     }
 
-    assert(@typeInfo(Flags) == .@"struct");
+    assert(@typeInfo(CLIArgs) == .@"struct");
 
-    const fields = std.meta.fields(Flags);
-    comptime var fields_named, const fields_positional, const fields_extended =
+    const fields = std.meta.fields(CLIArgs);
+    comptime var fields_named, var fields_positional: []const std.builtin.Type.StructField =
         for (fields, 0..) |field, index| {
             if (std.mem.eql(u8, field.name, "--")) {
                 assert(field.type == void);
+                const positional_count = fields.len - index - 1;
+                if (positional_count == 0) @panic("expected positional fields");
+
                 break .{
                     fields[0..index].*,
-                    fields[index + 1 ..].*,
-                    index == fields.len - 1,
+                    fields[index + 1 ..],
                 };
             }
         } else .{
             fields[0..fields.len].*,
-            [_]std.builtin.Type.StructField{},
-            false,
+            &.{},
         };
 
+    comptime var field_extended: ?std.builtin.Type.StructField = null;
+    if (fields_positional.len == 1 and fields_positional[0].type == []const []const u8) {
+        field_extended = fields_positional[0];
+        fields_positional = fields_positional[1..];
+        assert(fields_positional.len == 0);
+    }
+
+    var arg_extended: if (field_extended == null) void else std.ArrayListUnmanaged([]const u8) =
+        if (field_extended == null) {} else .empty;
+
     comptime {
-        if (fields_positional.len == 0) {
-            assert(fields.len == fields_named.len + @intFromBool(fields_extended));
-        } else {
-            assert(fields.len == fields_named.len + 1 + fields_positional.len);
-            assert(!fields_extended);
-        }
+        assert(
+            fields.len == fields_named.len +
+                fields_positional.len +
+                @intFromBool(field_extended != null) +
+                if (field_extended != null or fields_positional.len > 0) 1 else 0, // The @"--"
+        );
+        if (field_extended != null) assert(fields_positional.len == 0);
 
         // When parsing named arguments, we must consider longer arguments first, such that
         // `--foo-bar=92` is not confused for a misspelled `--foo=92`. Using `std.sort` for
@@ -203,8 +246,8 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
     }
 
-    var counts: std.enums.EnumFieldStruct(std.meta.FieldEnum(Flags), u32, 0) = .{};
-    var result: Flags = undefined;
+    var counts: std.enums.EnumFieldStruct(std.meta.FieldEnum(CLIArgs), u32, 0) = .{};
+    var result: CLIArgs = undefined;
     var parsed_positional = false;
     next_arg: while (args.next()) |arg| {
         comptime var field_len_prev = std.math.maxInt(usize);
@@ -226,7 +269,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
 
         if (fields_positional.len > 0) {
-            assert(!fields_extended);
+            assert(field_extended == null);
             counts.@"--" += 1;
             switch (counts.@"--" - 1) {
                 inline 0...fields_positional.len - 1 => |field_index| {
@@ -247,7 +290,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 else => {}, // Fall-through to the unexpected argument error.
             }
         } else {
-            if (fields_extended) {
+            if (field_extended != null) {
                 if (std.mem.eql(u8, arg, "--")) {
                     break;
                 } else {
@@ -258,7 +301,13 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
         fatal("unexpected argument: '{s}'", .{arg});
     }
-    if (!fields_extended) assert(args.next() == null);
+    if (field_extended != null) {
+        while (args.next()) |arg| {
+            arg_extended.append(arena, arg) catch |err| oom(err);
+        }
+    }
+
+    assert(args.next() == null);
 
     inline for (fields_named) |field| {
         const flag = flag_name(field);
@@ -274,6 +323,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     }
 
     if (fields_positional.len > 0) {
+        assert(field_extended == null);
         assert(counts.@"--" <= fields_positional.len);
         inline for (fields_positional, 0..) |field, field_index| {
             if (field_index >= counts.@"--") {
@@ -285,6 +335,11 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 }
             }
         }
+    }
+
+    if (field_extended) |field| {
+        assert(fields_positional.len == 0);
+        @field(result, field.name) = arg_extended.items;
     }
 
     return result;
@@ -622,6 +677,7 @@ pub const main =
             extended: struct {
                 flag: bool = false,
                 @"--": void,
+                rest: []const []const u8,
             },
             required: struct {
                 foo: u8,
@@ -655,10 +711,10 @@ pub const main =
             var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
             const gpa = gpa_allocator.allocator();
 
-            var args = try std.process.argsWithAllocator(gpa);
-            defer args.deinit();
+            var flags = Flags.init(gpa);
+            defer flags.deinit(gpa);
 
-            const cli_args = parse(&args, CLIArgs);
+            const cli_args = flags.parse(CLIArgs);
 
             const stdout = std.io.getStdOut();
             const out_stream = stdout.writer();
@@ -679,7 +735,7 @@ pub const main =
                 },
                 .extended => |values| {
                     try out_stream.print("flag: {}\n", .{values.flag});
-                    while (args.next()) |arg| try out_stream.print("arg: {s}\n", .{arg});
+                    for (values.rest) |arg| try out_stream.print("arg: {s}\n", .{arg});
                 },
                 .required => |required| {
                     try out_stream.print("foo: {}\n", .{required.foo});
@@ -1408,6 +1464,19 @@ test "flags" {
         \\flag: true
         \\arg: a
         \\arg: b
+        \\
+    ));
+    try t.check(&.{ "extended", "--", "--flag" }, snap(@src(),
+        \\stdout:
+        \\flag: false
+        \\arg: --flag
+        \\
+    ));
+    try t.check(&.{ "extended", "--", "--", "--" }, snap(@src(),
+        \\stdout:
+        \\flag: false
+        \\arg: --
+        \\arg: --
         \\
     ));
 }

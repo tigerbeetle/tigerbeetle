@@ -697,8 +697,8 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
-    const cli_args = stdx.flags(args_iterator, CLIArgs);
+pub fn parse_args(flags: *stdx.Flags) Command {
+    const cli_args = flags.parse(CLIArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },

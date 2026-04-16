@@ -36,10 +36,10 @@ pub fn main() !void {
     };
 
     const allocator = gpa_allocator.allocator();
-    var args_iterator = try std.process.argsWithAllocator(allocator);
-    defer args_iterator.deinit();
+    var flags = stdx.Flags.init(allocator);
+    defer flags.deinit(allocator);
 
-    const args = stdx.flags(&args_iterator, CLIArgs);
+    const args = flags.parse(CLIArgs);
     log.info("addresses: {s}", .{args.addresses});
 
     var tb_client: c.tb_client_t = undefined;

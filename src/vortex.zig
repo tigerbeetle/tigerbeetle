@@ -58,21 +58,10 @@ pub fn main() !void {
 
     const allocator = gpa_allocator.allocator();
 
-    var args_iterator = try std.process.argsWithAllocator(allocator);
-    defer args_iterator.deinit();
+    var flags = stdx.Flags.init(allocator);
+    defer flags.deinit(allocator);
 
-    // TODO Remove after merging https://github.com/tigerbeetle/tigerbeetle/pull/3612.
-    // (Stopgap for CFO).
-    {
-        const args_list = try std.process.argsAlloc(allocator);
-        defer std.process.argsFree(allocator, args_list);
-
-        if (std.mem.eql(u8, args_list[1], "supervisor")) {
-            assert(args_iterator.skip());
-        }
-    }
-
-    const args = stdx.flags(&args_iterator, CLIArgs);
+    const args = flags.parse(CLIArgs);
 
     if (args.log) |log_path| {
         const log_file = try std.fs.cwd().createFile(log_path, .{});
