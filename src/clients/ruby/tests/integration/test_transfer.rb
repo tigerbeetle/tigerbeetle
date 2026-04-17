@@ -86,7 +86,10 @@ class TestTransfers < Minitest::Test
       ]
     )
     assert_equal(1, results.length)
-    assert_equal(TigerBeetle::CreateTransferStatus::DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO, results[0].status)
+    assert_equal(
+      TigerBeetle::CreateTransferStatus::DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO,
+      results[0].status
+    )
   end
 
   def test_create_transfer_credit_account_id_zero
@@ -103,7 +106,10 @@ class TestTransfers < Minitest::Test
       ]
     )
     assert_equal(1, results.length)
-    assert_equal(TigerBeetle::CreateTransferStatus::CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO, results[0].status)
+    assert_equal(
+      TigerBeetle::CreateTransferStatus::CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO,
+      results[0].status
+    )
   end
 
   def test_create_transfer_accounts_must_be_different
