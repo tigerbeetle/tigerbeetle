@@ -3,18 +3,12 @@
 #include "tb_client.h"
 #include <assert.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-    tb_client_t client;
-    _Atomic bool closed;
-} rb_tb_client_t;
-
 typedef struct rb_tb_request {
-    rb_tb_client_t *client;
+    tb_client_t *client;
     uint8_t *send_buf;
     uint8_t *recv_buf;
     uint32_t recv_size;
@@ -44,16 +38,13 @@ void Init_tigerbeetle(void) {
 }
 
 static void rb_tb_client_free(void *ptr) {
-    rb_tb_client_t *client = ptr;
-    if (!atomic_exchange(&client->closed, true)) {
-        tb_client_deinit(&client->client);
-    }
-    ruby_xfree(client);
+    tb_client_deinit((tb_client_t *)ptr);
+    ruby_xfree(ptr);
 }
 
-static size_t rb_tb_client_memsize(const void *ptr) {
+static size_t rb_tb_client_size(const void *ptr) {
     (void)ptr;
-    return sizeof(rb_tb_client_t);
+    return sizeof(tb_client_t);
 }
 
 static const rb_data_type_t rb_tb_client_type = {
@@ -63,15 +54,14 @@ static const rb_data_type_t rb_tb_client_type = {
             // The struct contains no Ruby values, nothing to mark.
             .dmark = NULL,
             .dfree = rb_tb_client_free,
-            .dsize = rb_tb_client_memsize,
+            .dsize = rb_tb_client_size,
         },
     .flags = RUBY_TYPED_FREE_IMMEDIATELY,
 };
 
 static VALUE rb_tb_client_alloc(VALUE klass) {
-    rb_tb_client_t *data = ruby_xmalloc(sizeof(rb_tb_client_t));
-    memset(data, 0, sizeof(rb_tb_client_t));
-    atomic_store(&data->closed, true);
+    tb_client_t *data = ruby_xmalloc(sizeof(tb_client_t));
+    memset(data, 0, sizeof(tb_client_t));
     return TypedData_Wrap_Struct(klass, &rb_tb_client_type, data);
 }
 
@@ -144,11 +134,8 @@ static const char *tb_init_error_message(TB_INIT_STATUS status) {
 }
 
 static VALUE rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addresses_rb) {
-    rb_tb_client_t *client;
-    TypedData_Get_Struct(self, rb_tb_client_t, &rb_tb_client_type, client);
-
-    if (!atomic_load(&client->closed))
-        rb_raise(rb_eRuntimeError, "already initialized");
+    tb_client_t *client;
+    TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
     uint8_t cluster_id_bytes[16] = {0};
     rb_integer_pack(cluster_id_rb, cluster_id_bytes, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
@@ -157,13 +144,12 @@ static VALUE rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addr
     uint32_t addr_len = (uint32_t)RSTRING_LEN(addresses_rb);
 
     TB_INIT_STATUS status = tb_client_init(
-        &client->client, cluster_id_bytes, addr, addr_len, (uintptr_t)client, rb_tb_on_completion
+        client, cluster_id_bytes, addr, addr_len, 0, rb_tb_on_completion
     );
 
     if (status != TB_INIT_SUCCESS) {
         rb_raise(rb_eInitError, "tb_client_init failed: %s", tb_init_error_message(status));
     }
-    atomic_store(&client->closed, false);
     return self;
 }
 
@@ -173,21 +159,12 @@ static void *rb_tb_deinit_without_gvl(void *arg) {
 }
 
 static VALUE rb_tb_client_close(VALUE self) {
-    rb_tb_client_t *client;
-    TypedData_Get_Struct(self, rb_tb_client_t, &rb_tb_client_type, client);
-    if (atomic_exchange(&client->closed, true)) {
-        return Qnil;
-    }
+    tb_client_t *client;
+    TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
     // deinit blocks until all in-flight callbacks complete. The GVL is released
     // while waiting so other Ruby threads can run.
-    rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, &client->client, NULL, NULL);
+    rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, client, NULL, NULL);
     return Qnil;
-}
-
-static VALUE rb_tb_client_closed_p(VALUE self) {
-    rb_tb_client_t *client;
-    TypedData_Get_Struct(self, rb_tb_client_t, &rb_tb_client_type, client);
-    return atomic_load(&client->closed) ? Qtrue : Qfalse;
 }
 
 static size_t rb_tb_event_size(TB_OPERATION operation) {
@@ -380,7 +357,7 @@ static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint3
 }
 
 static rb_tb_request_t *rb_tb_client_submit_request_init(
-    rb_tb_client_t *client, uint8_t *send_buf, size_t send_size_bytes, TB_OPERATION operation
+    tb_client_t *client, uint8_t *send_buf, size_t send_size_bytes, TB_OPERATION operation
 ) {
     rb_tb_request_t *req = malloc(sizeof(rb_tb_request_t));
     if (!req) {
@@ -414,9 +391,8 @@ static rb_tb_request_t *rb_tb_client_submit_request_init(
 // Called without GVL: submits the packet and waits for the completion callback.
 static void *rb_tb_client_submit_without_gvl(void *arg) {
     rb_tb_request_t *req = (rb_tb_request_t *)arg;
-    rb_tb_client_t *client = req->client;
 
-    TB_CLIENT_STATUS status = tb_client_submit(&client->client, &req->packet);
+    TB_CLIENT_STATUS status = tb_client_submit(req->client, &req->packet);
 
     pthread_mutex_lock(&req->mutex);
     if (status == TB_CLIENT_INVALID) {
@@ -442,12 +418,8 @@ static void rb_tb_client_submit_ubf(void *arg) {
 }
 
 static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb) {
-    rb_tb_client_t *client;
-    TypedData_Get_Struct(self, rb_tb_client_t, &rb_tb_client_type, client);
-
-    if (atomic_load(&client->closed)) {
-        rb_raise(rb_eClientClosedError, "client is closed");
-    }
+    tb_client_t *client;
+    TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
     TB_OPERATION operation = (TB_OPERATION)NUM2INT(operation_rb);
     long count = RARRAY_LEN(items_rb);
@@ -520,5 +492,4 @@ static void rb_tb_init_native_client(VALUE mTigerBeetle) {
     rb_define_method(cNativeClient, "initialize", rb_tb_client_initialize, 2);
     rb_define_method(cNativeClient, "submit", rb_tb_client_submit, 2);
     rb_define_method(cNativeClient, "close", rb_tb_client_close, 0);
-    rb_define_method(cNativeClient, "closed?", rb_tb_client_closed_p, 0);
 }

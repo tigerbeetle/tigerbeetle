@@ -10,14 +10,18 @@ module TigerBeetle
     def initialize(cluster_id:, replica_addresses:)
       addresses = Array(replica_addresses).join(",")
       @native = NativeClient.new(cluster_id, addresses)
+      @closed = false
     end
 
     def close
+      raise ClientClosedError, "client is already closed" if closed?
+
+      @closed = true
       @native.close
     end
 
     def closed?
-      @native.closed?
+      @closed
     end
 
     def create_accounts(accounts)
