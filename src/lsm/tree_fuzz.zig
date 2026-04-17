@@ -30,7 +30,7 @@ const ResourcePool = @import("compaction.zig").ResourcePoolType(Grid);
 
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
+const ScanBuffer = @import("scan_buffer.zig").ScanBufferType(Grid);
 const TreeType = @import("tree.zig").TreeType;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const SortedSegmentedArrayType = @import("./segmented_array.zig").SortedSegmentedArrayType;

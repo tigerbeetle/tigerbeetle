@@ -15,7 +15,7 @@ const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLogPace = @import("manifest_log.zig").Pace;
 
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
-const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
+const ScanBufferPoolType = @import("scan_buffer.zig").ScanBufferPoolType;
 const ResourcePoolType = @import("compaction.zig").ResourcePoolType;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
@@ -178,6 +178,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     }
 
     const Grid = GridType(_Storage);
+    const ScanBufferPool = ScanBufferPoolType(Grid);
 
     return struct {
         const Forest = @This();

@@ -1,6 +1,7 @@
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
-const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
+const ScanBufferType = @import("scan_buffer.zig").ScanBufferType;
 
+const GridType = @import("../vsr/grid.zig").GridType;
 const Direction = @import("../direction.zig").Direction;
 const Pending = error{Pending};
 
@@ -37,6 +38,7 @@ pub fn ScanRangeType(
         };
 
         const ScanTree = ScanTreeType(*Context, Tree, Storage);
+        const ScanBuffer = ScanBufferType(GridType(Storage));
 
         evaluator_context: EvaluatorContext,
         scan_tree: ScanTree,
