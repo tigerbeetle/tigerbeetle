@@ -678,7 +678,7 @@ pub fn GridType(comptime Storage: type) type {
 
         /// Assert that the address is not currently being read from (disregarding repairs).
         /// Assert that the block pointer is not being used for any read if non-null.
-        fn assert_not_reading(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
+        fn assert_not_reading(grid: *const Grid, address: u64, block: ?BlockPtrConst) void {
             assert(address > 0);
 
             for ([_]*const QueueType(Read){
@@ -693,7 +693,7 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
             {
-                var it = grid.read_iops.iterate();
+                var it = grid.read_iops.iterate_const();
                 while (it.next()) |iop| {
                     if (iop.read.coherent) {
                         assert(address != iop.read.address);
@@ -704,7 +704,7 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        pub fn assert_only_repairing(grid: *Grid) void {
+        pub fn assert_only_repairing(grid: *const Grid) void {
             assert(grid.callback != .cancel);
             assert(grid.read_global_queue.empty());
 
@@ -720,7 +720,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(!grid.free_set.is_free(write.address));
             }
 
-            var write_iops = grid.write_iops.iterate();
+            var write_iops = grid.write_iops.iterate_const();
             while (write_iops.next()) |iop| {
                 assert(iop.write.repair);
                 assert(!grid.free_set.is_free(iop.write.address));
@@ -945,7 +945,11 @@ pub fn GridType(comptime Storage: type) type {
         /// * Reading a block that is currenly being repaired.
         /// * Reading a block that is currently being created, if it is requested
         ///   by another replica, or by the replica itself.
-        fn read_block_from_write_queues(grid: *Grid, address: u64, checksum: u128) ?BlockPtrConst {
+        fn read_block_from_write_queues(
+            grid: *const Grid,
+            address: u64,
+            checksum: u128,
+        ) ?BlockPtrConst {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
             assert(address > 0);
@@ -968,7 +972,7 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            var write_iops_iterator = grid.write_iops.iterate();
+            var write_iops_iterator = grid.write_iops.iterate_const();
             while (write_iops_iterator.next()) |iop| {
                 const queued_write_header = mem.bytesAsValue(
                     vsr.Header.Block,
@@ -1545,7 +1549,7 @@ pub fn GridType(comptime Storage: type) type {
         ///
         /// It's OK that some blocks, such as the blocks used by compaction escape this -- this is
         /// not to stop sensitive data from appearing in core dumps, but rather to keep the core
-        /// dump size managable even with a large grid cache.
+        /// dump size manageable even with a large grid cache.
         pub fn madv_dont_dump(grid: *const Grid) !void {
             if (builtin.target.os.tag != .linux) return;
 
