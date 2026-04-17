@@ -3,6 +3,63 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.1
+
+Released: 2026-04-17
+
+### Safety And Performance
+
+- [#3643](https://github.com/tigerbeetle/tigerbeetle/pull/3643)
+
+  Make VSR repair less eager, cutting `request_prepare` traffic by ~70-80% and
+  `request_headers` by ~80-90% for minor overhead.
+
+- [#3600](https://github.com/tigerbeetle/tigerbeetle/pull/3600)
+
+  Improve compaction table-selection from `O(a * log b)` to `O(a + b)`, especially
+  noticeable at 20TB+.
+
+### Internals
+
+- [#3637](https://github.com/tigerbeetle/tigerbeetle/pull/3637)
+
+  Refactor `stdx.flags` to own its allocator and return trailing `--` args as a slice.
+
+- [#3642](https://github.com/tigerbeetle/tigerbeetle/pull/3642)
+
+  Rename VSR view-change messages: `DoViewChange` -> `JoinView`, `StartView` -> `View`,
+  `StartViewChange` -> `ExitView`.
+
+- [#3652](https://github.com/tigerbeetle/tigerbeetle/pull/3652)
+
+  Re-enable VOPR in CI.
+
+- [#3649](https://github.com/tigerbeetle/tigerbeetle/pull/3649)
+
+  Increase tick budget for the Vortex upgrade/recover test, which was occasionally
+  timing out.
+
+- [#3647](https://github.com/tigerbeetle/tigerbeetle/pull/3647)
+
+  CI: fetch git tags in the `release-validate` job.
+
+- [#3648](https://github.com/tigerbeetle/tigerbeetle/pull/3648)
+
+  Docs: drop an overly wide comparison table from the API changes page.
+
+- [#3650](https://github.com/tigerbeetle/tigerbeetle/pull/3650),
+  [#3651](https://github.com/tigerbeetle/tigerbeetle/pull/3651)
+
+  Docs: remove references to the retired Startup Program.
+
+- [#3653](https://github.com/tigerbeetle/tigerbeetle/pull/3653)
+
+  Clean up TigerTracks in CHANGELOG.md by only using song titles.
+
+### TigerTracks 🎧
+
+- [Golden Times](https://www.youtube.com/watch?v=EvgaGxL30HM)
+
 ## TigerBeetle 0.17.0
 
 Released: 2026-04-10
