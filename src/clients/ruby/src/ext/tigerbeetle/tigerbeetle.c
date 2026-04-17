@@ -11,7 +11,6 @@
 typedef struct {
     tb_client_t client;
     _Atomic bool closed;
-    pthread_mutex_t mutex;
 } rb_tb_client_t;
 
 typedef struct rb_tb_request {
@@ -23,6 +22,7 @@ typedef struct rb_tb_request {
     uint8_t status; // TB_PACKET_STATUS
     bool done;
     bool abandoned; // Set by UBF. Client owns cleanup if true.
+    pthread_mutex_t mutex;
     pthread_cond_t cond;
     tb_packet_t packet;
 } rb_tb_request_t;
@@ -45,13 +45,9 @@ void Init_tigerbeetle(void) {
 
 static void rb_tb_client_free(void *ptr) {
     rb_tb_client_t *client = ptr;
-    if (!atomic_load(&client->closed)) {
-        atomic_store(&client->closed, true);
+    if (!atomic_exchange(&client->closed, true)) {
         tb_client_deinit(&client->client);
     }
-    // tb_client_deinit completes all in-flight callbacks before returning,
-    // so no requests are in flight here and the mutex can be safely destroyed.
-    pthread_mutex_destroy(&client->mutex);
     ruby_xfree(client);
 }
 
@@ -76,10 +72,6 @@ static VALUE rb_tb_client_alloc(VALUE klass) {
     rb_tb_client_t *data = ruby_xmalloc(sizeof(rb_tb_client_t));
     memset(data, 0, sizeof(rb_tb_client_t));
     atomic_store(&data->closed, true);
-    if (pthread_mutex_init(&data->mutex, NULL) != 0) {
-        ruby_xfree(data);
-        rb_raise(rb_eRuntimeError, "pthread_mutex_init failed");
-    }
     return TypedData_Wrap_Struct(klass, &rb_tb_client_type, data);
 }
 
@@ -94,7 +86,6 @@ static void rb_tb_on_completion(
     (void)completion_ctx;
     (void)timestamp;
     rb_tb_request_t *req = (rb_tb_request_t *)packet->user_data;
-    rb_tb_client_t *client = req->client;
 
     uint8_t *recv_buf = NULL;
     uint32_t recv_size = 0;
@@ -110,15 +101,16 @@ static void rb_tb_on_completion(
         }
     }
 
-    pthread_mutex_lock(&client->mutex);
+    pthread_mutex_lock(&req->mutex);
 
     if (req->abandoned) {
         // UBF fired, callback owns all cleanup.
-        pthread_mutex_unlock(&client->mutex);
+        pthread_mutex_unlock(&req->mutex);
         if (recv_buf)
             free(recv_buf);
         free(req->send_buf);
         pthread_cond_destroy(&req->cond);
+        pthread_mutex_destroy(&req->mutex);
         free(req);
         return;
     }
@@ -129,7 +121,7 @@ static void rb_tb_on_completion(
     req->recv_oom = recv_oom;
     req->done = true;
     pthread_cond_signal(&req->cond);
-    pthread_mutex_unlock(&client->mutex);
+    pthread_mutex_unlock(&req->mutex);
 }
 
 static const char *tb_init_error_message(TB_INIT_STATUS status) {
@@ -183,13 +175,9 @@ static void *rb_tb_deinit_without_gvl(void *arg) {
 static VALUE rb_tb_client_close(VALUE self) {
     rb_tb_client_t *client;
     TypedData_Get_Struct(self, rb_tb_client_t, &rb_tb_client_type, client);
-    pthread_mutex_lock(&client->mutex);
-    if (atomic_load(&client->closed)) {
-        pthread_mutex_unlock(&client->mutex);
+    if (atomic_exchange(&client->closed, true)) {
         return Qnil;
     }
-    atomic_store(&client->closed, true);
-    pthread_mutex_unlock(&client->mutex);
     // deinit blocks until all in-flight callbacks complete. The GVL is released
     // while waiting so other Ruby threads can run.
     rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, &client->client, NULL, NULL);
@@ -403,7 +391,13 @@ static rb_tb_request_t *rb_tb_client_submit_request_init(
     req->client = client;
     req->send_buf = send_buf;
 
+    if (pthread_mutex_init(&req->mutex, NULL) != 0) {
+        free(send_buf);
+        free(req);
+        rb_raise(rb_eRuntimeError, "pthread_mutex_init failed");
+    }
     if (pthread_cond_init(&req->cond, NULL) != 0) {
+        pthread_mutex_destroy(&req->mutex);
         free(send_buf);
         free(req);
         rb_raise(rb_eRuntimeError, "pthread_cond_init failed");
@@ -424,27 +418,27 @@ static void *rb_tb_client_submit_without_gvl(void *arg) {
 
     TB_CLIENT_STATUS status = tb_client_submit(&client->client, &req->packet);
 
-    pthread_mutex_lock(&client->mutex);
+    pthread_mutex_lock(&req->mutex);
     if (status == TB_CLIENT_INVALID) {
         req->status = TB_PACKET_CLIENT_SHUTDOWN;
         req->done = true;
         pthread_cond_signal(&req->cond);
     }
     while (!req->done) {
-        pthread_cond_wait(&req->cond, &client->mutex);
+        pthread_cond_wait(&req->cond, &req->mutex);
     }
-    pthread_mutex_unlock(&client->mutex);
+    pthread_mutex_unlock(&req->mutex);
     return NULL;
 }
 
 // UBF: called when the thread receives an interrupt (Thread#raise, Timeout).
 static void rb_tb_client_submit_ubf(void *arg) {
     rb_tb_request_t *req = (rb_tb_request_t *)arg;
-    pthread_mutex_lock(&req->client->mutex);
+    pthread_mutex_lock(&req->mutex);
     req->abandoned = true;
     req->done = true;
     pthread_cond_signal(&req->cond);
-    pthread_mutex_unlock(&req->client->mutex);
+    pthread_mutex_unlock(&req->mutex);
 }
 
 static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb) {
@@ -473,10 +467,10 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
 
     rb_thread_call_without_gvl(rb_tb_client_submit_without_gvl, req, rb_tb_client_submit_ubf, req);
 
-    pthread_mutex_lock(&client->mutex);
+    pthread_mutex_lock(&req->mutex);
     if (req->abandoned) {
         // Callback will remove and free req.
-        pthread_mutex_unlock(&client->mutex);
+        pthread_mutex_unlock(&req->mutex);
         rb_thread_check_ints(); // reraise pending interrupt
         return Qnil;
     }
@@ -485,9 +479,10 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
     uint8_t *recv_buf = req->recv_buf;
     uint32_t recv_size = req->recv_size;
     bool recv_oom = req->recv_oom;
-    pthread_mutex_unlock(&client->mutex);
+    pthread_mutex_unlock(&req->mutex);
 
     pthread_cond_destroy(&req->cond);
+    pthread_mutex_destroy(&req->mutex);
     free(send_buf);
     free(req);
 
