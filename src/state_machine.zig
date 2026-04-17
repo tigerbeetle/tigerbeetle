@@ -11,11 +11,12 @@ const maybe = stdx.maybe;
 const constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
+const GridType = @import("vsr/grid.zig").GridType;
 const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 const GrooveType = @import("lsm/groove.zig").GrooveType;
 const ForestType = @import("lsm/forest.zig").ForestType;
-const ScanBuffer = @import("lsm/scan_buffer.zig").ScanBuffer;
+const ScanBufferType = @import("lsm/scan_buffer.zig").ScanBufferType;
 const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
 
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
@@ -255,7 +256,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         aof_recovery: bool,
 
         const StateMachine = @This();
-        const Grid = @import("vsr/grid.zig").GridType(Storage);
+        const Grid = GridType(Storage);
 
         /// Re-exports the `Contract` declarations, so it can be interchangeable
         /// with a concrete state machine type.
@@ -4770,6 +4771,7 @@ fn ExpirePendingTransfersType(
 
         const Tree = @FieldType(TransfersGroove.IndexTrees, "expires_at");
         const Value = Tree.Table.Value;
+        const ScanBuffer = ScanBufferType(GridType(Storage));
 
         // TODO(zig) Context should be `*ExpirePendingTransfers`,
         // but its a dependency loop.
@@ -4920,6 +4922,7 @@ fn ChangeEventsScanLookupType(
     comptime Storage: type,
 ) type {
     const ScanTreeType = @import("lsm/scan_tree.zig").ScanTreeType;
+    const ScanBuffer = ScanBufferType(GridType(Storage));
 
     return struct {
         const AccountEventsLookup = @This();

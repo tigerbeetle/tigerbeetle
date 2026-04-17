@@ -14,7 +14,7 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
-const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
+const ScanBufferType = @import("scan_buffer.zig").ScanBufferType;
 const ScanState = @import("scan_state.zig").ScanState;
 const TableValueIteratorType =
     @import("table_value_iterator.zig").TableValueIteratorType;
@@ -43,6 +43,7 @@ pub fn ScanTreeType(
         pub const Callback = *const fn (context: Context, scan: *ScanTree) void;
 
         const Grid = GridType(Storage);
+        const ScanBuffer = ScanBufferType(Grid);
 
         const TableInfo = TreeTableInfoType(Table);
         const Manifest = ManifestType(Table, Storage);
@@ -485,6 +486,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         const TableInfo = ScanTree.TableInfo;
         const Manifest = ScanTree.Manifest;
+        const ScanBuffer = ScanTree.ScanBuffer;
 
         const Table = ScanTree.Table;
         const Key = Table.Key;
