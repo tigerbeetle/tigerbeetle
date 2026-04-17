@@ -398,7 +398,7 @@ Released: 2026-02-06
 
 ### TigerTracks 🎧
 
-- [Sonderling · Zonderling](https://www.youtube.com/watch?v=UxLEKVMpN48)
+- [Sonderling](https://www.youtube.com/watch?v=UxLEKVMpN48)
 
 ## TigerBeetle 0.16.70
 
@@ -890,7 +890,7 @@ Released: 2025-10-17
 
 ### TigerTracks 🎧
 
-- [no goodbye](https://www.youtube.com/watch?v=oWDzTvjoDn4)
+- [No Goodbye](https://www.youtube.com/watch?v=oWDzTvjoDn4)
 
 ## TigerBeetle (unreleased)
 
@@ -1196,7 +1196,7 @@ Released: 2025-08-29
 
 ### TigerTracks 🎧
 
-- [American Pie - Catch 22 😈](https://www.youtube.com/watch?v=9SzrN3oGCCw)
+- [American Pie](https://www.youtube.com/watch?v=9SzrN3oGCCw)
 
 ## TigerBeetle 0.16.56
 
@@ -1732,7 +1732,7 @@ Released: 2025-06-06
 
 ### TigerTracks 🎧
 
-- [Don Toliver - Lose My Mind (feat. Doja Cat)](https://www.youtube.com/watch?v=WWEs82u37Mw)
+- [Lose My Mind](https://www.youtube.com/watch?v=WWEs82u37Mw)
 
 ## TigerBeetle 0.16.43
 
