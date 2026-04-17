@@ -162,11 +162,14 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         pub fn block_count(trailer: *const CheckpointTrailer) u32 {
+            assert(trailer.grid != null);
             return block_count_for_trailer_size(trailer.size);
         }
 
         /// Each returned chunk has `chunk.len == chunk_size_max`.
         pub fn encode_chunks(trailer: *CheckpointTrailer) []const []align(@sizeOf(u256)) u8 {
+            assert(trailer.grid != null);
+
             for (trailer.block_bodies, trailer.blocks) |*block_body, block| {
                 block_body.* = block[@sizeOf(vsr.Header)..];
 
@@ -178,6 +181,8 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         pub fn decode_chunks(
             trailer: *const CheckpointTrailer,
         ) []const []align(@sizeOf(u256)) const u8 {
+            assert(trailer.grid != null);
+
             const chunk_count: u32 = @intCast(stdx.div_ceil(trailer.size, chunk_size_max));
             for (
                 trailer.block_bodies[0..chunk_count],
@@ -253,6 +258,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
 
         fn open_next_tick(next_tick: *Grid.NextTick) void {
             const trailer: *CheckpointTrailer = @alignCast(@fieldParentPtr("next_tick", next_tick));
+            assert(trailer.grid != null);
             assert(trailer.callback == .open);
             assert(trailer.size == 0);
             trailer.open_done();
@@ -299,6 +305,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 .block_count = trailer.block_count(),
                 .trailer_size = trailer.size,
             });
+            assert(chunk_size > 0);
 
             stdx.copy_disjoint(
                 .exact,
@@ -318,6 +325,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         fn open_done(trailer: *CheckpointTrailer) void {
+            assert(trailer.grid != null);
             assert(trailer.callback == .open);
             defer assert(trailer.callback == .none);
 

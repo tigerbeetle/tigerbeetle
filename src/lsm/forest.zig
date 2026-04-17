@@ -285,11 +285,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             try forest.node_pool.init(allocator, options.node_count);
             errdefer forest.node_pool.deinit(allocator);
 
-            try forest.manifest_log.init(
-                allocator,
-                grid,
-                &manifest_log_compaction_pace,
-            );
+            try forest.manifest_log.init(allocator, grid, &manifest_log_compaction_pace);
             errdefer forest.manifest_log.deinit(allocator);
 
             var grooves_initialized: usize = 0;
