@@ -120,6 +120,7 @@ pub fn init_grid(gpa: std.mem.Allocator, trace: *Tracer, superblock: *SuperBlock
     return try Grid.init(gpa, .{
         .superblock = superblock,
         .trace = trace,
+        .stash_blocks_count = 1, // FIXME?
         .missing_blocks_max = options.missing_blocks_max,
         .missing_tables_max = options.missing_tables_max,
         .blocks_released_prior_checkpoint_durability_max = //

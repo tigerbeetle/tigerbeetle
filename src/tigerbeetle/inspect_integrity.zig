@@ -184,6 +184,7 @@ fn init(
         .superblock = &integrity.superblock,
         .trace = tracer,
         .cache_blocks_count = Grid.Cache.value_count_max_multiple,
+        .stash_blocks_count = 1,
         .missing_blocks_max = constants.grid_missing_blocks_max,
         .missing_tables_max = constants.grid_missing_tables_max,
         .blocks_released_prior_checkpoint_durability_max = Forest

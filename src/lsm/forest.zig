@@ -311,8 +311,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.radix_buffer = try .init(allocator, radix_buffer_size);
             errdefer forest.radix_buffer.deinit(allocator);
 
-            forest.resource_pool = try ResourcePool.init(allocator, options.compaction_block_count);
-            errdefer forest.resource_pool.deinit(allocator);
+            forest.resource_pool =
+                try ResourcePool.init(allocator, grid, options.compaction_block_count);
+            errdefer forest.resource_pool.deinit(allocator, grid);
 
             inline for (std.meta.fields(Grooves)) |field| {
                 const Groove = field.type;
@@ -329,8 +330,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 grooves_initialized += 1;
             }
 
-            try forest.scan_buffer_pool.init(allocator);
-            errdefer forest.scan_buffer_pool.deinit(allocator);
+            forest.scan_buffer_pool.init(grid);
         }
 
         pub fn deinit(forest: *Forest, allocator: mem.Allocator) void {
@@ -342,9 +342,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
-            forest.resource_pool.deinit(allocator);
+            forest.resource_pool.deinit(allocator, forest.grid);
             forest.radix_buffer.deinit(allocator);
-            forest.scan_buffer_pool.deinit(allocator);
+            forest.scan_buffer_pool.deinit(forest.grid);
         }
 
         pub fn reset(forest: *Forest) void {

@@ -23,14 +23,7 @@ const log = stdx.log.scoped(.grid);
 pub const BlockPtr = *align(constants.sector_size) [constants.block_size]u8;
 pub const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
-// Leave this outside GridType so we can call it from modules that don't know about Storage.
-pub fn allocate_block(
-    allocator: mem.Allocator,
-) error{OutOfMemory}!*align(constants.sector_size) [constants.block_size]u8 {
-    const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
-    @memset(block, 0);
-    return block[0..constants.block_size];
-}
+// FIXME stash the checksum of a block on write_block(), make sure it doesn't get overwritten
 
 /// The Grid provides access to on-disk blocks (blobs of `block_size` bytes).
 /// Each block is identified by an "address" (`u64`, beginning at 1).
@@ -138,6 +131,7 @@ pub fn GridType(comptime Storage: type) type {
         const ReadIOP = struct {
             completion: Storage.Read,
             read: *Read,
+            location: u32,
         };
 
         const cache_interface = struct {
@@ -175,17 +169,30 @@ pub fn GridType(comptime Storage: type) type {
         free_set_checkpoint_blocks_acquired: CheckpointTrailer,
         free_set_checkpoint_blocks_released: CheckpointTrailer,
 
+        /// Entries in `cache` map to `cache_blocks`/`cache_references` via the cache's
+        /// `Value.offset`. FIXME
+        blocks: []align(constants.sector_size) [constants.block_size]u8,
+        blocks_references: []u8,
         blocks_missing: GridBlocksMissing,
 
         cache: Cache,
-        /// Each entry in cache has a corresponding block.
-        cache_blocks: []BlockPtr,
+        /// The block at `cache[x]` is found at `blocks[cache_locations[x]]`.
+        /// This indirection is necessary because the SetAssociativeCache is not aware of references
+        /// held by e.g. scans, so it may evict a block we still need.
+        ///
+        /// Locations at indexes beyond `cache_blocks_count` correspond to stash entries.
+        ///
+        /// Invariants:
+        /// - `cache_locations` is a permutation of the sequence from `0` to
+        ///   `cache_locations.len - 1` (inclusive).
+        /// FIXME Or maybe have a separate stash boundedarray (or two) for non-cache locations?
+        /// Though, it is nice that it corresponds to `blocks` so maybe not.
+        cache_locations: []u32,
+        cache_blocks_count: u64,
 
         write_iops: IOPSType(WriteIOP, write_iops_max) = .{},
         write_queue: QueueType(Write) = QueueType(Write).init(.{ .name = "grid_write" }),
 
-        // Each read_iops has a corresponding block.
-        read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPSType(ReadIOP, read_iops_max) = .{},
         read_queue: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_read" }),
 
@@ -217,6 +224,7 @@ pub fn GridType(comptime Storage: type) type {
             superblock: *SuperBlock,
             trace: *Tracer,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
+            stash_blocks_count: u64,
             missing_blocks_max: usize,
             missing_tables_max: usize,
             blocks_released_prior_checkpoint_durability_max: usize,
@@ -237,31 +245,30 @@ pub fn GridType(comptime Storage: type) type {
                 try CheckpointTrailer.init(allocator, .free_set, free_set_encoded_size_max);
             errdefer free_set_checkpoint_blocks_released.deinit(allocator);
 
+            const blocks_count = options.cache_blocks_count + options.stash_blocks_count;
+            const blocks = try allocator.alignedAlloc(
+                [constants.block_size]u8,
+                constants.sector_size,
+                blocks_count,
+            );
+            errdefer allocator.free(blocks);
+
+            const blocks_references = try allocator.alloc(u8, blocks_count);
+            errdefer allocator.free(blocks_references);
+            @memset(blocks_references, 0);
+
             var blocks_missing = try GridBlocksMissing.init(allocator, .{
                 .blocks_max = options.missing_blocks_max,
                 .tables_max = options.missing_tables_max,
             });
             errdefer blocks_missing.deinit(allocator);
 
-            const cache_blocks = try allocator.alloc(BlockPtr, options.cache_blocks_count);
-            errdefer allocator.free(cache_blocks);
-
-            for (cache_blocks, 0..) |*cache_block, i| {
-                errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
-                cache_block.* = try allocate_block(allocator);
-            }
-            errdefer for (cache_blocks) |block| allocator.free(block);
-
             var cache = try Cache.init(allocator, options.cache_blocks_count, .{ .name = "grid" });
             errdefer cache.deinit(allocator);
 
-            var read_iop_blocks: [read_iops_max]BlockPtr = undefined;
-
-            for (&read_iop_blocks, 0..) |*read_iop_block, i| {
-                errdefer for (read_iop_blocks[0..i]) |block| allocator.free(block);
-                read_iop_block.* = try allocate_block(allocator);
-            }
-            errdefer for (&read_iop_blocks) |block| allocator.free(block);
+            const cache_locations = try allocator.alloc(u32, blocks_count);
+            errdefer allocator.free(cache_locations);
+            for (cache_locations, 0..) |*location, i| location.* = @intCast(i);
 
             return Grid{
                 .superblock = options.superblock,
@@ -269,25 +276,25 @@ pub fn GridType(comptime Storage: type) type {
                 .free_set = free_set,
                 .free_set_checkpoint_blocks_acquired = free_set_checkpoint_blocks_acquired,
                 .free_set_checkpoint_blocks_released = free_set_checkpoint_blocks_released,
+                .blocks = blocks,
+                .blocks_references = blocks_references,
                 .blocks_missing = blocks_missing,
                 .cache = cache,
-                .cache_blocks = cache_blocks,
-                .read_iop_blocks = read_iop_blocks,
+                .cache_locations = cache_locations,
+                .cache_blocks_count = options.cache_blocks_count,
             };
         }
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
-            for (&grid.read_iop_blocks) |block| allocator.free(block);
-
-            for (grid.cache_blocks) |block| allocator.free(block);
-            allocator.free(grid.cache_blocks);
-
-            grid.cache.deinit(allocator);
-            grid.blocks_missing.deinit(allocator);
-
             grid.free_set_checkpoint_blocks_acquired.deinit(allocator);
             grid.free_set_checkpoint_blocks_released.deinit(allocator);
 
+            grid.blocks_missing.deinit(allocator);
+            allocator.free(grid.blocks_references);
+            allocator.free(grid.blocks);
+
+            allocator.free(grid.cache_locations);
+            grid.cache.deinit(allocator);
             grid.free_set.deinit(allocator);
 
             grid.* = undefined;
@@ -698,7 +705,8 @@ pub fn GridType(comptime Storage: type) type {
                     if (iop.read.coherent) {
                         assert(address != iop.read.address);
                     }
-                    const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
+
+                    const iop_block = &grid.blocks[iop.location];
                     assert(block != iop_block);
                 }
             }
@@ -725,6 +733,58 @@ pub fn GridType(comptime Storage: type) type {
                 assert(iop.write.repair);
                 assert(!grid.free_set.is_free(iop.write.address));
             }
+        }
+
+        /// Return a block from the stash which had no outstanding references.
+        pub fn get_block(grid: *Grid) BlockPtr {
+            assert(grid.superblock.opened);
+
+            for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
+                // FIXME Or use a linked list of locations?
+                if (grid.blocks_references[location] == 0) {
+                    grid.blocks_references[location] += 1;
+
+                    // We could overwrite all the block's data, but that would be more expensive.
+                    const block = &grid.blocks[location];
+                    @memset(block[0..@sizeOf(vsr.Header)], 0);
+                    return block;
+                }
+            } else @panic("stash has no free blocks");
+        }
+
+        pub fn block_ref(grid: *Grid, block: BlockPtr) BlockPtr {
+            const block_header = schema.header_from_block(block);
+            assert(block_header.valid_checksum());
+
+            const location = grid.location_from_block(block);
+            maybe(grid.blocks_references[location] == 0); // FIXME explain
+
+            // block_ref() is called by read_block callbacks, so the block is definitely in cache.
+            const cache_index = grid.cache.get_index(block_header.address);
+            if (cache_index != null and
+                grid.cache_locations[cache_index.?] == location)
+            {
+                // Typical case.
+            } else {
+                // The caller invoked block_ref() on a block that is not in our cache.
+                // Either:
+                // - The caller read the block from our write queue. (It will be in the cache soon.)
+                // - The caller read the block via fulfill_block().
+            }
+
+            grid.blocks_references[location] += 1;
+            return block;
+        }
+
+        pub fn block_references(grid: *Grid, block: BlockPtrConst) u8 {
+            return grid.blocks_references[grid.location_from_block(block)];
+        }
+
+        // FIXME return a zero-refrence block? won't work in 'fn init() { defer }' though
+        pub fn block_unref(grid: *Grid, block: BlockPtrConst) void {
+            const location = grid.location_from_block(block);
+            assert(grid.blocks_references[location] > 0);
+            grid.blocks_references[location] -= 1;
         }
 
         pub fn fulfill_block(grid: *Grid, block: BlockPtrConst) bool {
@@ -819,9 +879,16 @@ pub fn GridType(comptime Storage: type) type {
             assert(!grid.free_set.is_free(header.address));
             grid.assert_coherent(header.address, header.checksum);
 
+            assert(grid.blocks_references[grid.location_from_block(block.*)] > 0);
+            if (grid.blocks_references[grid.location_from_block(block.*)] > 1) {
+                // Extra references are due to fulfill_block().
+                assert(trigger == .repair);
+            }
+
             if (constants.verify) {
-                for (grid.cache_blocks) |cache_block| {
-                    assert(cache_block != block.*);
+                // FIXME positive-check stash instead, since it is much smaller
+                for (grid.cache_locations[0..grid.cache_blocks_count]) |location| {
+                    assert(&grid.blocks[location] != block.*);
                 }
             }
 
@@ -888,15 +955,23 @@ pub fn GridType(comptime Storage: type) type {
                 assert(grid.superblock.working.checkpoint_id() == completed_write.checkpoint_id);
             }
 
-            // Insert the write block into the cache, and give the evicted block to the writer.
-            const cache_index = grid.cache.upsert(&completed_write.address).index;
-            const cache_block = &grid.cache_blocks[cache_index];
-            std.mem.swap(BlockPtr, cache_block, completed_write.block);
-            // This block content won't be used again. We could overwrite the entire thing, but that
-            // would be more expensive.
-            @memset(completed_write.block.*[0..@sizeOf(vsr.Header)], 0);
+            // Insert the write block into the cache.
+            // FIXME insert into cache _before_ writing?
+            const block_written_location = grid.location_from_block(completed_write.block.*);
+            grid.cache_upsert(.{
+                .address = completed_write.address,
+                .location = block_written_location,
+            });
 
-            const cache_block_header = schema.header_from_block(cache_block.*);
+            // Usually references=1, but since reading from the write queue is possible, it may be
+            // higher.
+            assert(grid.blocks_references[block_written_location] > 0);
+            grid.blocks_references[block_written_location] -= 1;
+
+            const cache_block = &grid.blocks[block_written_location];
+            completed_write.block.* = grid.get_block();
+
+            const cache_block_header = schema.header_from_block(cache_block);
             assert(cache_block_header.address == completed_write.address);
             grid.assert_coherent(completed_write.address, cache_block_header.checksum);
 
@@ -924,7 +999,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Precede the write's callback, since the callback takes back ownership of the block.
-            if (completed_write.repair) grid.blocks_missing.write_complete(cache_block.*);
+            if (completed_write.repair) grid.blocks_missing.write_complete(cache_block);
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
@@ -1015,9 +1090,8 @@ pub fn GridType(comptime Storage: type) type {
                 }
                 return null;
             };
-
-            const cache_block = grid.cache_blocks[cache_index];
-
+            const cache_location = grid.cache_locations[cache_index];
+            const cache_block = &grid.blocks[cache_location];
             const header = schema.header_from_block(cache_block);
             assert(header.address == address);
             assert(header.cluster == grid.superblock.working.cluster);
@@ -1095,10 +1169,10 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .checksum = checksum,
                 .coherent = callback == .from_local_or_global_storage,
-                .checkpoint_durable = grid.free_set.checkpoint_durable,
                 .cache_read = options.cache_read,
                 .cache_write = options.cache_write,
                 .checkpoint_id = grid.superblock.working.checkpoint_id(),
+                .checkpoint_durable = grid.free_set.checkpoint_durable,
                 .grid = grid,
             };
 
@@ -1196,16 +1270,26 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.trace.start(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
+            const iop_location = location: {
+                // FIXME O(n)
+                for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
+                    if (grid.blocks_references[location] == 0) {
+                        break :location location;
+                    }
+                } else unreachable;
+            };
+
             iop.* = .{
                 .completion = undefined,
                 .read = read,
+                .location = iop_location,
             };
-            const iop_block = grid.read_iop_blocks[grid.read_iops.index(iop)];
 
+            grid.blocks_references[iop_location] = 1;
             grid.superblock.storage.read_sectors(
                 read_block_callback,
                 &iop.completion,
-                iop_block,
+                &grid.blocks[iop_location],
                 .grid,
                 block_offset(address),
             );
@@ -1215,7 +1299,10 @@ pub fn GridType(comptime Storage: type) type {
             const iop: *ReadIOP = @fieldParentPtr("completion", completion);
             const read = iop.read;
             const grid = read.grid;
-            const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
+            const block = &grid.blocks[iop.location];
+            const block_location = grid.location_from_block(block);
+            assert(grid.blocks_references[block_location] == 1);
+            defer grid.blocks_references[block_location] -= 1;
 
             grid.trace.stop(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
@@ -1225,21 +1312,15 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             }
 
-            // Insert the block into the cache, and give the evicted block to `iop`.
-            const cache_index =
-                if (read.cache_write) grid.cache.upsert(&read.address).index else null;
-            const block = block: {
-                if (read.cache_write) {
-                    const cache_block = &grid.cache_blocks[cache_index.?];
-                    std.mem.swap(BlockPtr, iop_block, cache_block);
-                    // This block content won't be used again. We could overwrite the entire thing,
-                    // but that would be more expensive.
-                    @memset(iop_block.*[0..@sizeOf(vsr.Header)], 0);
-                    break :block cache_block;
-                } else {
-                    break :block iop_block;
-                }
-            };
+            // FIXME or maybe call this after Handoff iop...
+            const result = read_block_validate(block, .{
+                .address = read.address,
+                .checksum = read.checksum,
+            });
+
+            if (result == .valid) {
+                grid.cache_upsert(.{ .address = read.address, .location = block_location });
+            }
 
             // Handoff the iop to a pending read or release it before resolving the callbacks below.
             if (grid.read_pending_queue.pop()) |pending| {
@@ -1252,14 +1333,8 @@ pub fn GridType(comptime Storage: type) type {
             // Remove the "root" read so that the address is no longer actively reading / locked.
             grid.read_queue.remove(read);
 
-            const result = read_block_validate(block.*, .{
-                .address = read.address,
-                .checksum = read.checksum,
-            });
-
             if (result != .valid) {
-                const header =
-                    mem.bytesAsValue(vsr.Header.Block, block.*[0..@sizeOf(vsr.Header)]);
+                const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
                 log.warn(
                     "{}: {s}: expected address={} checksum={x:0>32}, " ++
                         "found address={} checksum={x:0>32}",
@@ -1272,12 +1347,6 @@ pub fn GridType(comptime Storage: type) type {
                         header.checksum,
                     },
                 );
-
-                if (read.cache_write) {
-                    // Don't cache a corrupt or incorrect block.
-                    const removed = grid.cache.remove(read.address);
-                    assert(removed != null);
-                }
 
                 if (constants.verify) grid.verify_read_fault(read);
             }
@@ -1402,6 +1471,60 @@ pub fn GridType(comptime Storage: type) type {
                     );
                 }
             }
+        }
+
+        /// Insert the address into the cache, and swap the evicted block into the stash.
+        fn cache_upsert(grid: *Grid, options: struct { address: u64, location: u32 }) void {
+            assert(options.address != 0);
+            assert(options.location < grid.blocks.len);
+
+            // The location/block that is being moved from stash to cache.
+            const block_cache_location = options.location;
+            const block_cache = &grid.blocks[block_cache_location];
+            const block_cache_header = schema.header_from_block(block_cache);
+            assert(block_cache_header.address == options.address);
+
+            const cache_index = grid.cache.upsert(&options.address).index;
+            const stash_index = index: {
+                for (
+                    grid.cache_locations[grid.cache_blocks_count..],
+                    grid.cache_blocks_count..,
+                ) |location, i| {
+                    if (location == block_cache_location) break :index i;
+                } else unreachable;
+            };
+            assert(cache_index != stash_index);
+            assert(cache_index < grid.cache_blocks_count);
+            assert(stash_index >= grid.cache_blocks_count);
+
+            // The location/block being moved from cache to stash.
+            const block_stash_location = grid.cache_locations[cache_index];
+            assert(block_stash_location != block_cache_location);
+
+            assert(grid.blocks_references[block_cache_location] > 0);
+            maybe(grid.blocks_references[block_stash_location] > 0);
+
+            assert(grid.cache_locations[cache_index] == block_stash_location);
+            assert(grid.cache_locations[stash_index] == block_cache_location);
+
+            grid.cache_locations[cache_index] = block_cache_location;
+            grid.cache_locations[stash_index] = block_stash_location;
+
+            if (grid.blocks_references[block_stash_location] == 0) {
+                // This block content won't be used again.
+                // We could overwrite the entire thing, but that would be more expensive.
+                const block_stashed = &grid.blocks[block_stash_location];
+                @memset(block_stashed[0..@sizeOf(vsr.Header)], 0);
+            }
+        }
+
+        fn location_from_block(grid: *const Grid, block: BlockPtrConst) u32 {
+            assert(@intFromPtr(block.ptr) >= @intFromPtr(grid.blocks.ptr));
+            assert(@intFromPtr(block.ptr) <
+                @intFromPtr(grid.blocks.ptr) + grid.blocks.len * constants.block_size);
+
+            const offset = @intFromPtr(block.ptr) - @intFromPtr(grid.blocks.ptr);
+            return @intCast(@divExact(offset, constants.block_size));
         }
 
         fn block_offset(address: u64) u64 {
@@ -1550,50 +1673,20 @@ pub fn GridType(comptime Storage: type) type {
         /// It's OK that some blocks, such as the blocks used by compaction escape this -- this is
         /// not to stop sensitive data from appearing in core dumps, but rather to keep the core
         /// dump size manageable even with a large grid cache.
+        /// FIXME call this from init() once we use memfds+mmap?
         pub fn madv_dont_dump(grid: *const Grid) !void {
             if (builtin.target.os.tag != .linux) return;
 
-            assert(grid.cache_blocks.len > 0);
-
-            // Each block could be its own isolated memory mapping, with how things are done
-            // using allocate_block(), but it's extremely unlikely. Coalesce them where possible to
-            // save on madvise() syscalls.
-            var continuous_cache_start = @intFromPtr(grid.cache_blocks[0]);
-            var continuous_cache_len = grid.cache_blocks[0].len;
-            var madvise_bytes: usize = 0;
-            var madvise_calls: usize = 0;
-
-            for (grid.cache_blocks[1..]) |cache_block| {
-                if (continuous_cache_start + continuous_cache_len == @intFromPtr(cache_block.ptr)) {
-                    continuous_cache_len += cache_block.len;
-                } else {
-                    try std.posix.madvise(
-                        @ptrFromInt(continuous_cache_start),
-                        continuous_cache_len,
-                        std.posix.MADV.DONTDUMP,
-                    );
-                    madvise_bytes += continuous_cache_len;
-                    madvise_calls += 1;
-
-                    continuous_cache_start = @intFromPtr(cache_block.ptr);
-                    continuous_cache_len = cache_block.len;
-                }
-            }
+            assert(grid.blocks.len > 0);
 
             try std.posix.madvise(
-                @ptrFromInt(continuous_cache_start),
-                continuous_cache_len,
+                @ptrFromInt(@intFromPtr(grid.blocks.ptr)),
+                grid.blocks.len * constants.block_size,
                 std.posix.MADV.DONTDUMP,
             );
-            madvise_bytes += continuous_cache_len;
-            madvise_calls += 1;
 
-            assert(madvise_bytes == constants.block_size * grid.cache_blocks.len);
-            assert(madvise_calls <= grid.cache_blocks.len);
-
-            log.debug("marked {} bytes as MADV_DONTDUMP with {} calls", .{
-                madvise_bytes,
-                madvise_calls,
+            log.debug("marked {} bytes as MADV_DONTDUMP", .{
+                grid.blocks.len * constants.block_size,
             });
         }
     };
