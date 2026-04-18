@@ -508,6 +508,7 @@ const Environment = struct {
             env.grid_verify = try Grid.init(env.gpa, .{
                 .superblock = &env.superblock_verify,
                 .trace = &env.trace_verify,
+                .stash_blocks_count = 1,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
                 .blocks_released_prior_checkpoint_durability_max = 0,

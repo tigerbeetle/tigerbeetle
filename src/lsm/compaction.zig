@@ -48,7 +48,6 @@ const IOPSType = stdx.IOPSType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
@@ -88,6 +87,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         blocks: StackType(Block),
         blocks_backing_storage: []Block,
         grid_reservation: ?Grid.Reservation = null,
+        grid: *Grid,
 
         iop_release_resume: ?struct {
             ctx: *anyopaque,
@@ -149,41 +149,39 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             link: StackType(Block).Link,
         };
 
-        pub fn init(allocator: mem.Allocator, block_count: u32) !ResourcePool {
+        pub fn init(allocator: mem.Allocator, grid: *Grid, block_count: u32) !ResourcePool {
             const blocks_backing_storage = try allocator.alloc(Block, block_count);
-            var blocks_allocated: u32 = 0;
             errdefer {
-                for (blocks_backing_storage[0..blocks_allocated]) |block| {
-                    allocator.free(block.ptr);
+                for (blocks_backing_storage) |block| {
+                    grid.block_unref(block.ptr);
                 }
                 allocator.free(blocks_backing_storage);
             }
 
             for (blocks_backing_storage) |*block| {
                 block.* = .{
-                    .ptr = try allocate_block(allocator),
+                    .ptr = grid.get_block(),
                     .stage = .free,
                     .link = .{},
                 };
-                blocks_allocated += 1;
             }
-            assert(blocks_allocated == block_count);
 
             var blocks = StackType(Block).init(.{
-                .capacity = blocks_allocated,
+                .capacity = block_count,
                 .verify_push = false,
             });
             for (blocks_backing_storage) |*block| blocks.push(block);
 
             return .{
+                .grid = grid,
                 .blocks = blocks,
                 .blocks_backing_storage = blocks_backing_storage,
             };
         }
 
-        pub fn deinit(pool: *ResourcePool, allocator: Allocator) void {
+        pub fn deinit(pool: *ResourcePool, allocator: Allocator, grid: *Grid) void {
             for (pool.blocks_backing_storage) |block| {
-                allocator.free(block.ptr);
+                grid.block_unref(block.ptr);
             }
             allocator.free(pool.blocks_backing_storage);
         }
@@ -196,12 +194,14 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                     .verify_push = false,
                 }),
                 .blocks_backing_storage = pool.blocks_backing_storage,
+                .grid = pool.grid,
             };
             assert(pool.iop_release_resume == null);
 
             for (pool.blocks_backing_storage) |*block| {
+                pool.grid.block_unref(block.ptr);
                 block.* = .{
-                    .ptr = block.ptr,
+                    .ptr = pool.grid.get_block(),
                     .stage = .free,
                     .link = .{},
                 };
@@ -244,12 +244,18 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             const block = pool.blocks.pop() orelse return null;
             assert(block.stage == .free);
             assert(block.link.next == null);
+            assert(pool.grid.block_references(block.ptr) == 1);
             return block;
         }
 
         fn block_release(pool: *@This(), block: *Block) void {
             assert(block.stage == .free);
             assert(block.link.next == null);
+            assert(pool.grid.block_references(block.ptr) > 0);
+
+            pool.grid.block_unref(block.ptr);
+            block.ptr = pool.grid.get_block();
+
             pool.blocks.push(block);
         }
 
@@ -1400,11 +1406,13 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
         fn read_index_block_callback(grid_read: *Grid.Read, index_block: BlockPtrConst) void {
             const read: *ResourcePool.BlockRead = @fieldParentPtr("grid_read", grid_read);
+            const grid = grid_read.grid;
 
             assert(read.block.stage == .read_index_block);
             assert(read.counters == null);
 
-            stdx.copy_disjoint(.exact, u8, read.block.ptr, index_block);
+            grid.block_unref(read.block.ptr);
+            read.block.ptr = grid.block_ref(@constCast(index_block));
             read.block.stage = .read_index_block_done;
             return read.pool.iop_release(.{ .read = read });
         }
@@ -1490,11 +1498,14 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
         fn read_value_block_callback(grid_read: *Grid.Read, value_block: BlockPtrConst) void {
             const read: *ResourcePool.BlockRead = @fieldParentPtr("grid_read", grid_read);
+            const grid = grid_read.grid;
 
             read.counters.?.in += Table.value_block_values_used(value_block).len;
 
             assert(read.block.stage == .read_value_block);
-            stdx.copy_disjoint(.exact, u8, read.block.ptr, value_block);
+
+            grid.block_unref(read.block.ptr);
+            read.block.ptr = grid.block_ref(@constCast(value_block));
             read.block.stage = .read_value_block_done;
             return read.pool.iop_release(.{ .read = read });
         }
