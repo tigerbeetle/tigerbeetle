@@ -33,7 +33,6 @@ const schema = @import("../lsm/schema.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = stdx.IOPSType;
 
-const allocate_block = @import("./grid.zig").allocate_block;
 const GridType = @import("./grid.zig").GridType;
 const BlockPtr = @import("./grid.zig").BlockPtr;
 const ForestTableIteratorType = @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
@@ -143,8 +142,10 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
             forest: *Forest,
             client_sessions_checkpoint: *const CheckpointTrailer,
         ) error{OutOfMemory}!GridScrubber {
-            const tour_index_block = try allocate_block(allocator);
-            errdefer allocator.free(tour_index_block);
+            _ = allocator;
+
+            const tour_index_block = forest.grid.get_block();
+            errdefer forest.grid.block_unref(tour_index_block);
 
             return .{
                 .superblock = forest.grid.superblock,
@@ -159,8 +160,9 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
         }
 
         pub fn deinit(scrubber: *GridScrubber, allocator: std.mem.Allocator) void {
-            allocator.free(scrubber.tour_index_block);
+            _ = allocator;
 
+            scrubber.forest.grid.block_unref(scrubber.tour_index_block);
             scrubber.* = undefined;
         }
 

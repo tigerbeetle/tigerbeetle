@@ -1,10 +1,4 @@
-const std = @import("std");
-const mem = std.mem;
-const Allocator = std.mem.Allocator;
-
 const constants = @import("../constants.zig");
-
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 
 pub const Error = error{
@@ -14,28 +8,21 @@ pub const Error = error{
 /// Holds memory for performing scans on all lsm tree levels.
 /// TODO: It may be removed once we have ref-counted grid blocks.
 pub fn ScanBufferType(comptime Grid: type) type {
-    _ = Grid;
     return struct {
         pub const LevelBuffer = struct {
             index_block: BlockPtr,
             value_block: BlockPtr,
 
-            pub fn init(self: *LevelBuffer, allocator: Allocator) !void {
+            pub fn init(self: *LevelBuffer, grid: *Grid) void {
                 self.* = .{
-                    .index_block = undefined,
-                    .value_block = undefined,
+                    .index_block = grid.get_block(),
+                    .value_block = grid.get_block(),
                 };
-
-                self.index_block = try allocate_block(allocator);
-                errdefer allocator.free(self.index_block);
-
-                self.value_block = try allocate_block(allocator);
-                errdefer allocator.free(self.value_block);
             }
 
-            pub fn deinit(self: *LevelBuffer, allocator: Allocator) void {
-                allocator.free(self.index_block);
-                allocator.free(self.value_block);
+            pub fn deinit(self: *LevelBuffer, grid: *Grid) void {
+                grid.block_unref(self.index_block);
+                grid.block_unref(self.value_block);
             }
         };
 
@@ -46,25 +33,21 @@ pub fn ScanBufferType(comptime Grid: type) type {
 
         pub fn init(
             self: *ScanBuffer,
-            allocator: Allocator,
+            grid: *Grid,
             options: struct {
                 index: u8,
             },
-            ) !void {
+        ) void {
             self.* = .{
                 .index = options.index,
                 .levels = undefined,
             };
-            for (&self.levels, 0..) |*level, i| {
-                errdefer for (self.levels[0..i]) |*level_| level_.deinit(allocator);
-                try level.init(allocator);
-            }
-            errdefer for (&self.levels) |*level| level.deinit(allocator);
+            for (&self.levels) |*level| level.init(grid);
         }
 
-        pub fn deinit(self: *ScanBuffer, allocator: Allocator) void {
+        pub fn deinit(self: *ScanBuffer, grid: *Grid) void {
             for (&self.levels) |*level| {
-                level.deinit(allocator);
+                level.deinit(grid);
             }
         }
     };
@@ -82,25 +65,20 @@ pub fn ScanBufferPoolType(comptime Grid: type) type {
         const ScanBuffer = ScanBufferType(Grid);
         const ScanBufferPool = @This();
 
-        pub fn init(self: *ScanBufferPool, allocator: Allocator) !void {
+        pub fn init(self: *ScanBufferPool, grid: *Grid) void {
             self.* = .{
                 .scan_buffers = undefined,
                 .scan_buffer_used = 0,
             };
 
             for (&self.scan_buffers, 0..) |*scan_buffer, index| {
-                errdefer for (self.scan_buffers[0..index]) |*buffer| buffer.deinit(allocator);
-                try scan_buffer.init(
-                    allocator,
-                    .{ .index = @intCast(index) },
-                );
+                scan_buffer.init(grid, .{ .index = @intCast(index) });
             }
-            errdefer for (&self.scan_buffers) |*buffer| buffer.deinit(allocator);
         }
 
-        pub fn deinit(self: *ScanBufferPool, allocator: Allocator) void {
+        pub fn deinit(self: *ScanBufferPool, grid: *Grid) void {
             for (&self.scan_buffers) |*scan_buffer| {
-                scan_buffer.deinit(allocator);
+                scan_buffer.deinit(grid);
             }
         }
 

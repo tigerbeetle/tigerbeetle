@@ -33,7 +33,6 @@ const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
-const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const compaction = @import("compaction.zig");
 const RingBufferType = stdx.RingBufferType;
 const schema = @import("schema.zig");
@@ -174,28 +173,19 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 try RingBufferType(u64, .slice).init(allocator, manifest_log.pace.log_blocks_max);
             errdefer manifest_log.log_block_addresses.deinit(allocator);
 
-            // The upper-bound of manifest blocks we must buffer.
-            //
-            // `blocks` must have sufficient capacity for:
-            // - a leftover open block from the previous ops (+1 block)
-            // - table updates copied from a half bar of manifest compactions
-            // - table updates from a half bar of table compactions
-            const half_bar_buffer_blocks_max = 1 + manifest_log.pace.half_bar_compact_blocks_max +
-                manifest_log.pace.half_bar_append_blocks_max;
-            assert(half_bar_buffer_blocks_max >= 3);
-
+            const blocks_count = compaction_pace.blocks_count();
             // TODO RingBuffer for .slice should be extended to take care of alignment:
             manifest_log.blocks =
-                try RingBufferType(BlockPtr, .slice).init(allocator, half_bar_buffer_blocks_max);
+                try RingBufferType(BlockPtr, .slice).init(allocator, blocks_count);
             errdefer manifest_log.blocks.deinit(allocator);
 
             for (manifest_log.blocks.buffer, 0..) |*block, i| {
-                errdefer for (manifest_log.blocks.buffer[0..i]) |b| allocator.free(b);
-                block.* = try allocate_block(allocator);
+                errdefer for (manifest_log.blocks.buffer[0..i]) |b| grid.block_unref(b);
+                block.* = grid.get_block();
             }
-            errdefer for (manifest_log.blocks.buffer) |b| allocator.free(b);
+            errdefer for (manifest_log.blocks.buffer) |b| grid.block_unref(b);
 
-            manifest_log.writes = try allocator.alloc(Write, half_bar_buffer_blocks_max);
+            manifest_log.writes = try allocator.alloc(Write, blocks_count);
             errdefer allocator.free(manifest_log.writes);
             @memset(manifest_log.writes, undefined);
 
@@ -221,7 +211,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.tables_removed.deinit(allocator);
             manifest_log.table_extents.deinit(allocator);
             allocator.free(manifest_log.writes);
-            for (manifest_log.blocks.buffer) |block| allocator.free(block);
+            for (manifest_log.blocks.buffer) |block| manifest_log.grid.block_unref(block);
             manifest_log.blocks.deinit(allocator);
             manifest_log.log_block_addresses.deinit(allocator);
             manifest_log.log_block_checksums.deinit(allocator);
@@ -233,9 +223,13 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             manifest_log.grid.trace.cancel(.compact_manifest);
 
+            for (manifest_log.blocks.buffer) |*block| {
+                manifest_log.grid.block_unref(block.*);
+                block.* = manifest_log.grid.get_block();
+            }
+
             manifest_log.log_block_checksums.clear();
             manifest_log.log_block_addresses.clear();
-            for (manifest_log.blocks.buffer) |block| @memset(block, 0);
             manifest_log.table_extents.clearRetainingCapacity();
             manifest_log.tables_removed.clearRetainingCapacity();
 
@@ -1192,6 +1186,19 @@ pub const Pace = struct {
         assert(pace.log_blocks_cycle_max < pace.log_blocks_max);
 
         return pace;
+    }
+
+    /// The upper-bound of manifest blocks we must buffer.
+    ///
+    /// `blocks` must have sufficient capacity for:
+    /// - a leftover open block from the previous ops (+1 block)
+    /// - table updates copied from a half bar of manifest compactions
+    /// - table updates from a half bar of table compactions
+    pub fn blocks_count(pace: Pace) u32 {
+        const half_bar_buffer_blocks_max = 1 +
+            pace.half_bar_compact_blocks_max +
+            pace.half_bar_append_blocks_max;
+        return half_bar_buffer_blocks_max;
     }
 
     fn log_blocks_cycle_max_fixed_point(pace: Pace) u64 {

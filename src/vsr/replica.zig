@@ -13,7 +13,6 @@ const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 
 const StaticAllocator = @import("../static_allocator.zig");
-const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
 const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPSType = stdx.IOPSType;
@@ -1004,6 +1003,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
             assert(!self.grid.blocks_missing.repairing_tables());
+            assert(self.grid.stash_available() <= 1); // Only the burst block may be free.
             self.assert_free_set_consistent();
 
             log.info("{}: state_machine_open_callback: sync_ops={}..{}", .{
@@ -1202,10 +1202,21 @@ pub fn ReplicaType(
             });
             errdefer client_replies.deinit();
 
+            const stash_blocks_count =
+                constants.grid_iops_read_max +
+                constants.grid_repair_writes_max +
+                // Scans: *2 is for 1 index and 1 value block (per scan per level).
+                constants.lsm_scans_max * @as(u64, constants.lsm_levels) * 2 +
+                options.state_machine_options.lsm_forest_compaction_block_count +
+                vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size) +
+                Forest.manifest_log_compaction_pace.blocks_count() +
+                1; // GridScrubber.tour_index_block
+
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .trace = self.trace,
                 .cache_blocks_count = options.grid_cache_blocks_count,
+                .stash_blocks_count = stash_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
                 .blocks_released_prior_checkpoint_durability_max = Forest
@@ -1223,9 +1234,9 @@ pub fn ReplicaType(
 
             for (&self.grid_repair_write_blocks, 0..) |*block, i| {
                 errdefer for (self.grid_repair_write_blocks[0..i]) |b| allocator.free(b);
-                block.* = try allocate_block(allocator);
+                block.* = self.grid.get_block();
             }
-            errdefer for (self.grid_repair_write_blocks) |b| allocator.free(b);
+            errdefer for (self.grid_repair_write_blocks) |b| self.grid.block_unref(b);
 
             try self.state_machine.init(
                 allocator,
@@ -1427,6 +1438,12 @@ pub fn ReplicaType(
         pub fn deinit(self: *Replica, allocator: Allocator) void {
             self.static_allocator.transition_from_static_to_deinit();
 
+            var grid_reads = self.grid_reads.iterate();
+            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
+
+            for (self.grid_repair_write_blocks) |block| self.grid.block_unref(block);
+            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
+
             self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);
@@ -1457,12 +1474,6 @@ pub fn ReplicaType(
             }
 
             if (self.sync_view) |message| self.message_bus.unref(message);
-
-            var grid_reads = self.grid_reads.iterate();
-            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
-
-            for (self.grid_repair_write_blocks) |block| allocator.free(block);
-            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
 
             for (self.join_view_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
@@ -3426,9 +3437,19 @@ pub fn ReplicaType(
                 return;
             }
 
-            const block = message.buffer[0..constants.block_size];
+            const write = self.grid_repair_writes.acquire().?;
+            const write_index = self.grid_repair_writes.index(write);
+            const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
+            assert(self.grid.block_references(write_block.*) == 1);
 
-            const grid_fulfill = self.grid.fulfill_block(block);
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                write_block.*,
+                message.buffer[0..message.header.size],
+            );
+
+            const grid_fulfill = self.grid.fulfill_block(write_block.*);
             if (grid_fulfill) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
@@ -3445,10 +3466,6 @@ pub fn ReplicaType(
             if (grid_repair) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
-                const write = self.grid_repair_writes.acquire().?;
-                const write_index = self.grid_repair_writes.index(write);
-                const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
-
                 log.debug("{}: on_block: repairing address={} checksum={x:0>32} {s}", .{
                     self.log_prefix(),
                     message.header.address,
@@ -3456,15 +3473,13 @@ pub fn ReplicaType(
                     @tagName(message.header.block_type),
                 });
 
-                stdx.copy_disjoint(
-                    .inexact,
-                    u8,
-                    write_block.*,
-                    message.buffer[0..message.header.size],
-                );
-
                 write.* = .{ .replica = self };
                 self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
+            } else {
+                self.grid_repair_writes.release(write);
+                // A recipient of fulfill_block() may be borrowing this block.
+                self.grid.block_unref(write_block.*);
+                write_block.* = self.grid.get_block();
             }
 
             if (grid_fulfill or grid_repair) {
