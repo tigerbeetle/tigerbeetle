@@ -202,7 +202,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             .max = tree_infos[tree_infos.len - 1].tree_id,
         };
 
-        const manifest_log_compaction_pace = ManifestLogPace.init(.{
+        pub const manifest_log_compaction_pace = ManifestLogPace.init(.{
             .tree_count = tree_infos.len,
             // TODO Make this a runtime argument (from the CLI, derived from storage-size-max if
             // possible).

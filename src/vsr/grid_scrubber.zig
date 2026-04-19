@@ -337,6 +337,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                 assert(scrubber.tour.table_value.value_block_index == 0);
 
                 if (result == .valid) {
+                    // FIXME block_ref()
                     stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, result.valid);
                     scrubber.tour.table_value.index_block = scrubber.tour_index_block;
                 } else {

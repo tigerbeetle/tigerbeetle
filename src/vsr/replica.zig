@@ -1014,6 +1014,12 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
             assert(!self.grid.blocks_missing.repairing_tables());
+            std.debug.print("READS {} {} {}\n", .{
+                self.grid_reads.executing(),
+                self.grid.read_iops.executing(),
+                self.grid.read_resolving,
+            });
+            assert(self.grid.stash_available() == constants.grid_iops_read_max - self.grid_reads.executing() - @intFromBool(self.grid.read_resolving)); // FIXME maybe some repair reads are in progress?
             self.assert_free_set_consistent();
 
             log.info("{}: state_machine_open_callback: sync_ops={}..{}", .{
@@ -1213,10 +1219,33 @@ pub fn ReplicaType(
             });
             errdefer client_replies.deinit();
 
+            const stash_blocks_count =
+                constants.grid_iops_read_max +
+                //constants.grid_iops_write_max +
+                constants.grid_repair_writes_max +
+                // Scans: *2 is for 1 index and 1 value block (per scan per level).
+                constants.lsm_scans_max * @as(u64, constants.lsm_levels) * 2 +
+                options.state_machine_options.lsm_forest_compaction_block_count +
+                vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size) +
+                Forest.manifest_log_compaction_pace.blocks_count() +
+                1; // GridScrubber.tour_index_block
+
+            std.debug.print("GOT r={} w={} rep={} scan={} compac={} sess={} man={}\n", .{
+                constants.grid_iops_read_max ,
+                constants.grid_iops_write_max ,
+                constants.grid_repair_writes_max ,
+                // Scans: *2 is for 1 index and 1 value block (per scan per level).
+                constants.lsm_scans_max * @as(u64, constants.lsm_levels) * 2 ,
+                options.state_machine_options.lsm_forest_compaction_block_count ,
+                vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size) ,
+                Forest.manifest_log_compaction_pace.blocks_count() ,
+            });
+
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .trace = self.trace,
                 .cache_blocks_count = options.grid_cache_blocks_count,
+                .stash_blocks_count = stash_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
                 .blocks_released_prior_checkpoint_durability_max = Forest

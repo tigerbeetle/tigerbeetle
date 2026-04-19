@@ -229,6 +229,8 @@ pub fn GridType(comptime Storage: type) type {
             missing_tables_max: usize,
             blocks_released_prior_checkpoint_durability_max: usize,
         }) !Grid {
+            assert(options.stash_blocks_count > 0);
+
             var free_set = try FreeSet.init(allocator, .{
                 .grid_size_limit = options.superblock.grid_size_limit(),
                 .blocks_released_prior_checkpoint_durability_max = options
@@ -245,7 +247,14 @@ pub fn GridType(comptime Storage: type) type {
                 try CheckpointTrailer.init(allocator, .free_set, free_set_encoded_size_max);
             errdefer free_set_checkpoint_blocks_released.deinit(allocator);
 
-            const blocks_count = options.cache_blocks_count + options.stash_blocks_count;
+            // FIXME +1 for read burst?
+            const stash_blocks_count = options.stash_blocks_count +
+                vsr.checkpoint_trailer.block_count_for_trailer_size(free_set_encoded_size_max) * 2;
+            std.debug.print("GOT2 {} total={}\n", .{
+                vsr.checkpoint_trailer.block_count_for_trailer_size(free_set_encoded_size_max),
+                stash_blocks_count,
+            });
+            const blocks_count = options.cache_blocks_count + stash_blocks_count;
             const blocks = try allocator.alignedAlloc(
                 [constants.block_size]u8,
                 constants.sector_size,
@@ -750,6 +759,28 @@ pub fn GridType(comptime Storage: type) type {
                     return block;
                 }
             } else @panic("stash has no free blocks");
+        }
+
+        // FIXME additionally verify that total references always == stash_count
+        pub fn stash_available(grid: *const Grid) u32 {
+            var stash_sum: u32 = 0;
+            for (grid.cache_locations) |location| {
+                stash_sum += grid.blocks_references[location];
+            }
+            //var available: u32 = 0;
+            //for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
+            //    available += @intFromBool(grid.blocks_references[location] == 0);
+            //}
+            //var things: u32 = 0;
+            //for (grid.cache_locations[0..grid.cache_blocks_count]) |location| {
+            //    things += @intFromBool(grid.blocks_references[location] > 0);
+            //}
+            std.debug.print("AVAILABLE: {}  SUM={}\n", .{
+                grid.blocks.len - grid.cache_blocks_count - stash_sum,
+                //things,
+                stash_sum,
+            });
+            return @intCast(grid.blocks.len - grid.cache_blocks_count - stash_sum);
         }
 
         pub fn block_ref(grid: *Grid, block: BlockPtr) BlockPtr {
@@ -1270,14 +1301,18 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.trace.start(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
-            const iop_location = location: {
-                // FIXME O(n)
-                for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
-                    if (grid.blocks_references[location] == 0) {
-                        break :location location;
-                    }
-                } else unreachable;
-            };
+            // FIXME get_block()
+            const iop_block = grid.get_block();
+            const iop_location = grid.location_from_block(iop_block);
+            //    location: {
+            //    // FIXME O(n)
+            //    for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
+            //        if (grid.blocks_references[location] == 0) {
+            //            break :location location;
+            //        }
+            //    } else unreachable;
+            //};
+            //grid.blocks_references[iop_location] = 1;
 
             iop.* = .{
                 .completion = undefined,
@@ -1285,11 +1320,10 @@ pub fn GridType(comptime Storage: type) type {
                 .location = iop_location,
             };
 
-            grid.blocks_references[iop_location] = 1;
             grid.superblock.storage.read_sectors(
                 read_block_callback,
                 &iop.completion,
-                &grid.blocks[iop_location],
+                iop_block,
                 .grid,
                 block_offset(address),
             );
@@ -1302,7 +1336,7 @@ pub fn GridType(comptime Storage: type) type {
             const block = &grid.blocks[iop.location];
             const block_location = grid.location_from_block(block);
             assert(grid.blocks_references[block_location] == 1);
-            defer grid.blocks_references[block_location] -= 1;
+            defer grid.block_unref(block);
 
             grid.trace.stop(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
