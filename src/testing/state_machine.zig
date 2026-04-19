@@ -45,6 +45,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub const Options = struct {
             batch_size_limit: u32,
+            lsm_forest_compaction_block_count: u32 = Forest.Options.compaction_block_count_min,
             lsm_forest_node_count: u32,
         };
 
@@ -108,7 +109,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 allocator,
                 grid,
                 .{
-                    .compaction_block_count = Forest.Options.compaction_block_count_min,
+                    .compaction_block_count = options.lsm_forest_compaction_block_count,
                     .node_count = options.lsm_forest_node_count,
                 },
                 .{
