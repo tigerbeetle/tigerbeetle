@@ -764,7 +764,6 @@ pub fn GridType(comptime Storage: type) type {
         /// Return a block from the stash which had no outstanding references.
         pub fn get_block(grid: *Grid) BlockPtr {
             for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
-                // FIXME Or use a linked list of locations?
                 if (grid.blocks_references[location] == 0) {
                     grid.blocks_references[location] += 1;
 
@@ -804,7 +803,6 @@ pub fn GridType(comptime Storage: type) type {
             return grid.blocks_references[grid.location_from_block(block)];
         }
 
-        // FIXME return a zero-refrence block? won't work in 'fn init() { defer }' though
         pub fn block_unref(grid: *Grid, block: BlockPtrConst) void {
             const location = grid.location_from_block(block);
             assert(grid.blocks_references[location] > 0);
