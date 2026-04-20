@@ -1224,8 +1224,6 @@ pub fn ReplicaType(
                 Forest.manifest_log_compaction_pace.blocks_count() +
                 1; // GridScrubber.tour_index_block
 
-            std.debug.print("INIT: {}\n", .{stash_blocks_count});
-
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .trace = self.trace,
