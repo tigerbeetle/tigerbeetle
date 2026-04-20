@@ -192,8 +192,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree = undefined;
             env.lookup_value = null;
 
-            try env.scan_buffer.init(gpa, .{ .index = 0 });
-            defer env.scan_buffer.deinit(gpa);
+            env.scan_buffer.init(&env.grid, .{ .index = 0 });
+            defer env.scan_buffer.deinit(&env.grid);
 
             env.scan_results = try gpa.alloc(Value, scan_results_max);
             env.scan_results_count = 0;
@@ -202,8 +202,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.scan_results_model = try gpa.alloc(Value, scan_results_max);
             defer gpa.free(env.scan_results_model);
 
-            env.pool = try ResourcePool.init(gpa, block_count);
-            defer env.pool.deinit(gpa);
+            env.pool = try ResourcePool.init(gpa, &env.grid, block_count);
+            defer env.pool.deinit(gpa, &env.grid);
 
             env.radix_buffer = try .init(gpa, value_count_max * @sizeOf(Value));
             defer env.radix_buffer.deinit(gpa);

@@ -372,8 +372,8 @@ pub fn main() !void {
 }
 
 fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
-    const replica_count = 1;//prng.range_inclusive(u8, 1, constants.replicas_max);
-    const standby_count = 0;//prng.int_inclusive(u8, constants.standbys_max);
+    const replica_count = prng.range_inclusive(u8, 1, constants.replicas_max);
+    const standby_count = prng.int_inclusive(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
     // -1 since otherwise it is possible that all clients will evict each other.
     // (Due to retried register messages from the first set of evicted clients.
