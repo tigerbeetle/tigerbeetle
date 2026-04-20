@@ -24,20 +24,27 @@ module TigerBeetle
       @closed
     end
 
-    def create_accounts(accounts)
-      @native.submit(Operation::CREATE_ACCOUNTS, accounts)
-    end
+    def create_accounts(accounts) = native_submit(Operation::CREATE_ACCOUNTS, accounts)
+    def create_transfers(transfers) = native_submit(Operation::CREATE_TRANSFERS, transfers)
+    def lookup_accounts(ids) = native_submit(Operation::LOOKUP_ACCOUNTS, ids)
+    def lookup_transfers(ids) = native_submit(Operation::LOOKUP_TRANSFERS, ids)
 
-    def create_transfers(transfers)
-      @native.submit(Operation::CREATE_TRANSFERS, transfers)
-    end
+    private
 
-    def lookup_accounts(ids)
-      @native.submit(Operation::LOOKUP_ACCOUNTS, ids)
-    end
+    def native_submit(operation, payload)
+      return [] if payload.empty?
 
-    def lookup_transfers(ids)
-      @native.submit(Operation::LOOKUP_TRANSFERS, ids)
+      read_io, write_io = IO.pipe
+      req = @native.submit(operation, payload, write_io.fileno)
+      read_io.read(1)
+      status, result = req.result
+      raise ClientClosedError if status == PACKET_CLIENT_SHUTDOWN
+      raise PacketError, status unless status == PACKET_OK
+
+      result
+    ensure
+      read_io&.close
+      write_io&.close
     end
   end
 end
