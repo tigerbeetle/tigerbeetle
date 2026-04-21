@@ -1375,7 +1375,7 @@ pub const IO = struct {
             var buffer: u64 = undefined;
 
             fn on_read(
-                _: *Context,
+                _: ?*Context,
                 completion_inner: *Completion,
                 result: ReadError!usize,
             ) void {
@@ -1386,8 +1386,8 @@ pub const IO = struct {
         };
 
         self.read(
-            *Context,
-            undefined,
+            ?*Context,
+            null,
             Context.on_read,
             completion,
             event,
