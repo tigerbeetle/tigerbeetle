@@ -799,7 +799,7 @@ pub fn GridType(comptime Storage: type) type {
             return block;
         }
 
-        pub fn block_references(grid: *Grid, block: BlockPtrConst) u8 {
+        pub fn block_references(grid: *const Grid, block: BlockPtrConst) u8 {
             return grid.blocks_references[grid.location_from_block(block)];
         }
 
