@@ -132,6 +132,8 @@ pub fn main() !void {
     switch (command) {
         .version => unreachable, // Handled earlier.
         inline .format, .start, .recover => |*args, command_storage| {
+            if (args.cpu) |cpu_index| main_pin_cpu(cpu_index, @tagName(command_storage));
+
             const direct_io: vsr.io.DirectIO =
                 if (!constants.direct_io)
                     .direct_io_disabled
@@ -621,6 +623,24 @@ fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !
     while (true) {
         runner.tick();
     }
+}
+
+fn main_pin_cpu(cpu_index: u16, command_name: []const u8) void {
+    stdx.cpu_affinity.pin_current_thread(cpu_index) catch |err| switch (err) {
+        error.UnsupportedPlatform => log.warn(
+            "{s}: cpu pinning is not supported on this platform",
+            .{command_name},
+        ),
+        error.InvalidCpu => vsr.fatal(
+            .cli,
+            "{s}: cpu {d} is out of range",
+            .{ command_name, cpu_index },
+        ),
+        else => vsr.fatal(.cli, "{s}: failed to set cpu affinity ({})", .{
+            command_name,
+            err,
+        }),
+    };
 }
 
 fn print_value(

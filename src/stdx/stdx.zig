@@ -20,6 +20,7 @@ pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 pub const huge_page_allocator = @import("huge_page_allocator.zig").huge_page_allocator;
 
 pub const aegis = @import("vendored/aegis.zig");
+pub const cpu_affinity = @import("cpu_affinity.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const Flags = @import("flags.zig");
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
@@ -1157,6 +1158,7 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
 comptime {
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
+    _ = @import("cpu_affinity.zig");
     _ = @import("flags.zig");
     _ = @import("huge_page_allocator.zig");
     _ = @import("iops.zig");

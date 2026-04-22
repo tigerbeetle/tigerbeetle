@@ -88,6 +88,9 @@ pub fn command_benchmark(
         addresses.const_slice()
     else
         &.{tigerbeetle_process.?.address};
+
+    if (args.benchmark_cpu) |cpu_index| command_benchmark_pin_cpu(cpu_index);
+
     try benchmark_load.main(allocator, io, time, addresses, args);
 
     if (tigerbeetle_process) |*p| {
@@ -167,6 +170,13 @@ fn start(allocator: std.mem.Allocator, options: struct {
     try start_args.append(arena.allocator(), options.tigerbeetle);
     try start_args.append(arena.allocator(), "start");
     try start_args.append(arena.allocator(), "--addresses=0");
+    if (options.args.replica_cpu) |cpu_index| {
+        try start_args.append(arena.allocator(), try std.fmt.allocPrint(
+            arena.allocator(),
+            "--cpu={d}",
+            .{cpu_index},
+        ));
+    }
 
     // Forward the cache options to the tigerbeetle process:
     const forward_args = &.{
@@ -224,4 +234,19 @@ fn start(allocator: std.mem.Allocator, options: struct {
     const address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
 
     return .{ .child = child, .address = address };
+}
+
+fn command_benchmark_pin_cpu(cpu_index: u16) void {
+    vsr.stdx.cpu_affinity.pin_current_thread(cpu_index) catch |err| switch (err) {
+        error.UnsupportedPlatform => log.warn(
+            "benchmark: cpu pinning is not supported on this platform",
+            .{},
+        ),
+        error.InvalidCpu => vsr.fatal(
+            .cli,
+            "benchmark: cpu {d} is out of range",
+            .{cpu_index},
+        ),
+        else => vsr.fatal(.cli, "benchmark: failed to set cpu affinity ({})", .{err}),
+    };
 }

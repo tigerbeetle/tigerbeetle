@@ -45,6 +45,7 @@ const CLIArgs = union(enum) {
         replica_count: u8,
         development: bool = false,
         log_debug: bool = false,
+        cpu: ?u16 = null,
 
         @"--": void,
         path: []const u8,
@@ -57,6 +58,7 @@ const CLIArgs = union(enum) {
         replica_count: u8,
         development: bool = false,
         log_debug: bool = false,
+        cpu: ?u16 = null,
 
         @"--": void,
         path: []const u8,
@@ -67,6 +69,7 @@ const CLIArgs = union(enum) {
         addresses: []const u8,
         cache_grid: ?ByteSize = null,
         development: bool = false,
+        cpu: ?u16 = null,
 
         // Everything from here until positional arguments is considered experimental, and requires
         // `--experimental` to be set. Experimental flags disable automatic upgrades with
@@ -131,6 +134,8 @@ const CLIArgs = union(enum) {
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
+        benchmark_cpu: ?u16 = null,
+        replica_cpu: ?u16 = null,
         account_count: u64 = 10_000,
         account_count_hot: u32 = 0,
         log_debug: bool = false,
@@ -407,6 +412,17 @@ const CLIArgs = union(enum) {
         \\        (Total RAM) - 3GiB (TigerBeetle) - 1GiB (System), eg 12GiB for a 16GiB machine.
         \\        Defaults to {[default_cache_grid_gb]d}GiB.
         \\
+        \\  --cpu=<index>
+        \\        Pin the format, recover, or start command process to the zero-based CPU index.
+        \\        Supported on Linux.
+        \\
+        \\  --benchmark-cpu=<index>
+        \\        Pin the benchmark load process to the zero-based CPU index. Supported on Linux.
+        \\
+        \\  --replica-cpu=<index>
+        \\        Pin the local replica process started by benchmark to the zero-based CPU index.
+        \\        Supported on Linux.
+        \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
         \\
@@ -510,6 +526,7 @@ pub const Command = union(enum) {
         development: bool,
         path: []const u8,
         log_debug: bool,
+        cpu: ?u16,
     };
 
     pub const Recover = struct {
@@ -520,6 +537,7 @@ pub const Command = union(enum) {
         development: bool,
         path: []const u8,
         log_debug: bool,
+        cpu: ?u16,
     };
 
     pub const Start = struct {
@@ -550,6 +568,7 @@ pub const Command = union(enum) {
         log_debug: bool,
         log_trace: bool,
         statsd: ?std.net.Address,
+        cpu: ?u16,
     };
 
     pub const Version = struct {
@@ -615,6 +634,8 @@ pub const Command = union(enum) {
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
+        benchmark_cpu: ?u16,
+        replica_cpu: ?u16,
     };
 
     pub const Inspect = union(enum) {
@@ -778,6 +799,7 @@ fn parse_args_format(format: CLIArgs.Format) Command.Format {
         .development = format.development,
         .path = format.path,
         .log_debug = format.log_debug,
+        .cpu = format.cpu,
     };
 }
 
@@ -814,6 +836,7 @@ fn parse_args_recover(recover: CLIArgs.Recover) Command.Recover {
         .development = recover.development,
         .path = recover.path,
         .log_debug = recover.log_debug,
+        .cpu = recover.cpu,
     };
 }
 
@@ -823,6 +846,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const stable_args = .{
         "addresses",   "cache_grid",
         "development", "experimental",
+        "cpu",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
         @setEvalBranchQuota(4_000);
@@ -1090,6 +1114,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             parse_address_and_port(statsd_address, "--statsd", 8125)
         else
             null,
+        .cpu = start.cpu,
     };
 }
 
@@ -1129,6 +1154,11 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
 
     if (benchmark.addresses != null and benchmark.file != null) {
         vsr.fatal(.cli, "--file: --addresses and --file are mutually exclusive", .{});
+    }
+    // --replica-cpu is forwarded to the local replica process started by benchmark.
+    // With --addresses, benchmark connects to an existing cluster instead.
+    if (benchmark.addresses != null and benchmark.replica_cpu != null) {
+        vsr.fatal(.cli, "--replica-cpu: incompatible with --addresses", .{});
     }
 
     if (benchmark.account_batch_count == 0) {
@@ -1184,6 +1214,8 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .file = benchmark.file,
         .addresses = addresses,
         .seed = benchmark.seed,
+        .benchmark_cpu = benchmark.benchmark_cpu,
+        .replica_cpu = benchmark.replica_cpu,
     };
 }
 
