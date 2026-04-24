@@ -233,6 +233,23 @@ test "checksum alignment and sizing" {
         try std.testing.expect(case != std.math.maxInt(u128));
     }
 
+    for (0..input.len) |idx| {
+        input[idx] = @intCast(idx % 2);
+    }
+
+    const window_size = 256;
+
+    const even = checksum(input[0..window_size]);
+    const odd = checksum(input[1..][0..window_size]);
+
+    for (0..16) |start_idx| {
+        if (start_idx % 2 == 0) {
+            try std.testing.expectEqual(even, checksum(input[start_idx..][0..window_size]));
+        } else {
+            try std.testing.expectEqual(odd, checksum(input[start_idx..][0..window_size]));
+        }
+    }
+
     comptime assert(builtin.target.cpu.arch.endian() == .little);
     const hash = checksum(mem.sliceAsBytes(&cases));
     try testing.expectEqual(0xC8E7102D72CE96458639F6027DA0FBA0, hash);
