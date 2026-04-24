@@ -152,10 +152,10 @@ test "DoublyLinkedList LIFO" {
     list.push(&nodes[1]);
     list.push(&nodes[2]);
 
-    try std.testing.expectEqual(list.pop().?, &nodes[2]);
-    try std.testing.expectEqual(list.pop().?, &nodes[1]);
-    try std.testing.expectEqual(list.pop().?, &nodes[0]);
-    try std.testing.expectEqual(list.pop(), null);
+    try std.testing.expectEqual(&nodes[2], list.pop().?);
+    try std.testing.expectEqual(&nodes[1], list.pop().?);
+    try std.testing.expectEqual(&nodes[0], list.pop().?);
+    try std.testing.expectEqual(null, list.pop());
 }
 
 test "DoublyLinkedList fuzz" {
