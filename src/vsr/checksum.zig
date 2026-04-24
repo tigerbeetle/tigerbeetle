@@ -204,5 +204,53 @@ test "checksum stability" {
     // way.
     comptime assert(builtin.target.cpu.arch.endian() == .little);
     const hash = checksum(mem.sliceAsBytes(&cases));
-    try testing.expectEqual(hash, 0x82dcaacf4875b279446825b6830d1263);
+    try testing.expectEqual(0x82dcaacf4875b279446825b6830d1263, hash);
+}
+
+test "checksum alignment and sizing" {
+    var gpa = std.testing.allocator;
+
+    var input: []align(1) u8 = try gpa.alignedAlloc(u8, 1, 8 * stdx.KiB);
+    defer gpa.free(input);
+
+    var prng = stdx.PRNG.from_seed(92);
+    prng.fill(input);
+
+    var cases: [4112]u128 = @splat(0);
+    var case_index: usize = 0;
+
+    for (0..16) |start_idx| {
+        cases[case_index] = checksum(input[start_idx..]);
+        case_index += 1;
+        for (0..256) |size| {
+            cases[case_index] = checksum(input[start_idx..][0..size]);
+            case_index += 1;
+        }
+    }
+
+    for (cases) |case| {
+        try std.testing.expect(case != 0);
+        try std.testing.expect(case != std.math.maxInt(u128));
+    }
+
+    for (0..input.len) |idx| {
+        input[idx] = @intCast(idx % 2);
+    }
+
+    const window_size = 256;
+
+    const even = checksum(input[0..window_size]);
+    const odd = checksum(input[1..][0..window_size]);
+
+    for (0..16) |start_idx| {
+        if (start_idx % 2 == 0) {
+            try std.testing.expectEqual(even, checksum(input[start_idx..][0..window_size]));
+        } else {
+            try std.testing.expectEqual(odd, checksum(input[start_idx..][0..window_size]));
+        }
+    }
+
+    comptime assert(builtin.target.cpu.arch.endian() == .little);
+    const hash = checksum(mem.sliceAsBytes(&cases));
+    try testing.expectEqual(0xC8E7102D72CE96458639F6027DA0FBA0, hash);
 }
