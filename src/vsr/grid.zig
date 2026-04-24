@@ -1510,39 +1510,38 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         /// Insert the address into the cache, and swap the evicted block into the stash.
-        fn cache_upsert(grid: *Grid, block_address: u64, block: BlockPtr) void {
+        fn cache_upsert(grid: *Grid, block_address: u64, block_save: BlockPtr) void {
             assert(block_address != 0);
 
             // The location/block that is being moved from stash to cache.
-            const block_cache = block;
-            const block_cache_location = grid.location_from_block(block_cache);
-            assert(grid.blocks_references[block_cache_location] > 0);
+            const block_save_location = grid.location_from_block(block_save);
+            assert(grid.blocks_references[block_save_location] > 0);
 
-            const block_cache_header = schema.header_from_block(block_cache);
-            assert(block_cache_header.address == block_address);
+            const block_save_header = schema.header_from_block(block_save);
+            assert(block_save_header.address == block_address);
 
             const cache_index = grid.cache.upsert(&block_address).index;
             assert(cache_index < grid.cache_locations.len);
 
             // The location/block being moved from cache to stash.
-            const block_stash_location = grid.cache_locations[cache_index];
-            assert(block_stash_location != block_cache_location);
+            const block_drop_location = grid.cache_locations[cache_index];
+            assert(block_drop_location != block_save_location);
 
-            const block_stash_removed = grid.stash_used.swapRemove(block_cache_location);
-            assert(block_stash_removed);
+            const block_drop_removed = grid.stash_used.swapRemove(block_save_location);
+            assert(block_drop_removed);
 
-            if (grid.blocks_references[block_stash_location] == 0) {
-                grid.stash_free.putAssumeCapacityNoClobber(block_stash_location, {});
+            if (grid.blocks_references[block_drop_location] == 0) {
+                grid.stash_free.putAssumeCapacityNoClobber(block_drop_location, {});
             } else {
-                grid.stash_used.putAssumeCapacityNoClobber(block_stash_location, {});
+                grid.stash_used.putAssumeCapacityNoClobber(block_drop_location, {});
             }
-            grid.cache_locations[cache_index] = block_cache_location;
+            grid.cache_locations[cache_index] = block_save_location;
 
-            if (grid.blocks_references[block_stash_location] == 0) {
+            if (grid.blocks_references[block_drop_location] == 0) {
                 // This block content won't be used again.
                 // We could overwrite the entire thing, but that would be more expensive.
-                const block_stashed = &grid.blocks[block_stash_location];
-                @memset(block_stashed[0..@sizeOf(vsr.Header)], 0);
+                const block_drop = &grid.blocks[block_drop_location];
+                @memset(block_drop[0..@sizeOf(vsr.Header)], 0);
             }
         }
 
