@@ -1710,6 +1710,10 @@ pub fn ReplicaType(
                 message.header,
             });
 
+            if (constants.verify) {
+                assert(message.header.valid_checksum_body(message.body_used()));
+            }
+
             if (message.header.invalid()) |reason| {
                 log.warn("{}: on_message: invalid (command={}, {s})", .{
                     self.log_prefix(),
