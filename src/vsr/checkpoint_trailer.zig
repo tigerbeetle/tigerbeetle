@@ -149,7 +149,6 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             if (trailer.grid) |grid| {
                 for (trailer.blocks) |*block| {
                     grid.block_unref(block.*);
-                    //block.* = grid.get_block();
                 }
             } else {
                 assert(trailer.size == 0);
