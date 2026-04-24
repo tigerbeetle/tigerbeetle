@@ -7336,6 +7336,7 @@ pub fn ReplicaType(
 
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
+                .checksum_body = request_header.checksum_body,
                 .cluster = self.cluster,
                 .size = request_header.size,
                 .view = self.view,
@@ -7360,8 +7361,13 @@ pub fn ReplicaType(
                 .request = request_header.request,
                 .operation = request_header.operation,
             };
-            // Recompute the body checksum: `.register` and `.reconfigure` mutate the body in place.
-            message.header.set_checksum_body(message.body_used());
+
+            switch (message.header.operation) {
+                .register, .reconfigure => message.header.set_checksum_body(message.body_used()),
+                else => if (constants.verify) {
+                    assert(message.header.valid_checksum_body(message.body_used()));
+                },
+            }
             message.header.set_checksum();
 
             const size_ceil = vsr.sector_ceil(message.header.size);
