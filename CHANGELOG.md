@@ -3,6 +3,34 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.2
+
+Released: 2026-04-24
+
+### Safety And Performance
+
+- [#3660](https://github.com/tigerbeetle/tigerbeetle/pull/3660)
+
+  When a replica sends a message to itself, copy in message body before computing
+  `checksum_body` and `checksum`.
+
+### Features
+
+- [#3657](https://github.com/tigerbeetle/tigerbeetle/pull/3657)
+
+  Track `value_count_visible` as a metric, per tree.
+  This is useful for counting the number of accounts/transfers in the database.
+
+### Internals
+
+- [#3661](https://github.com/tigerbeetle/tigerbeetle/pull/3661)
+
+  Test that checksum works on unaligned data.
+
+### TigerTracks 🎧
+
+- [Line Between](https://www.youtube.com/watch?v=bF_w7mGjwB4)
+
 ## TigerBeetle 0.17.1
 
 Released: 2026-04-17
