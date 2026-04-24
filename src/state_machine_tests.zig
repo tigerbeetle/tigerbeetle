@@ -1066,7 +1066,7 @@ fn check_version(
                             TestGetChangeEventsResult,
                             reply.items,
                         );
-                        try testing.expectEqual(results_actual.len, results_expected.len);
+                        try testing.expectEqual(results_expected.len, results_actual.len);
                         for (results_actual, results_expected) |*actual, *expected| {
                             try testing.expect(expected.match(&accounts, &transfers, actual));
                         }

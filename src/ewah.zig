@@ -351,8 +351,8 @@ test "ewah Word=u8" {
         });
     }
 
-    try std.testing.expectEqual(codec.encode_size_max(0), 0);
-    try std.testing.expectEqual(codec.encode_all(&.{}, &.{}), 0);
+    try std.testing.expectEqual(0, codec.encode_size_max(0));
+    try std.testing.expectEqual(0, codec.encode_all(&.{}, &.{}));
 }
 
 test "ewah Word=u16" {

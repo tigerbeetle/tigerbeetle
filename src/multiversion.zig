@@ -291,7 +291,7 @@ test "ReleaseTriple.parse" {
         .{ .string = "65536.0.0", .result = error.InvalidRelease },
     };
     for (tests) |t| {
-        try std.testing.expectEqualDeep(ReleaseTriple.parse(t.string), t.result);
+        try std.testing.expectEqualDeep(t.result, ReleaseTriple.parse(t.string));
     }
 }
 

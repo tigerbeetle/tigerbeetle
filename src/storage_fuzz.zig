@@ -167,8 +167,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
             try std.testing.expectEqualSlices(
                 u8,
-                storage_data_written[start..end],
                 storage_data_stored[start..end],
+                storage_data_written[start..end],
             );
             try std.testing.expectEqualSlices(
                 u8,
