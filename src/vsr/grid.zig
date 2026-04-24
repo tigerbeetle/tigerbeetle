@@ -186,9 +186,13 @@ pub fn GridType(comptime Storage: type) type {
         // - `stash_free.keys`, `stash_used.keys`, and `cache_locations` have no overlapping values.
         stash_free: std.AutoArrayHashMapUnmanaged(u32, void),
         stash_used: std.AutoArrayHashMapUnmanaged(u32, void),
-        //stash_used: QueueType(StashLocation) = .init(.{ .name = "grid_stash_used" }),
-        //stash_free: QueueType(StashLocation),
-        //stash_nodes: []StashLocation,
+        /// NB: stash_free.count() may exceed stash_available. This occurs when there are multiple
+        /// references taken to a single block.
+        ///
+        /// Invariants:
+        /// - stash_available ≤ stash_blocks_count
+        /// - stash_available ≤ stash_free.count()
+        stash_available: u32,
 
         write_iops: IOPSType(WriteIOP, write_iops_max) = .{},
         write_queue: QueueType(Write) = QueueType(Write).init(.{ .name = "grid_write" }),
@@ -292,21 +296,13 @@ pub fn GridType(comptime Storage: type) type {
                     stash_free.putAssumeCapacityNoClobber(location, {});
                 }
             }
-
-            //var stash_nodes = try allocator.alloc(StashLocation, stash_blocks_count);
-            //errdefer allocator.free(stash_nodes);
-            //
-            //var stash_free = QueueType(StashLocation).init(.{ .name = "grid_stash_free" });
-            //for (stash_nodes) |*node| {
-            //    node.* = .{ .location = @intCast(options.cache_blocks_count + i) };
-            //    stash_nodes.push(node);
-            //}
+            assert(stash_free.count() == stash_blocks_count);
 
             var read_iop_blocks: [read_iops_max]BlockPtr = undefined;
             for (&read_iop_blocks) |*read_iop_block| {
                 const location = stash_free.pop().?.key;
                 read_iop_block.* = &blocks[location];
-                blocks_references[location] = 1;
+                blocks_references[location] += 1;
                 stash_used.putAssumeCapacityNoClobber(location, {});
             }
 
@@ -323,21 +319,25 @@ pub fn GridType(comptime Storage: type) type {
                 .cache_locations = cache_locations,
                 .stash_used = stash_used,
                 .stash_free = stash_free,
+                .stash_available = @intCast(stash_blocks_count - read_iops_max),
                 .read_iop_blocks = read_iop_blocks,
             };
         }
 
         pub fn deinit(grid: *Grid, allocator: mem.Allocator) void {
+            // Release the remaining block references:
             for (&grid.read_iop_blocks) |block| grid.block_unref(block);
-
             grid.free_set_checkpoint_blocks_acquired.deinit(allocator);
             grid.free_set_checkpoint_blocks_released.deinit(allocator);
 
-            // There are no outstanding references to blocks.
-            // FIXME assert sum blocks_references == stash_blocks_count
-            //assert(grid.stash_available() == grid.blocks.len - grid.cache_blocks_count);
+            // There are no more outstanding references to blocks.
             assert(grid.stash_used.count() == 0);
             assert(grid.stash_free.count() == grid.blocks.len - grid.cache_locations.len);
+            assert(grid.stash_available == grid.blocks.len - grid.cache_locations.len);
+
+            var references: u32 = 0;
+            for (grid.blocks_references) |ref| references += ref;
+            assert(references == 0);
 
             grid.blocks_missing.deinit(allocator);
             allocator.free(grid.blocks_references);
@@ -786,15 +786,6 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        //pub fn stash_available(grid: *const Grid) u32 {
-        //    const stash_max: u32 = @intCast(grid.blocks.len - grid.cache_blocks_count);
-        //    var stash_used: u32 = 0;
-        //    for (grid.cache_locations) |location| {
-        //        stash_used += grid.blocks_references[location];
-        //    }
-        //    return stash_max - stash_used;
-        //}
-
         /// Return a block from the stash which had no outstanding references.
         pub fn get_block(grid: *Grid) BlockPtr {
             const stash_entry = grid.stash_free.pop() orelse @panic("stash has no free blocks");
@@ -802,20 +793,11 @@ pub fn GridType(comptime Storage: type) type {
 
             assert(grid.blocks_references[stash_location] == 0);
             grid.blocks_references[stash_location] += 1;
+            grid.stash_available -= 1;
+
             grid.stash_used.putAssumeCapacityNoClobber(stash_location, {});
 
             return &grid.blocks[stash_location];
-            //for (grid.cache_locations[grid.cache_blocks_count..]) |location| {
-            //    // FIXME Or use a linked list of locations?
-            //    if (grid.blocks_references[location] == 0) {
-            //        grid.blocks_references[location] += 1;
-            //
-            //        // We could overwrite all the block's data, but that would be more expensive.
-            //        const block = &grid.blocks[location];
-            //        @memset(block[0..@sizeOf(vsr.Header)], 0);
-            //        return block;
-            //    }
-            //} else @panic("stash has no free blocks");
         }
 
         pub fn block_ref(grid: *Grid, block: BlockPtr) BlockPtr {
@@ -825,38 +807,33 @@ pub fn GridType(comptime Storage: type) type {
             const location = grid.location_from_block(block);
             assert(!grid.stash_free.contains(location));
 
-            // FIXME remove?:
-            // block_ref() is called by read_block callbacks, so the block is definitely in cache.
-            //const cache_index = grid.cache.get_index(block_header.address);
-            //if (cache_index != null and
-            //    grid.cache_locations[cache_index.?] == location)
-            //{
-            //    // Typical case.
-            //} else {
-            //    // The caller invoked block_ref() on a block that is not in our cache.
-            //    // Either:
-            //    // - The caller read the block from our write queue. (It will be in the cache soon.)
-            //    // - The caller read the block via fulfill_block().
-            //}
+            if (grid.blocks_references[location] == 0) {
+                // The only way to call block_ref() on a zero-reference block is if we got the block
+                // from the cache, not the stash.
+                assert(!grid.stash_used.contains(location));
+            }
 
-            maybe(grid.blocks_references[location] == 0);
             grid.blocks_references[location] += 1;
+            grid.stash_available -= 1;
+
             return block;
         }
 
-        // FIXME return a zero-reference block? won't work in 'fn init() { defer }' though
         pub fn block_unref(grid: *Grid, block: BlockPtrConst) void {
             const location = grid.location_from_block(block);
             assert(!grid.stash_free.contains(location));
 
             assert(grid.blocks_references[location] > 0);
             grid.blocks_references[location] -= 1;
+            grid.stash_available += 1;
 
             if (grid.blocks_references[location] == 0) {
                 if (grid.stash_used.swapRemove(location)) {
                     grid.stash_free.putAssumeCapacityNoClobber(location, {});
                 }
             }
+
+            assert(grid.stash_available <= grid.stash_free.count());
         }
 
         pub fn block_references(grid: *const Grid, block: BlockPtrConst) u8 {
@@ -1033,9 +1010,9 @@ pub fn GridType(comptime Storage: type) type {
             // higher.
             const block_written_location = grid.location_from_block(completed_write.block.*);
             assert(grid.blocks_references[block_written_location] > 0);
-            grid.blocks_references[block_written_location] -= 1;
 
-            const cache_block = &grid.blocks[block_written_location];
+            const cache_block = completed_write.block.*;
+            grid.block_unref(cache_block);
             completed_write.block.* = grid.get_block();
 
             const cache_block_header = schema.header_from_block(cache_block);
@@ -1533,13 +1510,14 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         /// Insert the address into the cache, and swap the evicted block into the stash.
-        /// FIXME rename to write/evict
         fn cache_upsert(grid: *Grid, block_address: u64, block: BlockPtr) void {
             assert(block_address != 0);
 
             // The location/block that is being moved from stash to cache.
             const block_cache = block;
             const block_cache_location = grid.location_from_block(block_cache);
+            assert(grid.blocks_references[block_cache_location] > 0);
+
             const block_cache_header = schema.header_from_block(block_cache);
             assert(block_cache_header.address == block_address);
 
@@ -1553,31 +1531,12 @@ pub fn GridType(comptime Storage: type) type {
             const block_stash_removed = grid.stash_used.swapRemove(block_cache_location);
             assert(block_stash_removed);
 
-            assert(grid.blocks_references[block_cache_location] > 0);
-            //maybe(grid.blocks_references[block_stash_location] > 0);
-
             if (grid.blocks_references[block_stash_location] == 0) {
                 grid.stash_free.putAssumeCapacityNoClobber(block_stash_location, {});
             } else {
                 grid.stash_used.putAssumeCapacityNoClobber(block_stash_location, {});
             }
             grid.cache_locations[cache_index] = block_cache_location;
-
-            //const stash_index = index: {
-            //    for (
-            //        grid.cache_locations[grid.cache_blocks_count..],
-            //        grid.cache_blocks_count..,
-            //    ) |location, i| {
-            //        if (location == block_cache_location) break :index i;
-            //    } else unreachable;
-            //};
-            //assert(cache_index != stash_index);
-            //assert(stash_index >= grid.cache_blocks_count);
-
-            //assert(grid.cache_locations[cache_index] == block_stash_location);
-            //assert(grid.cache_locations[stash_index] == block_cache_location);
-
-            //grid.cache_locations[stash_index] = block_stash_location;
 
             if (grid.blocks_references[block_stash_location] == 0) {
                 // This block content won't be used again.
