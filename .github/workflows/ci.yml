@@ -18,7 +18,7 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - run: shellcheck ./zig/download.sh
       - shell: pwsh
@@ -45,14 +45,14 @@ jobs:
         run: | # Allow unshare for vortex.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch full history for tidy.
       - run: ./zig/download.ps1 && ./zig/zig build ci -- test
 
   test_aof:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -109,7 +109,7 @@ jobs:
         run: | # Allow unshare for vortex.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
 
       - if: matrix.language == 'dotnet'
@@ -151,7 +151,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 2147483647, fetch-tags: true } # Fetch history for "git tag" in build.zig.
       - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: sudo rm -rf /usr/local/lib/android # Free up disk space for benchmarking.
