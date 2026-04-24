@@ -513,6 +513,7 @@ pub const EventMetric = union(enum) {
 
     table_count_visible: struct { tree: TreeEnum },
     table_count_visible_max: struct { tree: TreeEnum },
+    value_count_visible: struct { tree: TreeEnum },
     replica_status,
     replica_view,
     replica_log_view,
@@ -548,6 +549,7 @@ pub const EventMetric = union(enum) {
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_count(TreeEnum),
         .table_count_visible_max = enum_count(TreeEnum),
+        .value_count_visible = enum_count(TreeEnum),
         .replica_status = 1,
         .replica_view = 1,
         .replica_log_view = 1,
@@ -603,6 +605,7 @@ pub const EventMetric = union(enum) {
         switch (event.*) {
             inline .table_count_visible,
             .table_count_visible_max,
+            .value_count_visible,
             .compaction_values_physical,
             .compaction_values_logical,
             => |data| {
@@ -695,6 +698,9 @@ test "EventMetric slot doesn't have collisions" {
                 .tree = g.enum_value(TreeEnum),
             } },
             .table_count_visible_max => .{ .table_count_visible_max = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .value_count_visible => .{ .value_count_visible = .{
                 .tree = g.enum_value(TreeEnum),
             } },
             .compaction_values_physical => .{ .compaction_values_physical = .{

@@ -444,6 +444,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
             var table_count_visible: u32 = 0;
             var table_count_visible_max: u32 = 0;
+            var value_count_visible: u64 = 0;
+
             for (&manifest.levels, 0..) |*manifest_level, index| {
                 const level: u8 = @intCast(index);
                 const level_table_count_visible_max =
@@ -452,6 +454,21 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                 table_count_visible += manifest_level.table_count_visible;
                 table_count_visible_max += level_table_count_visible_max;
+                value_count_visible += manifest_level.value_count_visible;
+            }
+
+            if (constants.verify) {
+                var value_count_visible_verify: u64 = 0;
+                for (&manifest.levels) |*manifest_level| {
+                    var it = manifest_level.iterator(
+                        .visible,
+                        &.{snapshot_latest},
+                        .ascending,
+                        null,
+                    );
+                    while (it.next()) |table| value_count_visible_verify += table.value_count;
+                }
+                assert(value_count_visible_verify == value_count_visible);
             }
 
             manifest.tracer.gauge(
@@ -461,6 +478,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.tracer.gauge(
                 .{ .table_count_visible_max = .{ .tree = @enumFromInt(manifest.config.id) } },
                 table_count_visible_max,
+            );
+            manifest.tracer.gauge(
+                .{ .value_count_visible = .{ .tree = @enumFromInt(manifest.config.id) } },
+                value_count_visible,
             );
         }
 

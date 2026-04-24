@@ -166,6 +166,9 @@ pub fn ManifestLevelType(
         // added/updated/removed, and also knows the superblock's persisted snapshots.
         table_count_visible: u32 = 0,
 
+        /// The number of values, within all tables visible to snapshot_latest.
+        value_count_visible: u64 = 0,
+
         /// A monotonically increasing generation number that is used detect invalid internal
         /// TableInfo references.
         generation: u32 = 0,
@@ -218,7 +221,10 @@ pub fn ManifestLevelType(
             const absolute_index_tables = level.tables.insert_element(node_pool, table.*);
             assert(absolute_index_tables < level.tables.len());
 
-            if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
+            if (table.visible(lsm.snapshot_latest)) {
+                level.table_count_visible += 1;
+                level.value_count_visible += table.value_count;
+            }
             level.generation +%= 1;
 
             level.key_range_latest.include(KeyRange{
@@ -265,6 +271,7 @@ pub fn ManifestLevelType(
 
             table.snapshot_max = snapshot;
             level.table_count_visible -= 1;
+            level.value_count_visible -= table.value_count;
             level.key_range_latest.exclude(KeyRange{
                 .key_min = table.key_min,
                 .key_max = table.key_max,
@@ -305,6 +312,7 @@ pub fn ManifestLevelType(
 
             if (table.visible(lsm.snapshot_latest)) {
                 level.table_count_visible -= 1;
+                level.value_count_visible -= table.value_count;
 
                 level.key_range_latest.exclude(.{
                     .key_min = table.key_min,
