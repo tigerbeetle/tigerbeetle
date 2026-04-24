@@ -11425,10 +11425,11 @@ pub fn ReplicaType(
                 .previous_request_latency = 0,
             };
 
+            stdx.copy_disjoint(.exact, u8, request.body_used(), body);
             request.header.set_checksum_body(request.body_used());
             request.header.set_checksum();
 
-            stdx.copy_disjoint(.exact, u8, request.body_used(), body);
+            // Enable zero-copy Request->Prepare->WAL path by padding to disk sector.
             @memset(request.buffer[request.header.size..vsr.sector_ceil(request.header.size)], 0);
 
             self.send_message_to_replica(self.replica, request);
