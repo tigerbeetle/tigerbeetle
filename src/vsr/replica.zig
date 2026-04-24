@@ -7360,6 +7360,7 @@ pub fn ReplicaType(
                 .request = request_header.request,
                 .operation = request_header.operation,
             };
+            // Recompute the body checksum: `.register` and `.reconfigure` mutate the body in place.
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
