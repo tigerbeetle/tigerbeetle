@@ -120,7 +120,7 @@ pub fn ScanTreeType(
         };
 
         tree: *Tree,
-        buffer: *const ScanBuffer,
+        buffer: *ScanBuffer,
 
         direction: Direction,
         key_lower: Key,
@@ -163,7 +163,7 @@ pub fn ScanTreeType(
 
         pub fn init(
             tree: *Tree,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             key_min: Key,
             key_max: Key,
@@ -240,11 +240,7 @@ pub fn ScanTreeType(
             for (&self.levels, 0..) |*level, i| {
                 if (state_before == .idle) {
                     // Initializing all levels for the first read.
-                    level.init(
-                        self,
-                        self.buffer.levels[i],
-                        @intCast(i),
-                    );
+                    level.init(self, &self.buffer.levels[i], @intCast(i));
                 }
 
                 switch (level.values) {
@@ -495,7 +491,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         scan: *ScanTree,
         level_index: u8,
-        buffer: ScanBuffer.LevelBuffer,
+        buffer: *ScanBuffer.LevelBuffer,
 
         state: union(enum) {
             loading_manifest,
@@ -526,7 +522,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         pub fn init(
             self: *ScanTreeLevel,
             scan: *ScanTree,
-            buffer: ScanBuffer.LevelBuffer,
+            buffer: *ScanBuffer.LevelBuffer,
             level_index: u8,
         ) void {
             assert(level_index < constants.lsm_levels);
@@ -783,8 +779,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state == .buffering);
             assert(self.scan.state.buffering.pending_count > 0);
 
-            // `index_block` is only valid for this callback, so copy it's contents.
-            stdx.copy_disjoint(.exact, u8, self.buffer.index_block, index_block);
+            self.scan.tree.grid.block_unref(self.buffer.index_block);
+            self.buffer.index_block = self.scan.tree.grid.block_ref(@constCast(index_block));
 
             const Range = struct { start: u32, end: u32 };
             const range_found: ?Range = range: {

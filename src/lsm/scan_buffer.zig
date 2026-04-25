@@ -89,7 +89,7 @@ pub fn ScanBufferPoolType(comptime Grid: type) type {
             };
         }
 
-        pub fn acquire(self: *ScanBufferPool) Error!*const ScanBuffer {
+        pub fn acquire(self: *ScanBufferPool) Error!*ScanBuffer {
             if (self.scan_buffer_used == constants.lsm_scans_max) return Error.ScansMaxExceeded;
 
             defer self.scan_buffer_used += 1;
@@ -97,7 +97,7 @@ pub fn ScanBufferPoolType(comptime Grid: type) type {
             return &self.scan_buffers[self.scan_buffer_used];
         }
 
-        pub fn acquire_assume_capacity(self: *ScanBufferPool) *const ScanBuffer {
+        pub fn acquire_assume_capacity(self: *ScanBufferPool) *ScanBuffer {
             return self.acquire() catch unreachable;
         }
     };
