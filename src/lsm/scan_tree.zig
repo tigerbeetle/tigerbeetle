@@ -9,6 +9,7 @@ const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
+const vsr = @import("../vsr.zig");
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -895,18 +896,13 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             );
 
             if (range.count > 0) {
-                // The buffer is a whole grid block, but only the matching values should
-                // be copied to save memory bandwidth. The buffer `value block` does not
-                // follow the block layout (e.g. header + values).
-                const buffer: []Value = std.mem.bytesAsSlice(Value, self.buffer.value_block);
-                stdx.copy_disjoint(
-                    .exact,
-                    Value,
-                    buffer[0..range.count],
-                    values[range.start..][0..range.count],
-                );
+                self.scan.tree.grid.block_unref(self.buffer.value_block);
+                self.buffer.value_block = self.scan.tree.grid.block_ref(@constCast(value_block));
+
                 // Found values that match the range query.
-                self.values = .{ .buffered = buffer[0..range.count] };
+                const block_values =
+                    std.mem.bytesAsSlice(Value, self.buffer.value_block[@sizeOf(vsr.Header)..]);
+                self.values = .{ .buffered = block_values[range.start..][0..range.count] };
             } else {
                 // The `value_block` *might* contain the key range,
                 // otherwise, it shouldn't have been returned by the iterator.
