@@ -801,7 +801,7 @@ pub fn GridType(comptime Storage: type) type {
             return &grid.blocks[stash_location];
         }
 
-        pub fn block_ref(grid: *Grid, block: BlockPtr) BlockPtr {
+        pub fn block_ref(grid: *Grid, block: BlockPtrConst) BlockPtrConst {
             const block_header = schema.header_from_block(block);
             assert(block_header.valid_checksum());
 
