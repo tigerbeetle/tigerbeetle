@@ -781,7 +781,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state.buffering.pending_count > 0);
 
             self.scan.tree.grid.block_unref(self.buffer.index_block);
-            self.buffer.index_block = self.scan.tree.grid.block_ref(@constCast(index_block));
+            self.buffer.index_block = self.scan.tree.grid.block_ref(index_block);
 
             const Range = struct { start: u32, end: u32 };
             const range_found: ?Range = range: {
@@ -897,7 +897,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             if (range.count > 0) {
                 self.scan.tree.grid.block_unref(self.buffer.value_block);
-                self.buffer.value_block = self.scan.tree.grid.block_ref(@constCast(value_block));
+                self.buffer.value_block = self.scan.tree.grid.block_ref(value_block);
 
                 // Found values that match the range query.
                 const block_values =

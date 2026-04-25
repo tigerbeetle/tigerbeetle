@@ -1,5 +1,5 @@
 const constants = @import("../constants.zig");
-const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 
 pub const Error = error{
     ScansMaxExceeded,
@@ -10,8 +10,8 @@ pub const Error = error{
 pub fn ScanBufferType(comptime Grid: type) type {
     return struct {
         pub const LevelBuffer = struct {
-            index_block: BlockPtr,
-            value_block: BlockPtr,
+            index_block: BlockPtrConst,
+            value_block: BlockPtrConst,
 
             pub fn init(self: *LevelBuffer, grid: *Grid) void {
                 self.* = .{

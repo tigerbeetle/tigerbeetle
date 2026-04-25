@@ -339,7 +339,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                 if (result == .valid) {
                     scrubber.forest.grid.block_unref(scrubber.tour_index_block);
                     scrubber.tour_index_block =
-                        scrubber.forest.grid.block_ref(@constCast(result.valid));
+                        scrubber.forest.grid.block_ref(result.valid);
                     scrubber.tour.table_value.index_block = scrubber.tour_index_block;
                 } else {
                     // The scrubber can't scrub the table value blocks until it has the

@@ -323,7 +323,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             assert(chunk_size > 0);
 
             trailer.grid.?.block_unref(trailer.blocks[trailer.block_index]);
-            trailer.blocks[trailer.block_index] = trailer.grid.?.block_ref(@constCast(block));
+            trailer.blocks[trailer.block_index] = @constCast(trailer.grid.?.block_ref(block));
             trailer.size_transferred += chunk_size;
 
             if (schema.TrailerNode.previous(block)) |previous| {

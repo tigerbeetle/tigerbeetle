@@ -1412,7 +1412,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(read.counters == null);
 
             grid.block_unref(read.block.ptr);
-            read.block.ptr = grid.block_ref(@constCast(index_block));
+            read.block.ptr = @constCast(grid.block_ref(index_block));
             read.block.stage = .read_index_block_done;
             return read.pool.iop_release(.{ .read = read });
         }
@@ -1505,7 +1505,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(read.block.stage == .read_value_block);
 
             grid.block_unref(read.block.ptr);
-            read.block.ptr = grid.block_ref(@constCast(value_block));
+            read.block.ptr = @constCast(grid.block_ref(value_block));
             read.block.stage = .read_value_block_done;
             return read.pool.iop_release(.{ .read = read });
         }
