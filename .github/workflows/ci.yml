@@ -18,7 +18,7 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - run: git clone https://github.com/${{ github.repository }} .
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
       - run: shellcheck ./zig/download.sh
       - shell: pwsh
         run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
@@ -44,13 +44,13 @@ jobs:
         run: | # Allow unshare for vortex.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: git clone https://github.com/${{ github.repository }} .
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
       - run: ./zig/download.ps1 && ./zig/zig build ci -- test
 
   test_aof:
     runs-on: ubuntu-latest
     steps:
-      - run: git clone https://github.com/${{ github.repository }} .
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
       - uses: actions/cache@v5
         with:
           path: ./zig/cache
@@ -106,7 +106,7 @@ jobs:
         run: | # Allow unshare for vortex.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: git clone https://github.com/${{ github.repository }} .
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
 
       - if: matrix.language == 'dotnet'
         uses: actions/setup-dotnet@v4
@@ -147,7 +147,7 @@ jobs:
       id-token: write
 
     steps:
-      - run: git clone https://github.com/${{ github.repository }} .
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
       - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: sudo rm -rf /usr/local/lib/android # Free up disk space for benchmarking.
       - uses: actions/cache@v5

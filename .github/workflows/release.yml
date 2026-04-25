@@ -16,7 +16,7 @@ jobs:
       id-token: write
 
     steps:
-      - run: git clone https://github.com/${{ github.repository }} . && git checkout release
+      - run: git clone https://github.com/${{ github.repository }} . git checkout release
 
       - uses: actions/setup-dotnet@v4
         with:

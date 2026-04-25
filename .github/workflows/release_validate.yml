@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !(github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') }}
     steps:
-      - run: git clone https://github.com/${{ github.repository }} .
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
 
       # TODO: move this to be after tag checkout once #3613 is released
       - uses: actions/cache@v5
