@@ -13,6 +13,9 @@ on:
     # in systems we do not control.
     - cron: 0 */6 * * *
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 2nd, 2026).
+
 jobs:
   validate:
     runs-on: ubuntu-latest

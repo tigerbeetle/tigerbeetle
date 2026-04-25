@@ -13,6 +13,7 @@ on:
 
 env:
   GH_TOKEN: ${{ github.token }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 2nd, 2026).
 
 jobs:
   smoke:
