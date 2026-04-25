@@ -18,11 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !(github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2147483647
-          fetch-tags: true # Fetch full history for tidy.
-          ref: main
+      - run: git clone https://github.com/${{ github.repository }} . && git fetch origin ${{ github.sha }} && git checkout ${{ github.sha }}
 
       # TODO: move this to be after tag checkout once #3613 is released
       - uses: actions/cache@v5

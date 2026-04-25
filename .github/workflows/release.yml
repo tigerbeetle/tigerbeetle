@@ -16,11 +16,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2147483647
-          fetch-tags: true # Fetch full history for tidy.
-          ref: release # Use the 'release' branch even if triggered manually
+      - run: git clone https://github.com/${{ github.repository }} . git checkout release
 
       - uses: actions/setup-dotnet@v4
         with:
