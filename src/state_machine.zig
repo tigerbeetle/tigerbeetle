@@ -4815,7 +4815,7 @@ fn ExpirePendingTransfersType(
         fn scan(
             self: *ExpirePendingTransfers,
             tree: *Tree,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             filter: struct {
                 snapshot: u64,
                 /// Will fetch transfers expired before this timestamp (inclusive).
@@ -4948,7 +4948,7 @@ fn ChangeEventsScanLookupType(
         fn init(
             self: *AccountEventsLookup,
             tree: *AccountEventsGroove.ObjectTree,
-            scan_buffer: *const ScanBuffer,
+            scan_buffer: *ScanBuffer,
             snapshot: u64,
             timestamp_range: TimestampRange,
         ) void {

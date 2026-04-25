@@ -103,7 +103,7 @@ pub fn ScanBuilderType(
         pub fn scan_prefix(
             self: *ScanBuilder,
             comptime index: std.meta.FieldEnum(Groove.IndexTrees),
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             prefix: CompositeKeyPrefixType(index),
             timestamp_range: TimestampRange,
@@ -129,7 +129,7 @@ pub fn ScanBuilderType(
         /// Results are always unique.
         pub fn scan_id(
             self: *ScanBuilder,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             id: u128,
             direction: Direction,
@@ -155,7 +155,7 @@ pub fn ScanBuilderType(
         /// Results are ordered by `timestamp`.
         pub fn scan_timestamp(
             self: *ScanBuilder,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             timestamp_range: TimestampRange,
             direction: Direction,

@@ -46,7 +46,7 @@ pub fn ScanRangeType(
         pub fn init(
             evaluator_context: EvaluatorContext,
             tree: *Tree,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot_: u64,
             key_min: Tree.Table.Key,
             key_max: Tree.Table.Key,
