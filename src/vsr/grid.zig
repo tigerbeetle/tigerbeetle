@@ -187,7 +187,8 @@ pub fn GridType(comptime Storage: type) type {
         stash_free: std.AutoArrayHashMapUnmanaged(u32, void),
         stash_used: std.AutoArrayHashMapUnmanaged(u32, void),
         /// NB: stash_free.count() may exceed stash_available. This occurs when there are multiple
-        /// references taken to a single block.
+        /// references taken to a single block. Even if there are free blocks in `stash_free`,
+        /// taking more than `stash_available` references is not permitted.
         ///
         /// Invariants:
         /// - stash_available ≤ stash_blocks_count
