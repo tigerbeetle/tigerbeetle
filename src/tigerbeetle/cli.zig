@@ -89,9 +89,6 @@ const CLIArgs = union(enum) {
         timeout_grid_repair_message_ms: ?u64 = null,
         commit_stall_probability: ?Ratio = null,
 
-        // Highly experimental options that will be removed in a future release:
-        replicate_star: bool = false,
-
         statsd: ?[]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
@@ -543,7 +540,7 @@ pub const Command = union(enum) {
         trace: ?[]const u8,
         development: bool,
         experimental: bool,
-        replicate_star: bool,
+
         aof_file: ?Path,
         aof_recovery: bool,
         path: []const u8,
@@ -1080,7 +1077,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
-        .replicate_star = start.replicate_star,
+
         .aof_file = aof_file,
         .aof_recovery = start.aof_recovery,
         .path = start.path,

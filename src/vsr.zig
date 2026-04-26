@@ -70,7 +70,7 @@ pub const Header = @import("vsr/message_header.zig").Header;
 pub const FreeSet = @import("vsr/free_set.zig").FreeSet;
 pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").CheckpointTrailerType;
 pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
-pub const Routing = @import("vsr/routing.zig");
+
 pub const FaultDetector = @import("vsr/fault_detector.zig");
 pub const CountingAllocator = @import("counting_allocator.zig");
 

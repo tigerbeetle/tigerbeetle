@@ -165,10 +165,6 @@ pub fn ReplicaType(
         const Clock = vsr.Clock;
         const ForestTableIterator = ForestTableIteratorType(Forest);
 
-        pub const ReplicateOptions = struct {
-            star: bool = false,
-        };
-
         const BlockRead = struct {
             read: Grid.Read,
             replica: *Replica,
@@ -468,8 +464,6 @@ pub fn ReplicaType(
             cache: PipelineCache,
         },
 
-        routing: vsr.Routing,
-
         /// When "log_view < view": The JV headers.
         /// When "log_view = view": The View headers. (Just as a cache,
         /// since they are regenerated for every request_view).
@@ -616,8 +610,6 @@ pub fn ReplicaType(
         aof: ?*AOF,
         aof_recovery: bool,
 
-        replicate_options: ReplicateOptions,
-
         const OpenOptions = struct {
             node_count: u8,
             pipeline_requests_limit: u32,
@@ -636,7 +628,6 @@ pub fn ReplicaType(
             timeout_prepare_ticks: ?u64 = null,
             timeout_grid_repair_message_ticks: ?u64 = null,
             commit_stall_probability: ?Ratio,
-            replicate_options: ReplicateOptions = .{},
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -724,7 +715,6 @@ pub fn ReplicaType(
                     .timeout_prepare_ticks = options.timeout_prepare_ticks,
                     .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
                     .commit_stall_probability = options.commit_stall_probability,
-                    .replicate_options = options.replicate_options,
                     .tracer = options.tracer,
                 },
             );
@@ -868,7 +858,6 @@ pub fn ReplicaType(
                 // completes.
                 self.log_view += 1;
                 self.view += 1;
-                self.routing.view_change(self.view);
                 self.primary_update_view_headers();
                 self.view_durable_update();
 
@@ -1070,7 +1059,6 @@ pub fn ReplicaType(
             timeout_prepare_ticks: ?u64,
             timeout_grid_repair_message_ticks: ?u64,
             commit_stall_probability: ?Ratio,
-            replicate_options: ReplicateOptions,
             tracer: *Tracer,
         };
 
@@ -1314,11 +1302,7 @@ pub fn ReplicaType(
                     .capacity = constants.pipeline_prepare_queue_max +
                         options.pipeline_requests_limit,
                 } },
-                .routing = vsr.Routing.init(.{
-                    .replica = replica_index,
-                    .replica_count = replica_count,
-                    .standby_count = standby_count,
-                }),
+
                 .view_headers = vsr.Headers.ViewChangeArray.init(
                     self.superblock.working.view_headers().command,
                     self.superblock.working.view_headers().slice,
@@ -1425,9 +1409,7 @@ pub fn ReplicaType(
                 .test_context = self.test_context,
                 .aof = options.aof,
                 .aof_recovery = options.aof_recovery,
-                .replicate_options = options.replicate_options,
             };
-            self.routing.view_change(self.view);
 
             log.info("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
                 "release={}", .{
@@ -1489,7 +1471,7 @@ pub fn ReplicaType(
 
         pub fn invariants(self: *const Replica) void {
             assert(self.journal.header_with_op(self.op) != null);
-            assert(self.view == self.routing.view);
+
             assert((self.sync_tables == null) == (self.sync_tables_op_range == null));
             assert(self.commit_min <= self.op);
         }
@@ -1839,15 +1821,6 @@ pub fn ReplicaType(
                 .ping_timestamp_monotonic = message.header.ping_timestamp_monotonic,
                 .pong_timestamp_wall = @bitCast(self.clock.realtime()),
             }));
-
-            if (self.status == .normal and self.backup()) {
-                if (message.header.view == self.view and message.header.route != 0) {
-                    const route = self.routing.route_decode(message.header.route).?;
-                    if (!self.routing.a.equal(&route)) {
-                        self.routing.route_activate(route);
-                    }
-                }
-            }
 
             if (message.header.replica < self.replica_count) {
                 const upgrade_targets = &self.upgrade_targets[message.header.replica];
@@ -2244,13 +2217,6 @@ pub fn ReplicaType(
             assert(message.header.view == self.view);
             assert(self.primary());
             assert(self.syncing == .idle);
-
-            // Routing tracks latencies even for prepares outside of the pipeline.
-            self.routing.op_prepare_ok(
-                message.header.op,
-                message.header.replica,
-                self.clock.monotonic(),
-            );
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
@@ -2789,9 +2755,6 @@ pub fn ReplicaType(
 
             if (self.status == .recovering_head) {
                 assert(message.header.view >= self.view);
-                if (message.header.view > self.view) {
-                    self.routing.view_change(message.header.view);
-                }
                 self.view = message.header.view;
                 maybe(self.view == self.log_view);
             } else {
@@ -3548,15 +3511,6 @@ pub fn ReplicaType(
             // Don't drop pings while the view is being updated.
             const ping_view = self.view_durable();
 
-            var ping_route: u64 = 0;
-            if (self.status == .normal and self.primary() and self.view == ping_view) {
-                if (self.routing.route_improvement()) |new_route| {
-                    self.routing.history_reset();
-                    self.routing.route_activate(new_route);
-                }
-                ping_route = self.routing.route_encode(self.routing.a);
-            }
-
             const releases = self.multiversion.releases_bundled();
             releases.verify();
             assert(releases.contains(self.release));
@@ -3571,7 +3525,6 @@ pub fn ReplicaType(
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic().ns,
-                .route = ping_route,
                 .release_count = releases.count,
             };
 
@@ -7396,7 +7349,6 @@ pub fn ReplicaType(
                 self.pulse_timeout.reset();
             }
 
-            self.routing.op_prepare(message.header.op, self.clock.monotonic());
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
@@ -7586,14 +7538,9 @@ pub fn ReplicaType(
                 // repair their journal.
                 if (self.status == .view_change) break :repair self.op;
 
-                // Missing prepares/headers are expected during normal
-                // processing. This is by virtue of experimental ops in
-                // adaptive replication routing (see routing.zig), which
-                // cause replicas that usually receive ops in 2 hops to
-                // receive *some* ops in 1 hop (and vice versa). So, if a
-                // missing prepare/header exists within a pipeline of ops
-                // from the head, wait for it to arrive via normal
-                // replication, instead of eagerly repairing it.
+                // Missing prepares/headers within a pipeline of ops
+                // from the head may arrive via normal replication, so
+                // wait for them instead of eagerly repairing.
                 break :repair self.op -| constants.pipeline_prepare_queue_max;
             };
 
@@ -8511,27 +8458,8 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.replicate_options.star) {
-                if (self.status == .normal and self.primary()) {
-                    self.send_message_to_other_replicas_and_standbys(message.base());
-                }
-
-                return;
-            }
-
-            var next_hop_buffer: [2]u8 = undefined;
-            const next_hop = self.routing.op_next_hop(message.header.op, &next_hop_buffer);
-            assert(next_hop.len <= 2);
-            for (next_hop) |replica_target| {
-                assert(replica_target != self.replica);
-                assert(replica_target != self.view % self.replica_count);
-                assert(replica_target < self.replica_count + self.standby_count);
-                log.debug("{}: replicate: replicating op={} to replica {}", .{
-                    self.log_prefix(),
-                    message.header.op,
-                    replica_target,
-                });
-                self.send_message_to_replica(replica_target, message);
+            if (self.status == .normal and self.primary()) {
+                self.send_message_to_other_replicas_and_standbys(message.base());
             }
         }
 
@@ -10021,9 +9949,6 @@ pub fn ReplicaType(
                 // Recovering to the same view we lost the head in.
                 assert(self.view == view_new);
             } else {
-                if (view_new > self.view) {
-                    self.routing.view_change(view_new);
-                }
                 self.view = view_new;
                 self.log_view = view_new;
                 self.view_durable_update();
@@ -10116,9 +10041,6 @@ pub fn ReplicaType(
                     // We recovered into the same view we crashed in, with a detour through
                     // status=recovering_head.
                 } else {
-                    if (view_new > self.view) {
-                        self.routing.view_change(view_new);
-                    }
                     self.view = view_new;
                     self.log_view = view_new;
                     self.view_durable_update();
@@ -10200,8 +10122,6 @@ pub fn ReplicaType(
                 assert(view_new > self.view);
                 self.view = view_new;
                 self.view_durable_update();
-                self.routing.history_reset();
-                self.routing.view_change(self.view);
             }
 
             if (self.pipeline == .queue) {
