@@ -435,7 +435,6 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
             },
         },
         .replicate_options = .{
-            .closed_loop = prng.chance(ratio(1, 5)),
             .star = prng.chance(ratio(1, 5)),
         },
     };

@@ -166,7 +166,6 @@ pub fn ReplicaType(
         const ForestTableIterator = ForestTableIteratorType(Forest);
 
         pub const ReplicateOptions = struct {
-            closed_loop: bool = false,
             star: bool = false,
         };
 
