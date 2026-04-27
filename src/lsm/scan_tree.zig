@@ -398,10 +398,7 @@ pub fn ScanTreeType(
         }
 
         fn merge_table_immutable_peek(self: *ScanTree) Pending!?Key {
-            return self.table_immutable_iterator.peek() catch |err| switch (err) {
-                error.Empty => return null,
-                error.Drained => unreachable,
-            };
+            return self.table_immutable_iterator.peek();
         }
 
         fn merge_table_mutable_pop(self: *ScanTree) Value {
@@ -409,7 +406,7 @@ pub fn ScanTreeType(
         }
 
         fn merge_table_immutable_pop(self: *ScanTree) Value {
-            return self.table_immutable_iterator.pop() catch unreachable;
+            return self.table_immutable_iterator.pop().?;
         }
 
         inline fn table_memory_peek(

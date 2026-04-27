@@ -31,7 +31,9 @@ const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 const Direction = @import("../direction.zig").Direction;
-const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
+const k_way_merge = @import("k_way_merge.zig");
+const KWayMergeIteratorType = k_way_merge.KWayMergeIteratorType;
+const TournamentTreeType = k_way_merge.TournamentTreeType;
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 const Pending = error{Pending};
 
@@ -130,18 +132,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
         };
 
-        const KWayMergeIterator = KWayMergeIteratorType(
-            MergeContext,
-            Key,
-            Value,
-            .{
-                .streams_max = sorted_runs_max,
-                .deduplicate = false,
-            },
-            key_from_value,
-            MergeContext.stream_peek,
-            MergeContext.stream_pop,
-        );
 
         const SortedRunTracker = struct {
             /// Invariants:
@@ -253,9 +243,11 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub const ImmutableTableIterator = struct {
             const Self = @This();
+            const TournamentTree = TournamentTreeType(Key, sorted_runs_max);
 
-            merge_context: MergeContext,
-            k_way_iterator: KWayMergeIterator,
+            streams: [sorted_runs_max][]const Value,
+            streams_count: u32,
+            tournament_tree: ?TournamentTree,
             address: *const Self,
             direction: Direction,
             maybe_key_end: ?Key,
@@ -275,17 +267,15 @@ pub fn TableMemoryType(comptime Table: type) type {
                 maybe_key_end: ?Key,
                 direction: Direction,
             ) void {
-                var context = merge_context;
-                context.direction = direction;
-
                 var count_input: usize = 0;
-                for (context.streams[0..context.streams_count]) |stream| {
+                for (merge_context.streams[0..merge_context.streams_count]) |stream| {
                     count_input += stream.len;
                 }
 
                 iterator.* = .{
-                    .merge_context = context,
-                    .k_way_iterator = undefined,
+                    .streams = undefined,
+                    .streams_count = merge_context.streams_count,
+                    .tournament_tree = null,
                     .address = iterator,
                     .direction = direction,
                     .maybe_key_end = maybe_key_end,
@@ -296,11 +286,14 @@ pub fn TableMemoryType(comptime Table: type) type {
                         .input = @intCast(count_input),
                     },
                 };
-                iterator.k_way_iterator = KWayMergeIterator.init(
-                    &iterator.merge_context,
-                    @intCast(iterator.merge_context.streams_count),
-                    iterator.direction,
+
+                @memcpy(
+                    iterator.streams[0..merge_context.streams_count],
+                    merge_context.streams[0..merge_context.streams_count],
                 );
+                for (iterator.streams[merge_context.streams_count..]) |*s| {
+                    s.* = &.{};
+                }
             }
 
             pub fn count_max(iterator: *const Self) u32 {
@@ -321,25 +314,23 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             fn assert_not_moved(iterator: *const Self) void {
                 assert(@intFromPtr(iterator.address) == @intFromPtr(iterator));
-                assert(@intFromPtr(iterator.k_way_iterator.context) ==
-                    @intFromPtr(&iterator.merge_context));
             }
 
-            pub inline fn peek(iterator: *Self) error{ Empty, Drained }!Key {
-                if(iterator.maybe_value_next) |value| return key_from_value(&value);
-                try iterator.ensure_next();
-                const value = iterator.maybe_value_next orelse return error.Empty;
+            pub inline fn peek(iterator: *Self) ?Key {
+                if (iterator.maybe_value_next) |value| return key_from_value(&value);
+                iterator.ensure_next();
+                const value = iterator.maybe_value_next orelse return null;
                 return key_from_value(&value);
             }
 
-            pub inline fn pop(iterator: *Self) error{ Empty, Drained }!Value {
-                if(iterator.maybe_value_next) |value|{
+            pub inline fn pop(iterator: *Self) ?Value {
+                if (iterator.maybe_value_next) |value| {
                     iterator.counters.out += 1;
                     iterator.maybe_value_next = null;
                     return value;
                 }
-                try iterator.ensure_next();
-                const value = iterator.maybe_value_next orelse return error.Empty;
+                iterator.ensure_next();
+                const value = iterator.maybe_value_next orelse return null;
                 iterator.counters.out += 1;
                 iterator.maybe_value_next = null;
                 return value;
@@ -347,26 +338,66 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             pub fn probe(iterator: *Self, probe_key: Key) void {
                 while (true) {
-                    const key_peek = iterator.peek() catch break;
+                    const key_peek = iterator.peek() orelse break;
                     switch (iterator.direction) {
                         .ascending => if (key_peek >= probe_key) break,
                         .descending => if (key_peek <= probe_key) break,
                     }
-                    _ = iterator.pop() catch unreachable;
+                    _ = iterator.pop();
                 }
             }
 
-            fn ensure_next(iterator: *Self) error{ Empty, Drained }!void {
-                iterator.assert_not_moved();
-                if (iterator.maybe_value_next != null) return;
-                if (iterator.end_reached) {
-                    return error.Empty;
+            fn load_tree(iterator: *Self) void {
+                assert(iterator.tournament_tree == null);
+
+                var contestants: [TournamentTree.node_count_max]TournamentTree.Node = @splat(.sentinel);
+                for (0..iterator.streams_count) |id_usize| {
+                    const stream = iterator.streams[id_usize];
+                    if (stream.len == 0) continue;
+                    const value: *const Value = iterator.direction.slice_peek(stream);
+                    contestants[id_usize] = .{
+                        .key = key_from_value(value),
+                        .id = @intCast(id_usize),
+                    };
                 }
 
+                iterator.tournament_tree = TournamentTree.init(
+                    iterator.direction,
+                    &contestants,
+                    @intCast(iterator.streams_count),
+                );
+            }
+
+            fn pop_from_tree(iterator: *Self) ?Value {
+                if (iterator.tournament_tree == null) iterator.load_tree();
+                var tree = &iterator.tournament_tree.?;
+
+                while (tree.contestants_left > 0) {
+                    const win_id = tree.win_id;
+                    const next_key: ?Key = if (iterator.streams[win_id].len > 0)
+                        key_from_value(iterator.direction.slice_peek(iterator.streams[win_id]))
+                    else
+                        null;
+
+                    tree.pop_winner(next_key);
+                    if (tree.contestants_left == 0) return null;
+
+                    const new_win_id = tree.win_id;
+                    const value, iterator.streams[new_win_id] =
+                        iterator.direction.slice_pop(iterator.streams[new_win_id]);
+
+                    return value;
+                }
+                return null;
+            }
+
+            fn ensure_next(iterator: *Self) void {
+                iterator.assert_not_moved();
+                if (iterator.maybe_value_next != null) return;
+                if (iterator.end_reached) return;
+
                 while (true) {
-                    const maybe_value = iterator.k_way_iterator.pop() catch |err| switch (err) {
-                        error.Pending => unreachable, // in-memory streams never pend
-                    };
+                    const maybe_value = iterator.pop_from_tree();
 
                     if (maybe_value == null) {
                         if (iterator.pending) |pending_value| {
@@ -379,7 +410,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                         assert(iterator.counters.input == consumed);
 
                         iterator.end_reached = true;
-                        return error.Empty;
+                        return;
                     }
 
                     const value = maybe_value.?;
@@ -408,7 +439,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     } else {
                         if (!iterator.within_range(key)) {
                             iterator.end_reached = true;
-                            return error.Empty;
+                            return;
                         }
 
                         iterator.pending = value;
