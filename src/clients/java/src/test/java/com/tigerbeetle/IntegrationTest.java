@@ -702,7 +702,7 @@ public class IntegrationTest {
         // so adding an extra delay to avoid flaky tests.
         final var timeout_ms = TimeUnit.SECONDS.toMillis(lookupTransfers.getTimeout());
         final var currentMilis = System.currentTimeMillis();
-        final var extra_wait_time = 250L;
+        final var extra_wait_time = 500L;
         Thread.sleep(timeout_ms + extra_wait_time);
         assertTrue(System.currentTimeMillis() - currentMilis > timeout_ms);
 

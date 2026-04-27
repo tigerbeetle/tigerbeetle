@@ -447,7 +447,7 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   // server can pulse the expiry operation anytime after the timeout,
   // so adding an extra delay to avoid flaky tests.
   // TODO: Use `await setTimeout(1000)` when upgrade to Node.js > 15.
-  const extra_wait_time = 250;
+  const extra_wait_time = 500;
   await new Promise(_ => setTimeout(_, (transfer.timeout * 1000) + extra_wait_time));
 
   // Looking up the accounts again for the updated balance.

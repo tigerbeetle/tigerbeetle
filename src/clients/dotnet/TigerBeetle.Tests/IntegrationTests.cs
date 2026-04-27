@@ -662,7 +662,7 @@ public class IntegrationTests
         // We need to wait 1s for the server to expire the transfer, however the
         // server can pulse the expiry operation anytime after the timeout,
         // so adding an extra delay to avoid flaky tests.
-        const long EXTRA_WAIT_TIME = 250;
+        const long EXTRA_WAIT_TIME = 500;
         Thread.Sleep(TimeSpan.FromSeconds(transfer.Timeout)
             .Add(TimeSpan.FromMilliseconds(EXTRA_WAIT_TIME)));
 
