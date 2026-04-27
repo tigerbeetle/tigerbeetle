@@ -379,7 +379,7 @@ def test_cannot_void_an_expired_transfer(client):
     # We need to wait 1s for the server to expire the transfer, however the
     # server can pulse the expiry operation anytime after the timeout,
     # so adding an extra delay to avoid flaky tests.
-    extra_wait_time = 0.25
+    extra_wait_time = 0.50
     time.sleep(transfer.timeout + extra_wait_time)
 
     # Looking up the accounts again for the updated balance.
