@@ -1987,7 +1987,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             while (index_target < budget_iterator and
                 index_target < values_target.len) : (index_target += 1)
             {
-                const value_in = values_iterator.pop() catch break;
+                const value_in = values_iterator.pop() orelse break;
                 values_target[index_target] = value_in;
             }
 
@@ -2037,9 +2037,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             var index_source: usize = 0;
             var index_target: usize = 0;
             while (index_source < budget_iterator and index_target < values_target.len) {
-                const value_in = values_iterator.pop() catch {
-                    break;
-                };
+                const value_in = values_iterator.pop() orelse break;
                 index_source += 1;
                 if (tombstone(&value_in)) {
                     assert(Table.usage != .secondary_index);
@@ -2129,12 +2127,12 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             while (index_source_a < budget_iterator and index_source_b < values_source_b.len and
                 index_target < values_target.len)
             {
-                const key_a = iterator_source_a.peek() catch break;
+                const key_a = iterator_source_a.peek() orelse break;
                 const value_b = &values_source_b[index_source_b];
                 switch (std.math.order(key_a, key_from_value(value_b))) {
                     .lt => { // Pick value from level a.
                         index_source_a += 1;
-                        const value_a = iterator_source_a.pop() catch break;
+                        const value_a = iterator_source_a.pop() orelse break;
                         if (drop_tombstones and tombstone(&value_a)) {
                             assert(Table.usage != .secondary_index);
                             continue;
@@ -2150,7 +2148,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                     .eq => { // Values have equal keys -- collapse them!
                         index_source_a += 1;
                         index_source_b += 1;
-                        const value_a = iterator_source_a.pop() catch break;
+                        const value_a = iterator_source_a.pop() orelse break;
                         if (comptime Table.usage == .secondary_index) {
                             // Secondary index optimization: cancel matching put/remove pairs.
                             assert(tombstone(&value_a) != tombstone(value_b));
