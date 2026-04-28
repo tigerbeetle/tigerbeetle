@@ -204,13 +204,13 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         pub const ImmutableTableIterator = struct {
-            const Self = @This();
+            const Iterator = @This();
             const TournamentTree = TournamentTreeType(Key, sorted_runs_max);
 
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
             tournament_tree: ?TournamentTree,
-            address: *const Self,
+            address: *const Iterator,
             direction: Direction,
             maybe_key_end: ?Key,
             pending: ?Value,
@@ -224,7 +224,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             } = .{},
 
             pub fn init(
-                iterator: *Self,
+                iterator: *Iterator,
                 merge_context: MergeContext,
                 maybe_key_end: ?Key,
                 direction: Direction,
@@ -235,7 +235,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 }
 
                 iterator.* = .{
-                    .streams = undefined,
+                    .streams = @splat(undefined),
                     .streams_count = merge_context.streams_count,
                     .tournament_tree = null,
                     .address = iterator,
@@ -249,43 +249,42 @@ pub fn TableMemoryType(comptime Table: type) type {
                     },
                 };
 
-                @memcpy(
-                    iterator.streams[0..merge_context.streams_count],
+                stdx.copy_disjoint(
+                    .exact,
+                    []const Value,
+                    iterator.streams[0..iterator.streams_count],
                     merge_context.streams[0..merge_context.streams_count],
                 );
-                for (iterator.streams[merge_context.streams_count..]) |*s| {
-                    s.* = &.{};
-                }
             }
 
-            pub fn count_max(iterator: *const Self) u32 {
+            pub fn count_max(iterator: *const Iterator) u32 {
                 iterator.assert_not_moved();
                 return iterator.counters.input;
             }
 
-            pub fn count_dropped(iterator: *const Self) u32 {
+            pub fn count_dropped(iterator: *const Iterator) u32 {
                 iterator.assert_not_moved();
                 return iterator.counters.dropped;
             }
 
-            pub fn count_remaining(iterator: *const Self) u32 {
+            pub fn count_remaining(iterator: *const Iterator) u32 {
                 iterator.assert_not_moved();
                 return iterator.counters.input - (iterator.counters.out +
                     iterator.counters.dropped);
             }
 
-            fn assert_not_moved(iterator: *const Self) void {
+            fn assert_not_moved(iterator: *const Iterator) void {
                 assert(@intFromPtr(iterator.address) == @intFromPtr(iterator));
             }
 
-            pub inline fn peek(iterator: *Self) ?Key {
+            pub inline fn peek(iterator: *Iterator) ?Key {
                 if (iterator.maybe_value_next) |value| return key_from_value(&value);
                 iterator.ensure_next();
                 const value = iterator.maybe_value_next orelse return null;
                 return key_from_value(&value);
             }
 
-            pub inline fn pop(iterator: *Self) ?Value {
+            pub inline fn pop(iterator: *Iterator) ?Value {
                 if (iterator.maybe_value_next) |value| {
                     iterator.counters.out += 1;
                     iterator.maybe_value_next = null;
@@ -298,7 +297,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return value;
             }
 
-            pub fn probe(iterator: *Self, probe_key: Key) void {
+            pub fn probe(iterator: *Iterator, probe_key: Key) void {
                 while (true) {
                     const key_peek = iterator.peek() orelse break;
                     switch (iterator.direction) {
@@ -309,10 +308,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                 }
             }
 
-            fn load_tree(iterator: *Self) void {
+            fn load_tree(iterator: *Iterator) void {
                 assert(iterator.tournament_tree == null);
 
-                var contestants: [TournamentTree.node_count_max]TournamentTree.Node = @splat(.sentinel);
+                var contestants: [TournamentTree.node_count_max]TournamentTree.Node =
+                    @splat(.sentinel);
                 for (0..iterator.streams_count) |id_usize| {
                     const stream = iterator.streams[id_usize];
                     if (stream.len == 0) continue;
@@ -330,7 +330,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 );
             }
 
-            fn pop_from_tree(iterator: *Self) ?Value {
+            fn pop_from_tree(iterator: *Iterator) ?Value {
                 if (iterator.tournament_tree == null) iterator.load_tree();
                 var tree = &iterator.tournament_tree.?;
 
@@ -351,7 +351,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return value;
             }
 
-            fn ensure_next(iterator: *Self) void {
+            fn ensure_next(iterator: *Iterator) void {
                 iterator.assert_not_moved();
                 if (iterator.maybe_value_next != null) return;
                 if (iterator.end_reached) return;
@@ -418,7 +418,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return .{ .next_pending = value, .dropped_count = 1 };
             }
 
-            inline fn within_range(iterator: *const Self, key: Key) bool {
+            inline fn within_range(iterator: *const Iterator, key: Key) bool {
                 const key_end = iterator.maybe_key_end orelse return true;
 
                 return switch (iterator.direction) {
@@ -578,7 +578,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 const expand: bool = table.count() == 0 or
                     key_from_value(&table.values[table.count() - 1]) <
                         key_from_value(value);
-                table.value_context.run_tracker.runs[run_count - 1].index_max += @intFromBool(expand);
+                table.value_context.run_tracker.runs[run_count - 1].index_max +=
+                    @intFromBool(expand);
             }
 
             table.values[table.count()] = value.*;
@@ -689,7 +690,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             maybe(table_mutable.sorted());
             defer assert(table_mutable.count() == 0);
 
-            // We should swap value_context and buffer
             table_mutable.value_context.run_tracker.assert_invariants(table_mutable.count());
 
             std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
@@ -722,34 +722,32 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             if (table_mutable.count() == 0) return;
 
-            // BUG: probably a performance bug.
-            const radix_buffer_values = table_mutable.mutability.mutable.radix_buffer.acquire(
-                Value,
-                table_immutable.count(),
-            );
-            defer table_mutable.mutability.mutable.radix_buffer.release(Value, radix_buffer_values);
+            if (!table_immutable.sorted()) {
+                // NOTE: We could also only collapse if it is required.
+                const radix_buffer_values = table_mutable.mutability.mutable.radix_buffer.acquire(
+                    Value,
+                    table_immutable.count(),
+                );
+                defer table_mutable.mutability.mutable.radix_buffer.release(
+                    Value,
+                    radix_buffer_values,
+                );
 
-            const target_count = sort_suffix_from_index(
-                table_immutable.values_used(),
-                radix_buffer_values,
-                0,
-            );
-            table_immutable.value_context.count = target_count;
-            // reset run
-
-            table_immutable.value_context.run_tracker.reset();
-            table_immutable.value_context.run_tracker.add(.{
-                .index_min = 0,
-                .index_max = table_immutable.count(),
-                .origin = .immutable,
-            });
-
+                const target_count = sort_suffix_from_index(
+                    table_immutable.values_used(),
+                    radix_buffer_values,
+                    0,
+                );
+                table_immutable.value_context.count = target_count;
+                table_immutable.value_context.run_tracker.reset();
+                table_immutable.value_context.run_tracker.add(.{
+                    .index_min = 0,
+                    .index_max = table_immutable.count(),
+                    .origin = .immutable,
+                });
+            }
             assert(table_immutable.sorted());
-
-            // Copy immutable after the current mutable tail and mark as an immutable run,
-            // so the merge prefers its entries on key ties.
             const tables_combined_count = table_immutable.count() + table_mutable.count();
-
             // Because `table_mutable` is likely to be smaller then `tabel_immutable` we:
             // 1. Copy the values from `table_mutable` into `table_immutable`.
             // 2. We swap the backing arrays so that `table_mutable` has all the values.
@@ -888,13 +886,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn key_max(table: *const TableMemory) Key {
             assert(table.mutability == .immutable);
 
-            assert(table.mutability == .immutable);
-
             // we could go one time through the runs and find min.
             const run_count = table.value_context.run_tracker.count();
             assert(run_count > 0);
 
-            var table_max: Key = std.math.maxInt(Key);
+            var table_max: Key = std.math.minInt(Key);
             for (0..run_count) |i| {
                 const run_info = table.value_context.run_tracker.runs[run_count - 1 - i];
                 const run_max = key_from_value(&table.values_used()[run_info.index_max - 1]);
@@ -1026,10 +1022,7 @@ test "table_memory: merge and absorb (last wins across streams)" {
     var merged: [Table.value_count_max]Value = undefined;
     var merged_len: usize = 0;
     while (true) {
-        const value = iterator.pop() catch |err| switch (err) {
-            error.Empty => break,
-            error.Drained => unreachable,
-        };
+        const value = iterator.pop() orelse break;
         merged[merged_len] = value;
         merged_len += 1;
     }
@@ -1103,10 +1096,7 @@ test "table_memory: compact and deduplicate across runs" {
     var merged: [Table.value_count_max]Value = undefined;
     var merged_len: usize = 0;
     while (true) {
-        const value = iterator.pop() catch |err| switch (err) {
-            error.Empty => break,
-            error.Drained => unreachable,
-        };
+        const value = iterator.pop() orelse break;
         merged[merged_len] = value;
         merged_len += 1;
     }

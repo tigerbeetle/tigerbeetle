@@ -2113,10 +2113,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             drop_tombstones: bool,
             budget_iterator: u32,
         ) MergeResult {
-            assert(values_source_b.len > 0);
-            assert(values_source_b.len <= Table.data.value_count_max);
-            assert(values_target.len > 0);
-            assert(values_target.len <= Table.data.value_count_max);
+            assert(values_source_b.len > 0 and values_source_b.len <= Table.data.value_count_max);
+            assert(values_target.len > 0 and values_target.len <= Table.data.value_count_max);
 
             const remaining_before_iterator = iterator_source_a.count_remaining();
             const dropped_before_iterator = iterator_source_a.count_dropped();
@@ -2171,11 +2169,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .produced = @intCast(index_target),
             };
             assert(merge_result.consumed_a > 0 or merge_result.consumed_b > 0);
-            //assert(merge_result.consumed_a <= values_source_a.len);
-            //assert(merge_result.consumed_b <= values_source_b.len);
             assert(merge_result.dropped <= merge_result.consumed_a + merge_result.consumed_b);
             assert(merge_result.produced <= values_target.len);
-
             assert(merge_result.produced ==
                 merge_result.consumed_a + merge_result.consumed_b - merge_result.dropped);
             return merge_result;

@@ -188,9 +188,12 @@ pub fn ScanTreeType(
                 break :blk values[range.start..][0..range.count];
             };
 
-            const context = tree.table_immutable.iterator_context_range(
-                .{ .min = key_min, .max = key_max },
-            );
+            const context = if (snapshot <
+                tree.table_immutable.mutability.immutable.snapshot_min)
+                Tree.TableMemory.MergeContext{ .streams = undefined, .streams_count = 0 }
+            else
+                tree.table_immutable.iterator_context_range(.{ .min = key_min, .max = key_max });
+
             self.* = .{
                 .tree = tree,
                 .buffer = buffer,

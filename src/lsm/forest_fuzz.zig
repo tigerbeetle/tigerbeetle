@@ -290,7 +290,8 @@ const Environment = struct {
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @alignCast(@fieldParentPtr("superblock_context", superblock_context));
+        const env: *Environment =
+            @alignCast(@fieldParentPtr("superblock_context", superblock_context));
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
