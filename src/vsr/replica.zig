@@ -3525,6 +3525,7 @@ pub fn ReplicaType(
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic().ns,
+                .route = 0, // TODO: remove with next release.
                 .release_count = releases.count,
             };
 

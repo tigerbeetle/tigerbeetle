@@ -1037,8 +1037,11 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         vsr.fatal(.cli, "--log-debug must be provided when using --log-trace", .{});
     }
 
-    if(start.replicate_star){
-        std.log.warn("--replicate-star is deprecated; star replication is now the default.", .{},);
+    if (start.replicate_star) {
+        std.log.warn(
+            "--replicate-star is deprecated; star replication is now the default.",
+            .{},
+        );
     }
 
     return .{
