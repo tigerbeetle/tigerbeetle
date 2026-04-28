@@ -8,6 +8,15 @@ const Query = std.Target.Query;
 const VoprStateMachine = enum { testing, accounting };
 const VoprLog = enum { short, full };
 
+// The minimum client version allowed to connect. This has implications for backwards
+// compatibility and the upgrade path for replicas and clients. If there's no overlap
+// between a replica version and minimum client version - eg, replica 0.15.4 requires
+// client 0.15.4 - it means that upgrading requires coordination with clients, which
+// will be very inconvenient for operators.
+//
+// NB: grep for 'TODO(client_release)' after changing!
+const release_client_min = "0.16.4";
+
 // TigerBeetle binary requires certain CPU feature and supports a closed set of CPUs. Here, we
 // specify exactly which features the binary needs.
 fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.ResolvedTarget {
@@ -168,7 +177,8 @@ pub fn build(b: *std.Build) !void {
         .git_commit = build_options.git_commit[0..40].*,
         .config_verify = build_options.config_verify,
         .config_release = build_options.config_release orelse "65535.0.0",
-        .config_release_client_min = build_options.config_release_client_min orelse "0.16.4",
+        .config_release_client_min = build_options.config_release_client_min orelse
+            release_client_min,
     });
 
     // For integration tests and vortex, we build an independent copy of TigerBeetle with "real"
@@ -178,7 +188,7 @@ pub fn build(b: *std.Build) !void {
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
         .config_release = "65535.0.0",
-        .config_release_client_min = "0.16.4",
+        .config_release_client_min = release_client_min,
     });
 
     // 65535.0.0 + 1, to test both sides of upgrades.
@@ -187,7 +197,7 @@ pub fn build(b: *std.Build) !void {
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
         .config_release = "65535.0.1",
-        .config_release_client_min = "0.16.4",
+        .config_release_client_min = release_client_min,
     });
 
     var releases_previous = release_history(b);
