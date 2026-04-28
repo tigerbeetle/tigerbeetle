@@ -36,12 +36,6 @@ pub const IO = struct {
     ios_in_kernel: u32 = 0,
 
     stats: common.Stats = .{},
-    yield_requested: bool = false,
-    timeout_ts: os.linux.kernel_timespec = undefined,
-    /// Pending run_for_ns timeout CQEs orphaned by a previous yield.
-    /// These will arrive as stale user_data=0 CQEs and must be
-    /// consumed without decrementing the current timeouts counter.
-    orphaned_timeouts: usize = 0,
 
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
@@ -92,10 +86,6 @@ pub const IO = struct {
             try self.flush_submissions(0, &timeouts, &etime);
             assert(etime == false);
         }
-
-        // Clear any yield requested by callbacks during flush, so it
-        // doesn't cause the next run_for_ns to short-circuit.
-        self.yield_requested = false;
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
@@ -111,23 +101,21 @@ pub const IO = struct {
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
         const current_ts = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch unreachable;
-        // The absolute CLOCK_MONOTONIC time after which we may return from this function.
-        // Stored in the IO struct (not the stack) so that pending timeout SQEs that
-        // reference it remain valid if yield causes early return.
-        self.timeout_ts = .{
+        // The absolute CLOCK_MONOTONIC time after which we may return from this function:
+        const timeout_ts: os.linux.kernel_timespec = .{
             .sec = current_ts.sec,
             .nsec = current_ts.nsec + nanoseconds,
         };
         var timeouts: usize = 0;
         var etime = false;
-        while (!etime and !self.yield_requested) {
+        while (!etime) {
             const timeout_sqe = self.ring.get_sqe() catch blk: {
                 // The submission queue is full, so flush submissions to make space:
                 try self.flush_submissions(0, &timeouts, &etime);
                 break :blk self.ring.get_sqe() catch unreachable;
             };
             // Submit an absolute timeout that will be canceled if any other SQE completes first:
-            timeout_sqe.prep_timeout(&self.timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
+            timeout_sqe.prep_timeout(&timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
             timeout_sqe.user_data = 0;
             timeouts += 1;
 
@@ -138,30 +126,10 @@ pub const IO = struct {
             // The amount of time this call will block is bounded by the timeout we just submitted:
             try self.flush(1, &timeouts, &etime);
         }
-        self.yield_requested = false;
-        // Reap any remaining timeouts. On yield, pending timeout SQEs still
-        // reference self.timeout_ts which remains valid, so they are left to
-        // complete naturally and tracked as orphaned_timeouts.
-        if (timeouts > 0) {
-            if (etime) {
-                // All timeouts should already be complete or completing.
-                // The busy loop is required to avoid a potential deadlock,
-                // as the kernel determines when the timeouts are pushed to
-                // the completion queue, not us.
-                while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
-            } else {
-                self.orphaned_timeouts += timeouts;
-            }
-        }
-    }
-
-    /// Request early return from run_for_ns. Called from IO callbacks to
-    /// return control to the caller's event loop without waiting for the
-    /// full tick timeout. run_for_ns may dispatch additional callbacks
-    /// before returning; yield only eliminates latency, it does not cut
-    /// off observation of further events.
-    pub fn yield(self: *IO) void {
-        self.yield_requested = true;
+        // Reap any remaining timeouts, which reference the timespec in the current stack frame.
+        // The busy loop here is required to avoid a potential deadlock, as the kernel determines
+        // when the timeouts are pushed to the completion queue, not us.
+        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
@@ -213,17 +181,12 @@ pub const IO = struct {
                 self.ios_in_kernel -= 1;
 
                 if (cqe.user_data == 0) {
-                    // Consume orphaned timeouts from a previous yield before
-                    // decrementing the current run_for_ns timeout counter.
-                    if (self.orphaned_timeouts > 0) {
-                        self.orphaned_timeouts -= 1;
-                    } else {
-                        timeouts.* -= 1;
-                        // Done only if completed due to time (not due to
-                        // the completion of another event, where res = 0).
-                        if (-cqe.res == @intFromEnum(posix.E.TIME))
-                            etime.* = true;
-                    }
+                    timeouts.* -= 1;
+                    // We are only done if the timeout submitted was completed due to time, not if
+                    // it was completed due to the completion of an event, in which case `cqe.res`
+                    // would be 0. It is possible for multiple timeout operations to complete at the
+                    // same time if the nanoseconds value passed to `run_for_ns()` is very short.
+                    if (-cqe.res == @intFromEnum(posix.E.TIME)) etime.* = true;
                     continue;
                 }
                 const completion: *Completion = @ptrFromInt(cqe.user_data);

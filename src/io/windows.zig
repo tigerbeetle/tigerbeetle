@@ -24,7 +24,6 @@ pub const IO = struct {
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
     stats: common.Stats = .{},
-    yield_requested: bool = false,
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -51,10 +50,7 @@ pub const IO = struct {
     }
 
     pub fn run(self: *IO) !void {
-        try self.flush(.non_blocking);
-        // Clear any yield requested by callbacks during flush, so it
-        // doesn't cause the next run_for_ns to short-circuit.
-        self.yield_requested = false;
+        return self.flush(.non_blocking);
     }
 
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
@@ -79,23 +75,9 @@ pub const IO = struct {
         var completion: Completion = undefined;
         self.timeout(*bool, &timed_out, Callback.on_timeout, &completion, nanoseconds);
 
-        while (!timed_out and !self.yield_requested) {
+        while (!timed_out) {
             try self.flush(.blocking);
         }
-        if (!timed_out) {
-            self.timeouts.remove(&completion);
-        }
-        self.yield_requested = false;
-    }
-
-    /// Request early return from run_for_ns. Called from IO callbacks to
-    /// return control to the caller's event loop without waiting for the
-    /// full tick timeout. run_for_ns may dispatch additional callbacks
-    /// before returning; yield only eliminates latency, it does not cut
-    /// off observation of further events.
-    ///
-    pub fn yield(self: *IO) void {
-        self.yield_requested = true;
     }
 
     const FlushMode = enum {
