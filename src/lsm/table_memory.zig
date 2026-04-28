@@ -77,8 +77,8 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         // A contiguous sorted range in `values[min..max)`.
         const SortedRun = struct {
-            min: u32,
-            max: u32, // exclusive.
+            index_min: u32, // inclusive
+            index_max: u32, // exclusive
             origin: RunOrigin, // Where the run originated; affects merge precedence on equal keys.
         };
 
@@ -96,7 +96,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             streams_count: u32,
         };
 
-
         const SortedRunTracker = struct {
             /// Invariants:
             /// - Runs are in ascending order.
@@ -113,7 +112,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             fn add(tracker: *SortedRunTracker, run: SortedRun) void {
-                if (run.min == run.max) return; // Ignore empty runs.
+                if (run.index_min == run.index_max) return; // Ignore empty runs.
 
                 tracker.runs[tracker.runs_count] = run;
                 tracker.runs_count += 1;
@@ -122,7 +121,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Adds a new run at the front and shifts the other runs by the offset to maintain
             // the invariant that no run overlaps and they have no gaps.
             fn add_front_and_propagate_offset(tracker: *SortedRunTracker, run: SortedRun) void {
-                if (run.min == run.max) return; // Ignore empty runs.
+                if (run.index_min == run.index_max) return; // Ignore empty runs.
+                assert(run.index_min == 0);
                 assert(tracker.runs_count + 1 <= tracker.runs.len);
                 stdx.copy_right(
                     .exact,
@@ -136,8 +136,8 @@ pub fn TableMemoryType(comptime Table: type) type {
 
                 //Propagate the new offset to the remaining runs.
                 for (tracker.runs[1..tracker.count()]) |*run_old| {
-                    run_old.min += run.max;
-                    run_old.max += run.max;
+                    run_old.index_min += run.index_max;
+                    run_old.index_max += run.index_max;
                 }
             }
 
@@ -163,14 +163,14 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // Place the immutable run first so smaller stream_id wins on ties.
                 for (tracker.runs[0..tracker.count()]) |run| {
                     if (run.origin != .immutable) continue;
-                    context.streams[stream_idx] = values[run.min..run.max];
+                    context.streams[stream_idx] = values[run.index_min..run.index_max];
                     stream_idx += 1;
                     break;
                 }
                 // Now place all the mutable runs.
                 for (tracker.runs[0..tracker.count()]) |run| {
                     if (run.origin == .immutable) continue;
-                    context.streams[stream_idx] = values[run.min..run.max];
+                    context.streams[stream_idx] = values[run.index_min..run.index_max];
                     stream_idx += 1;
                 }
                 context.streams_count = stream_idx;
@@ -187,12 +187,12 @@ pub fn TableMemoryType(comptime Table: type) type {
 
                 if (runs_count == 0) return;
 
-                assert(tracker.runs[0].min == 0);
-                assert(tracker.runs[runs_count - 1].max == table_count);
+                assert(tracker.runs[0].index_min == 0);
+                assert(tracker.runs[runs_count - 1].index_max == table_count);
 
                 for (tracker.runs[0 .. runs_count - 1], tracker.runs[1..runs_count]) |a, b| {
-                    assert(a.min < b.min); // Ordered and we ignore empty runs.
-                    assert(a.max == b.min); // No gaps.
+                    assert(a.index_min < b.index_min); // Ordered and we ignore empty runs.
+                    assert(a.index_max == b.index_min); // No gaps.
                 }
 
                 var immutable_runs: u1 = 0;
@@ -573,12 +573,12 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             const run_count = table.value_context.run_tracker.count();
             if (run_count > 0 and
-                table.value_context.run_tracker.runs[run_count - 1].max == table.count())
+                table.value_context.run_tracker.runs[run_count - 1].index_max == table.count())
             {
                 const expand: bool = table.count() == 0 or
                     key_from_value(&table.values[table.count() - 1]) <
                         key_from_value(value);
-                table.value_context.run_tracker.runs[run_count - 1].max += @intFromBool(expand);
+                table.value_context.run_tracker.runs[run_count - 1].index_max += @intFromBool(expand);
             }
 
             table.values[table.count()] = value.*;
@@ -590,10 +590,18 @@ pub fn TableMemoryType(comptime Table: type) type {
             const run_count = table.value_context.run_tracker.count();
             if (run_count == 0) return null;
 
-            // Runs are ordered oldest to newest, so lookup searches backwards.
-            for (0..run_count) |i| {
-                const run_info = table.value_context.run_tracker.runs[run_count - 1 - i];
-                const run_sorted = table.values_used()[run_info.min..run_info.max];
+            assert(run_count <= sorted_runs_max);
+
+            // Iterate runs backwards i.e. newest first so the most recent version of a key wins.
+            var run_index = run_count;
+            while (run_index > 0) {
+                run_index -= 1;
+                const run_info = table.value_context.run_tracker.runs[run_index];
+                const run_sorted = table.values_used()[run_info.index_min..run_info.index_max];
+
+                // Skip binary search if the key is not in the range.
+                if (key < key_from_value(&run_sorted[0])) continue;
+                if (key > key_from_value(&run_sorted[run_sorted.len - 1])) continue;
 
                 if (binary_search.binary_search_values(
                     Key,
@@ -721,7 +729,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
             defer table_mutable.mutability.mutable.radix_buffer.release(Value, radix_buffer_values);
 
-            const target_count = sort_suffix_from_offset(
+            const target_count = sort_suffix_from_index(
                 table_immutable.values_used(),
                 radix_buffer_values,
                 0,
@@ -731,8 +739,8 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table_immutable.value_context.run_tracker.reset();
             table_immutable.value_context.run_tracker.add(.{
-                .min = 0,
-                .max = table_immutable.count(),
+                .index_min = 0,
+                .index_max = table_immutable.count(),
                 .origin = .immutable,
             });
 
@@ -755,8 +763,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
 
             table_mutable.value_context.run_tracker.add_front_and_propagate_offset(.{
-                .min = 0,
-                .max = table_immutable.count(),
+                .index_min = 0,
+                .index_max = table_immutable.count(),
                 .origin = .immutable,
             });
 
@@ -776,11 +784,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             defer table.value_context.run_tracker.assert_invariants(table.count());
 
             if (!table.sorted()) {
-                _ = table.mutable_sort_suffix_from_offset(0);
+                _ = table.mutable_sort_suffix_from_index(0);
                 table.value_context.run_tracker.reset();
                 table.value_context.run_tracker.add(.{
-                    .min = 0,
-                    .max = table.count(),
+                    .index_min = 0,
+                    .index_max = table.count(),
                     .origin = .mutable,
                 });
             }
@@ -795,10 +803,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (table.value_context.run_tracker.count() != 1) return false;
 
             const last_run = table.value_context.run_tracker.last().?;
-            assert(last_run.min == 0);
-            assert(last_run.max <= table.count());
+            assert(last_run.index_min == 0);
+            assert(last_run.index_max <= table.count());
 
-            return table.count() == last_run.max;
+            return table.count() == last_run.index_max;
         }
 
         pub fn sort_suffix(table: *TableMemory) void {
@@ -807,26 +815,26 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             if (table.sorted()) return;
 
-            const sort_suffix_offset = if (table.value_context.run_tracker.last()) |last_run|
-                last_run.max
+            const sort_suffix_index = if (table.value_context.run_tracker.last()) |last_run|
+                last_run.index_max
             else
                 0;
 
-            assert(sort_suffix_offset <= table.count());
+            assert(sort_suffix_index <= table.count());
 
-            if (sort_suffix_offset == table.count()) return;
+            if (sort_suffix_index == table.count()) return;
 
-            const run = table.mutable_sort_suffix_from_offset(sort_suffix_offset);
-            assert(run.min <= run.max);
-            assert(run.max == table.count());
-            assert(sort_suffix_offset <= run.max);
+            const run = table.mutable_sort_suffix_from_index(sort_suffix_index);
+            assert(run.index_min <= run.index_max);
+            assert(run.index_max == table.count());
+            assert(sort_suffix_index <= run.index_max);
             table.value_context.run_tracker.add(run);
         }
 
-        fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32) SortedRun {
+        fn mutable_sort_suffix_from_index(table: *TableMemory, index: u32) SortedRun {
             assert(table.mutability == .mutable);
-            assert(offset == 0 or offset == table.value_context.run_tracker.last().?.max);
-            assert(offset <= table.count());
+            assert(index == 0 or index == table.value_context.run_tracker.last().?.index_max);
+            assert(index <= table.count());
 
             const radix_buffer_values = table.mutability.mutable.radix_buffer.acquire(
                 Value,
@@ -834,39 +842,31 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
             defer table.mutability.mutable.radix_buffer.release(Value, radix_buffer_values);
 
-            const target_count = sort_suffix_from_offset(
+            const target_count = sort_suffix_from_index(
                 table.values_used(),
                 radix_buffer_values,
-                offset,
+                index,
             );
             table.value_context.count = target_count;
-            return .{ .min = offset, .max = target_count, .origin = .mutable };
+            return .{ .index_min = index, .index_max = target_count, .origin = .mutable };
         }
 
         // Returns the new length of `values`. Values are deduplicated after sorting, so the
         // returned count may be less than or equal to the original `values.len`.
-        fn sort_suffix_from_offset(values: []Value, values_scratch: []Value, offset: u32) u32 {
+        fn sort_suffix_from_index(values: []Value, values_scratch: []Value, index: u32) u32 {
             assert(values.len == values_scratch.len);
-            assert(offset <= values.len);
+            assert(index <= values.len);
 
-            stdx.radix_sort(Key, Value, key_from_value, values[offset..], values_scratch[offset..]);
+            stdx.radix_sort(Key, Value, key_from_value, values[index..], values_scratch[index..]);
 
             // Deduplicate values in streaming fashion.
-            var dedup_sink = DedupSink.init(values[offset..]);
-            for (values[offset..]) |value| {
+            var dedup_sink = DedupSink.init(values[index..]);
+            for (values[index..]) |value| {
                 dedup_sink.push(value);
             }
-            const target_count = offset + dedup_sink.finish();
+            const target_count = index + dedup_sink.finish();
 
             return target_count;
-        }
-
-        pub fn key_range_contains(table: *const TableMemory, key: Key) bool {
-            // TODO: currently unused
-            assert(table.sorted());
-
-            if (table.count() == 0) return false;
-            return table.key_min() <= key and key <= table.key_max();
         }
 
         pub fn key_min(table: *const TableMemory) Key {
@@ -879,7 +879,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             var table_min: Key = std.math.maxInt(Key);
             for (0..run_count) |i| {
                 const run_info = table.value_context.run_tracker.runs[run_count - 1 - i];
-                const run_min = key_from_value(&table.values_used()[run_info.min]);
+                const run_min = key_from_value(&table.values_used()[run_info.index_min]);
                 table_min = @min(table_min, run_min);
             }
             return table_min;
@@ -897,7 +897,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             var table_max: Key = std.math.maxInt(Key);
             for (0..run_count) |i| {
                 const run_info = table.value_context.run_tracker.runs[run_count - 1 - i];
-                const run_max = key_from_value(&table.values_used()[run_info.max - 1]);
+                const run_max = key_from_value(&table.values_used()[run_info.index_max - 1]);
                 table_max = @max(table_max, run_max);
             }
 
