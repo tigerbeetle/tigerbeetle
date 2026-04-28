@@ -110,6 +110,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
     if (builtin.os.tag != .linux) {
         log.warn("skip release verification for platforms other than Linux", .{});
+        return;
     }
 
     // Note: when updating the list of artifacts, don't forget to check for any external links.
