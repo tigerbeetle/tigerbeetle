@@ -481,6 +481,68 @@ fn client_drop_causes_shutdown_status() -> Result<()> {
 }
 
 #[test]
+fn future_outlives_client_close() -> Result<()> {
+    let (client, _guard) = test_client()?;
+
+    let account = tb::Account {
+        id: tb::id(),
+        ledger: TEST_LEDGER,
+        code: TEST_CODE,
+        ..Default::default()
+    };
+
+    let future = client.create_accounts(&[account]).unwrap();
+
+    // Close the client explicitly and then await the still-outstanding future.
+    // This compiles only because the request future does not borrow the client.
+    let result = block_on(async {
+        let _ = client.close().await;
+        future.await
+    });
+
+    match result {
+        Ok(_) => {}
+        Err(tb::PacketStatus::ClientShutdown) => {}
+        Err(e) => panic!("unexpected error {e:?}"),
+    }
+
+    Ok(())
+}
+
+#[test]
+fn client_close_causes_shutdown_status() -> Result<()> {
+    let (client, _guard) = test_client()?;
+
+    let mut futures = Vec::new();
+    for _ in 0..10 {
+        let account = tb::Account {
+            id: tb::id(),
+            ledger: TEST_LEDGER,
+            code: TEST_CODE,
+            ..Default::default()
+        };
+        futures.push(client.create_accounts(&[account]).unwrap());
+    }
+
+    let mut shutdown_count = 0;
+
+    block_on(async {
+        let _ = client.close().await;
+        for future in futures {
+            match future.await {
+                Ok(_) => {}
+                Err(tb::PacketStatus::ClientShutdown) => shutdown_count += 1,
+                Err(e) => panic!("unexpected error {e:?}"),
+            }
+        }
+    });
+
+    assert!(shutdown_count > 0);
+
+    Ok(())
+}
+
+#[test]
 fn too_many_events() -> Result<()> {
     let (client, _guard) = test_client()?;
 
