@@ -482,6 +482,8 @@ pub const Supervisor = struct {
     pub fn replica_reformat(supervisor: *Supervisor, replica_index: u8) !void {
         assert(supervisor.replicas[replica_index].state == .terminated);
 
+        log.info("{}: reformatting replica", .{replica_index});
+
         supervisor.shell.cwd.deleteFile(supervisor.replica_datafiles[replica_index]) catch |err| {
             log.err("{}: failed deleting datafile: {}", .{ replica_index, err });
             return err;
