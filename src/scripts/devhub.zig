@@ -314,8 +314,11 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .sha = cli_args.sha,
             .template = "{{range .}}{{.startedAt}} {{.updatedAt}}{{end}}",
         });
-        const iso8601_started_at, const iso8601_updated_at =
-            stdx.cut(times_gh, " ") orelse break :blk null;
+        const iso8601_started_at, const iso8601_updated_at = stdx.cut(times_gh, " ") orelse {
+            log.err("error parsing run list", .{});
+            log.err("output: {s}", .{times_gh});
+            break :blk null;
+        };
 
         const epoch_started_at = try shell.iso8601_to_timestamp_seconds(iso8601_started_at);
         const epoch_updated_at = try shell.iso8601_to_timestamp_seconds(iso8601_updated_at);
