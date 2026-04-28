@@ -190,7 +190,6 @@ pub fn ScanTreeType(
 
             const context = tree.table_immutable.iterator_context_range(
                 .{ .min = key_min, .max = key_max },
-                direction,
             );
             self.* = .{
                 .tree = tree,
