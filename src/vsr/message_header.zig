@@ -396,6 +396,7 @@ pub const Header = extern struct {
 
         ping_timestamp_monotonic: u64,
         release_count: u16,
+        // TODO: Remove in the next release. We switched to star replication and removed ARR.
         route_padding: [6]u8 = @splat(0),
         route: u64,
 

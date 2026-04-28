@@ -613,18 +613,16 @@ corrupted (in non-byzantine way). Although specific `MessageBus` is not tested i
 [VOPR](#simulation-testing), bugs in `MessageBus` are unlikely to affect correctness, because the
 contract for the transport layer is intentionally very weak.
 
-### Adaptive Routing
+### Star Replication
 
 As per the
-[8 Fallacies of Distributed Computing](https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing)
-the network topology may change over time. Therefore, replication must dynamically adapt to
-changes in the environment. Following the insight from
-[Performance-Oriented Congestion Control](https://www.usenix.org/system/files/conference/nsdi15/nsdi15-paper-dong.pdf),
-a robust adaptive routing algorithm is based on direct observation of outcomes, rather than on
-indirect modeling. Instead of inferring topology information based on measuring individual
-ping-pong roundtrips, TigerBeetle dedicates a fraction of bandwidth for running experiments,
-sending an individual prepare over a random alternative replication path. If an experimental route
-proves more efficient, the primary changes the replication path for subsequent prepares.
+[8 Fallacies of Distributed Computing](https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing),
+the network topology may change over time. Therefore, replication must tolerate both latency
+variations and faults. TigerBeetle uses star replication: the primary sends each prepare in parallel
+to all other replicas. Combined with
+[flexible quorums](https://fpaxos.github.io/), this means the primary only needs to wait for the two
+fastest replies out of five replicas, making replication both latency-tolerant and resilient to
+individual node failures.
 
 ## Conclusion
 

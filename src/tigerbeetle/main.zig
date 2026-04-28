@@ -372,9 +372,6 @@ fn command_start(
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .tracer = tracer,
-            .replicate_options = .{
-                .star = args.replicate_star,
-            },
         },
     ) catch |err| switch (err) {
         error.NoAddress => vsr.fatal(.cli, "all --addresses must be provided", .{}),

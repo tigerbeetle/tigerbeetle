@@ -89,7 +89,7 @@ const CLIArgs = union(enum) {
         timeout_grid_repair_message_ms: ?u64 = null,
         commit_stall_probability: ?Ratio = null,
 
-        // Highly experimental options that will be removed in a future release:
+        /// Legacy option. Star replication is the default behavior now.
         replicate_star: bool = false,
 
         statsd: ?[]const u8 = null,
@@ -1034,6 +1034,13 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
 
     if (start.log_trace and !start.log_debug) {
         vsr.fatal(.cli, "--log-debug must be provided when using --log-trace", .{});
+    }
+
+    if (start.replicate_star) {
+        std.log.warn(
+            "--replicate-star is deprecated; star replication is now the default.",
+            .{},
+        );
     }
 
     return .{

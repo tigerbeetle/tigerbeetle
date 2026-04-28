@@ -434,9 +434,6 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
                 .aof_recovery = false,
             },
         },
-        .replicate_options = .{
-            .star = prng.chance(ratio(1, 5)),
-        },
     };
 
     const network_options: Cluster.NetworkOptions = .{
