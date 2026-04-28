@@ -5104,7 +5104,6 @@ fn ChangeEventsScanLookupType(
 
             while (scan_tree.next() catch |err| switch (err) {
                 error.Pending => {
-                    std.debug.print("read again\n", .{});
                     self.scan_tree.read({}, &scan_read_callback);
                     return;
                 },

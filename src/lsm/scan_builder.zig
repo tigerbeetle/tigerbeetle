@@ -286,10 +286,6 @@ pub fn ScanBuilderType(
             return @FieldType(UniqueKey, "field");
         }
 
-        fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
-            return @FieldType(Scan.Dispatcher, @tagName(field));
-        }
-
         fn key_from_value(
             comptime field: std.meta.FieldEnum(Groove.IndexTrees),
             prefix: CompositeKeyPrefixType(field),
