@@ -17,7 +17,7 @@ pub fn ZigZagMergeIteratorType(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
-    comptime streams_max: u32,
+    comptime streams_max: u8,
     /// Peek the next key in the stream identified by `stream_index`.
     /// For example, `peek(stream_index=2)` returns `user_streams[2][0]`.
     /// Returns `Pending` if the stream was consumed and must be refilled
@@ -39,13 +39,12 @@ pub fn ZigZagMergeIteratorType(
 ) type {
     return struct {
         const ZigZagMergeIterator = @This();
-        const BitSet = std.bit_set.IntegerBitSet(streams_max);
 
         context: *Context,
         streams_count: u32,
         direction: Direction,
-        probe_key_previous: ?Key = null,
         key_popped: ?Key = null,
+        key_peeked: ?Key = null,
 
         /// At least two scans are required for zig-zag merge.
         pub fn init(
@@ -94,118 +93,133 @@ pub fn ZigZagMergeIteratorType(
             return value;
         }
 
+        /// Zig zig-zag join algorithm: finding the next _common_ key.
+        /// Algorithm is conflict driven --- if any two streams disagree
+        /// on the next key, one of the streams can be advanced (probed).
+        /// In particular, if any stream is empty, there are no common keys.
+        /// Converesly, the algorithm finishes when there is no disagreement:
+        /// - some streams are pending (need IO to fetch next key from disk),
+        /// - _all_ other streams agree on the key.
+        ///
+        /// The schedule to interrogate the streams is arbitrary. We use
+        /// simple round-robin: going in circles, reseting the "tour" every
+        /// time a conflict is detected, until we complete a full circle
+        /// without a reset. The schedule ensures that any pending stream is
+        /// probed with our best guess for optimal IO.
         fn peek_key(it: *ZigZagMergeIterator) Pending!?Key {
-            assert(it.streams_count <= streams_max);
             assert(it.streams_count > 1);
+            assert(it.streams_count <= streams_max);
 
-            const key_min: Key = switch (it.direction) {
+            // NB: We could start with `it.key_peeked`, but starting
+            // from zero tightens assertions on the underlying streams.
+            var candidate: Key = switch (it.direction) {
                 .ascending => 0,
                 .descending => std.math.maxInt(Key),
             };
 
-            var pending: BitSet = BitSet.initEmpty();
-            var probe_key: Key = key_min;
+            var pending: stdx.BitSetType(streams_max) = .{};
 
-            var probing: BitSet = BitSet.initFull();
-            while (probing.count() > 0) {
-                // Looking into all non-pending streams for a match, while accumulating
-                // the most ahead key to probe the streams behind.
-                probing = BitSet.initEmpty();
-                for (0..it.streams_count) |stream_index| {
-                    if (pending.isSet(stream_index)) continue;
+            var tour_total: u32 = 0;
+            var tour_equal: u32 = 0;
+            var tour_pending: u32 = 0;
 
-                    const key = stream_peek(it.context, @intCast(stream_index)) catch |err| {
-                        switch (err) {
-                            // Skipping `Pending` streams. The goal is to match all buffered streams
-                            // first so that the pending ones can read from a narrower key range.
-                            error.Pending => {
-                                pending.set(stream_index);
-                                continue;
-                            },
-                        }
-                    } orelse
-                        // Return immediately on empty streams.
-                        // If any one stream is empty, then there can be no value remaining
-                        // in the intersection.
-                        return null;
+            // TODO: Find a way to add a safety counter here.
+            var tour_index: u32 = 0;
+            while (tour_total < it.streams_count) //
+            : (tour_index = (tour_index + 1) % it.streams_count) {
+                assert(tour_total == tour_equal + tour_pending);
 
-                    // The stream cannot regress.
-                    assert(it.probe_key_previous == null or
-                        it.direction.cmp(it.probe_key_previous.?, .@"<=", key));
-
-                    // The keys match, continuing to the next stream.
-                    if (probe_key == key) continue;
-
-                    if (it.direction.cmp(probe_key, .@"<", key)) {
-                        // The stream is ahead, it will be the probe key,
-                        // meaning all streams before must be probed.
-                        probe_key = key;
-
-                        // Setting all previous streams as `true` except the pending ones.
-                        probing.setRangeValue(.{ .start = 0, .end = stream_index }, true);
-                        probing.setIntersection(pending.complement());
-                        assert(!probing.isSet(stream_index));
-                    } else {
-                        // The stream is behind and needs to be probed.
-                        probing.set(stream_index);
-                    }
+                // Optimization: don't re-probe already pending streams,
+                // until the very end, when the final candidate is known.
+                if (pending.is_set(tour_index)) {
+                    tour_total += 1;
+                    tour_pending += 1;
+                    continue;
                 }
 
-                // Probing the buffered streams that did not match the key.
-                var probing_iterator = probing.iterator(.{ .kind = .set });
-                while (probing_iterator.next()) |stream_index| {
-                    stream_probe(it.context, @intCast(stream_index), probe_key);
-
-                    const key = stream_peek(it.context, @intCast(stream_index)) catch |err| {
-                        switch (err) {
-                            error.Pending => {
-                                pending.set(stream_index);
-                                probing.unset(stream_index);
-                                continue;
-                            },
-                        }
-                    } orelse return null;
-
-                    // After probed, the stream must either match the key or be ahead.
-                    if (key == probe_key) {
-                        probing.unset(stream_index);
-                    } else {
-                        assert(it.direction.cmp(probe_key, .@"<", key));
+                const key = it.gallop_key(tour_index, candidate) catch |err| {
+                    switch (err) {
+                        error.Pending => {
+                            assert(!pending.is_set(tour_index));
+                            pending.set(tour_index);
+                            tour_total += 1;
+                            tour_pending += 1;
+                            continue;
+                        },
                     }
-                }
-            }
+                } orelse
+                    // An empty stream short-circuits the entire thing.
+                    return null;
 
-            if (pending.count() == it.streams_count) {
-                // Can't probe if all streams are pending.
-                assert(probe_key == key_min);
-                return error.Pending;
-            }
-
-            assert(probe_key != key_min);
-            for (0..it.streams_count) |stream_index| {
-                if (pending.isSet(stream_index)) {
-                    // Probing the pending stream will update the key range for the next read.
-                    stream_probe(it.context, @intCast(stream_index), probe_key);
-                    // The stream must remain pending after being probed.
-                    assert(stream_peek(it.context, @intCast(stream_index)) == Pending.Pending);
+                if (it.direction.cmp(candidate, .@"<", key)) {
+                    // The stream is strictly ahead, restart a tour with a new candidate.
+                    candidate = key;
+                    tour_total = 1;
+                    tour_equal = 1;
+                    tour_pending = 0;
                 } else {
-                    // At this point, all the buffered streams must have produced a matching key.
-                    assert((stream_peek(it.context, @intCast(stream_index)) catch unreachable) ==
-                        probe_key);
+                    assert(candidate == key);
+                    tour_total += 1;
+                    tour_equal += 1;
+                }
+            }
+            assert(tour_total == tour_equal + tour_pending);
+            assert(tour_total == it.streams_count);
+            assert(tour_pending == pending.count());
+
+            if (tour_pending == it.streams_count) return error.Pending;
+
+            // Completing the optimization, probe pending streams one last time.
+            // We minize probe & peek virtual function calls, keeping IO optimal.
+            for (0..it.streams_count) |index_usize| {
+                const stream_index: u32 = @intCast(index_usize);
+                if (pending.is_set(stream_index)) {
+                    pending.unset(stream_index);
+                    stream_probe(it.context, stream_index, candidate);
+                    assert(stream_peek(it.context, stream_index) == Pending.Pending);
+                } else {
+                    assert((stream_peek(it.context, stream_index) catch unreachable) == candidate);
+                }
+            }
+            assert(pending.count() == 0);
+
+            if (tour_pending > 0) return error.Pending;
+
+            if (it.key_peeked) |key_peeked| {
+                assert(it.direction.cmp(key_peeked, .@"<=", candidate));
+            }
+            it.key_peeked = candidate;
+            return candidate;
+        }
+
+        fn gallop_key(
+            it: *ZigZagMergeIterator,
+            stream_index: u32,
+            candidate: Key,
+        ) Pending!?Key {
+            assert(stream_index < it.streams_count);
+
+            var key = try stream_peek(it.context, stream_index) orelse return null;
+            if (it.key_peeked) |key_peeked| {
+                assert(it.direction.cmp(key_peeked, .@"<=", key));
+            }
+
+            if (it.direction.cmp(key, .@"<", candidate)) {
+                stream_probe(it.context, stream_index, candidate);
+                key = try stream_peek(it.context, stream_index) orelse return null;
+
+                assert(it.direction.cmp(candidate, .@"<=", key));
+                if (it.key_peeked) |key_peeked| {
+                    assert(it.direction.cmp(key_peeked, .@"<=", key));
                 }
             }
 
-            // The iterator cannot regress.
-            assert(it.probe_key_previous == null or
-                it.direction.cmp(it.probe_key_previous.?, .@"<=", probe_key));
-
-            it.probe_key_previous = probe_key;
-            return if (pending.count() == 0) probe_key else error.Pending;
+            return key;
         }
     };
 }
 
-fn TestContextType(comptime streams_max: u32) type {
+fn TestContextType(comptime streams_max: u8) type {
     const testing = std.testing;
 
     return struct {
