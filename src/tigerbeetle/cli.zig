@@ -89,8 +89,7 @@ const CLIArgs = union(enum) {
         timeout_grid_repair_message_ms: ?u64 = null,
         commit_stall_probability: ?Ratio = null,
 
-        // TODO: Remove in the next release. This option is now a no-op since star
-        // replication has become the default behavior.
+        /// Legacy option. Star replication is the default behavior now.
         replicate_star: bool = false,
 
         statsd: ?[]const u8 = null,
