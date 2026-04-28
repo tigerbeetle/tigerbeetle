@@ -139,6 +139,9 @@ jobs:
         run: pip install build hatch pytest 'mypy<=1.18.2'
 
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        # actions/cache (as of v5.0.5) routinely flakes under windows -- it just prints
+        # "Cache hit for: Windows-X64-(hash)" and then exits with no other info.
+        if: matrix.os != 'windows-latest'
         with:
           path: ./zig/cache
           key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
