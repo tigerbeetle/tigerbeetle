@@ -33,12 +33,6 @@ pub const IO = struct {
     ios_in_kernel: u32 = 0,
 
     stats: common.Stats = .{},
-    yield_requested: bool = false,
-    timeout_ts: os.linux.kernel_timespec = undefined,
-    /// Pending run_for_ns timeout CQEs orphaned by a previous yield.
-    /// These will arrive as stale user_data=0 CQEs and must be
-    /// consumed without decrementing the current timeouts counter.
-    orphaned_timeouts: usize = 0,
 
     time_os: TimeOS = .{},
 
@@ -88,10 +82,6 @@ pub const IO = struct {
         // This is an optimization to avoid delaying submissions until the next tick.
         // At the same time, we do not flush any ready CQEs since SQEs may complete synchronously.
         try self.flush_submissions(0);
-
-        // Clear any yield requested by callbacks during flush, so it
-        // doesn't cause the next run_for_ns to short-circuit.
-        self.yield_requested = false;
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
@@ -113,7 +103,7 @@ pub const IO = struct {
         var now = self.time_os.monotonic();
         const deadline = now.add(.{ .ns = nanoseconds });
 
-        while (now.ns < deadline.ns and !self.yield_requested) : (now = self.time_os.monotonic()) {
+        while (now.ns < deadline.ns) : (now = self.time_os.monotonic()) {
             // If there are callbacks ready to run, don't wait in the kernel: the callbacks may
             // queue more work, which should be submitted as soon as possible.
             const block_ns = if (self.completed.count() == 0) deadline.ns -| now.ns else 0;
@@ -123,19 +113,9 @@ pub const IO = struct {
 
             try self.run_callback();
         }
-        self.yield_requested = false;
 
         // Ditto the optimization in `run()`.
         try self.flush_submissions(0);
-    }
-
-    /// Request early return from run_for_ns. Called from IO callbacks to
-    /// return control to the caller's event loop without waiting for the
-    /// full tick timeout. run_for_ns may dispatch additional callbacks
-    /// before returning; yield only eliminates latency, it does not cut
-    /// off observation of further events.
-    pub fn yield(self: *IO) void {
-        self.yield_requested = true;
     }
 
     fn flush_submissions(self: *IO, wait_duration_ns: u63) !void {

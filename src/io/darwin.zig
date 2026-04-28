@@ -28,7 +28,6 @@ pub const IO = struct {
     run_for_ns_active: bool = false,
 
     stats: common.Stats = .{},
-    yield_requested: bool = false,
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -50,9 +49,6 @@ pub const IO = struct {
         assert(!self.run_for_ns_active);
 
         try self.flush(false);
-        // Clear any yield requested by callbacks during flush, so it
-        // doesn't cause the next run_for_ns to short-circuit.
-        self.yield_requested = false;
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
@@ -96,23 +92,9 @@ pub const IO = struct {
 
         // Loop until our timeout completion is processed above, which sets timed_out to true.
         // LLVM shouldn't be able to cache timed_out's value here since its address escapes above.
-        while (!timed_out and !self.yield_requested) {
+        while (!timed_out) {
             try self.flush(true);
         }
-        if (!timed_out) {
-            self.timeouts.remove(&completion);
-        }
-        self.yield_requested = false;
-    }
-
-    /// Request early return from run_for_ns. Called from IO callbacks to
-    /// return control to the caller's event loop without waiting for the
-    /// full tick timeout. run_for_ns may dispatch additional callbacks
-    /// before returning; yield only eliminates latency, it does not cut
-    /// off observation of further events.
-    ///
-    pub fn yield(self: *IO) void {
-        self.yield_requested = true;
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
