@@ -110,6 +110,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
     if (builtin.os.tag != .linux) {
         log.warn("skip release verification for platforms other than Linux", .{});
+        return;
     }
 
     // Note: when updating the list of artifacts, don't forget to check for any external links.
@@ -158,7 +159,23 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         }
     }
 
-    try shell.unzip_executable("tigerbeetle-x86_64-linux.zip", "tigerbeetle");
+    const artifact_host = switch (builtin.os.tag) {
+        .linux => switch (builtin.cpu.arch) {
+            .aarch64 => "tigerbeetle-aarch64-linux.zip",
+            .x86_64 => "tigerbeetle-x86_64-linux.zip",
+            else => std.debug.panic("unsupported arch {}", .{builtin.os.arch}),
+        },
+        .macos => switch (builtin.cpu.arch) {
+            .aarch64, .x86_64 => "tigerbeetle-universal-macos.zip",
+            else => std.debug.panic("unsupported arch {}", .{builtin.os.arch}),
+        },
+        .windows => switch (builtin.cpu.arch) {
+            .x86_64 => "tigerbeetle-x86_64-windows.zip",
+            else => std.debug.panic("unsupported arch {}", .{builtin.os.arch}),
+        },
+        else => std.debug.panic("unsupported os {}", .{builtin.os.tag}),
+    };
+    try shell.unzip_executable(artifact_host, "tigerbeetle");
 
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);

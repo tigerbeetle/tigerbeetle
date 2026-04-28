@@ -294,6 +294,8 @@ fn build_tigerbeetle_target(
         .tag_multiversion = info.tag_multiversion,
     });
 
+    const linux_aarch64 = comptime std.mem.eql(u8, target, "aarch64-linux");
+    const linux_x86_64 = comptime std.mem.eql(u8, target, "x86_64-linux");
     const windows = comptime std.mem.eql(u8, target, "x86_64-windows");
     const macos = comptime std.mem.eql(u8, target, "aarch64-macos");
 
@@ -303,7 +305,8 @@ fn build_tigerbeetle_target(
         (if (debug) "-debug" else "") ++
         ".zip";
 
-    if ((std.mem.eql(u8, target, "x86_64-linux") and builtin.target.os.tag == .linux) or
+    if ((linux_aarch64 and builtin.target.os.tag == .linux and builtin.cpu.arch == .aarch64) or
+        (linux_x86_64 and builtin.target.os.tag == .linux and builtin.cpu.arch == .x86_64) or
         (macos and builtin.target.os.tag == .macos) or
         (windows and builtin.target.os.tag == .windows))
     {
