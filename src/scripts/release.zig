@@ -120,26 +120,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(release.value >
         (try multiversion.Release.parse(first_multiversion_release)).value);
 
-    // The minimum client version allowed to connect. This has implications for backwards
-    // compatibility and the upgrade path for replicas and clients. If there's no overlap
-    // between a replica version and minimum client version - eg, replica 0.15.4 requires
-    // client 0.15.4 - it means that upgrading requires coordination with clients, which
-    // will be very inconvenient for operators.
-    const release_triple_client_min = .{
-        .major = 0,
-        .minor = 16,
-        .patch = 4,
-    }; // NB: grep for 'TODO(client_release)' after changing!
-
     const version_info = VersionInfo{
-        .release_triple = try shell.fmt(
-            "{[major]}.{[minor]}.{[patch]}",
-            release.triple(),
-        ),
-        .release_triple_client_min = try shell.fmt(
-            "{[major]}.{[minor]}.{[patch]}",
-            release_triple_client_min,
-        ),
+        .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release.triple()),
+        .release_triple_client_min = @import("vsr_options").release_client_min,
         .tag = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
             release.triple(),
