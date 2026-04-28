@@ -334,23 +334,21 @@ pub fn TableMemoryType(comptime Table: type) type {
                 if (iterator.tournament_tree == null) iterator.load_tree();
                 var tree = &iterator.tournament_tree.?;
 
-                while (tree.contestants_left > 0) {
-                    const win_id = tree.win_id;
-                    const next_key: ?Key = if (iterator.streams[win_id].len > 0)
-                        key_from_value(iterator.direction.slice_peek(iterator.streams[win_id]))
-                    else
-                        null;
+                if (tree.contestants_left == 0) return null;
 
-                    tree.pop_winner(next_key);
-                    if (tree.contestants_left == 0) return null;
+                // Pop the current winner's value directly from its stream.
+                const win_id = tree.win_id;
+                const value, iterator.streams[win_id] =
+                    iterator.direction.slice_pop(iterator.streams[win_id]);
 
-                    const new_win_id = tree.win_id;
-                    const value, iterator.streams[new_win_id] =
-                        iterator.direction.slice_pop(iterator.streams[new_win_id]);
+                // Feed the stream's next key back into the tree (or null if exhausted).
+                const next_key: ?Key = if (iterator.streams[win_id].len > 0)
+                    key_from_value(iterator.direction.slice_peek(iterator.streams[win_id]))
+                else
+                    null;
+                tree.pop_winner(next_key);
 
-                    return value;
-                }
-                return null;
+                return value;
             }
 
             fn ensure_next(iterator: *Self) void {
