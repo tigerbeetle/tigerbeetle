@@ -31,11 +31,8 @@ const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 const Direction = @import("../direction.zig").Direction;
-const k_way_merge = @import("k_way_merge.zig");
-const KWayMergeIteratorType = k_way_merge.KWayMergeIteratorType;
-const TournamentTreeType = k_way_merge.TournamentTreeType;
+const TournamentTreeType = @import("k_way_merge.zig").TournamentTreeType;
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
-const Pending = error{Pending};
 
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
@@ -93,43 +90,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             max: Key,
         };
 
-        // Merge context for the k-way iterator across all runs in the tracker.
+        // Sorted run slices for the immutable table iterator.
         pub const MergeContext = struct {
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
-            stream_origins: [sorted_runs_max]RunOrigin,
-            direction: Direction = .ascending,
-
-            fn stream_peek(
-                context: *const MergeContext,
-                stream_index: u32,
-            ) Pending!?Key {
-                // TODO: Enable the asserts once `constants.verify` is disabled on release.
-                //assert(stream_index < context.streams_count);
-                const stream = context.streams[stream_index];
-                if (stream.len == 0) return null;
-                const value: *const Value = switch (context.direction) {
-                    .ascending => &stream[0],
-                    .descending => &stream[stream.len - 1],
-                };
-                return key_from_value(value);
-            }
-
-            fn stream_pop(context: *MergeContext, stream_index: u32) Value {
-                // TODO: Enable the asserts once `constants.verify` is disabled on release.
-                //assert(stream_index < context.streams_count);
-                const stream = context.streams[stream_index];
-                return switch (context.direction) {
-                    .ascending => blk: {
-                        context.streams[stream_index] = stream[1..];
-                        break :blk stream[0];
-                    },
-                    .descending => blk: {
-                        context.streams[stream_index] = stream[0 .. stream.len - 1];
-                        break :blk stream[stream.len - 1];
-                    },
-                };
-            }
         };
 
 
@@ -192,8 +156,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                 var context = MergeContext{
                     .streams = undefined,
                     .streams_count = undefined,
-                    .stream_origins = undefined,
-                    .direction = .ascending,
                 };
 
                 var stream_idx: u32 = 0;
@@ -683,13 +645,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn iterator_context_range(
             table_immutable: *TableMemory,
             range: KeyRange,
-            direction: Direction,
         ) MergeContext {
             assert(table_immutable.mutability == .immutable);
             var context = table_immutable.value_context.run_tracker.merge_context(
                 table_immutable.values_used(),
             );
-            context.direction = direction;
 
             var target_index: u32 = 0;
             var source_index: u32 = 0;
@@ -702,7 +662,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                 if (range.min <= run_max and range.max >= run_min) {
                     if (slice_run_for_range(context.streams[source_index], range)) |run_slice| {
                         context.streams[target_index] = run_slice;
-                        context.stream_origins[target_index] = context.stream_origins[source_index];
                         target_index += 1;
                     }
                 }
