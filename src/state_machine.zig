@@ -4710,8 +4710,8 @@ pub fn StateMachineType(comptime Storage: type) type {
 
                     // Transfers mutate the account balance and the closed flag.
                     // Each transfer modifies two accounts.
-                    .timestamp = @max(batch_create_accounts, 2 * batch_create_transfers),
-                    .closed = @max(batch_create_accounts, 2 * batch_create_transfers),
+                    .timestamp = @max(batch_create_accounts, 2 * batch_create_transfers + 1),
+                    .closed = @max(batch_create_accounts, 2 * batch_create_transfers + 1),
                 },
                 .transfers = .{
                     .timestamp = batch_create_transfers,

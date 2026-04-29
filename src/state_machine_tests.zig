@@ -1525,6 +1525,131 @@ test "create/lookup expired transfers" {
     );
 }
 
+test "pulse can expire multiple batches of pending transfers for the same accounts" {
+    const allocator = testing.allocator;
+
+    var context: TestContext = undefined;
+    try context.init(allocator);
+    defer context.deinit(allocator);
+
+    var request_buffer: [constants.message_body_size_max]u8 align(16) = undefined;
+    var output_buffer: [constants.message_body_size_max]u8 align(16) = undefined;
+
+    var accounts = [_]Account{
+        .{
+            .id = 1,
+            .debits_pending = 0,
+            .debits_posted = 0,
+            .credits_pending = 0,
+            .credits_posted = 0,
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .reserved = 0,
+            .ledger = 1,
+            .code = 1,
+            .flags = .{},
+            .timestamp = 0,
+        },
+        .{
+            .id = 2,
+            .debits_pending = 0,
+            .debits_posted = 0,
+            .credits_pending = 0,
+            .credits_posted = 0,
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .reserved = 0,
+            .ledger = 1,
+            .code = 1,
+            .flags = .{},
+            .timestamp = 0,
+        },
+    };
+    {
+        const bytes = std.mem.sliceAsBytes(&accounts);
+        stdx.copy_disjoint(.exact, u8, request_buffer[0..bytes.len], bytes);
+        const reply = context.submit(
+            .create_accounts,
+            request_buffer[0..],
+            accounts.len * @sizeOf(Account),
+            &output_buffer,
+        );
+        const results = std.mem.bytesAsSlice(CreateAccountResult, reply);
+        try testing.expectEqual(@as(usize, accounts.len), results.len);
+        for (results) |result| try testing.expectEqual(CreateAccountStatus.created, result.status);
+    }
+
+    const pulse_batch_limit = @max(
+        TestContext.StateMachine.Operation.create_transfers.event_max(
+            context.state_machine.batch_size_limit,
+        ),
+        TestContext.StateMachine.Operation.deprecated_create_transfers_sparse.event_max(
+            context.state_machine.batch_size_limit,
+        ),
+        TestContext.StateMachine.Operation.deprecated_create_transfers_unbatched.event_max(
+            context.state_machine.batch_size_limit,
+        ),
+    );
+    const expired_transfers_count = 2 * pulse_batch_limit;
+
+    var next_transfer_id: u128 = 10;
+    var created: usize = 0;
+    while (created < expired_transfers_count) {
+        var batch: [29]Transfer = undefined;
+        const batch_len = @min(batch.len, expired_transfers_count - created);
+        for (batch[0..batch_len], 0..) |*transfer, index| {
+            transfer.* = .{
+                .id = next_transfer_id + index,
+                .debit_account_id = 1,
+                .credit_account_id = 2,
+                .amount = 1,
+                .pending_id = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .timeout = 1,
+                .ledger = 1,
+                .code = 1,
+                .flags = .{ .pending = true },
+                .timestamp = 0,
+            };
+        }
+
+        const bytes = std.mem.sliceAsBytes(batch[0..batch_len]);
+        stdx.copy_disjoint(.exact, u8, request_buffer[0..bytes.len], bytes);
+        const reply = context.submit(
+            .create_transfers,
+            request_buffer[0..],
+            @intCast(bytes.len),
+            &output_buffer,
+        );
+        const results = std.mem.bytesAsSlice(CreateTransferResult, reply);
+        try testing.expectEqual(batch_len, results.len);
+        for (results) |result| try testing.expectEqual(CreateTransferStatus.created, result.status);
+
+        next_transfer_id += batch_len;
+        created += batch_len;
+    }
+
+    context.state_machine.prepare_timestamp += std.time.ns_per_s;
+    context.pulse();
+
+    const account_after_first_pulse = context.get_account_from_cache(1).?;
+    try testing.expectEqual(
+        @as(u128, pulse_batch_limit),
+        account_after_first_pulse.debits_pending,
+    );
+
+    while (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
+        context.pulse();
+    }
+
+    const account_after_final_pulse = context.get_account_from_cache(1).?;
+    try testing.expectEqual(@as(u128, 0), account_after_final_pulse.debits_pending);
+}
+
 test "create_transfers: empty" {
     try check(
         \\ commit create_transfers
