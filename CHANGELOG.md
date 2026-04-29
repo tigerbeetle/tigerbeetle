@@ -3336,7 +3336,7 @@ The highlight of today's release is the new official Python client, implemented 
 
 - [#2510](https://github.com/tigerbeetle/tigerbeetle/pull/2510)
 
-  Track the number of untriaged issues on [DevHub](https://tigerbeetle.github.io/tigerbeetle/).
+  Track the number of untriaged issues on [DevHub](https://devhub.tigerbeetle.com/).
 
 ### TigerTracks 🎧
 
@@ -3690,7 +3690,7 @@ Released: 2024-10-15
 
 - [#2404](https://github.com/tigerbeetle/tigerbeetle/pull/2404)
 
-  Give the [DevHub](https://tigerbeetle.github.io/tigerbeetle/) a fresh coat of paint, and fix
+  Give the [DevHub](https://devhub.tigerbeetle.com/) a fresh coat of paint, and fix
   passing seeds being blue in dark mode.
 
 - [#2408](https://github.com/tigerbeetle/tigerbeetle/pull/2408),
@@ -4075,7 +4075,7 @@ Released: 2024-09-09
   [#2285](https://github.com/tigerbeetle/tigerbeetle/pull/2285)
 
   Add [`kcov`](https://simonkagstrom.github.io/kcov/) code coverage to
-  [DevHub](https://tigerbeetle.github.io/tigerbeetle/).
+  [DevHub](https://devhub.tigerbeetle.com/).
 
 - [#2266](https://github.com/tigerbeetle/tigerbeetle/pull/2266),
   [#2293](https://github.com/tigerbeetle/tigerbeetle/pull/2293)
@@ -4487,7 +4487,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
   would only be built with baseline CPU features, and thus use the software AES implementation.
 
   Enforce at comptime that hardware acceleration is available, fix the build system bug, log
-  checksum performance on our [devhub](https://tigerbeetle.github.io/tigerbeetle/) and build client
+  checksum performance on our [devhub](https://devhub.tigerbeetle.com/) and build client
   libraries with hardware acceleration too.
 
 - [#2139](https://github.com/tigerbeetle/tigerbeetle/pull/2139)
@@ -4558,7 +4558,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
   [#2131](https://github.com/tigerbeetle/tigerbeetle/pull/2131),
   [#2124](https://github.com/tigerbeetle/tigerbeetle/pull/2124)
 
-  Lots of small [CFO](https://tigerbeetle.github.io/tigerbeetle/) improvements.
+  Lots of small [CFO](https://devhub.tigerbeetle.com/) improvements.
 
 ### TigerTracks 🎧
 
@@ -4712,7 +4712,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 
 - [#2057](https://github.com/tigerbeetle/tigerbeetle/pull/2057)
 
-  Our internal dashboard, [devhub](https://tigerbeetle.github.io/tigerbeetle/) now has dark mode 😎.
+  Our internal dashboard, [devhub](https://devhub.tigerbeetle.com/) now has dark mode 😎.
 
 - [#2052](https://github.com/tigerbeetle/tigerbeetle/pull/2052),
   [#2032](https://github.com/tigerbeetle/tigerbeetle/pull/2032),
@@ -4911,7 +4911,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
 - [#1974](https://github.com/tigerbeetle/tigerbeetle/pull/1974),
   [#1970](https://github.com/tigerbeetle/tigerbeetle/pull/1970)
 
-  Add the size of an empty data file to [devhub](https://tigerbeetle.github.io/tigerbeetle/),
+  Add the size of an empty data file to [devhub](https://devhub.tigerbeetle.com/),
   tweak the benchmark to always generate the same sized batches, and speed up loading the
   devhub itself.
 
@@ -4964,7 +4964,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
   [#1927](https://github.com/tigerbeetle/tigerbeetle/pull/1927)
 
   Lots of CFO enhancements - the CFO can now do simple minimization, fuzz PRs and orchestrate the
-  VOPR directly. See the output on our [devhub](https://tigerbeetle.github.io/tigerbeetle/)!
+  VOPR directly. See the output on our [devhub](https://devhub.tigerbeetle.com/)!
 
 - [#1948](https://github.com/tigerbeetle/tigerbeetle/pull/1948),
   [#1929](https://github.com/tigerbeetle/tigerbeetle/pull/1929),
@@ -5157,7 +5157,7 @@ Note that the upgrade procedure from `0.15.3` and `0.15.4` is a bit more involve
   [#1854](https://github.com/tigerbeetle/tigerbeetle/pull/1854).
 
   Turn on continuous fuzzing and integrate it with
-  [devhub](https://tigerbeetle.github.io/tigerbeetle/).
+  [devhub](https://devhub.tigerbeetle.com/).
 
 ### Internals
 
@@ -5519,7 +5519,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
   Hook [nyrkiö](https://nyrkio.com/) up to our CI! You can find our dashboard
   [here](https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub)
-  in addition to our [devhub](https://tigerbeetle.github.io/tigerbeetle/).
+  in addition to our [devhub](https://devhub.tigerbeetle.com/).
 
 - [#1635](https://github.com/tigerbeetle/tigerbeetle/pull/1635)
   [#1634](https://github.com/tigerbeetle/tigerbeetle/pull/1634)
@@ -5769,7 +5769,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 - [#1491](https://github.com/tigerbeetle/tigerbeetle/pull/1491),
   [#1503](https://github.com/tigerbeetle/tigerbeetle/pull/1503).
 
-  TigerBeetle's [dev workbench](https://tigerbeetle.github.io/tigerbeetle/) now also tracks
+  TigerBeetle's [dev workbench](https://devhub.tigerbeetle.com/) now also tracks
   memory usage (RSS), throughput, and latency benchmarks over time!
 
 ### Internals
@@ -5832,7 +5832,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1402](https://github.com/tigerbeetle/tigerbeetle/pull/1402)
 
-  TigerBeetle now has a [dev workbench](https://tigerbeetle.github.io/tigerbeetle/)! Currently we
+  TigerBeetle now has a [dev workbench](https://devhub.tigerbeetle.com/)! Currently we
   track our build times and executable size over time.
 
 - [#1461](https://github.com/tigerbeetle/tigerbeetle/pull/1461)
