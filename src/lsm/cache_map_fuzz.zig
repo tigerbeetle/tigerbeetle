@@ -69,7 +69,11 @@ const Environment = struct {
                     env.model.compact();
                 },
                 .upsert => |value| {
-                    env.cache_map.upsert(&value);
+                    // The fuzz drives the slot=null path only (the SAC + stash path).
+                    // The slot=some path is exercised end-to-end via forest_fuzz / VOPR
+                    // through the real Account groove, since the cache_map fuzz has no
+                    // backing values buffer to point slot indices into.
+                    env.cache_map.upsert(&value, null);
                     try env.model.upsert(&value);
                 },
                 .remove => |key| {

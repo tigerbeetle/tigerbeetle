@@ -42,10 +42,23 @@ pub fn TableMemoryType(comptime Table: type) type {
     return struct {
         const TableMemory = @This();
 
+        // Optional callback fired after `mutable_sort_suffix_from_offset` reorders
+        // `values_used[offset..]`. Used by the parent groove to keep an external
+        // `(key -> slot)` index aligned to the post-sort layout. `offset` is 0 for a full
+        // sort and the prior `last_sorted_run_max` for an incremental one.
+        pub const SortCallback = ?*const fn (
+            context: *anyopaque,
+            values_used: []const Value,
+            offset_after_sort: u32,
+        ) void;
+
         values: []Value,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
+
+        sort_callback: SortCallback = null,
+        sort_callback_context: ?*anyopaque = null,
 
         // Maintains per-table mutable state that must be snapshotted for “scopes”.
         // When a scope is opened (e.g., in `tree.zig`), we copy `ValueContext` so we can
@@ -347,6 +360,9 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.value_context.run_tracker.reset();
 
+            // Preserve `sort_callback` and `sort_callback_context` across resets. They are
+            // installed once per groove init by the parent cache_map and must outlive every
+            // bar boundary; this `table.* = .{...}` would otherwise zero them.
             table.* = .{
                 .values = table.values,
                 .value_context = .{
@@ -354,6 +370,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 },
                 .mutability = mutability,
                 .name = table.name,
+                .sort_callback = table.sort_callback,
+                .sort_callback_context = table.sort_callback_context,
             };
         }
 
@@ -363,6 +381,33 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn values_used(table: *const TableMemory) []Value {
             return table.values[0..table.count()];
+        }
+
+        // The exclusive upper bound of the most recently sorted run, or 0 if no run exists.
+        // Used by `Groove.compact` to walk only the newly-sorted suffix after `sort_suffix`,
+        // when an external `(key -> slot)` index needs to be re-aligned to `values_used()`.
+        pub fn last_sorted_run_max(table: *const TableMemory) u32 {
+            if (table.value_context.run_tracker.last()) |run| {
+                return run.max;
+            }
+            return 0;
+        }
+
+        // Register a sort callback. Must be called once, before any sort/sort_suffix call.
+        // See `SortCallback` above for the contract.
+        pub fn attach_sort_callback(
+            table: *TableMemory,
+            context: *anyopaque,
+            callback: *const fn (
+                context: *anyopaque,
+                values_used: []const Value,
+                offset_after_sort: u32,
+            ) void,
+        ) void {
+            assert(table.sort_callback == null);
+            assert(table.sort_callback_context == null);
+            table.sort_callback = callback;
+            table.sort_callback_context = context;
         }
 
         // Appends a `value`. If it is strictly greater than the previous key,
@@ -586,6 +631,18 @@ pub fn TableMemoryType(comptime Table: type) type {
                 offset,
             );
             table.value_context.count = target_count;
+
+            // Notify the parent groove (via the registered callback) that the suffix
+            // `[offset..target_count)` has been freshly sorted, so any external
+            // `(key -> slot)` index that mirrors `values_used` can be re-aligned.
+            if (table.sort_callback) |callback| {
+                callback(
+                    table.sort_callback_context.?,
+                    table.values_used(),
+                    offset,
+                );
+            }
+
             return .{ .min = offset, .max = target_count, .origin = .mutable };
         }
 

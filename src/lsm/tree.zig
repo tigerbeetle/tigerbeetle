@@ -204,6 +204,25 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.table_mutable.put(&Table.tombstone_from_key(Table.key_from_value(value)));
         }
 
+        // The slot in `table_mutable.values` that the next `put` will write to. Captured by
+        // `Groove.insert`/`Groove.update` immediately before `put`, and threaded into the
+        // `objects_cache`'s `write_index` so the cache can store a slot index instead of a
+        // duplicated value. Calling `peek_next_slot` then `put` must be a single, uninterrupted
+        // pair to keep the slot meaningful.
+        pub fn peek_next_slot(tree: *const Tree) u32 {
+            assert(tree.table_mutable.mutability == .mutable);
+            return tree.table_mutable.count();
+        }
+
+        // The exclusive upper bound of the most recently sorted run in `table_mutable`.
+        // Captured by `Groove.compact` before calling `tree.compact()` so it knows where the
+        // newly-sorted suffix begins, when re-aligning the cache_map's `write_index` to the
+        // post-sort layout of `values_used`.
+        pub fn last_sorted_run_max(tree: *const Tree) u32 {
+            assert(tree.table_mutable.mutability == .mutable);
+            return tree.table_mutable.last_sorted_run_max();
+        }
+
         pub fn key_range_update(tree: *Tree, key: Key) void {
             if (tree.key_range) |*key_range| {
                 if (key < key_range.key_min) key_range.key_min = key;

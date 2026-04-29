@@ -629,16 +629,34 @@ pub fn GrooveType(
                 .scan_builder = undefined,
             };
 
+            // write_index holds the slot=some upsert population (writes) when the SAC is
+            // non-empty; the stash then only needs to hold slot=null upserts. SAC absent
+            // keeps the historical single-stash bound.
+            const write_index_max: u32 = if (options.cache_entries_max > 0)
+                constants.lsm_compaction_ops *
+                    options.tree_options_object.batch_value_count_limit
+            else
+                0;
+
+            // Stash sizing. With SAC present, writes live in write_index; the stash holds
+            // prefetch loads, plus orphan-id sentinels for grooves with `orphaned_ids`
+            // (see `insert_orphaned_id` / `state_machine.zig:3164`). With SAC absent the
+            // historical `lsm_compaction_ops * (batch + prefetch)` bound applies.
+            const orphan_max: u32 = if (groove_options.orphaned_ids)
+                options.tree_options_object.batch_value_count_limit
+            else
+                0;
+            const stash_max: u32 = constants.lsm_compaction_ops *
+                (if (options.cache_entries_max > 0)
+                    options.prefetch_entries_for_read_max + orphan_max
+                else
+                    options.tree_options_object.batch_value_count_limit +
+                        options.prefetch_entries_for_read_max);
+
             groove.objects_cache = if (ObjectsCache != void) try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
-                // In the worst case, each stash must be able to store
-                // batch_value_count_limit per beat (to contain either TableMutable or
-                // TableImmutable) as well as the maximum number of prefetches a bar may
-                // perform, excluding prefetches already accounted
-                // for by batch_value_count_limit.
-                .stash_value_count_max = constants.lsm_compaction_ops *
-                    (options.tree_options_object.batch_value_count_limit +
-                        options.prefetch_entries_for_read_max),
+                .write_index_value_count_max = write_index_max,
+                .stash_value_count_max = stash_max,
 
                 // Scopes are limited to a single beat, so the maximum number of entries in
                 // a single scope is batch_value_count_limit (total – not per beat).
@@ -668,6 +686,20 @@ pub fn GrooveType(
                 options.tree_options_object,
             );
             errdefer groove.objects.deinit(allocator);
+
+            // Wire write_index to the tree's mutable values. The cache_map stores a stable
+            // pointer to the slice header so `compact`/`absorb` buffer swaps are observed
+            // freshly on every lookup. The sort callback re-aligns slot indices after any
+            // sort_suffix/sort on the tree's mutable.
+            if (ObjectsCache != void and options.cache_entries_max > 0) {
+                groove.objects_cache.attach_values_backing(
+                    &groove.objects.table_mutable.values,
+                );
+                groove.objects.table_mutable.attach_sort_callback(
+                    &groove.objects_cache,
+                    @TypeOf(groove.objects_cache).sort_callback,
+                );
+            }
 
             if (has_id) try groove.ids.init(
                 allocator,
@@ -891,11 +923,14 @@ pub fn GrooveType(
                         assert(groove_options.orphaned_ids);
 
                         // Zeroed timestamp indicates the object is not present,
-                        // and this id cannot be used anymore.
+                        // and this id cannot be used anymore. The sentinel does not live
+                        // in the tree's mutable table, so it routes through the stash via
+                        // slot=null.
                         groove.objects_cache.upsert(
                             &std.mem.zeroInit(Object, .{
                                 .id = id_tree_value.id,
                             }),
+                            null,
                         );
                     } else {
                         if (groove.prefetch_keys.get(.{
@@ -956,9 +991,11 @@ pub fn GrooveType(
                 .positive => |object| {
                     assert(!ObjectTreeHelper.tombstone(object));
                     switch (lookup_by) {
-                        .primary_key => groove.objects_cache.upsert(object),
+                        // Loaded from the LSM tree levels (not from `tree.table_mutable`),
+                        // so it routes through the stash via slot=null.
+                        .primary_key => groove.objects_cache.upsert(object, null),
                         .timestamp => if (has_id) {
-                            groove.objects_cache.upsert(object);
+                            groove.objects_cache.upsert(object, null);
                             groove.timestamps.set(object.timestamp, .{ .found = object.id });
                         } else unreachable,
                     }
@@ -1175,11 +1212,14 @@ pub fn GrooveType(
                         comptime assert(has_id);
 
                         // Zeroed timestamp indicates the object is not present,
-                        // and this id cannot be used anymore.
+                        // and this id cannot be used anymore. The sentinel does not live
+                        // in the tree's mutable table, so it routes through the stash via
+                        // slot=null.
                         worker.context.groove.objects_cache.upsert(
                             &std.mem.zeroInit(Object, .{
                                 .id = id_tree_value.id,
                             }),
+                            null,
                         );
                     } else if (!id_tree_value.tombstone()) {
                         worker.lookup_by_timestamp(id_tree_value.timestamp);
@@ -1243,9 +1283,11 @@ pub fn GrooveType(
                     }
 
                     switch (entry.lookup_by) {
-                        .primary_key => worker.context.groove.objects_cache.upsert(object),
+                        // Loaded from disk (or tree levels), not from `tree.table_mutable`,
+                        // so it routes through the stash via slot=null.
+                        .primary_key => worker.context.groove.objects_cache.upsert(object, null),
                         .timestamp => if (has_id) {
-                            worker.context.groove.objects_cache.upsert(object);
+                            worker.context.groove.objects_cache.upsert(object, null);
                             worker.context.groove.timestamps.set(
                                 object.timestamp,
                                 .{ .found = object.id },
@@ -1273,7 +1315,15 @@ pub fn GrooveType(
 
             if (ObjectsCache != void) {
                 assert(!groove.objects_cache.has(@field(object, primary_field)));
-                groove.objects_cache.upsert(object);
+                // Capture the slot the next `tree.put` will write to and thread it into
+                // `objects_cache`. This is a no-op (slot=null) when the cache_map's
+                // write_index is disabled. The peek and the put must remain a single,
+                // uninterrupted pair so the slot stays meaningful.
+                const slot: ?u32 = if (groove.objects_cache.write_index_enabled())
+                    groove.objects.peek_next_slot()
+                else
+                    null;
+                groove.objects_cache.upsert(object, slot);
             }
 
             if (has_id) {
@@ -1357,7 +1407,15 @@ pub fn GrooveType(
             // unless old comes from the stash) and no secondary indexes will be updated!
 
             if (ObjectsCache != void) {
-                groove.objects_cache.upsert(new);
+                // Capture the slot for the upcoming `tree.put(new)` and thread it through.
+                // The previous slot for this key (if any) becomes a shadow in mutable.values
+                // that the next sort_suffix's dedup will fold out. No-op (slot=null) when
+                // the cache_map's write_index is disabled for this groove.
+                const slot: ?u32 = if (groove.objects_cache.write_index_enabled())
+                    groove.objects.peek_next_slot()
+                else
+                    null;
+                groove.objects_cache.upsert(new, slot);
             }
             groove.objects.put(new);
         }
@@ -1404,7 +1462,13 @@ pub fn GrooveType(
             assert(groove.ids.active_scope == null);
             assert(!groove.objects_cache.has(id));
 
-            groove.objects_cache.upsert(&std.mem.zeroInit(Object, .{ .id = id }));
+            // The sentinel does not live in the tree's mutable table (we only put into
+            // `groove.ids`, not `groove.objects`), so it routes through the stash via
+            // slot=null.
+            groove.objects_cache.upsert(
+                &std.mem.zeroInit(Object, .{ .id = id }),
+                null,
+            );
             groove.ids.put(&.{ .id = id, .timestamp = 0 });
             groove.ids.key_range_update(id);
         }
@@ -1435,6 +1499,10 @@ pub fn GrooveType(
         }
 
         pub fn scope_close(groove: *Groove, mode: ScopeCloseMode) void {
+            // Order matters: cache_map.scope_close runs FIRST so its rollback log replay
+            // observes the pre-rewind tree state. Then tree.scope_close rewinds the
+            // mutable count. Finally, on .discard with write_index enabled, walk the
+            // post-rewind values to re-establish write_index slot pointers.
             if (ObjectsCache != void) groove.objects_cache.scope_close(mode);
 
             if (has_id) {
@@ -1445,18 +1513,31 @@ pub fn GrooveType(
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).scope_close(mode);
             }
+
+            if (ObjectsCache != void and mode == .discard and
+                groove.objects_cache.write_index_enabled())
+            {
+                groove.objects_cache.rebuild_write_index_full(
+                    groove.objects.table_mutable.values_used(),
+                );
+            }
         }
 
         pub fn compact(groove: *Groove, op: u64) void {
             if (has_id) groove.ids.compact();
+
+            // When the cache_map's write_index is enabled, the rebuild happens
+            // automatically inside `tree.compact()` -> `table_mutable.sort_suffix()` via
+            // the sort callback the groove wired during init. No explicit rebuild call is
+            // needed here.
             groove.objects.compact();
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).compact();
             }
 
-            // Compact the objects_cache on the last beat of the bar, just like the trees do to
-            // their mutable tables.
+            // Compact the objects_cache on the last beat of the bar, just like the trees do
+            // to their mutable tables.
             if (ObjectsCache != void) {
                 const compaction_beat = op % constants.lsm_compaction_ops;
                 if (compaction_beat == constants.lsm_compaction_ops - 1) {
