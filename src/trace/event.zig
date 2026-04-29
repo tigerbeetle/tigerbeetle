@@ -554,7 +554,8 @@ pub const EventMetric = union(enum) {
     grid_blocks_missing,
     grid_cache_hits,
     grid_cache_misses,
-    lsm_object_cache_fill_percent: struct { groove: GrooveEnum },
+    lsm_object_cache_entries: struct { groove: GrooveEnum },
+    lsm_object_cache_entries_max: struct { groove: GrooveEnum },
     lsm_nodes_free,
     lsm_manifest_block_count,
     metrics_statsd_packets,
@@ -591,7 +592,8 @@ pub const EventMetric = union(enum) {
         .grid_blocks_missing = 1,
         .grid_cache_hits = 1,
         .grid_cache_misses = 1,
-        .lsm_object_cache_fill_percent = enum_count(GrooveEnum),
+        .lsm_object_cache_entries = enum_count(GrooveEnum),
+        .lsm_object_cache_entries_max = enum_count(GrooveEnum),
         .lsm_nodes_free = 1,
         .lsm_manifest_block_count = 1,
         .metrics_statsd_packets = 1,
@@ -637,7 +639,9 @@ pub const EventMetric = union(enum) {
 
                 return slot_bases.get(event.*) + offset;
             },
-            inline .lsm_object_cache_fill_percent => |data| {
+            inline .lsm_object_cache_entries,
+            .lsm_object_cache_entries_max,
+            => |data| {
                 const groove = index_from_enum(data.groove);
                 const offset = groove;
                 assert(offset < slot_limits.get(event.*));
@@ -732,7 +736,10 @@ test "EventMetric slot doesn't have collisions" {
             .value_count_visible => .{ .value_count_visible = .{
                 .tree = g.enum_value(TreeEnum),
             } },
-            .lsm_object_cache_fill_percent => .{ .lsm_object_cache_fill_percent = .{
+            .lsm_object_cache_entries => .{ .lsm_object_cache_entries = .{
+                .groove = g.enum_value(GrooveEnum),
+            } },
+            .lsm_object_cache_entries_max => .{ .lsm_object_cache_entries_max = .{
                 .groove = g.enum_value(GrooveEnum),
             } },
             .compaction_values_physical => .{ .compaction_values_physical = .{

@@ -3854,7 +3854,7 @@ pub fn ReplicaType(
                     const GrooveMetric = @TypeOf(@as(
                         vsr.trace.EventMetric,
                         undefined,
-                    ).lsm_object_cache_fill_percent.groove);
+                    ).lsm_object_cache_entries.groove);
                     const groove_metric = comptime std.meta.stringToEnum(
                         GrooveMetric,
                         Groove.ObjectTree.tree_name(),
@@ -3863,10 +3863,16 @@ pub fn ReplicaType(
                         const groove: *const Groove =
                             &@field(self.state_machine.forest.grooves, field.name);
                         self.trace.gauge(
-                            .{ .lsm_object_cache_fill_percent = .{
+                            .{ .lsm_object_cache_entries = .{
                                 .groove = groove_metric_unwrapped,
                             } },
-                            groove.objects_cache.fill_percent(),
+                            groove.objects_cache.cache_entries(),
+                        );
+                        self.trace.gauge(
+                            .{ .lsm_object_cache_entries_max = .{
+                                .groove = groove_metric_unwrapped,
+                            } },
+                            groove.objects_cache.cache_entries_max(),
                         );
                     }
                 }
