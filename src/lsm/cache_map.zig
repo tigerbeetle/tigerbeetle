@@ -146,6 +146,21 @@ pub fn CacheMapType(
                 self.stash.getKeyPtr(tombstone_from_key(key));
         }
 
+        pub fn fill_percent(self: *const CacheMap) u8 {
+            const cache_value_count = if (self.cache) |*cache|
+                cache.metrics.value_count
+            else
+                return 0;
+            assert(self.options.cache_value_count_max > 0);
+
+            const percent = @divFloor(
+                cache_value_count * 100,
+                self.options.cache_value_count_max,
+            );
+            assert(percent <= 100);
+            return @intCast(percent);
+        }
+
         pub fn upsert(self: *CacheMap, value: *const Value) void {
             const old_value_maybe = self.fetch_upsert(value);
 
@@ -361,7 +376,13 @@ test "cache_map: unit" {
     });
     defer cache_map.deinit(allocator);
 
+    try testing.expectEqual(@as(u8, 0), cache_map.fill_percent());
+
     cache_map.upsert(&.{ .key = 1, .value = 1, .tombstone = false });
+    try testing.expectEqual(
+        @as(u8, @intCast(@divFloor(100, cache_map.options.cache_value_count_max))),
+        cache_map.fill_percent(),
+    );
     try testing.expectEqual(
         TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
         cache_map.get(1).?.*,

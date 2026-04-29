@@ -3848,6 +3848,29 @@ pub fn ReplicaType(
             self.trace.gauge(.grid_cache_hits, self.grid.cache.metrics.hits);
             self.trace.gauge(.grid_cache_misses, self.grid.cache.metrics.misses);
             self.trace.gauge(.lsm_nodes_free, self.state_machine.forest.node_pool.free.count());
+            inline for (std.meta.fields(StateMachine.Forest.Grooves)) |field| {
+                const Groove = field.type;
+                if (Groove.ObjectsCache != void) {
+                    const GrooveMetric = @TypeOf(@as(
+                        vsr.trace.EventMetric,
+                        undefined,
+                    ).lsm_object_cache_fill_percent.groove);
+                    const groove_metric = comptime std.meta.stringToEnum(
+                        GrooveMetric,
+                        Groove.ObjectTree.tree_name(),
+                    );
+                    if (groove_metric) |groove_metric_unwrapped| {
+                        const groove: *const Groove =
+                            &@field(self.state_machine.forest.grooves, field.name);
+                        self.trace.gauge(
+                            .{ .lsm_object_cache_fill_percent = .{
+                                .groove = groove_metric_unwrapped,
+                            } },
+                            groove.objects_cache.fill_percent(),
+                        );
+                    }
+                }
+            }
             self.trace.gauge(.release, self.release.value);
 
             self.trace.gauge(
