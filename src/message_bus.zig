@@ -57,7 +57,7 @@ pub fn MessageBusType(comptime IO: type) type {
         connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
             .name = null,
         }),
-        resume_receive_completion: IO.Completion = undefined,
+        resume_receive_next_tick: IO.Completion = undefined,
         resume_receive_submitted: bool = false,
 
         /// Map from replica index to the currently active connection for that replica, if any.
@@ -1134,25 +1134,20 @@ pub fn MessageBusType(comptime IO: type) type {
             if (!bus.resume_needed()) return;
 
             bus.resume_receive_submitted = true;
-            bus.io.timeout(
+            bus.io.next_tick(
                 *MessageBus,
                 bus,
                 ready_to_receive_callback,
-                &bus.resume_receive_completion,
-                0, // Zero timeout means next tick.
+                &bus.resume_receive_next_tick,
+                .vsr,
             );
         }
 
         fn ready_to_receive_callback(
             bus: *MessageBus,
-            completion: *IO.Completion,
-            result: IO.TimeoutError!void,
+            _: *IO.Completion,
+            _: IO.NextTickResult,
         ) void {
-            assert(completion == &bus.resume_receive_completion);
-            _ = result catch |e| switch (e) {
-                error.Canceled => unreachable,
-                error.Unexpected => unreachable,
-            };
             assert(bus.resume_receive_submitted);
             bus.resume_receive_submitted = false;
             maybe(bus.connections_suspended.empty());
