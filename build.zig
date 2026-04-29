@@ -88,6 +88,15 @@ pub fn build(b: *std.Build) !void {
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
+        .objcopy_fuzz = b.step("objcopy:fuzz", "Run tb_objcopy differential fuzzer"),
+        .objcopy_fuzz_roundtrip = b.step(
+            "objcopy:fuzz:roundtrip",
+            "Run tb_objcopy roundtrip fuzzer (no llvm dependency)",
+        ),
+        .objcopy_fuzz_build = b.step(
+            "objcopy:fuzz:build",
+            "Build tb_objcopy differential fuzzer",
+        ),
         .run = b.step("run", "Run TigerBeetle"),
         .ci = b.step("ci", "Run the full suite of CI checks"),
         .scripts = b.step("scripts", "Free form automation scripts"),
@@ -150,7 +159,7 @@ pub fn build(b: *std.Build) !void {
         .llvm_objcopy = b.option(
             []const u8,
             "llvm-objcopy",
-            "Use this llvm-objcopy instead of downloading one",
+            "Use this objcopy binary instead of the in-tree tb_objcopy wrapper",
         ),
         .print_exe = b.option(
             bool,
@@ -330,6 +339,14 @@ pub fn build(b: *std.Build) !void {
         .vsr_options_test = vsr_options_test,
         .target = target,
         .mode = mode,
+        .print_exe = build_options.print_exe,
+    });
+    build_objcopy_fuzz(b, .{
+        .objcopy_fuzz = build_steps.objcopy_fuzz,
+        .objcopy_fuzz_roundtrip = build_steps.objcopy_fuzz_roundtrip,
+        .objcopy_fuzz_build = build_steps.objcopy_fuzz_build,
+    }, .{
+        .llvm_objcopy = build_options.llvm_objcopy,
         .print_exe = build_options.print_exe,
     });
 
@@ -518,6 +535,18 @@ fn build_ci(
         build_ci_script(b, step_ci, options.scripts, &.{"--help"});
 
         build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
+        build_ci_step(b, step_ci, .{
+            "objcopy:fuzz",
+            "--",
+            "--iterations=50",
+            "--seed=1",
+        });
+        build_ci_step(b, step_ci, .{
+            "objcopy:fuzz",
+            "--",
+            "--iterations=50",
+            "--seed=2",
+        });
         inline for (.{ "testing", "accounting" }) |state_machine| {
             build_ci_step(b, step_ci, .{
                 "vopr",
@@ -771,7 +800,10 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     if (options.llvm_objcopy) |path| {
         build_multiversion.addArg(b.fmt("--llvm-objcopy={s}", .{path}));
     } else {
-        build_multiversion.addPrefixedFileArg("--llvm-objcopy=", fetch_objcopy(b));
+        build_multiversion.addPrefixedFileArg(
+            "--llvm-objcopy=",
+            build_tb_objcopy_wrapper(b),
+        );
     }
     if (options.target.result.os.tag == .macos) {
         build_multiversion.addArg("--target=macos");
@@ -816,6 +848,24 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
     else
         "tigerbeetle";
     return build_multiversion.addPrefixedOutputFileArg("--output=", basename);
+}
+
+fn build_tigerbeetle_executable_get_objcopy_reference(b: *std.Build) std.Build.LazyPath {
+    return fetch_objcopy(b);
+}
+
+fn build_tb_objcopy_wrapper(b: *std.Build) std.Build.LazyPath {
+    const stdx_module = b.createModule(.{ .root_source_file = b.path("src/stdx/stdx.zig") });
+    const objcopy = b.addExecutable(.{
+        .name = "tb_objcopy",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tb_objcopy.zig"),
+            .target = resolve_target(b, null) catch @panic("unsupported host"),
+            .optimize = .ReleaseSafe,
+        }),
+    });
+    objcopy.root_module.addImport("stdx", stdx_module);
+    return objcopy.getEmittedBin();
 }
 
 fn build_aof(
@@ -1141,6 +1191,52 @@ fn build_fuzz(
     const fuzz_run = b.addRunArtifact(fuzz_exe);
     if (b.args) |args| fuzz_run.addArgs(args);
     steps.fuzz.dependOn(&fuzz_run.step);
+}
+
+fn build_objcopy_fuzz(
+    b: *std.Build,
+    steps: struct {
+        objcopy_fuzz: *std.Build.Step,
+        objcopy_fuzz_roundtrip: *std.Build.Step,
+        objcopy_fuzz_build: *std.Build.Step,
+    },
+    options: struct {
+        llvm_objcopy: ?[]const u8,
+        print_exe: bool,
+    },
+) void {
+    const stdx_module = b.createModule(.{ .root_source_file = b.path("src/stdx/stdx.zig") });
+    const objcopy_fuzz = b.addExecutable(.{
+        .name = "tb_objcopy_fuzz",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tb_objcopy_fuzz.zig"),
+            .target = resolve_target(b, null) catch @panic("unsupported host"),
+            .optimize = .ReleaseSafe,
+        }),
+    });
+    objcopy_fuzz.root_module.addImport("stdx", stdx_module);
+
+    steps.objcopy_fuzz_build.dependOn(print_or_install(b, objcopy_fuzz, options.print_exe));
+
+    const run_objcopy_fuzz = b.addRunArtifact(objcopy_fuzz);
+    run_objcopy_fuzz.addArg(b.fmt("--zig-exe={s}", .{b.graph.zig_exe}));
+    run_objcopy_fuzz.addPrefixedFileArg("--tb-objcopy=", build_tb_objcopy_wrapper(b));
+    if (options.llvm_objcopy) |path| {
+        run_objcopy_fuzz.addArg(b.fmt("--llvm-objcopy={s}", .{path}));
+    } else {
+        run_objcopy_fuzz.addPrefixedFileArg(
+            "--llvm-objcopy=",
+            build_tigerbeetle_executable_get_objcopy_reference(b),
+        );
+    }
+    if (b.args) |args| run_objcopy_fuzz.addArgs(args);
+    steps.objcopy_fuzz.dependOn(&run_objcopy_fuzz.step);
+
+    const run_objcopy_fuzz_roundtrip = b.addRunArtifact(objcopy_fuzz);
+    run_objcopy_fuzz_roundtrip.addArg(b.fmt("--zig-exe={s}", .{b.graph.zig_exe}));
+    run_objcopy_fuzz_roundtrip.addPrefixedFileArg("--tb-objcopy=", build_tb_objcopy_wrapper(b));
+    if (b.args) |args| run_objcopy_fuzz_roundtrip.addArgs(args);
+    steps.objcopy_fuzz_roundtrip.dependOn(&run_objcopy_fuzz_roundtrip.step);
 }
 
 fn build_scripts(

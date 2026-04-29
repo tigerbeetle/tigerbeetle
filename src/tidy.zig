@@ -1238,6 +1238,8 @@ const DeadFilesDetector = struct {
             "search_index_writer.zig",
             "service_worker_writer.zig",
             "single_page_writer.zig",
+            "tb_objcopy.zig",
+            "tb_objcopy_fuzz.zig",
             "tb_client_header.zig",
             "unit_tests.zig",
             "vopr.zig",
