@@ -1748,9 +1748,37 @@ pub const IO = struct {
                             .{std.fmt.fmtIntSizeBin(superblock_zone_size)},
                         );
                     }
+
                     // Reset position in the block device to compensate for read(2).
                     try posix.lseek_CUR(fd, -superblock_zone_size);
                     assert(try posix.lseek_CUR_get(fd) == 0);
+
+                    // In a similar vein to the fs_allocate for the .file case above, BLKDISCARD
+                    // the entire block device.
+                    assert(std.mem.allEqual(u8, &read_buf, 0));
+
+                    const BLKDISCARD = os.linux.IOCTL.IO(0x12, 119);
+                    const range: extern struct { start: u64, len: u64 } = .{
+                        .start = 0,
+                        .len = block_device_size,
+                    };
+
+                    log.info("discarding {}...", .{std.fmt.fmtIntSizeBin(block_device_size)});
+                    switch (os.linux.E.init(os.linux.ioctl(
+                        fd,
+                        BLKDISCARD,
+                        @intFromPtr(&range),
+                    ))) {
+                        .SUCCESS => {},
+                        else => |e| {
+                            // It's OK if the underlying device doesn't support DISCARD. Warn
+                            // about it.
+                            std.log.warn(
+                                "open_data_file: unable to discard block device: {}",
+                                .{e},
+                            );
+                        },
+                    }
                 }
             },
         }
