@@ -2,9 +2,9 @@
 #include "ruby/thread.h"
 #include "tb_client.h"
 #include <assert.h>
-#include <fcntl.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -17,7 +17,6 @@ typedef enum {
 
 typedef struct rb_tb_request {
     // Set at init, read by callback.
-    int write_fd;
     TB_OPERATION operation;
     uint8_t *send_buf;
     tb_packet_t packet;
@@ -32,6 +31,7 @@ typedef struct rb_tb_request {
 static VALUE rb_mTigerBeetle;
 static VALUE rb_cRequest;
 static VALUE rb_eInitError;
+static VALUE rb_eClientClosedError;
 
 static void rb_tb_init_native_client(VALUE mTigerBeetle);
 
@@ -39,7 +39,7 @@ void Init_tigerbeetle(void) {
     rb_mTigerBeetle = rb_define_module("TigerBeetle");
 
     rb_eInitError = rb_define_class_under(rb_mTigerBeetle, "InitError", rb_eStandardError);
-    rb_define_class_under(rb_mTigerBeetle, "ClientClosedError", rb_eStandardError);
+    rb_eClientClosedError = rb_define_class_under(rb_mTigerBeetle, "ClientClosedError", rb_eStandardError);
     rb_define_class_under(rb_mTigerBeetle, "PacketError", rb_eStandardError);
 
     rb_tb_init_native_client(rb_mTigerBeetle);
@@ -156,8 +156,7 @@ static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf
     }
 }
 
-static VALUE
-rb_tb_deserialize_create_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
+static VALUE rb_tb_deserialize_create_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
     long count = (long)(buf_size / sizeof(tb_create_account_result_t));
     VALUE results = rb_ary_new_capa(count);
     VALUE klass = rb_const_get(mTigerBeetle, rb_intern("CreateAccountResult"));
@@ -172,8 +171,7 @@ rb_tb_deserialize_create_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32
     return results;
 }
 
-static VALUE
-rb_tb_deserialize_create_transfers(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
+static VALUE rb_tb_deserialize_create_transfers(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
     long count = (long)(buf_size / sizeof(tb_create_transfer_result_t));
     VALUE results = rb_ary_new_capa(count);
     VALUE klass = rb_const_get(mTigerBeetle, rb_intern("CreateTransferResult"));
@@ -311,6 +309,13 @@ static VALUE rb_tb_request_result(VALUE self) {
     return ary;
 }
 
+static void rb_tb_write_completion(int fd, rb_tb_request_t *req) {
+    uint64_t request_id = (uint64_t)(uintptr_t)req;
+    ssize_t written = write(fd, &request_id, sizeof(request_id));
+    (void)written;
+    assert(written == sizeof(request_id));
+}
+
 static void rb_tb_on_completion(
     uintptr_t completion_ctx,
     tb_packet_t *packet,
@@ -318,7 +323,6 @@ static void rb_tb_on_completion(
     const uint8_t *result,
     uint32_t result_size
 ) {
-    (void)completion_ctx;
     (void)timestamp;
     rb_tb_request_t *req = (rb_tb_request_t *)packet->user_data;
 
@@ -341,15 +345,12 @@ static void rb_tb_on_completion(
     if (!atomic_compare_exchange_strong(&req->state, &expected, REQ_DONE)) {
         // dfree already ran (state == REQ_ABANDONED). We own cleanup.
         assert(expected == REQ_ABANDONED);
-        close(req->write_fd);
         free(req->result);
         free(req);
         return;
     }
 
-    // write_fd is O_NONBLOCK (see rb_tb_client_submit).
-    write(req->write_fd, "\x01", 1);
-    close(req->write_fd);
+    rb_tb_write_completion((int)completion_ctx, req);
 }
 
 #pragma endregion
@@ -383,7 +384,8 @@ static VALUE rb_tb_client_alloc(VALUE klass) {
     return TypedData_Wrap_Struct(klass, &rb_tb_client_type, data);
 }
 
-static VALUE rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addresses_rb) {
+static VALUE
+rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addresses_rb, VALUE completion_fd_rb) {
     tb_client_t *client;
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
@@ -393,12 +395,15 @@ static VALUE rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addr
     const char *addr = StringValueCStr(addresses_rb);
     uint32_t addr_len = (uint32_t)RSTRING_LEN(addresses_rb);
 
+    int completion_fd = NUM2INT(completion_fd_rb);
+
     TB_INIT_STATUS status =
-        tb_client_init(client, cluster_id_bytes, addr, addr_len, 0, rb_tb_on_completion);
+        tb_client_init(client, cluster_id_bytes, addr, addr_len, (uintptr_t)completion_fd, rb_tb_on_completion);
 
     if (status != TB_INIT_SUCCESS) {
         rb_raise(rb_eInitError, "tb_client_init failed: %s", tb_init_error_message(status));
     }
+
     return self;
 }
 
@@ -410,32 +415,25 @@ static void *rb_tb_deinit_without_gvl(void *arg) {
 static VALUE rb_tb_client_close(VALUE self) {
     tb_client_t *client;
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
+
     // deinit blocks until all in-flight callbacks complete. The GVL is released
     // while waiting so other Ruby threads can run.
     rb_thread_call_without_gvl(rb_tb_deinit_without_gvl, client, NULL, NULL);
     return Qnil;
 }
 
-static VALUE
-rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb, VALUE write_fd_rb) {
+static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb) {
     tb_client_t *client;
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
     TB_OPERATION operation = (TB_OPERATION)NUM2INT(operation_rb);
     long count = RARRAY_LEN(items_rb);
-    int write_fd = NUM2INT(write_fd_rb);
-    int callback_fd = dup(write_fd);
-    if (callback_fd < 0) {
-        rb_raise(rb_eRuntimeError, "out of file descriptors");
-    }
 
     rb_tb_request_t *req = malloc(sizeof(rb_tb_request_t));
     if (!req) {
-        close(callback_fd);
         rb_raise(rb_eNoMemError, "failed to allocate request");
     }
     memset(req, 0, sizeof(rb_tb_request_t));
-    req->write_fd = callback_fd;
     req->operation = operation;
 
     if (count > 0) {
@@ -456,22 +454,20 @@ rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb, VALUE write_
     req->packet.operation = (uint8_t)operation;
     req->packet.user_data = req;
 
-    int fl = fcntl(callback_fd, F_GETFL, 0);
-    fcntl(callback_fd, F_SETFL, fl | O_NONBLOCK);
-
     TB_CLIENT_STATUS cs = tb_client_submit(client, &req->packet);
     if (cs == TB_CLIENT_INVALID) {
-        // Client already closed, so callback won't fire. Signal ourselves.
         free(req->send_buf);
-        req->send_buf = NULL;
-        req->status = TB_PACKET_CLIENT_SHUTDOWN;
-        rb_tb_request_state_t expected = REQ_PENDING;
-        atomic_compare_exchange_strong(&req->state, &expected, REQ_DONE);
-        write(req->write_fd, "\x01", 1);
-        close(req->write_fd);
+        free(req);
+        rb_raise(rb_eClientClosedError, "client is closed");
     }
 
     return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
+}
+
+static VALUE rb_tb_request_id(VALUE self) {
+    rb_tb_request_t *req;
+    TypedData_Get_Struct(self, rb_tb_request_t, &rb_tb_request_type, req);
+    return ULL2NUM((unsigned long long)(uintptr_t)req);
 }
 
 static void rb_tb_init_native_client(VALUE mTigerBeetle) {
@@ -480,12 +476,13 @@ static void rb_tb_init_native_client(VALUE mTigerBeetle) {
 
     VALUE cNativeClient = rb_define_class_under(mTigerBeetle, "NativeClient", rb_cObject);
     rb_define_alloc_func(cNativeClient, rb_tb_client_alloc);
-    rb_define_method(cNativeClient, "initialize", rb_tb_client_initialize, 2);
-    rb_define_method(cNativeClient, "submit", rb_tb_client_submit, 3);
+    rb_define_method(cNativeClient, "initialize", rb_tb_client_initialize, 3);
+    rb_define_method(cNativeClient, "submit", rb_tb_client_submit, 2);
     rb_define_method(cNativeClient, "close", rb_tb_client_close, 0);
 
     rb_cRequest = rb_define_class_under(mTigerBeetle, "Request", rb_cObject);
     rb_define_alloc_func(rb_cRequest, rb_tb_request_alloc);
+    rb_define_method(rb_cRequest, "id", rb_tb_request_id, 0);
     rb_define_method(rb_cRequest, "result", rb_tb_request_result, 0);
 }
 

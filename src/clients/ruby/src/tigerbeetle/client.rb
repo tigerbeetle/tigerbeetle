@@ -1,5 +1,8 @@
 module TigerBeetle
   class Client
+    Client::COMPLETION_DISPATCHER = CompletionDispatcher.new
+    private_constant :COMPLETION_DISPATCHER
+
     def self.open(cluster_id:, replica_addresses:)
       client = new(cluster_id: cluster_id, replica_addresses: replica_addresses)
       yield client
@@ -9,7 +12,7 @@ module TigerBeetle
 
     def initialize(cluster_id:, replica_addresses:)
       addresses = Array(replica_addresses).join(",")
-      @native = NativeClient.new(cluster_id, addresses)
+      @native = NativeClient.new(cluster_id, addresses, COMPLETION_DISPATCHER.write_fileno)
       @closed = false
     end
 
@@ -33,18 +36,15 @@ module TigerBeetle
 
     def native_submit(operation, payload)
       return [] if payload.empty?
+      raise ClientClosedError if closed?
 
-      read_io, write_io = IO.pipe
-      req = @native.submit(operation, payload, write_io.fileno)
-      read_io.read(1)
+      req = COMPLETION_DISPATCHER.submit_and_wait_for(@native, operation, payload)
+
       status, result = req.result
       raise ClientClosedError if status == PACKET_CLIENT_SHUTDOWN
       raise PacketError, status unless status == PACKET_OK
 
       result
-    ensure
-      read_io&.close
-      write_io&.close
     end
   end
 end

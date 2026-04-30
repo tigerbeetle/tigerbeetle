@@ -1,6 +1,7 @@
 require_relative "tigerbeetle/version"
 require_relative "tigerbeetle/bindings"
 require_relative "tigerbeetle/id"
+require_relative "tigerbeetle/completion_dispatcher"
 require_relative "tigerbeetle/client"
 require "tigerbeetle/tigerbeetle"
 
