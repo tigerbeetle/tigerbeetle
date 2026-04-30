@@ -146,6 +146,17 @@ pub fn CacheMapType(
                 self.stash.getKeyPtr(tombstone_from_key(key));
         }
 
+        pub fn cache_entries(self: *const CacheMap) u64 {
+            return if (self.cache) |*cache|
+                cache.metrics.value_count
+            else
+                0;
+        }
+
+        pub fn cache_entries_max(self: *const CacheMap) u64 {
+            return self.options.cache_value_count_max;
+        }
+
         pub fn upsert(self: *CacheMap, value: *const Value) void {
             const old_value_maybe = self.fetch_upsert(value);
 
@@ -361,7 +372,14 @@ test "cache_map: unit" {
     });
     defer cache_map.deinit(allocator);
 
+    try testing.expectEqual(@as(u64, 0), cache_map.cache_entries());
+    try testing.expectEqual(
+        @as(u64, cache_map.options.cache_value_count_max),
+        cache_map.cache_entries_max(),
+    );
+
     cache_map.upsert(&.{ .key = 1, .value = 1, .tombstone = false });
+    try testing.expectEqual(@as(u64, 1), cache_map.cache_entries());
     try testing.expectEqual(
         TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
         cache_map.get(1).?.*,

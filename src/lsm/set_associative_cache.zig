@@ -24,6 +24,7 @@ pub const Layout = struct {
 const Metrics = struct {
     hits: u64 = 0,
     misses: u64 = 0,
+    value_count: u64 = 0,
 };
 
 /// Each Key is associated with a set of n consecutive ways (or slots) that may contain the Value.
@@ -251,6 +252,7 @@ pub fn SetAssociativeCacheType(
             const removed: Value = set.values[way];
             self.counts.set(set.offset + way, 0);
             set.values[way] = undefined;
+            self.metrics.value_count -= 1;
 
             return removed;
         }
@@ -350,6 +352,7 @@ pub fn SetAssociativeCacheType(
             set.values[way] = value.*;
             self.counts.set(set.offset + way, 1);
             self.clocks.set(clock_index, way +% 1);
+            if (evicted == null) self.metrics.value_count += 1;
 
             return .{
                 .index = set.offset + way,
@@ -459,6 +462,7 @@ fn set_associative_cache_test(
             for (sac.tags) |tag| try testing.expectEqual(@as(SAC.Tag, 0), tag);
             for (sac.counts.words) |word| try testing.expectEqual(@as(u64, 0), word);
             for (sac.clocks.words) |word| try testing.expectEqual(@as(u64, 0), word);
+            try expectEqual(@as(u64, 0), sac.metrics.value_count);
 
             // Fill up the first set entirely.
             {
@@ -473,6 +477,7 @@ fn set_associative_cache_test(
                     try expect(sac.counts.get(i) == 2);
                 }
                 try expect(sac.clocks.get(0) == 0);
+                try expectEqual(@as(u64, layout.ways), sac.metrics.value_count);
             }
 
             if (log) sac.associate(0).inspect(sac);
@@ -493,6 +498,7 @@ fn set_associative_cache_test(
                         try expect(sac.counts.get(i) == 1);
                     }
                 }
+                try expectEqual(@as(u64, layout.ways), sac.metrics.value_count);
             }
 
             if (log) sac.associate(0).inspect(sac);
@@ -506,6 +512,7 @@ fn set_associative_cache_test(
                 _ = sac.remove(key);
                 try expectEqual(@as(?*Value, null), sac.get(key));
                 try expect(sac.counts.get(5) == 0);
+                try expectEqual(@as(u64, layout.ways - 1), sac.metrics.value_count);
             }
 
             sac.reset();
@@ -513,6 +520,7 @@ fn set_associative_cache_test(
             for (sac.tags) |tag| try testing.expectEqual(@as(SAC.Tag, 0), tag);
             for (sac.counts.words) |word| try testing.expectEqual(@as(u64, 0), word);
             for (sac.clocks.words) |word| try testing.expectEqual(@as(u64, 0), word);
+            try expectEqual(@as(u64, 0), sac.metrics.value_count);
 
             // Fill up the first set entirely, maxing out the count for each slot.
             {
@@ -532,6 +540,7 @@ fn set_associative_cache_test(
                     try expect(sac.counts.get(i) == math.maxInt(SAC.Count));
                 }
                 try expect(sac.clocks.get(0) == 0);
+                try expectEqual(@as(u64, layout.ways), sac.metrics.value_count);
             }
 
             if (log) sac.associate(0).inspect(sac);
@@ -552,6 +561,7 @@ fn set_associative_cache_test(
                         try expect(sac.counts.get(i) == 1);
                     }
                 }
+                try expectEqual(@as(u64, layout.ways), sac.metrics.value_count);
             }
 
             if (log) sac.associate(0).inspect(sac);
