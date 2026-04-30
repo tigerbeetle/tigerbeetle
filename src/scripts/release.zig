@@ -508,6 +508,7 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         .{ .tag = info.tag },
     );
     try shell.exec("npm ci", .{});
+    try shell.exec("npm run prepare", .{});
     try shell.exec("npm pack --quiet", .{});
 
     try Shell.copy_path(
