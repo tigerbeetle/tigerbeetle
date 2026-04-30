@@ -1462,6 +1462,31 @@ pub fn GrooveType(
                 if (compaction_beat == constants.lsm_compaction_ops - 1) {
                     groove.objects_cache.compact();
                 }
+
+                const Trace = @TypeOf(groove.grid.trace.*);
+                const GrooveMetric = @FieldType(
+                    @FieldType(Trace.EventMetric, "lsm_object_cache_entries"),
+                    "groove",
+                );
+                const maybe_groove_metric = comptime std.meta.stringToEnum(
+                    GrooveMetric,
+                    ObjectTree.tree_name(),
+                );
+
+                if (comptime maybe_groove_metric) |groove_metric| {
+                    groove.grid.trace.gauge(
+                        .{ .lsm_object_cache_entries = .{
+                            .groove = groove_metric,
+                        } },
+                        groove.objects_cache.cache_entries(),
+                    );
+                    groove.grid.trace.gauge(
+                        .{ .lsm_object_cache_entries_max = .{
+                            .groove = groove_metric,
+                        } },
+                        groove.objects_cache.cache_entries_max(),
+                    );
+                }
             }
         }
 
