@@ -278,19 +278,20 @@ const Environment = struct {
     }
 
     fn grid_checkpoint_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
+        const env: *Environment = @alignCast(@fieldParentPtr("grid", grid));
         assert(env.checkpoint_op != null);
         env.change_state(.grid_checkpoint, .superblock_checkpoint);
     }
 
     fn forest_checkpoint_callback(forest: *Forest) void {
-        const env: *Environment = @fieldParentPtr("forest", forest);
+        const env: *Environment = @alignCast(@fieldParentPtr("forest", forest));
         assert(env.checkpoint_op != null);
         env.change_state(.forest_checkpoint, .grid_checkpoint);
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
+        const env: *Environment =
+            @alignCast(@fieldParentPtr("superblock_context", superblock_context));
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
@@ -446,7 +447,8 @@ const Environment = struct {
                 // It's not expected to exceed `lsm_scans_max` here.
                 const scan_buffer = scan_buffer_pool.acquire() catch unreachable;
 
-                var scan_range = ScanRange.init(
+                var scan_range: ScanRange = undefined;
+                scan_range.init(
                     {},
                     &@field(groove_accounts.indexes, @tagName(index)),
                     scan_buffer,
