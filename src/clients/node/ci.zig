@@ -73,6 +73,73 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    version: []const u8,
+}) !void {
+    const tmp_dir = try shell.create_tmp_dir();
+    defer shell.cwd.deleteTree(tmp_dir) catch {};
+
+    const published_url = try shell.fmt(
+        "https://registry.npmjs.org/tigerbeetle-node/-/tigerbeetle-node-{s}.tgz",
+        .{options.version},
+    );
+    const published_tgz = try shell.fmt("{s}/published.tgz", .{tmp_dir});
+    const published_dir = try shell.fmt("{s}/published", .{tmp_dir});
+    try shell.cwd.makePath(published_dir);
+
+    log.info("validating node package {s}", .{published_url});
+
+    // Multiple attempts in case of network errors.
+    const attempts_max = 5;
+    for (0..attempts_max) |attempt_index| {
+        const result = try shell.exec_raw(
+            "wget --quiet --output-document={out} {url}",
+            .{
+                .out = published_tgz,
+                .url = published_url,
+            },
+        );
+        switch (result.term) {
+            .Exited => |code| if (code == 0) break,
+            else => {},
+        }
+
+        const attempt = attempt_index + 1;
+        log.warn("node package download failed. Attempt={}", .{attempt});
+        if (attempt == attempts_max) {
+            return error.DownloadAttemptsExceeded;
+        }
+    }
+
+    const local_path_relative = try shell.fmt(
+        "zig-out/dist/node/tigerbeetle-node-{s}.tgz",
+        .{options.version},
+    );
+    const local_tgz = try shell.project_root.realpathAlloc(
+        shell.arena.allocator(),
+        local_path_relative,
+    );
+    const local_dir = try shell.fmt("{s}/local", .{tmp_dir});
+    try shell.cwd.makePath(local_dir);
+
+    // npm repacks the tarball on publish with a different compression, so we extract and diff.
+    try shell.exec(
+        "tar --extract --file {tgz} --directory {dir}",
+        .{ .tgz = published_tgz, .dir = published_dir },
+    );
+    try shell.exec(
+        "tar --extract --file {tgz} --directory {dir}",
+        .{ .tgz = local_tgz, .dir = local_dir },
+    );
+    try shell.exec(
+        "diff --recursive {published} {local}",
+        .{ .published = published_dir, .local = local_dir },
+    );
+
+    const package_json = try shell.fmt("{s}/package/package.json", .{published_dir});
+    try validate_npm_metadata(shell, gpa, package_json);
+}
+
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     version: []const u8,
     tigerbeetle: []const u8,
@@ -101,4 +168,39 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
     return try shell.exec_stdout("npm view tigerbeetle-node version", .{});
+}
+
+fn validate_npm_metadata(
+    shell: *Shell,
+    gpa: std.mem.Allocator,
+    package_json_path: []const u8,
+) !void {
+    const package_json = try shell.cwd.readFileAlloc(gpa, package_json_path, 4 * 1024);
+    defer gpa.free(package_json);
+
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        shell.arena.allocator(),
+        package_json,
+        .{},
+    );
+    defer parsed.deinit();
+
+    // Verify no runtime dependencies were introduced.
+    if (parsed.value.object.get("dependencies")) |deps| {
+        if (deps == .object and deps.object.count() > 0) {
+            std.debug.panic("unexpected dependencies in tigerbeetle-node", .{});
+        }
+    }
+
+    // Verify no install-time hooks that could run arbitrary code.
+    if (parsed.value.object.get("scripts")) |scripts| {
+        if (scripts == .object) {
+            for ([_][]const u8{ "install", "preinstall", "postinstall" }) |hook| {
+                if (scripts.object.get(hook) != null) {
+                    std.debug.panic("unexpected '{s}' script in tigerbeetle-node", .{hook});
+                }
+            }
+        }
+    }
 }

@@ -130,7 +130,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         assert(shell.file_exists(artifact));
     }
 
-    const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    // Use the SHA of the release tag commit, not HEAD (which may be ahead of the release).
+    const git_sha = try shell.exec_stdout("git rev-list -n 1 {tag}", .{ .tag = tag });
     try shell.exec_zig_options(.{ .timeout = .minutes(20) }, "build scripts -- release --build " ++
         "--sha={git_sha} --language=zig", .{
         .git_sha = git_sha,
@@ -187,6 +188,19 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     inline for (comptime std.enums.values(Language)) |language| {
         if (language_requested == language or language_requested == null) {
             const ci = @field(LanguageCI, @tagName(language));
+
+            // Before we run the published package we verify that it is identical to a local build.
+            if (@hasDecl(ci, "validate_release_package")) {
+                log.info("building {s} client", .{@tagName(language)});
+                try shell.exec_zig(
+                    "build scripts -- release --build --sha={git_sha} --language={language}",
+                    .{ .git_sha = git_sha, .language = @tagName(language) },
+                );
+
+                try ci.validate_release_package(shell, gpa, .{ .version = tag });
+            }
+
+            // Test if the published package works with TigerBeetle.
             try ci.validate_release(shell, gpa, .{
                 .tigerbeetle = tigerbeetle_absolute_path,
                 .version = tag,
