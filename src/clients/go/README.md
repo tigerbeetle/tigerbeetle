@@ -432,7 +432,7 @@ transfer0 := Transfer{
 	Amount:          ToUint128(10),
 	Ledger:          1,
 	Code:            1,
-	Flags:           0,
+	Flags:           TransferFlags{Pending: true}.ToUint16(),
 }
 
 transferResults, err := client.CreateTransfers([]Transfer{transfer0})
@@ -467,7 +467,7 @@ transfer0 := Transfer{
 	Timeout:         0,
 	Ledger:          1,
 	Code:            1,
-	Flags:           0,
+	Flags:           TransferFlags{Pending: true}.ToUint16(),
 }
 
 transferResults, err := client.CreateTransfers([]Transfer{transfer0})
