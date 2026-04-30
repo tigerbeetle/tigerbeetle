@@ -47,7 +47,7 @@
 //!     },
 //! ];
 //!
-//! let account_results = client.create_accounts(&accounts).await?;
+//! let account_results = client.create_accounts(&accounts)?.await?;
 //!
 //! // If no results are returned, then all input events were successful -
 //! // to save resources only unsuccessful inputs return results.
@@ -65,11 +65,11 @@
 //!     ..Default::default()
 //! }];
 //!
-//! let transfer_results = client.create_transfers(&transfers).await?;
+//! let transfer_results = client.create_transfers(&transfers)?.await?;
 //! assert_eq!(transfer_results.len(), 0);
 //!
 //! // Look up the accounts to see the transfer result
-//! let accounts = client.lookup_accounts(&[account_id1, account_id2]).await?;
+//! let accounts = client.lookup_accounts(&[account_id1, account_id2])?.await?;
 //! let account1 = accounts[0];
 //! let account2 = accounts[1];
 //!
@@ -160,7 +160,7 @@
 //!             }
 //!             State::End => return None,
 //!         };
-//!         let result_next = client.get_account_transfers(event).await;
+//!         let result_next = client.get_account_transfers(event).expect("client closed").await;
 //!         match result_next {
 //!             Ok(result_next) => {
 //!                 let result_len = u32::try_from(result_next.len()).expect("u32");
@@ -280,7 +280,7 @@
 //!             ..Default::default()
 //!         }];
 //!
-//!         let results = client.create_accounts(&accounts).await?;
+//!         let results = client.create_accounts(&accounts)?.await?;
 //!
 //!         Ok(())
 //!     })
@@ -428,7 +428,7 @@ impl Client {
     ///     client: &tb::Client,
     ///     accounts: &[tb::Account],
     /// ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    ///     let account_results = client.create_accounts(accounts).await?;
+    ///     let account_results = client.create_accounts(accounts)?.await?;
     ///     assert_eq!(accounts.len(), account_results.len());
     ///     let it = accounts
     ///         .iter()
@@ -476,16 +476,25 @@ impl Client {
     pub fn create_accounts(
         &self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>>, ClientClosed>
+    {
         let (packet, rx) =
             create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
 
             let responses: &[tbc::tb_create_account_result_t] = handle_message(&msg)?;
@@ -497,7 +506,7 @@ impl Client {
                     status: CreateAccountStatus::from(result.status),
                 })
                 .collect())
-        }
+        })
     }
 
     /// Create one or more transfers.
@@ -534,7 +543,7 @@ impl Client {
     ///     client: &tb::Client,
     ///     transfers: &[tb::Transfer],
     /// ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    ///     let transfer_results = client.create_transfers(transfers).await?;
+    ///     let transfer_results = client.create_transfers(transfers)?.await?;
     ///     let it = transfers
     ///         .iter()
     ///         .enumerate()
@@ -580,16 +589,25 @@ impl Client {
     pub fn create_transfers(
         &self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>>, ClientClosed>
+    {
         let (packet, rx) =
             create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
 
             let responses: &[tbc::tb_create_transfer_result_t] = handle_message(&msg)?;
@@ -601,7 +619,7 @@ impl Client {
                     status: CreateTransferStatus::from(result.status),
                 })
                 .collect())
-        }
+        })
     }
 
     /// Query individual accounts.
@@ -629,7 +647,7 @@ impl Client {
     ///     client: &tb::Client,
     ///     accounts: &[u128],
     /// ) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let lookup_accounts_results = client.lookup_accounts(accounts).await?;
+    ///     let lookup_accounts_results = client.lookup_accounts(accounts)?.await?;
     ///     let lookup_accounts_results_merged = merge_lookup_accounts_results(accounts, lookup_accounts_results);
     ///     for (account_id, maybe_account) in lookup_accounts_results_merged {
     ///         match maybe_account {
@@ -688,20 +706,28 @@ impl Client {
     pub fn lookup_accounts(
         &self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<Account>, PacketStatus>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
             let responses: &[Account] = handle_message(&msg)?;
             Ok(Vec::from(responses))
-        }
+        })
     }
 
     /// Query individual transfers.
@@ -732,7 +758,7 @@ impl Client {
     ///     client: &tb::Client,
     ///     transfers: &[u128],
     /// ) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let lookup_transfers_results = client.lookup_transfers(transfers).await?;
+    ///     let lookup_transfers_results = client.lookup_transfers(transfers)?.await?;
     ///     let lookup_transfers_results_merged = merge_lookup_transfers_results(transfers, lookup_transfers_results);
     ///     for (transfer_id, maybe_transfer) in lookup_transfers_results_merged {
     ///         match maybe_transfer {
@@ -777,20 +803,28 @@ impl Client {
     pub fn lookup_transfers(
         &self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketStatus>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
             let responses: &[Transfer] = handle_message(&msg)?;
             Ok(Vec::from(responses))
-        }
+        })
     }
 
     /// Query multiple transfers for a single account.
@@ -808,23 +842,31 @@ impl Client {
     pub fn get_account_transfers(
         &self,
         event: AccountFilter,
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketStatus>>, ClientClosed> {
         let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS,
             &[event],
         );
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
             let result: &[Transfer] = handle_message(&msg)?;
 
             Ok(result.to_vec())
-        }
+        })
     }
 
     /// Query historical account balances for a single account.
@@ -842,23 +884,31 @@ impl Client {
     pub fn get_account_balances(
         &self,
         event: AccountFilter,
-    ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>>, ClientClosed> {
         let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES,
             &[event],
         );
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
             let result: &[AccountBalance] = handle_message(&msg)?;
 
             Ok(result.to_vec())
-        }
+        })
     }
 
     /// Query multiple accounts related by fields and timestamps.
@@ -876,21 +926,29 @@ impl Client {
     pub fn query_accounts(
         &self,
         event: QueryFilter,
-    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<Account>, PacketStatus>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS, &[event]);
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
             let result: &[Account] = handle_message(&msg)?;
 
             Ok(result.to_vec())
-        }
+        })
     }
 
     /// Query multiple transfers related by fields and timestamps.
@@ -908,54 +966,64 @@ impl Client {
     pub fn query_transfers(
         &self,
         event: QueryFilter,
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> {
+    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketStatus>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS, &[event]);
 
         unsafe {
-            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
-            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+            let packet = Box::into_raw(packet);
+            let status = tbc::tb_client_submit(self.client, packet);
+            match status {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                    drop(Box::from_raw(packet));
+                    return Err(ClientClosed);
+                }
+                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+            }
         }
 
-        async {
+        Ok(async {
             let msg = rx.await;
             let result: &[Transfer] = handle_message(&msg)?;
 
             Ok(result.to_vec())
-        }
+        })
     }
 
     /// Close the client and asynchronously wait for completion.
     ///
-    /// Note that it is not required for correctness to call this method &mdash;
-    /// `Client`'s destructor will correctly shut down the client, though
-    /// without providing the ability to wait for shutdown.
+    /// The returned future resolves to `Err(ClientClosed)` if the client
+    /// was already invalidated by eviction.
     ///
     /// Calling `close` will cancel any pending requests. This is only possible
     /// if the futures for those requests were dropped without awaiting them.
-    pub fn close(mut self) -> impl Future<Output = ()> {
+    pub fn close(mut self) -> impl Future<Output = Result<(), ClientClosed>> {
         struct SendClient(*mut tbc::tb_client_t);
         unsafe impl Send for SendClient {}
 
         let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
         let client = SendClient(client);
 
-        let (tx, rx) = oneshot::channel::<()>();
+        let (tx, rx) = oneshot::channel::<Result<(), ClientClosed>>();
 
         std::thread::spawn(move || {
             let client = client;
-            unsafe {
+            let result = unsafe {
                 // This is a blocking function so we're calling it offthread.
                 let status = tbc::tb_client_deinit(client.0);
-                assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+                let result = match status {
+                    tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => Ok(()),
+                    tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => Err(ClientClosed),
+                    _ => unreachable!("unexpected status from tb_client_deinit: {}", status),
+                };
                 std::mem::drop(Box::from_raw(client.0));
-            }
-            tx.send(());
+                result
+            };
+            tx.send(result);
         });
 
-        async {
-            rx.await;
-        }
+        rx
     }
 }
 
@@ -1635,6 +1703,20 @@ impl core::fmt::Display for PacketStatus {
             Self::InvalidOperation => f.write_str("invalid operation"),
             Self::InvalidDataSize => f.write_str("invalid data size"),
         }
+    }
+}
+
+/// An error indicating the client has been closed or is invalid.
+///
+/// Returned when `tb_client_submit` reports the client handle is invalid,
+/// which occurs after the client has been closed.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct ClientClosed;
+
+impl std::error::Error for ClientClosed {}
+impl core::fmt::Display for ClientClosed {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.write_str("client closed")
     }
 }
 

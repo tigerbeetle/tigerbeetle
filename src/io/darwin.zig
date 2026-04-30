@@ -133,11 +133,11 @@ pub const IO = struct {
             }
         }
 
-        var completed = self.completed;
-        self.completed.reset();
-
+        // Drain all ready completions. Callbacks may push new completions
+        // (e.g. zero-delay timeouts) which are picked up in the same pass,
+        // matching Linux io_uring behavior (see ba0535354).
         var timer = try std.time.Timer.start();
-        while (completed.pop()) |completion| {
+        while (self.completed.pop()) |completion| {
             (completion.callback)(self, completion);
         }
         self.stats.now.time_callbacks.ns += timer.read();
@@ -302,10 +302,6 @@ pub const IO = struct {
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
         }
-    }
-
-    pub fn cancel_all(_: *IO) void {
-        // TODO Cancel in-flight async IO and wait for all completions.
     }
 
     pub const CancelError = error{

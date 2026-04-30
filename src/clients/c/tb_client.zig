@@ -13,22 +13,22 @@ pub const Packet = @import("tb_client/packet.zig").Packet.Extern;
 pub const PacketStatus = @import("tb_client/packet.zig").Packet.Status;
 pub const Operation = vsr.tigerbeetle.Operation;
 
-const ContextType = @import("tb_client/context.zig").ContextType;
-const DefaultContext = blk: {
+const IoThreadType = @import("tb_client/context.zig").IoThreadType;
+const DefaultIoThread = blk: {
     const ClientType = @import("../../vsr/client.zig").ClientType;
     const Client = ClientType(Operation, MessageBus);
-    break :blk ContextType(Client);
+    break :blk IoThreadType(Client);
 };
 
-const TestingContext = blk: {
+const TestingIoThread = blk: {
     const EchoClientType = @import("tb_client/echo_client.zig").EchoClientType;
     const EchoClient = EchoClientType(MessageBus);
-    break :blk ContextType(EchoClient);
+    break :blk IoThreadType(EchoClient);
 };
 
-pub const init = DefaultContext.init;
-pub const init_echo = TestingContext.init;
+pub const init = DefaultIoThread.init;
+pub const init_echo = TestingIoThread.init;
 
 test {
-    std.testing.refAllDecls(DefaultContext);
+    std.testing.refAllDecls(DefaultIoThread);
 }

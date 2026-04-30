@@ -1015,8 +1015,11 @@ public class IntegrationTest {
 
                 // The client is deinitialized after it learns it was evicted.
                 // Reusing an evicted client must return a "ClientShutdown" error.
-                assertThrows(ClientClosedException.class,
-                        () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
+                try {
+                    client_evict.lookupAccounts(new IdBatch(UInt128.id()));
+                    assert false;
+                } catch (ClientClosedException clientClosedException) {
+                }
             }
         }
     }
