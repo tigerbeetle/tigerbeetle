@@ -331,7 +331,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             fn pop_from_tree(iterator: *Iterator) ?Value {
                 if (iterator.tournament_tree == null) iterator.load_tree();
-                var tree = &iterator.tournament_tree.?;
+                const tree = &iterator.tournament_tree.?;
 
                 if (tree.contestants_left == 0) return null;
 
