@@ -218,10 +218,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             end_reached: bool,
 
             counters: struct {
-                input: u32 = 0, // This is the input count of the immutable table.
+                input: u32, // This is the input count of the immutable table.
                 dropped: u32 = 0, // Tombstones.
                 out: u32 = 0,
-            } = .{},
+            },
 
             pub fn init(
                 iterator: *Iterator,
