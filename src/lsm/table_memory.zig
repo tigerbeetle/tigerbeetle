@@ -366,7 +366,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                             return;
                         }
                         const consumed = iterator.counters.out + iterator.counters.dropped;
-                        assert(iterator.counters.input == consumed);
+                        assert(consumed == iterator.counters.input);
 
                         iterator.end_reached = true;
                         return;
