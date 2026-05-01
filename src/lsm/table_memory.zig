@@ -463,7 +463,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                         self.pending = null; // drop both
                     } else {
                         // The last value in a run of duplicates needs to be the one that ends up
-                        // in  target.
+                        // in target.
                         // Effect: keep the slot, overwrite winner with the newer value.
                         self.pending = value; // last wins
                     }
