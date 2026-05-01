@@ -206,10 +206,10 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub const ImmutableTableIterator = struct {
             const TournamentTree = TournamentTreeType(Key, sorted_runs_max);
 
-            address: *const Iterator,
+            address: *const ImmutableTableIterator,
             direction: Direction,
             maybe_value_next: ?Value,
-            
+
             tournament_tree: ?TournamentTree,
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
@@ -224,7 +224,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             },
 
             pub fn init(
-                iterator: *Iterator,
+                iterator: *ImmutableTableIterator,
                 merge_context: MergeContext,
                 maybe_key_end: ?Key,
                 direction: Direction,
@@ -257,34 +257,34 @@ pub fn TableMemoryType(comptime Table: type) type {
                 );
             }
 
-            pub fn count_max(iterator: *const Iterator) u32 {
+            pub fn count_max(iterator: *const ImmutableTableIterator) u32 {
                 iterator.assert_not_moved();
                 return iterator.counters.input;
             }
 
-            pub fn count_dropped(iterator: *const Iterator) u32 {
+            pub fn count_dropped(iterator: *const ImmutableTableIterator) u32 {
                 iterator.assert_not_moved();
                 return iterator.counters.dropped;
             }
 
-            pub fn count_remaining(iterator: *const Iterator) u32 {
+            pub fn count_remaining(iterator: *const ImmutableTableIterator) u32 {
                 iterator.assert_not_moved();
                 return iterator.counters.input - (iterator.counters.out +
                     iterator.counters.dropped);
             }
 
-            fn assert_not_moved(iterator: *const Iterator) void {
+            fn assert_not_moved(iterator: *const ImmutableTableIterator) void {
                 assert(@intFromPtr(iterator.address) == @intFromPtr(iterator));
             }
 
-            pub inline fn peek(iterator: *Iterator) ?Key {
+            pub inline fn peek(iterator: *ImmutableTableIterator) ?Key {
                 if (iterator.maybe_value_next) |value| return key_from_value(&value);
                 iterator.ensure_next();
                 const value = iterator.maybe_value_next orelse return null;
                 return key_from_value(&value);
             }
 
-            pub inline fn pop(iterator: *Iterator) ?Value {
+            pub inline fn pop(iterator: *ImmutableTableIterator) ?Value {
                 if (iterator.maybe_value_next) |value| {
                     iterator.counters.out += 1;
                     iterator.maybe_value_next = null;
@@ -297,7 +297,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return value;
             }
 
-            pub fn probe(iterator: *Iterator, probe_key: Key) void {
+            pub fn probe(iterator: *ImmutableTableIterator, probe_key: Key) void {
                 while (true) {
                     const key_peek = iterator.peek() orelse break;
                     switch (iterator.direction) {
@@ -308,7 +308,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 }
             }
 
-            fn load_tree(iterator: *Iterator) void {
+            fn load_tree(iterator: *ImmutableTableIterator) void {
                 assert(iterator.tournament_tree == null);
 
                 var contestants: [TournamentTree.node_count_max]TournamentTree.Node =
@@ -330,7 +330,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 );
             }
 
-            fn pop_from_tree(iterator: *Iterator) ?Value {
+            fn pop_from_tree(iterator: *ImmutableTableIterator) ?Value {
                 if (iterator.tournament_tree == null) iterator.load_tree();
                 const tree = &iterator.tournament_tree.?;
 
@@ -351,7 +351,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return value;
             }
 
-            fn ensure_next(iterator: *Iterator) void {
+            fn ensure_next(iterator: *ImmutableTableIterator) void {
                 iterator.assert_not_moved();
                 if (iterator.maybe_value_next != null) return;
                 if (iterator.end_reached) return;
@@ -417,7 +417,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return .{ .next_pending = value, .dropped_count = 1 };
             }
 
-            inline fn within_range(iterator: *const Iterator, key: Key) bool {
+            inline fn within_range(iterator: *const ImmutableTableIterator, key: Key) bool {
                 const key_end = iterator.maybe_key_end orelse return true;
 
                 return switch (iterator.direction) {

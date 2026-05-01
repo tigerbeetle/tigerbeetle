@@ -1680,7 +1680,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .level_b = compaction.level_b,
             } });
 
-            const merge_result = switch (compaction.table_info_a.?)
+            const merge_result = switch (compaction.table_info_a.?) {
                 .immutable => compaction.merge_immutable(),
                 .disk => compaction.merge_disk(),
             };

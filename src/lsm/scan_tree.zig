@@ -10,11 +10,6 @@ const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
 const vsr = @import("../vsr.zig");
-const perf = @import("perf_event.zig");
-
-const Params = struct {
-    name: []const u8 = "scan",
-};
 
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
