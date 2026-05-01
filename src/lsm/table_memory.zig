@@ -206,14 +206,15 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub const ImmutableTableIterator = struct {
             const TournamentTree = TournamentTreeType(Key, sorted_runs_max);
 
-            streams: [sorted_runs_max][]const Value,
-            streams_count: u32,
-            tournament_tree: ?TournamentTree,
             address: *const Iterator,
             direction: Direction,
+            maybe_value_next: ?Value,
+            
+            tournament_tree: ?TournamentTree,
+            streams: [sorted_runs_max][]const Value,
+            streams_count: u32,
             maybe_key_end: ?Key,
             pending: ?Value,
-            maybe_value_next: ?Value,
             end_reached: bool,
 
             counters: struct {
