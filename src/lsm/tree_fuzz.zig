@@ -172,6 +172,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
                 .blocks_released_prior_checkpoint_durability_max = 0,
+                .stash_blocks_count = block_count + 64,
             });
             defer env.grid.deinit(gpa);
 
