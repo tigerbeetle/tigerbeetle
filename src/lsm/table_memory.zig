@@ -363,11 +363,10 @@ pub fn TableMemoryType(comptime Table: type) type {
                         if (iterator.pending) |pending_value| {
                             iterator.maybe_value_next = pending_value;
                             iterator.pending = null;
-                            iterator.end_reached = true;
-                            return;
+                        } else {
+                            const consumed = iterator.counters.out + iterator.counters.dropped;
+                            assert(iterator.counters.input == consumed);
                         }
-                        const consumed = iterator.counters.out + iterator.counters.dropped;
-                        assert(consumed == iterator.counters.input);
 
                         iterator.end_reached = true;
                         return;
