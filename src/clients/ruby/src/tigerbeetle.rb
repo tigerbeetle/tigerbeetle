@@ -9,9 +9,9 @@ module TigerBeetle
   private_constant :NativeClient
   private_constant :Request
 
-  @id_generator = IdGenerator.new
+  @id_generator = ID.new
 
-  def self.generate_id
+  def self.id
     @id_generator.generate
   end
 end

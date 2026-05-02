@@ -1,7 +1,7 @@
 require "securerandom"
 
 module TigerBeetle
-  class IdGenerator
+  class ID
     RANDOM_MAX = 2 ** 80
     TIMESTAMP_MAX = 2 ** 48
 

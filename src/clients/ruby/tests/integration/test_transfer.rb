@@ -6,8 +6,8 @@ class TestTransfers < Minitest::Test
     tb_address = ENV.fetch("TB_ADDRESS", "3000")
     @client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: tb_address)
 
-    @a1_id = TigerBeetle.generate_id
-    @a2_id = TigerBeetle.generate_id
+    @a1_id = TigerBeetle.id
+    @a2_id = TigerBeetle.id
     @client.create_accounts(
       [
         TigerBeetle::Account.new(id: @a1_id, ledger: 1, code: 1),
@@ -24,7 +24,7 @@ class TestTransfers < Minitest::Test
     results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.generate_id,
+          id: TigerBeetle.id,
           debit_account_id: @a1_id,
           credit_account_id: @a2_id,
           amount: 100,
@@ -40,7 +40,7 @@ class TestTransfers < Minitest::Test
 
   def test_create_transfer_duplicate
     transfer = TigerBeetle::Transfer.new(
-      id: TigerBeetle.generate_id,
+      id: TigerBeetle.id,
       debit_account_id: @a1_id,
       credit_account_id: @a2_id,
       amount: 10,
@@ -76,7 +76,7 @@ class TestTransfers < Minitest::Test
     results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.generate_id,
+          id: TigerBeetle.id,
           debit_account_id: 0,
           credit_account_id: @a2_id,
           amount: 10,
@@ -96,7 +96,7 @@ class TestTransfers < Minitest::Test
     results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.generate_id,
+          id: TigerBeetle.id,
           debit_account_id: @a1_id,
           credit_account_id: 0,
           amount: 10,
@@ -116,7 +116,7 @@ class TestTransfers < Minitest::Test
     results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.generate_id,
+          id: TigerBeetle.id,
           debit_account_id: @a1_id,
           credit_account_id: @a1_id,
           amount: 10,
@@ -133,7 +133,7 @@ class TestTransfers < Minitest::Test
     results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.generate_id,
+          id: TigerBeetle.id,
           debit_account_id: @a1_id,
           credit_account_id: @a2_id,
           amount: 10,
@@ -150,7 +150,7 @@ class TestTransfers < Minitest::Test
     results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.generate_id,
+          id: TigerBeetle.id,
           debit_account_id: @a1_id,
           credit_account_id: @a2_id,
           amount: 10,
@@ -164,7 +164,7 @@ class TestTransfers < Minitest::Test
   end
 
   def test_lookup_transfer
-    id = TigerBeetle.generate_id
+    id = TigerBeetle.id
     @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
@@ -185,15 +185,15 @@ class TestTransfers < Minitest::Test
   end
 
   def test_lookup_transfer_not_found
-    id = TigerBeetle.generate_id
+    id = TigerBeetle.id
 
     results = @client.lookup_transfers([id])
     assert_equal(0, results.length)
   end
 
   def test_lookup_transfers_multiple
-    id1 = TigerBeetle.generate_id
-    id2 = TigerBeetle.generate_id
+    id1 = TigerBeetle.id
+    id2 = TigerBeetle.id
     @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
@@ -226,8 +226,8 @@ class TestTransfers < Minitest::Test
   end
 
   def test_lookup_transfers_partial_match
-    existing_id = TigerBeetle.generate_id
-    missing_id = TigerBeetle.generate_id
+    existing_id = TigerBeetle.id
+    missing_id = TigerBeetle.id
     @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
@@ -252,8 +252,8 @@ class TestTransfers < Minitest::Test
   end
 
   def test_lookup_transfer_field_roundtrip
-    id = TigerBeetle.generate_id
-    user_data_128 = TigerBeetle.generate_id
+    id = TigerBeetle.id
+    user_data_128 = TigerBeetle.id
     user_data_64 = 8_888_888_888
     user_data_32 = 54321
     @client.create_transfers(

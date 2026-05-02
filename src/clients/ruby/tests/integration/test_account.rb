@@ -12,7 +12,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account
-    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 1)
+    account = TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 1, code: 1)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -21,7 +21,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_duplicate
-    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 1)
+    account = TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 1, code: 1)
 
     @client.create_accounts([account])
 
@@ -39,7 +39,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_ledger_zero
-    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 0, code: 1)
+    account = TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 0, code: 1)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -47,7 +47,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_create_account_code_zero
-    account = TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 0)
+    account = TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 1, code: 0)
 
     results = @client.create_accounts([account])
     assert_equal(1, results.length)
@@ -56,7 +56,7 @@ class TestAccounts < Minitest::Test
 
   def test_create_account_mutually_exclusive_flags
     account = TigerBeetle::Account.new(
-      id: TigerBeetle.generate_id,
+      id: TigerBeetle.id,
       ledger: 1,
       code: 1,
       flags: TigerBeetle::AccountFlags::DEBITS_MUST_NOT_EXCEED_CREDITS |
@@ -69,7 +69,7 @@ class TestAccounts < Minitest::Test
   end
 
   def test_lookup_account
-    id = TigerBeetle.generate_id
+    id = TigerBeetle.id
     account = TigerBeetle::Account.new(id: id, ledger: 1, code: 1)
 
     @client.create_accounts([account])
@@ -82,15 +82,15 @@ class TestAccounts < Minitest::Test
   end
 
   def test_lookup_account_not_found
-    id = TigerBeetle.generate_id
+    id = TigerBeetle.id
 
     results = @client.lookup_accounts([id])
     assert_equal(0, results.length)
   end
 
   def test_lookup_accounts_multiple
-    id1 = TigerBeetle.generate_id
-    id2 = TigerBeetle.generate_id
+    id1 = TigerBeetle.id
+    id2 = TigerBeetle.id
     @client.create_accounts(
       [
         TigerBeetle::Account.new(id: id1, ledger: 1, code: 1),
@@ -109,8 +109,8 @@ class TestAccounts < Minitest::Test
   end
 
   def test_lookup_accounts_partial_match
-    existing_id = TigerBeetle.generate_id
-    missing_id = TigerBeetle.generate_id
+    existing_id = TigerBeetle.id
+    missing_id = TigerBeetle.id
     @client.create_accounts(
       [TigerBeetle::Account.new(id: existing_id, ledger: 1, code: 1)]
     )
@@ -126,8 +126,8 @@ class TestAccounts < Minitest::Test
   end
 
   def test_lookup_account_field_roundtrip
-    id = TigerBeetle.generate_id
-    user_data_128 = TigerBeetle.generate_id
+    id = TigerBeetle.id
+    user_data_128 = TigerBeetle.id
     user_data_64 = 9_999_999_999
     user_data_32 = 12345
     @client.create_accounts(

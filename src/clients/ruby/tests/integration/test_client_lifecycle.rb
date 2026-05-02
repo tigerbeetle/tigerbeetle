@@ -72,7 +72,7 @@ class TestClientLifecycle < Minitest::Test
     end
 
     accounts = clients.map do
-      TigerBeetle::Account.new(id: TigerBeetle.generate_id, ledger: 1, code: 1)
+      TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 1, code: 1)
     end
 
     threads = clients.zip(accounts).map do |client, account|

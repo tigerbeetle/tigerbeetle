@@ -3,26 +3,26 @@ require "tigerbeetle"
 
 class TestID < Minitest::Test
   def test_unique
-    ids = Array.new(1000) { TigerBeetle.generate_id }
+    ids = Array.new(1000) { TigerBeetle.id }
     assert_equal(ids.length, ids.uniq.length)
   end
 
   def test_monotonic
-    ids = Array.new(100) { TigerBeetle.generate_id }
+    ids = Array.new(100) { TigerBeetle.id }
     assert_equal(ids, ids.sort)
   end
 
   def test_fits_in_128_bits
     1000.times do
-      id = TigerBeetle.generate_id
+      id = TigerBeetle.id
       assert(id >= 0)
       assert(id < 2 ** 128)
     end
   end
 
   def test_random_overflow_advances_timestamp
-    gen = TigerBeetle::IdGenerator.new
-    gen.instance_variable_set(:@random, TigerBeetle::IdGenerator::RANDOM_MAX - 1)
+    gen = TigerBeetle::ID.new
+    gen.instance_variable_set(:@random, TigerBeetle::ID::RANDOM_MAX - 1)
     last_ms = gen.instance_variable_get(:@last_ms)
 
     id = gen.generate
@@ -34,15 +34,15 @@ class TestID < Minitest::Test
   end
 
   def test_random_near_max_does_not_raise
-    gen = TigerBeetle::IdGenerator.new
-    gen.instance_variable_set(:@random, TigerBeetle::IdGenerator::RANDOM_MAX - 2)
+    gen = TigerBeetle::ID.new
+    gen.instance_variable_set(:@random, TigerBeetle::ID::RANDOM_MAX - 2)
 
-    assert_equal(TigerBeetle::IdGenerator::RANDOM_MAX - 1, gen.generate & (TigerBeetle::IdGenerator::RANDOM_MAX - 1))
+    assert_equal(TigerBeetle::ID::RANDOM_MAX - 1, gen.generate & (TigerBeetle::ID::RANDOM_MAX - 1))
   end
 
   def test_ids_monotonic_across_random_overflow
-    gen = TigerBeetle::IdGenerator.new
-    gen.instance_variable_set(:@random, TigerBeetle::IdGenerator::RANDOM_MAX - 2)
+    gen = TigerBeetle::ID.new
+    gen.instance_variable_set(:@random, TigerBeetle::ID::RANDOM_MAX - 2)
 
     ids = Array.new(5) { gen.generate }
     assert_equal(ids, ids.sort)
