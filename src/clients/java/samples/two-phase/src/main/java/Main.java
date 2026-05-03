@@ -130,7 +130,7 @@ public final class Main {
                     assert accounts.getCreditsPosted().intValueExact() == 0;
                     assert accounts.getDebitsPending().intValueExact() == 0;
                     assert accounts.getCreditsPending().intValueExact() == 0;
-                } else if (accounts.getId(UInt128.LeastSignificant) == 1
+                } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
                     assert accounts.getDebitsPosted().intValueExact() == 0;
                     assert accounts.getCreditsPosted().intValueExact() == 500;
