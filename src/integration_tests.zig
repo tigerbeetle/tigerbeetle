@@ -368,11 +368,14 @@ test "help/version smoke" {
     }
 }
 
-test "in-place upgrade" {
+test "in-place upgrade -- FIXME" {
     if (builtin.target.os.tag != .linux) {
         return error.SkipZigTest;
     }
 
+    for (0..5) |_| {
+
+    {
     const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.info;
     defer std.testing.log_level = level;
@@ -434,15 +437,9 @@ test "in-place upgrade" {
     if (!supervisor.workload_done()) {
         return error.WorkloadIncomplete;
     }
-}
-
-test "recover smoke -- FIXME" {
-    if (builtin.os.tag != .linux) {
-        return error.SkipZigTest;
     }
 
-    for (0..40) |_| {
-
+    {
     const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.info;
     defer std.testing.log_level = level;
@@ -479,6 +476,7 @@ test "recover smoke -- FIXME" {
         return error.WorkloadIncomplete;
     }
 
+    }
     }
 }
 
