@@ -436,10 +436,12 @@ test "in-place upgrade" {
     }
 }
 
-test "recover smoke" {
+test "recover smoke -- FIXME" {
     if (builtin.os.tag != .linux) {
         return error.SkipZigTest;
     }
+
+    for (0..40) |_| {
 
     const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.info;
@@ -475,6 +477,8 @@ test "recover smoke" {
         try supervisor.tick();
     } else {
         return error.WorkloadIncomplete;
+    }
+
     }
 }
 
