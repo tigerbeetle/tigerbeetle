@@ -188,7 +188,8 @@ typedef struct tb_account_filter_t {
     uint64_t user_data_64;
     uint32_t user_data_32;
     uint16_t code;
-    uint8_t reserved[58];
+    uint8_t pending_status;
+    uint8_t reserved[57];
     uint64_t timestamp_min;
     uint64_t timestamp_max;
     uint32_t limit;
@@ -216,7 +217,8 @@ typedef struct tb_query_filter_t {
     uint32_t user_data_32;
     uint32_t ledger;
     uint16_t code;
-    uint8_t reserved[6];
+    uint8_t pending_status;
+    uint8_t reserved[5];
     uint64_t timestamp_min;
     uint64_t timestamp_max;
     uint32_t limit;
@@ -258,6 +260,7 @@ typedef enum TB_OPERATION {
     TB_OPERATION_QUERY_TRANSFERS = 145,
     TB_OPERATION_CREATE_ACCOUNTS = 146,
     TB_OPERATION_CREATE_TRANSFERS = 147,
+    TB_OPERATION_QUERY_TWO_PHASE_TRANSFERS = 148,
 } TB_OPERATION;
 
 typedef enum TB_PACKET_STATUS {

@@ -530,7 +530,11 @@ pub const QueryFilter = extern struct {
     /// Query by the `code` index.
     /// Use zero for no filter.
     code: u16,
-    reserved: [6]u8 = @splat(0),
+    /// Query by the pending status.
+    /// Use `.none` for no filter.
+    pending_status: TransferPendingStatus,
+
+    reserved: [5]u8 = @splat(0),
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -576,8 +580,11 @@ pub const AccountFilter = extern struct {
     /// Query by the `code` index.
     /// Use zero for no filter.
     code: u16,
+    /// Query by the pending status.
+    /// Use `.none` for no filter.
+    pending_status: TransferPendingStatus,
 
-    reserved: [58]u8 = @splat(0),
+    reserved: [57]u8 = @splat(0),
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -603,6 +610,7 @@ pub const AccountFilterFlags = packed struct(u32) {
     credits: bool,
     /// Whether the results are sorted by timestamp in chronological or reverse-chronological order.
     reversed: bool,
+
     padding: u29 = 0,
 
     comptime {
@@ -681,6 +689,101 @@ pub const ChangeEventsFilter = extern struct {
     }
 };
 
+pub const TwoPhaseFilter = extern struct {
+    /// Query by the `user_data_128` index.
+    /// Use zero for no filter.
+    user_data_128: u128,
+    /// Query by the `user_data_64` index.
+    /// Use zero for no filter.
+    user_data_64: u64,
+    /// Query by the `user_data_32` index.
+    /// Use zero for no filter.
+    user_data_32: u32,
+    /// Query by the `ledger` index.
+    /// Use zero for no filter.
+    ledger: u32,
+    /// Query by the `code` index.
+    /// Use zero for no filter.
+    code: u16,
+    /// Query by the pending status.
+    /// Use `.none` for no filter.
+    pending_status: TransferPendingStatus,
+
+    reserved: [69]u8 = @splat(0),
+    /// The initial timestamp (inclusive).
+    /// Use zero for no filter.
+    timestamp_min: u64,
+    /// The final timestamp (inclusive).
+    /// Use zero for no filter.
+    timestamp_max: u64,
+    /// Maximum number of results that can be returned by this query.
+    /// Must be greater than zero.
+    limit: u32,
+    /// Query flags.
+    flags: TwoPhaseFilterFlags,
+
+    comptime {
+        assert(@sizeOf(TwoPhaseFilter) == 128);
+        assert(stdx.no_padding(TwoPhaseFilter));
+    }
+};
+
+pub const TwoPhaseTarget = enum(u1) {
+    pending = 0,
+    outcome = 1,
+};
+
+pub const TwoPhaseFilterFlags = packed struct(u32) {
+    /// Whether filtering by the pending transfer or the outcome transfer.
+    /// Also afects the timestamp ordering.
+    target: TwoPhaseTarget,
+
+    /// Whether the results are sorted by timestamp in chronological or reverse-chronological order.
+    reversed: bool,
+    padding: u30 = 0,
+
+    comptime {
+        assert(@sizeOf(TwoPhaseFilterFlags) == @sizeOf(u32));
+        assert(@bitSizeOf(TwoPhaseFilterFlags) == @sizeOf(TwoPhaseFilterFlags) * 8);
+    }
+};
+
+pub const TwoPhaseResult = extern struct {
+    debit_account_id: u128,
+    credit_account_id: u128,
+
+    pending_id: u128,
+    pending_amount: u128,
+    pending_user_data_128: u128,
+    pending_user_data_64: u64,
+    pending_user_data_32: u32,
+    pending_timeout: u32,
+
+    ledger: u32,
+
+    pending_code: u16,
+    pending_flags: TransferFlags,
+    pending_timestamp: u64,
+
+    outcome_id: u128,
+    outcome_amount: u128,
+    outcome_user_data_128: u128,
+    outcome_user_data_64: u64,
+    outcome_user_data_32: u32,
+    outcome_code: u16,
+    outcome_flags: TransferFlags,
+    outcome_timestamp: u64,
+
+    pending_status: TransferPendingStatus,
+    reserved: [71]u8 = @splat(0),
+
+    comptime {
+        assert(stdx.no_padding(TwoPhaseResult));
+        assert(@sizeOf(TwoPhaseResult) == 256);
+        assert(@alignOf(TwoPhaseResult) == 16);
+    }
+};
+
 /// Operations exported by TigerBeetle.
 pub const Operation = enum(u8) {
     // Looking to make backwards incompatible changes here?
@@ -714,6 +817,8 @@ pub const Operation = enum(u8) {
     create_accounts = constants.vsr_operations_reserved + 18,
     create_transfers = constants.vsr_operations_reserved + 19,
 
+    query_two_phase_transfers = constants.vsr_operations_reserved + 20,
+
     pub fn EventType(comptime operation: Operation) type {
         return switch (operation) {
             .pulse => void,
@@ -726,6 +831,7 @@ pub const Operation = enum(u8) {
             .query_accounts => QueryFilter,
             .query_transfers => QueryFilter,
             .get_change_events => ChangeEventsFilter,
+            .query_two_phase_transfers => TwoPhaseFilter,
 
             .deprecated_create_accounts_sparse => Account,
             .deprecated_create_transfers_sparse => Transfer,
@@ -753,6 +859,7 @@ pub const Operation = enum(u8) {
             .query_accounts => Account,
             .query_transfers => Transfer,
             .get_change_events => ChangeEvent,
+            .query_two_phase_transfers => TwoPhaseResult,
 
             .deprecated_create_accounts_sparse => CreateAccountErrorResult,
             .deprecated_create_transfers_sparse => CreateTransferErrorResult,
@@ -799,6 +906,7 @@ pub const Operation = enum(u8) {
             .query_accounts => false,
             .query_transfers => false,
             .get_change_events => false,
+            .query_two_phase_transfers => false,
 
             .deprecated_create_accounts_sparse => true,
             .deprecated_create_transfers_sparse => true,
@@ -828,6 +936,7 @@ pub const Operation = enum(u8) {
             .get_account_balances,
             .query_accounts,
             .query_transfers,
+            .query_two_phase_transfers,
             => true,
 
             .get_change_events => false,
@@ -972,6 +1081,7 @@ pub const Operation = enum(u8) {
             .deprecated_query_accounts_unbatched,
             .deprecated_query_transfers_unbatched,
             .get_change_events,
+            .query_two_phase_transfers,
             => |operation_comptime| count: {
                 // For queries, each event produces up to `limit` events.
                 comptime assert(!operation_comptime.is_batchable());

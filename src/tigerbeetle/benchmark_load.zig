@@ -607,6 +607,7 @@ const Benchmark = struct {
             .code = 0,
             .timestamp_min = 0,
             .timestamp_max = 0,
+            .pending_status = .none,
             .limit = @divExact(
                 constants.message_size_max - @sizeOf(vsr.Header),
                 @sizeOf(tb.Transfer),

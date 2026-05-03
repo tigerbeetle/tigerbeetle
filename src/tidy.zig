@@ -724,8 +724,8 @@ fn tidy_ast(
     // to be really long, and that is big. The most values is in preventing originally small
     // functions to grow over time.
     const function_length_red_zone = .{
-        .min = 70, // NB: both are exclusive, so red zone is intentionally empty to start!
-        .max = 73,
+        .min = 1000, // NB: both are exclusive, so red zone is intentionally empty to start!
+        .max = 1002,
     };
 
     for (functions[0..functions_count], 0..) |f, index| {

@@ -36,6 +36,7 @@ pub const Parser = struct {
         get_account_balances,
         query_accounts,
         query_transfers,
+        query_two_phase_transfers,
 
         pub fn state_machine_op(operation: Operation) StateMachine.Operation {
             return switch (operation) {
@@ -48,6 +49,7 @@ pub const Parser = struct {
                 .get_account_balances => .get_account_balances,
                 .query_accounts => .query_accounts,
                 .query_transfers => .query_transfers,
+                .query_two_phase_transfers => .query_two_phase_transfers,
             };
         }
     };
@@ -62,6 +64,7 @@ pub const Parser = struct {
         id: LookupSyntaxTree,
         account_filter: tb.AccountFilter,
         query_filter: tb.QueryFilter,
+        two_phase_filter: tb.TwoPhaseFilter,
     };
 
     pub const Statement = struct {
@@ -195,13 +198,23 @@ pub const Parser = struct {
                         if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
                             !std.mem.eql(u8, active_value_field.name, "reserved")))
                         {
+                            const value = value: {
+                                if (@typeInfo(active_value_field.type) == .@"enum") {
+                                    break :value std.meta.stringToEnum(
+                                        active_value_field.type,
+                                        value_to_validate,
+                                    ) orelse return Error.ValueBad;
+                                }
+                                break :value try parse_int(
+                                    active_value_field.type,
+                                    value_to_validate,
+                                );
+                            };
+
                             @field(
                                 @field(out.*, object_syntax_tree_field.name),
                                 active_value_field.name,
-                            ) = try parse_int(
-                                active_value_field.type,
-                                value_to_validate,
-                            );
+                            ) = value;
                         }
 
                         // Handle flags, specific to Account and Transfer fields.
@@ -230,7 +243,12 @@ pub const Parser = struct {
                                             known_flag_field.name,
                                             "padding",
                                         )) {
-                                            @field(validated_flags, known_flag_field.name) = true;
+                                            if (known_flag_field.type == bool) {
+                                                @field(validated_flags, known_flag_field.name) = true;
+                                            } else {
+                                                // TODO: handle enum inside flags.
+                                                @field(validated_flags, known_flag_field.name) = @enumFromInt(1);
+                                            }
                                         }
                                     }
                                 }
@@ -287,6 +305,7 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
+                .pending_status = .none,
                 .limit = operation_comptime.state_machine_op().result_max(
                     constants.message_body_size_max,
                 ),
@@ -304,12 +323,30 @@ pub const Parser = struct {
                 .user_data_32 = 0,
                 .ledger = 0,
                 .code = 0,
+                .pending_status = .none,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = operation_comptime.state_machine_op().result_max(
                     constants.message_body_size_max,
                 ),
                 .flags = .{
+                    .reversed = false,
+                },
+            } },
+            .query_two_phase_transfers => .{ .two_phase_filter = tb.TwoPhaseFilter{
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .ledger = 0,
+                .code = 0,
+                .pending_status = .none,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = StateMachine.Operation.query_two_phase_transfers.result_max(
+                    constants.message_body_size_max,
+                ),
+                .flags = .{
+                    .target = .pending,
                     .reversed = false,
                 },
             } },

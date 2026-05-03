@@ -17,8 +17,6 @@ const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_no
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
-const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
-
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -337,8 +335,6 @@ pub fn GrooveType(
         },
     });
 
-    const has_scan = index_fields.len > 0;
-
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
@@ -554,8 +550,6 @@ pub fn GrooveType(
             not_found,
         };
 
-        pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
-
         grid: *Grid,
         objects: ObjectTree,
         ids: IdTree,
@@ -588,8 +582,6 @@ pub fn GrooveType(
         objects_cache: ObjectsCache,
 
         timestamps: if (has_id) TimestampSet else void,
-
-        scan_builder: ScanBuilder,
 
         pub const IndexTreeOptions = _IndexTreeOptions;
 
@@ -626,7 +618,6 @@ pub fn GrooveType(
                 .prefetch_keys = undefined,
                 .objects_cache = if (ObjectsCache != void) undefined else {},
                 .timestamps = undefined,
-                .scan_builder = undefined,
             };
 
             groove.objects_cache = if (ObjectsCache != void) try ObjectsCache.init(allocator, .{
@@ -722,9 +713,6 @@ pub fn GrooveType(
                 options.prefetch_entries_for_read_max,
             );
             errdefer if (has_id) groove.timestamps.deinit(allocator);
-
-            if (has_scan) try groove.scan_builder.init(allocator);
-            errdefer if (has_scan) groove.scan_builder.deinit(allocator);
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
@@ -739,8 +727,6 @@ pub fn GrooveType(
 
             if (ObjectsCache != void) groove.objects_cache.deinit(allocator);
             if (has_id) groove.timestamps.deinit(allocator);
-            if (has_scan) groove.scan_builder.deinit(allocator);
-
             groove.* = undefined;
         }
 
@@ -756,7 +742,6 @@ pub fn GrooveType(
             if (ObjectsCache != void) groove.objects_cache.reset();
 
             if (has_id) groove.timestamps.reset();
-            if (has_scan) groove.scan_builder.reset();
 
             groove.* = .{
                 .grid = groove.grid,
@@ -767,7 +752,6 @@ pub fn GrooveType(
                 .prefetch_snapshot = null,
                 .objects_cache = groove.objects_cache,
                 .timestamps = groove.timestamps,
-                .scan_builder = groove.scan_builder,
             };
         }
 

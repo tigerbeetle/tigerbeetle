@@ -92,6 +92,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
+                .query_two_phase_transfers,
                 => |operation| {
                     const state_machine_operation = operation.state_machine_op();
                     try repl.send(
@@ -823,7 +824,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_accounts, .create_transfers => "create",
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
-                .query_accounts, .query_transfers => "query",
+                .query_accounts, .query_transfers, .query_two_phase_transfers => "query",
                 else => unreachable,
             };
             const object_type = switch (operation) {
@@ -831,6 +832,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
+                .query_two_phase_transfers => "two phase transfers",
                 else => unreachable,
             };
 
@@ -869,6 +871,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn display_object(repl: *Repl, object: anytype) !void {
             comptime assert(@TypeOf(object.*) == tb.Account or
                 @TypeOf(object.*) == tb.Transfer or
+                @TypeOf(object.*) == tb.TwoPhaseResult or
                 @TypeOf(object.*) == tb.AccountBalance or
                 @TypeOf(object.*) == tb.CreateAccountResult or
                 @TypeOf(object.*) == tb.CreateTransferResult);
@@ -987,6 +990,21 @@ pub fn ReplType(comptime MessageBus: type) type {
                         try repl.fail("No transfers were found.\n", .{});
                     } else {
                         for (transfer_results) |*transfer| {
+                            try repl.display_object(transfer);
+                        }
+                    }
+                },
+                .query_two_phase_transfers,
+                => {
+                    const results = stdx.bytes_as_slice(
+                        .exact,
+                        tb.TwoPhaseResult,
+                        result,
+                    );
+                    if (results.len == 0) {
+                        try repl.fail("No transfers were found.\n", .{});
+                    } else {
+                        for (results) |*transfer| {
                             try repl.display_object(transfer);
                         }
                     }
