@@ -502,9 +502,14 @@ fn command_start(
     // run_for_ns() is called.
     io.stats.tracer = tracer;
 
+    var prng: stdx.PRNG = stdx.PRNG.from_seed(123);
     while (true) {
         replica.tick();
-        try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        if (prng.int(u8) < 64) {
+            try io.run();
+        } else {
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        }
     }
 }
 
