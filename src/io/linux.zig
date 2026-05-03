@@ -158,7 +158,7 @@ pub const IO = struct {
         // Reap any remaining timeouts, which reference the timespec in the current stack frame.
         // The busy loop here is required to avoid a potential deadlock, as the kernel determines
         // when the timeouts are pushed to the completion queue, not us.
-        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
+        while (timeouts > 0) try self.flush_completions(0, &timeouts, &etime);
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
