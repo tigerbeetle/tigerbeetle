@@ -45,7 +45,7 @@ public final class Main {
             transfers.setCreditAccountId(2);
             transfers.setLedger(1);
             transfers.setCode(1);
-            transfers.setAmount(500);
+            transfers.setAmount(100);
             transfers.setFlags(TransferFlags.PENDING);
 
             transfers.add();
@@ -110,13 +110,13 @@ public final class Main {
                         && accounts.getId(UInt128.MostSignificant) == 0) {
                     assert accounts.getDebitsPosted().intValueExact() == 0;
                     assert accounts.getCreditsPosted().intValueExact() == 0;
-                    assert accounts.getDebitsPending().intValueExact() == 500;
+                    assert accounts.getDebitsPending().intValueExact() == 1500;
                     assert accounts.getCreditsPending().intValueExact() == 0;
                 } else if (Arrays.equals(accounts.getId(), UInt128.asBytes(2))) {
                     assert accounts.getDebitsPosted().intValueExact() == 0;
                     assert accounts.getCreditsPosted().intValueExact() == 0;
                     assert accounts.getDebitsPending().intValueExact() == 0;
-                    assert accounts.getCreditsPending().intValueExact() == 500;
+                    assert accounts.getCreditsPending().intValueExact() == 1500;
                 } else {
                     System.err.printf("Unexpected account: %s\n",
                             UInt128.asBigInteger(accounts.getId()).toString());
@@ -323,13 +323,13 @@ public final class Main {
             // Create a 10th transfer posting the 5th transfer.
             transfers = new TransferBatch(1);
             transfers.add();
-            transfers.setId(6);
-            transfers.setPendingId(1);
+            transfers.setId(10);
+            transfers.setPendingId(5);
             transfers.setDebitAccountId(1);
             transfers.setCreditAccountId(2);
             transfers.setLedger(1);
             transfers.setCode(1);
-            transfers.setAmount(100);
+            transfers.setAmount(500);
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
             transferResults = client.createTransfers(transfers);
