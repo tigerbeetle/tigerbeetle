@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const os = std.os;
 
+const constants = @import("constants.zig");
+
 const IO_Linux = @import("io/linux.zig").IO;
 const IO_Darwin = @import("io/darwin.zig").IO;
 const IO_Windows = @import("io/windows.zig").IO;

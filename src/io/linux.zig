@@ -1321,7 +1321,7 @@ pub const IO = struct {
             Context.on_read,
             completion,
             event,
-            std.mem.asBytes(&Context.buffer),
+            std.mem.asBytes(&Context.buffer), // Context.buffer acts as global variable
             0, // eventfd reads must always start from 0 offset.
         );
     }
