@@ -7,6 +7,7 @@ const Query = std.Target.Query;
 
 const VoprStateMachine = enum { testing, accounting };
 const VoprLog = enum { short, full };
+const ClientIOBackend = enum { default, epoll };
 
 // The minimum client version allowed to connect. This has implications for backwards
 // compatibility and the upgrade path for replicas and clients. If there's no overlap
@@ -85,6 +86,7 @@ pub fn build(b: *std.Build) !void {
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
+        .clients_zig_benchmark = b.step("clients:zig:benchmark", "Build zig benchmark client"),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -157,6 +159,11 @@ pub fn build(b: *std.Build) !void {
             "print-exe",
             "Build tasks print the path of the executable",
         ) orelse false,
+        .client_io = b.option(
+            ClientIOBackend,
+            "client_io",
+            "Client IO backend.",
+        ) orelse .default,
     };
 
     if (build_options.config_release == null and build_options.config_release_client_min != null) {
@@ -179,6 +186,7 @@ pub fn build(b: *std.Build) !void {
         .config_release = build_options.config_release orelse "65535.0.0",
         .config_release_client_min = build_options.config_release_client_min orelse
             release_client_min,
+        .client_io = build_options.client_io,
     });
 
     // For integration tests and vortex, we build an independent copy of TigerBeetle with "real"
@@ -407,6 +415,14 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
+    // zig build clients:zig:benchmark
+    build_clients_zig_benchmark(b, build_steps.clients_zig_benchmark, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .target = target,
+        .mode = mode,
+    });
+
     // zig build docs
     build_steps.docs.dependOn(blk: {
         const nested_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
@@ -427,6 +443,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     config_verify: bool,
     config_release: []const u8,
     config_release_client_min: []const u8,
+    client_io: ClientIOBackend = .default,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
     // Ideally, we would return _just_ the module here, and keep options an implementation detail.
     // However, currently Zig makes it awkward to provide multiple entry points for a module:
@@ -439,6 +456,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     vsr_options.addOption(bool, "config_verify", options.config_verify);
     vsr_options.addOption([]const u8, "release", options.config_release);
     vsr_options.addOption([]const u8, "release_client_min", options.config_release_client_min);
+    vsr_options.addOption(ClientIOBackend, "client_io", options.client_io);
 
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
@@ -1994,6 +2012,31 @@ fn build_clients_c_sample(
 
     const install_step = b.addInstallArtifact(sample, .{});
     step_clients_c_sample.dependOn(&install_step.step);
+}
+
+fn build_clients_zig_benchmark(
+    b: *std.Build,
+    step_clients_zig_benchmark: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+    },
+) void {
+    const bench = b.addExecutable(.{
+        .name = "client_zig_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/zig/benchmark.zig"),
+            .target = options.target,
+            .optimize = options.mode,
+        }),
+    });
+    bench.root_module.addImport("vsr", options.vsr_module);
+    bench.root_module.addOptions("vsr_options", options.vsr_options);
+
+    const install_step = b.addInstallArtifact(bench, .{});
+    step_clients_zig_benchmark.dependOn(&install_step.step);
 }
 
 fn strip_root_module(root_module: *std.Build.Module) void {

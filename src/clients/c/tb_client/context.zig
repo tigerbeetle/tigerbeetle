@@ -14,14 +14,12 @@ const Header = vsr.Header;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 
-const IO = vsr.io.IO;
 const TimeOS = vsr.time.TimeOS;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 const Packet = @import("packet.zig").Packet;
-const Signal = @import("signal.zig").Signal;
 
 const KiB = stdx.KiB;
 
@@ -157,6 +155,7 @@ pub const InitError = std.mem.Allocator.Error || error{
 /// Implements a `ClientInterface` with specialized `vsr.Client` and `StateMachine` types.
 pub fn ContextType(
     comptime Client: type,
+    comptime IO: type,
 ) type {
     return struct {
         const Context = @This();
@@ -195,6 +194,7 @@ pub fn ContextType(
             InvalidOperation,
             InvalidDataSize,
         };
+        const Signal = @import("signal.zig").SignalType(IO);
 
         /// Thread-local variable to track whether the current thread is
         /// the IO thread or a user thread.

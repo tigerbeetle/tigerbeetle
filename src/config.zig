@@ -287,7 +287,6 @@ pub const configs = struct {
         base.process.release_client_min = vsr.Release.from(release_client_min);
         base.process.git_commit = build_options.git_commit;
         base.process.verify = build_options.config_verify;
-
         assert(base.process.release.value >= base.process.release_client_min.value);
 
         break :current base;
