@@ -1,3 +1,4 @@
+#include "rb_tb_gen.h"
 #include "ruby.h"
 #include "ruby/thread.h"
 #include "tb_client.h"
@@ -39,219 +40,14 @@ void Init_tigerbeetle(void) {
     rb_mTigerBeetle = rb_define_module("TigerBeetle");
 
     rb_eInitError = rb_define_class_under(rb_mTigerBeetle, "InitError", rb_eStandardError);
-    rb_eClientClosedError = rb_define_class_under(rb_mTigerBeetle, "ClientClosedError", rb_eStandardError);
+    rb_eClientClosedError =
+        rb_define_class_under(rb_mTigerBeetle, "ClientClosedError", rb_eStandardError);
     rb_define_class_under(rb_mTigerBeetle, "PacketError", rb_eStandardError);
 
     rb_tb_init_native_client(rb_mTigerBeetle);
 }
 
 #pragma region Ruby Bridge
-
-static const char *tb_init_error_message(TB_INIT_STATUS status) {
-    switch (status) {
-    case TB_INIT_UNEXPECTED:
-        return "unexpected internal error";
-    case TB_INIT_OUT_OF_MEMORY:
-        return "out of memory";
-    case TB_INIT_ADDRESS_INVALID:
-        return "invalid replica address";
-    case TB_INIT_ADDRESS_LIMIT_EXCEEDED:
-        return "too many replica addresses";
-    case TB_INIT_SYSTEM_RESOURCES:
-        return "insufficient system resources";
-    case TB_INIT_NETWORK_SUBSYSTEM:
-        return "network subsystem failed";
-    default:
-        return "init error";
-    }
-}
-
-static size_t rb_tb_event_size(TB_OPERATION operation) {
-    switch (operation) {
-    case TB_OPERATION_CREATE_ACCOUNTS:
-        return sizeof(tb_account_t);
-    case TB_OPERATION_CREATE_TRANSFERS:
-        return sizeof(tb_transfer_t);
-    case TB_OPERATION_LOOKUP_ACCOUNTS:
-    case TB_OPERATION_LOOKUP_TRANSFERS:
-        return sizeof(tb_uint128_t);
-    default:
-        rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
-        return 0; // unreachable
-    }
-}
-
-static inline void pack_u128(VALUE v, void *dst) {
-    rb_integer_pack(v, dst, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
-}
-
-static inline VALUE unpack_u128(const void *src) {
-    return rb_integer_unpack(src, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
-}
-
-static void rb_tb_serialize_accounts(VALUE items_rb, uint8_t *buf, long count) {
-    tb_account_t *accounts = (tb_account_t *)buf;
-    for (long i = 0; i < count; i++) {
-        VALUE item = RARRAY_AREF(items_rb, i);
-        tb_account_t *a = &accounts[i];
-        memset(a, 0, sizeof(tb_account_t));
-        pack_u128(rb_ivar_get(item, rb_intern("@id")), &a->id);
-        pack_u128(rb_ivar_get(item, rb_intern("@debits_pending")), &a->debits_pending);
-        pack_u128(rb_ivar_get(item, rb_intern("@debits_posted")), &a->debits_posted);
-        pack_u128(rb_ivar_get(item, rb_intern("@credits_pending")), &a->credits_pending);
-        pack_u128(rb_ivar_get(item, rb_intern("@credits_posted")), &a->credits_posted);
-        pack_u128(rb_ivar_get(item, rb_intern("@user_data_128")), &a->user_data_128);
-        a->user_data_64 = NUM2ULL(rb_ivar_get(item, rb_intern("@user_data_64")));
-        a->user_data_32 = NUM2UINT(rb_ivar_get(item, rb_intern("@user_data_32")));
-        a->ledger = NUM2UINT(rb_ivar_get(item, rb_intern("@ledger")));
-        a->code = (uint16_t)NUM2UINT(rb_ivar_get(item, rb_intern("@code")));
-        a->flags = (uint16_t)NUM2UINT(rb_ivar_get(item, rb_intern("@flags")));
-        a->timestamp = NUM2ULL(rb_ivar_get(item, rb_intern("@timestamp")));
-    }
-}
-
-static void rb_tb_serialize_lookup_ids(VALUE items_rb, uint8_t *buf, long count) {
-    tb_uint128_t *ids = (tb_uint128_t *)buf;
-    for (long i = 0; i < count; i++) {
-        rb_integer_pack(RARRAY_AREF(items_rb, i), &ids[i], 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
-    }
-}
-
-static void rb_tb_serialize_transfers(VALUE items_rb, uint8_t *buf, long count) {
-    tb_transfer_t *transfers = (tb_transfer_t *)buf;
-    for (long i = 0; i < count; i++) {
-        VALUE item = RARRAY_AREF(items_rb, i);
-        tb_transfer_t *t = &transfers[i];
-        memset(t, 0, sizeof(tb_transfer_t));
-        pack_u128(rb_ivar_get(item, rb_intern("@id")), &t->id);
-        pack_u128(rb_ivar_get(item, rb_intern("@debit_account_id")), &t->debit_account_id);
-        pack_u128(rb_ivar_get(item, rb_intern("@credit_account_id")), &t->credit_account_id);
-        pack_u128(rb_ivar_get(item, rb_intern("@amount")), &t->amount);
-        pack_u128(rb_ivar_get(item, rb_intern("@pending_id")), &t->pending_id);
-        pack_u128(rb_ivar_get(item, rb_intern("@user_data_128")), &t->user_data_128);
-        t->user_data_64 = NUM2ULL(rb_ivar_get(item, rb_intern("@user_data_64")));
-        t->user_data_32 = NUM2UINT(rb_ivar_get(item, rb_intern("@user_data_32")));
-        t->timeout = NUM2UINT(rb_ivar_get(item, rb_intern("@timeout")));
-        t->ledger = NUM2UINT(rb_ivar_get(item, rb_intern("@ledger")));
-        t->code = (uint16_t)NUM2UINT(rb_ivar_get(item, rb_intern("@code")));
-        t->flags = (uint16_t)NUM2UINT(rb_ivar_get(item, rb_intern("@flags")));
-        t->timestamp = NUM2ULL(rb_ivar_get(item, rb_intern("@timestamp")));
-    }
-}
-
-static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf, long count) {
-    switch (operation) {
-    case TB_OPERATION_CREATE_ACCOUNTS:
-        rb_tb_serialize_accounts(items_rb, buf, count);
-        break;
-    case TB_OPERATION_CREATE_TRANSFERS:
-        rb_tb_serialize_transfers(items_rb, buf, count);
-        break;
-    case TB_OPERATION_LOOKUP_ACCOUNTS:
-    case TB_OPERATION_LOOKUP_TRANSFERS:
-        rb_tb_serialize_lookup_ids(items_rb, buf, count);
-        break;
-    default:
-        rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
-    }
-}
-
-static VALUE rb_tb_deserialize_create_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
-    long count = (long)(buf_size / sizeof(tb_create_account_result_t));
-    VALUE results = rb_ary_new_capa(count);
-    VALUE klass = rb_const_get(mTigerBeetle, rb_intern("CreateAccountResult"));
-    const tb_create_account_result_t *items = (const tb_create_account_result_t *)buf;
-    for (long i = 0; i < count; i++) {
-        const tb_create_account_result_t *res = &items[i];
-        VALUE obj = rb_obj_alloc(klass);
-        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(res->timestamp));
-        rb_ivar_set(obj, rb_intern("@status"), UINT2NUM(res->status));
-        rb_ary_push(results, obj);
-    }
-    return results;
-}
-
-static VALUE rb_tb_deserialize_create_transfers(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
-    long count = (long)(buf_size / sizeof(tb_create_transfer_result_t));
-    VALUE results = rb_ary_new_capa(count);
-    VALUE klass = rb_const_get(mTigerBeetle, rb_intern("CreateTransferResult"));
-    const tb_create_transfer_result_t *items = (const tb_create_transfer_result_t *)buf;
-    for (long i = 0; i < count; i++) {
-        const tb_create_transfer_result_t *res = &items[i];
-        VALUE obj = rb_obj_alloc(klass);
-        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(res->timestamp));
-        rb_ivar_set(obj, rb_intern("@status"), UINT2NUM(res->status));
-        rb_ary_push(results, obj);
-    }
-    return results;
-}
-
-static VALUE rb_tb_deserialize_accounts(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
-    long count = (long)(buf_size / sizeof(tb_account_t));
-    VALUE results = rb_ary_new_capa(count);
-    VALUE klass = rb_const_get(mTigerBeetle, rb_intern("Account"));
-    const tb_account_t *items = (const tb_account_t *)buf;
-    for (long i = 0; i < count; i++) {
-        const tb_account_t *a = &items[i];
-        VALUE obj = rb_obj_alloc(klass);
-        rb_ivar_set(obj, rb_intern("@id"), unpack_u128(&a->id));
-        rb_ivar_set(obj, rb_intern("@debits_pending"), unpack_u128(&a->debits_pending));
-        rb_ivar_set(obj, rb_intern("@debits_posted"), unpack_u128(&a->debits_posted));
-        rb_ivar_set(obj, rb_intern("@credits_pending"), unpack_u128(&a->credits_pending));
-        rb_ivar_set(obj, rb_intern("@credits_posted"), unpack_u128(&a->credits_posted));
-        rb_ivar_set(obj, rb_intern("@user_data_128"), unpack_u128(&a->user_data_128));
-        rb_ivar_set(obj, rb_intern("@user_data_64"), ULL2NUM(a->user_data_64));
-        rb_ivar_set(obj, rb_intern("@user_data_32"), UINT2NUM(a->user_data_32));
-        rb_ivar_set(obj, rb_intern("@ledger"), UINT2NUM(a->ledger));
-        rb_ivar_set(obj, rb_intern("@code"), UINT2NUM(a->code));
-        rb_ivar_set(obj, rb_intern("@flags"), UINT2NUM(a->flags));
-        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(a->timestamp));
-        rb_ary_push(results, obj);
-    }
-    return results;
-}
-
-static VALUE
-rb_tb_deserialize_transfers(VALUE mTigerBeetle, const uint8_t *buf, uint32_t buf_size) {
-    long count = (long)(buf_size / sizeof(tb_transfer_t));
-    VALUE results = rb_ary_new_capa(count);
-    VALUE klass = rb_const_get(mTigerBeetle, rb_intern("Transfer"));
-    const tb_transfer_t *items = (const tb_transfer_t *)buf;
-    for (long i = 0; i < count; i++) {
-        const tb_transfer_t *t = &items[i];
-        VALUE obj = rb_obj_alloc(klass);
-        rb_ivar_set(obj, rb_intern("@id"), unpack_u128(&t->id));
-        rb_ivar_set(obj, rb_intern("@debit_account_id"), unpack_u128(&t->debit_account_id));
-        rb_ivar_set(obj, rb_intern("@credit_account_id"), unpack_u128(&t->credit_account_id));
-        rb_ivar_set(obj, rb_intern("@amount"), unpack_u128(&t->amount));
-        rb_ivar_set(obj, rb_intern("@pending_id"), unpack_u128(&t->pending_id));
-        rb_ivar_set(obj, rb_intern("@user_data_128"), unpack_u128(&t->user_data_128));
-        rb_ivar_set(obj, rb_intern("@user_data_64"), ULL2NUM(t->user_data_64));
-        rb_ivar_set(obj, rb_intern("@user_data_32"), UINT2NUM(t->user_data_32));
-        rb_ivar_set(obj, rb_intern("@timeout"), UINT2NUM(t->timeout));
-        rb_ivar_set(obj, rb_intern("@ledger"), UINT2NUM(t->ledger));
-        rb_ivar_set(obj, rb_intern("@code"), UINT2NUM(t->code));
-        rb_ivar_set(obj, rb_intern("@flags"), UINT2NUM(t->flags));
-        rb_ivar_set(obj, rb_intern("@timestamp"), ULL2NUM(t->timestamp));
-        rb_ary_push(results, obj);
-    }
-    return results;
-}
-
-static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint32_t buf_size) {
-    switch (operation) {
-    case TB_OPERATION_CREATE_ACCOUNTS:
-        return rb_tb_deserialize_create_accounts(rb_mTigerBeetle, buf, buf_size);
-    case TB_OPERATION_CREATE_TRANSFERS:
-        return rb_tb_deserialize_create_transfers(rb_mTigerBeetle, buf, buf_size);
-    case TB_OPERATION_LOOKUP_ACCOUNTS:
-        return rb_tb_deserialize_accounts(rb_mTigerBeetle, buf, buf_size);
-    case TB_OPERATION_LOOKUP_TRANSFERS:
-        return rb_tb_deserialize_transfers(rb_mTigerBeetle, buf, buf_size);
-    default:
-        rb_raise(rb_eRuntimeError, "unsupported operation: %d", (int)operation);
-    }
-}
 
 static void rb_tb_request_free(void *ptr) {
     rb_tb_request_t *req = (rb_tb_request_t *)ptr;
@@ -384,8 +180,9 @@ static VALUE rb_tb_client_alloc(VALUE klass) {
     return TypedData_Wrap_Struct(klass, &rb_tb_client_type, data);
 }
 
-static VALUE
-rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addresses_rb, VALUE completion_fd_rb) {
+static VALUE rb_tb_client_initialize(
+    VALUE self, VALUE cluster_id_rb, VALUE addresses_rb, VALUE completion_fd_rb
+) {
     tb_client_t *client;
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
@@ -397,11 +194,12 @@ rb_tb_client_initialize(VALUE self, VALUE cluster_id_rb, VALUE addresses_rb, VAL
 
     int completion_fd = NUM2INT(completion_fd_rb);
 
-    TB_INIT_STATUS status =
-        tb_client_init(client, cluster_id_bytes, addr, addr_len, (uintptr_t)completion_fd, rb_tb_on_completion);
+    TB_INIT_STATUS status = tb_client_init(
+        client, cluster_id_bytes, addr, addr_len, (uintptr_t)completion_fd, rb_tb_on_completion
+    );
 
     if (status != TB_INIT_SUCCESS) {
-        rb_raise(rb_eInitError, "tb_client_init failed: %s", tb_init_error_message(status));
+        rb_raise(rb_eInitError, "Init error: %s", rb_tb_init_error_message(status));
     }
 
     return self;

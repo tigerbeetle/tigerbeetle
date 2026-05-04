@@ -63,7 +63,7 @@ class TestClientLifecycle < Minitest::Test
       TigerBeetle::Client.new(cluster_id: 0, replica_addresses: "not-an-address")
     end
 
-    assert_match(/invalid replica address/, err.message)
+    assert_equal("Init error: address_invalid", err.message)
   end
 
   def test_multiple_clients_submit_from_multiple_threads
