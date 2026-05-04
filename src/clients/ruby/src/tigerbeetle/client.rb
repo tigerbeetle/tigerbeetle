@@ -31,6 +31,8 @@ module TigerBeetle
     def create_transfers(transfers) = native_submit(Operation::CREATE_TRANSFERS, transfers)
     def lookup_accounts(ids) = native_submit(Operation::LOOKUP_ACCOUNTS, ids)
     def lookup_transfers(ids) = native_submit(Operation::LOOKUP_TRANSFERS, ids)
+    def get_account_transfers(filter) = native_submit(Operation::GET_ACCOUNT_TRANSFERS, [filter])
+    def get_account_balances(filter) = native_submit(Operation::GET_ACCOUNT_BALANCES, [filter])
 
     private
 
