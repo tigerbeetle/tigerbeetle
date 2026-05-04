@@ -1020,13 +1020,12 @@ test "timeouts with the same delay fire in the same batch" {
             try self.io.run_for_ns(1000 * std.time.ns_per_ms);
 
             try testing.expectEqual(@as(u32, timeout_count), self.callback_count);
-            // The probe fires after all original timeouts because:
-            // - On Linux, completed is drained in-place (FIFO), so the
-            //   probe queued during callback 1 fires after originals 2-10.
-            // - On Windows/Darwin, completed is snapshot'd, so the probe
-            //   fires in the next flush, after all originals are done.
-            // If timeouts trickled in one per flush instead of batching,
-            // the probe would fire after only 1 or 2 callbacks.
+            // The probe fires after all original timeouts because the
+            // completed queue is drained in-place (FIFO) on every
+            // platform, so the probe queued during callback 1 fires after
+            // originals 2-10. If timeouts trickled in one per flush
+            // instead of batching, the probe would fire after only 1 or
+            // 2 callbacks.
             try testing.expectEqual(@as(u32, timeout_count), self.probe_saw.?);
         }
 
