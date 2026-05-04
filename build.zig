@@ -99,6 +99,7 @@ pub fn build(b: *std.Build) !void {
         .test_fmt = b.step("test:fmt", "Check formatting"),
         .test_integration = b.step("test:integration", "Run integration tests"),
         .test_integration_build = b.step("test:integration:build", "Build integration tests"),
+        .test_stdx_linux_aio = b.step("test:stdx:linux-aio", "Run stdx Linux AIO smoke test"),
         .test_unit = b.step("test:unit", "Run unit tests"),
         .test_unit_build = b.step("test:unit:build", "Build unit tests"),
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
@@ -157,6 +158,11 @@ pub fn build(b: *std.Build) !void {
             "print-exe",
             "Build tasks print the path of the executable",
         ) orelse false,
+        .no_uring = b.option(
+            bool,
+            "no_uring",
+            "Use epoll+AIO backend instead of io_uring on Linux.",
+        ) orelse false,
     };
 
     if (build_options.config_release == null and build_options.config_release_client_min != null) {
@@ -179,6 +185,7 @@ pub fn build(b: *std.Build) !void {
         .config_release = build_options.config_release orelse "65535.0.0",
         .config_release_client_min = build_options.config_release_client_min orelse
             release_client_min,
+        .no_uring = build_options.no_uring,
     });
 
     // For integration tests and vortex, we build an independent copy of TigerBeetle with "real"
@@ -287,6 +294,7 @@ pub fn build(b: *std.Build) !void {
         .test_unit_build = build_steps.test_unit_build,
         .test_integration = build_steps.test_integration,
         .test_integration_build = build_steps.test_integration_build,
+        .test_stdx_linux_aio = build_steps.test_stdx_linux_aio,
         .test_fmt = build_steps.test_fmt,
         .@"test" = build_steps.@"test",
     }, .{
@@ -427,6 +435,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     config_verify: bool,
     config_release: []const u8,
     config_release_client_min: []const u8,
+    no_uring: bool = false,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
     // Ideally, we would return _just_ the module here, and keep options an implementation detail.
     // However, currently Zig makes it awkward to provide multiple entry points for a module:
@@ -439,6 +448,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     vsr_options.addOption(bool, "config_verify", options.config_verify);
     vsr_options.addOption([]const u8, "release", options.config_release);
     vsr_options.addOption([]const u8, "release_client_min", options.config_release_client_min);
+    vsr_options.addOption(bool, "no_uring", options.no_uring);
 
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
@@ -850,6 +860,7 @@ fn build_test(
         test_unit_build: *std.Build.Step,
         test_integration: *std.Build.Step,
         test_integration_build: *std.Build.Step,
+        test_stdx_linux_aio: *std.Build.Step,
         test_fmt: *std.Build.Step,
         @"test": *std.Build.Step,
     },
@@ -899,6 +910,21 @@ fn build_test(
 
     steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
     steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);
+
+    if (options.target.result.os.tag == .linux) {
+        const linux_aio_tests = b.addExecutable(.{
+            .name = "test-stdx-linux-aio",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/stdx/testing/linux_aio_tests.zig"),
+                .target = options.target,
+                .optimize = options.mode,
+            }),
+        });
+        linux_aio_tests.root_module.addImport("stdx", options.stdx_module);
+
+        const run_linux_aio_tests = b.addRunArtifact(linux_aio_tests);
+        steps.test_stdx_linux_aio.dependOn(&run_linux_aio_tests.step);
+    }
 
     const run_stdx_unit_tests = b.addRunArtifact(stdx_unit_tests);
     const run_unit_tests = b.addRunArtifact(unit_tests);

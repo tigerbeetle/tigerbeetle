@@ -499,6 +499,7 @@ pub const sector_size = 4096;
 /// even after an application panic, since the kernel will mark dirty pages as clean, even
 /// when they were never written to disk.
 pub const direct_io = config.process.direct_io;
+pub const io_backend = config.process.io_backend;
 
 pub const iops_read_max = journal_iops_read_max + client_replies_iops_read_max +
     grid_iops_read_max + superblock_iops_read_max;

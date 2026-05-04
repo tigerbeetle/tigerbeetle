@@ -23,6 +23,7 @@ const BuildOptions = struct {
     git_commit: ?[40]u8,
     release: []const u8,
     release_client_min: []const u8,
+    no_uring: bool,
 };
 
 // Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
@@ -44,6 +45,11 @@ const build_options: BuildOptions = blk: {
         );
     }
     break :blk result;
+};
+
+pub const IoBackend = enum {
+    io_uring,
+    epoll_aio,
 };
 
 fn launder_type(comptime T: type, comptime value: anytype) T {
@@ -113,6 +119,7 @@ const ConfigProcess = struct {
     tcp_keepcnt: c_int = 3,
     tcp_nodelay: bool = true,
     direct_io: bool,
+    io_backend: IoBackend = .io_uring,
     journal_iops_read_max: u16 = 8,
     journal_iops_write_max: u16 = 32,
     client_replies_iops_read_max: u16 = 1,
@@ -287,6 +294,7 @@ pub const configs = struct {
         base.process.release_client_min = vsr.Release.from(release_client_min);
         base.process.git_commit = build_options.git_commit;
         base.process.verify = build_options.config_verify;
+        base.process.io_backend = if (build_options.no_uring) .epoll_aio else .io_uring;
 
         assert(base.process.release.value >= base.process.release_client_min.value);
 

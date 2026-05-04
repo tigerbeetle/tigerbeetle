@@ -27,6 +27,7 @@ pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
 pub const windows = @import("windows.zig");
 pub const radix_sort = @import("radix.zig").sort;
+pub const linux_aio = @import("linux_aio.zig").linux_aio;
 
 pub const Instant = @import("time_units.zig").Instant;
 pub const Duration = @import("time_units.zig").Duration;
