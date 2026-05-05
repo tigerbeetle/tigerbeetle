@@ -1,18 +1,8 @@
-require "minitest/autorun"
-require "tigerbeetle"
+require_relative "tiger_beetle_integration_test"
 
-class TestQueryFilter < Minitest::Test
+class TestQueryFilter < TigerBeetleIntegrationTest
   BATCH_MAX = 8_189
   UINT64_MAX = (1 << 64) - 1
-
-  def setup
-    @tb_address = ENV.fetch("TB_ADDRESS", "3000")
-    @client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address)
-  end
-
-  def teardown
-    @client.close
-  end
 
   def test_query_accounts_filters_and_paginates
     ledger = 1

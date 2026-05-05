@@ -1,16 +1,6 @@
-require "minitest/autorun"
-require "tigerbeetle"
+require_relative "tiger_beetle_integration_test"
 
-class TestAccountFilter < Minitest::Test
-  def setup
-    @tb_address = ENV.fetch("TB_ADDRESS", "3000")
-    @client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address)
-  end
-
-  def teardown
-    @client.close
-  end
-
+class TestAccountFilter < TigerBeetleIntegrationTest
   def test_get_account_transfers_and_balances
     account_id = TigerBeetle.id
     debit_account_id = TigerBeetle.id

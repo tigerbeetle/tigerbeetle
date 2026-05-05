@@ -1,10 +1,8 @@
-require "minitest/autorun"
-require "tigerbeetle"
+require_relative "tiger_beetle_integration_test"
 
-class TestTransfers < Minitest::Test
+class TestTransfers < TigerBeetleIntegrationTest
   def setup
-    tb_address = ENV.fetch("TB_ADDRESS", "3000")
-    @client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: tb_address)
+    super
 
     @a1_id = TigerBeetle.id
     @a2_id = TigerBeetle.id
@@ -14,10 +12,6 @@ class TestTransfers < Minitest::Test
         TigerBeetle::Account.new(id: @a2_id, ledger: 1, code: 1)
       ]
     )
-  end
-
-  def teardown
-    @client.close
   end
 
   def test_create_transfer
