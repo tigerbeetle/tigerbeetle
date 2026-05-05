@@ -33,6 +33,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         errdefer tmp_beetle.log_stderr();
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
+        try shell.env.put("MAVEN_OPTS", "-ea");
         try shell.exec(
             \\mvn --batch-mode --file pom.xml --quiet
             \\  package exec:java
