@@ -31,6 +31,12 @@ address of the TigerBeetle server you started.
 
 ## Run this sample
 
+First, you must enable assertions through `MAVEN_OPTS` variable:
+
+```console
+export MAVEN_OPTS="-ea"
+```
+
 Now you can run this sample:
 
 ```console
