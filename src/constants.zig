@@ -9,6 +9,7 @@ const Config = @import("config.zig").Config;
 const stdx = @import("stdx");
 
 const MiB = stdx.MiB;
+const Duration = stdx.Duration;
 
 pub const config = @import("config.zig").configs.current;
 
@@ -715,6 +716,8 @@ comptime {
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = config.process.tick_ms;
+pub const tick_duration: Duration = .ms(tick_ms);
+pub const tick_delay_warn_theshold: Duration = .{ .ns = tick_duration.ns * 3 };
 
 /// The conservative round-trip time at startup when there is no network knowledge.
 /// Adjusted dynamically thereafter for RTT-sensitive timeouts according to network congestion.

@@ -293,6 +293,9 @@ pub fn ReplicaType(
         /// clock:
         clock: Clock,
 
+        /// For logging real interval between ticks, to capture stalls.
+        tick_last: ?Instant = null,
+
         /// The persistent log of hash-chained prepares:
         journal: Journal,
 
@@ -1489,6 +1492,15 @@ pub fn ReplicaType(
             // decrease throughput significantly.
             assert(self.loopback_queue == null);
             defer self.invariants();
+
+            const now = self.clock.monotonic();
+            if (self.tick_last) |past| {
+                const internval = now.duration_since(past);
+                if (internval.ns >= constants.tick_delay_warn_theshold.ns) {
+                    log.warn("tick: delayed interval={}", .{internval});
+                }
+            }
+            self.tick_last = now;
 
             if (self.message_bus.resume_needed()) {
                 // See fn suspend_message conditions.
