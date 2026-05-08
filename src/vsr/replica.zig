@@ -1233,7 +1233,7 @@ pub fn ReplicaType(
             errdefer for (&self.grid_repair_table_bitsets) |*b| b.deinit(allocator);
 
             for (&self.grid_repair_write_blocks, 0..) |*block, i| {
-                errdefer for (self.grid_repair_write_blocks[0..i]) |b| allocator.free(b);
+                errdefer for (self.grid_repair_write_blocks[0..i]) |b| self.grid.block_unref(b);
                 block.* = self.grid.get_block();
             }
             errdefer for (self.grid_repair_write_blocks) |b| self.grid.block_unref(b);
