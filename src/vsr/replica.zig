@@ -3504,6 +3504,9 @@ pub fn ReplicaType(
         fn grid_repair_block_callback(grid_write: *Grid.Write) void {
             const write: *BlockWrite = @fieldParentPtr("write", grid_write);
             const self = write.replica;
+            const write_index = self.grid_repair_writes.index(write);
+            assert(self.grid.block_references(self.grid_repair_write_blocks[write_index]) == 1);
+
             defer {
                 self.grid_repair_writes.release(write);
             }
@@ -10369,7 +10372,14 @@ pub fn ReplicaType(
             self.grid_scrubber.cancel();
 
             var grid_repair_writes = self.grid_repair_writes.iterate();
-            while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
+            while (grid_repair_writes.next()) |write| {
+                self.grid_repair_writes.release(write);
+                // The write is canceled, but a read may have acquired a reference to it from the
+                // write queue in the mean time.
+                const write_index = self.grid_repair_writes.index(write);
+                self.grid.block_unref(self.grid_repair_write_blocks[write_index]);
+                self.grid_repair_write_blocks[write_index] = self.grid.get_block();
+            }
 
             // Resume View/sync flow.
             const message = self.sync_view.?;
