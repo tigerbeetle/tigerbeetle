@@ -929,14 +929,14 @@ test "flush checks timeouts even when completions are queued" {
             var self: Context = .{ .io = try IO.init(32, 0) };
             defer self.io.deinit();
 
-            // The zero-delay goes directly into the completed queue.
+            // next_tick goes directly into the completed queue.
             // The 1ns timeout goes into the timeouts queue and expires
             // immediately on the next flush_timeouts call. If flush
             // skips flush_timeouts when completed is non-empty, the
             // 1ns timeout will be stranded.
             var c1: IO.Completion = undefined;
             var c2: IO.Completion = undefined;
-            self.io.timeout(*Context, &self, on_instant, &c1, 0);
+            self.io.next_tick(*Context, &self, on_instant, &c1, .vsr);
             self.io.timeout(*Context, &self, on_timeout, &c2, 1);
 
             try self.io.run();
@@ -945,8 +945,7 @@ test "flush checks timeouts even when completions are queued" {
             try testing.expect(self.timeout_fired);
         }
 
-        fn on_instant(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
-            _ = result catch @panic("instant timeout error");
+        fn on_instant(self: *Context, _: *IO.Completion, _: IO.NextTickResult) void {
             self.instant_fired = true;
         }
 
@@ -971,11 +970,11 @@ test "chained zero-delay callbacks complete in a single flush" {
             var self: Context = .{ .io = try IO.init(32, 0) };
             defer self.io.deinit();
 
-            // Start the chain with a single zero-delay timeout.
-            self.io.timeout(*Context, &self, on_timeout, &self.completions[0], 0);
+            // Start the chain with a single next_tick.
+            self.io.next_tick(*Context, &self, on_next_tick, &self.completions[0], .vsr);
 
             // A single run() calls flush once. If the dispatch loop
-            // drains the live completed queue, each callback's 0-delay
+            // drains the live completed queue, each callback's next_tick
             // successor is picked up in the same pass and the entire
             // chain completes. If completed were snapshot'd, only the
             // first link would fire per run() call.
@@ -984,11 +983,16 @@ test "chained zero-delay callbacks complete in a single flush" {
             try testing.expectEqual(@as(u32, chain_length), self.count);
         }
 
-        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
-            _ = result catch @panic("timeout error");
+        fn on_next_tick(self: *Context, _: *IO.Completion, _: IO.NextTickResult) void {
             self.count += 1;
             if (self.count < chain_length) {
-                self.io.timeout(*Context, self, on_timeout, &self.completions[self.count], 0);
+                self.io.next_tick(
+                    *Context,
+                    self,
+                    on_next_tick,
+                    &self.completions[self.count],
+                    .vsr,
+                );
             }
         }
     }.run_test();
@@ -1033,14 +1037,13 @@ test "timeouts with the same delay fire in the same batch" {
             _ = result catch @panic("timeout error");
             self.callback_count += 1;
             if (self.callback_count == 1) {
-                // Submit a zero-delay probe that fires in the next
+                // Submit a next_tick probe that fires in the next
                 // dispatch round, acting as a flush boundary marker.
-                self.io.timeout(*Context, self, on_probe, &self.probe_completion, 0);
+                self.io.next_tick(*Context, self, on_probe, &self.probe_completion, .vsr);
             }
         }
 
-        fn on_probe(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
-            _ = result catch @panic("probe timeout error");
+        fn on_probe(self: *Context, _: *IO.Completion, _: IO.NextTickResult) void {
             self.probe_saw = self.callback_count;
         }
     }.run_test();
