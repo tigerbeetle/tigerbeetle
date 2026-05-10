@@ -275,6 +275,8 @@ pub fn ContextType(
                 .client_id = stdx.unique_u128(),
                 .cluster_id = cluster_id,
 
+                .batch_size_limit = null,
+
                 .completion_callback = completion_callback,
                 .completion_context = completion_ctx,
 
