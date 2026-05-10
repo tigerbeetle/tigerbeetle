@@ -298,6 +298,8 @@ pub fn ContextType(
                 .message_pool = undefined,
                 .client = undefined,
                 .signal = undefined,
+                .eviction_reason = null,
+                .phase = .running,
                 .thread = undefined,
                 .previous_request_instant = undefined,
             };
