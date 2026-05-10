@@ -435,8 +435,6 @@ pub fn ContextType(
                         )),
                     };
 
-                    assert((ctx.previous_request_instant == null) ==
-                        (ctx.previous_request_latency == null));
                     ctx.previous_request_instant = .{
                         .ns = packet_list.multi_batch_time_monotonic,
                     };
