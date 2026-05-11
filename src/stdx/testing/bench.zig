@@ -56,7 +56,7 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const Duration = stdx.Duration;
 const Instant = stdx.Instant;
-const TimeOS = stdx.time.TimeOS;
+const BenchmarkTimer = @import("timer.zig");
 
 const seed_benchmark: u64 = 42;
 
@@ -114,14 +114,12 @@ fn parameter_fallible(
 pub fn start(bench: *Bench) void {
     assert(bench.timer == null);
     defer assert(bench.timer != null);
-
     bench.timer = bench.time.monotonic();
 }
 
 pub fn stop(bench: *Bench) Duration {
     assert(bench.timer != null);
     defer assert(bench.timer == null);
-
     const instant_stop = bench.time.monotonic();
     const elapsed = bench.timer.?.elapsed(instant_stop);
     bench.timer = null;
