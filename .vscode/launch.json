@@ -1,0 +1,114 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "debug server",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/tigerbeetle",
+            "args": [
+                "start",
+                "--development",
+                "--addresses=127.0.0.1:3000",
+                "tb.debug"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build server",
+        },
+        {
+            "name": "debug amqp",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/tigerbeetle",
+            "args": [
+                "amqp",
+                "--addresses=3000",
+                "--timestamp-last=0",
+                "--cluster=0",
+                "--host=127.0.0.1",
+                "--user=guest",
+                "--password=guest",
+                "--vhost=/",
+                "--publish-exchange=tigerbeetle",
+                "--idle-interval-ms=200",
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build server",
+        },
+        {
+            "name": "debug vopr",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/vopr",
+            "args": [
+                "--lite",
+                "15744680611159750367"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build vopr",
+        },
+        {
+            "name": "debug fuzz",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/fuzz",
+            "args": [
+                "lsm_forest",
+                "5723532789554788839"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build fuzz",
+        },
+        {
+            "name": "debug test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/test-unit",
+            "args": [  ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [
+                {
+                    "name": "ZIG_EXE",
+                    "value": "${workspaceFolder}/zig/zig"
+             }
+            ],
+            "preLaunchTask": "build test",
+        },
+        {
+            "name": "debug benchmark",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/tigerbeetle",
+            "args": [
+                "benchmark",
+                "--transfer-count=10_000",
+                "--transfer-batch-size=10",
+                "--validate",
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build server",
+        },
+        {
+            "name": "debug scripts",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/scripts",
+            "args": [ "amqp"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "build scripts",
+        },
+    ]
+}
