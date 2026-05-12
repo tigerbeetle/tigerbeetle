@@ -29,6 +29,7 @@ comptime {
     _ = @import("lsm/table.zig");
     _ = @import("lsm/table_memory.zig");
     _ = @import("lsm/tree.zig");
+    _ = @import("lsm/unique_key.zig");
     _ = @import("lsm/zig_zag_merge.zig");
     _ = @import("message_buffer.zig");
     _ = @import("multiversion.zig");
