@@ -111,10 +111,12 @@ const ThingsGroove = GrooveType(
             .index_13 = 2 * batch_objects_max,
             .timestamp = batch_objects_max,
         },
-        .ignored = &[_][]const u8{},
-        .optional = &[_][]const u8{},
+        .primary_key = "id",
+        .primary_key_orphaned = false,
+        .unique_keys = &[_][:0]const u8{"id"},
+        .ignored = &[_][:0]const u8{},
+        .optional = &[_][:0]const u8{},
         .derived = .{},
-        .orphaned_ids = false,
         .objects_cache = true,
     },
 );
@@ -123,7 +125,22 @@ const Forest = ForestType(Storage, .{
     .things = ThingsGroove,
 });
 
-const Index = std.meta.FieldEnum(ThingsGroove.IndexTrees);
+// TODO: test unique indexes as well.
+const Index = enum {
+    index_01,
+    index_02,
+    index_03,
+    index_04,
+    index_05,
+    index_06,
+    index_07,
+    index_08,
+    index_09,
+    index_10,
+    index_11,
+    index_12,
+    index_13,
+};
 
 const ScanLookup = ScanLookupType(
     ThingsGroove,
@@ -463,8 +480,8 @@ const Environment = struct {
             .prefetch_entries_for_update_max = batch_objects_max,
             .cache_entries_max = cache_entries_max,
             .tree_options_object = .{ .batch_value_count_limit = batch_objects_max },
-            .tree_options_id = .{ .batch_value_count_limit = batch_objects_max },
             .tree_options_index = .{
+                .id = .{ .batch_value_count_limit = batch_objects_max },
                 .index_01 = .{ .batch_value_count_limit = 2 * batch_objects_max },
                 .index_02 = .{ .batch_value_count_limit = 2 * batch_objects_max },
                 .index_03 = .{ .batch_value_count_limit = 2 * batch_objects_max },
@@ -941,7 +958,10 @@ const Environment = struct {
 
                     const scan = switch (field.index) {
                         inline else => |comptime_index| scan_builder.scan_prefix(
-                            comptime_index,
+                            comptime std.enums.nameCast(
+                                std.meta.FieldEnum(ThingsGroove.IndexTrees),
+                                comptime_index,
+                            ),
                             scan_buffer_pool.acquire_assume_capacity(),
                             snapshot,
                             field.value,
