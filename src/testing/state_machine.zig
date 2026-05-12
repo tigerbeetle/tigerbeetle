@@ -64,10 +64,12 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .id = 1,
                     .value = 1,
                 },
-                .ignored = &[_][]const u8{},
-                .optional = &[_][]const u8{},
+                .primary_key = "id",
+                .primary_key_orphaned = false,
+                .unique_keys = &[_][:0]const u8{"id"},
+                .ignored = &[_][:0]const u8{},
+                .optional = &[_][:0]const u8{},
                 .derived = .{},
-                .orphaned_ids = false,
                 .objects_cache = true,
             },
         );
@@ -117,8 +119,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                         .prefetch_entries_for_read_max = 0,
                         .prefetch_entries_for_update_max = 1,
                         .tree_options_object = .{ .batch_value_count_limit = 1 },
-                        .tree_options_id = .{ .batch_value_count_limit = 1 },
-                        .tree_options_index = .{ .value = .{ .batch_value_count_limit = 1 } },
+                        .tree_options_index = .{
+                            .id = .{ .batch_value_count_limit = 1 },
+                            .value = .{ .batch_value_count_limit = 1 },
+                        },
                     },
                 },
             );
@@ -190,14 +194,13 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) void {
             _ = operation;
             _ = input;
-            _ = op;
 
             assert(state_machine.callback == null);
             state_machine.callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
             state_machine.forest.grooves.things.prefetch_setup(snapshot);
-            state_machine.forest.grooves.things.prefetch_enqueue(snapshot);
+            state_machine.forest.grooves.things.prefetch_enqueue(.{ .id = op });
             state_machine.forest.grooves.things.prefetch(
                 prefetch_callback,
                 &state_machine.prefetch_context,

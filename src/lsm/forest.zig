@@ -113,16 +113,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .groove_tree = .objects,
             }};
 
-            if (Groove.IdTree != void) {
-                tree_infos = tree_infos ++ &[_]TreeInfo{.{
-                    .Tree = Groove.IdTree,
-                    .tree_name = groove_field.name ++ ".id",
-                    .tree_id = @field(Groove.config.ids, "id"),
-                    .groove_name = groove_field.name,
-                    .groove_tree = .ids,
-                }};
-            }
-
             for (std.meta.fields(Groove.IndexTrees)) |tree_field| {
                 tree_infos = tree_infos ++ &[_]TreeInfo{.{
                     .Tree = tree_field.type,
