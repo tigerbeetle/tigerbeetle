@@ -21,6 +21,7 @@ const LanguageCI = .{
     .java = @import("../clients/java/ci.zig"),
     .node = @import("../clients/node/ci.zig"),
     .python = @import("../clients/python/ci.zig"),
+    .ruby = @import("../clients/ruby/ci.zig"),
 };
 
 const LanguageCIVortex = .{

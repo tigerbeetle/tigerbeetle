@@ -22,7 +22,7 @@ pub const RubyDocs = Docs{
     .test_file_name = "main",
 
     .install_commands = "gem install tigerbeetle",
-    .run_commands = "",
+    .run_commands = "ruby main.rb",
 
     .examples = "",
 

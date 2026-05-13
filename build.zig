@@ -1948,10 +1948,11 @@ fn build_ruby_client(
     });
     step_clients_ruby.dependOn(&header.step);
 
-    step_clients_ruby.dependOn(&b.addInstallFile(
-        options.tb_client_header,
-        "../src/clients/ruby/src/ext/tigerbeetle/tb_client.h",
-    ).step);
+    const tb_client_header_copy = Generated.file_copy(b, .{
+        .from = options.tb_client_header,
+        .path = "./src/clients/ruby/src/ext/tigerbeetle/tb_client.h",
+    });
+    step_clients_ruby.dependOn(&tb_client_header_copy.step);
 
     step_clients_ruby.dependOn(&b.addInstallDirectory(.{
         .source_dir = options.tb_client.all_platforms,

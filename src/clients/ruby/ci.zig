@@ -16,22 +16,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // Only to test the build process - the samples below run directly from the src/ directory.
     try shell.exec("gem build tigerbeetle.gemspec", .{});
 
-    const path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
-        "src",
-        @src().file,
-    });
-    const ruby_path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
-        std.fs.path.dirname(path_relative).?,
-        "src",
-    });
-
-    const ruby_path = try shell.project_root.realpathAlloc(
-        shell.arena.allocator(),
-        ruby_path_relative,
-    );
-
-    try shell.env.put("RUBYLIB", ruby_path);
-
     {
         log.info("running tests", .{});
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
@@ -48,7 +32,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
-        try shell.exec("rake test", .{});
+        try shell.exec("rake test:unit", .{});
         try shell.exec("rake test:integration", .{});
     }
 
@@ -65,7 +49,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         errdefer tmp_beetle.log_stderr();
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
-        try shell.exec("ruby main.rb", .{});
+        try shell.exec("ruby -I ../../src -I ../../src/ext main.rb", .{});
     }
 }
 
