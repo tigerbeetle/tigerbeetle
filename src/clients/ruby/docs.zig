@@ -26,7 +26,18 @@ pub const RubyDocs = Docs{
 
     .examples = "",
 
-    .client_object_documentation = "",
+    .client_object_documentation =
+    \\The gem also provides an optional top-level alias.
+    \\Require `tigerbeetle/tb` to use `TB` as a shorthand for `TigerBeetle`:
+    \\
+    \\```ruby
+    \\require "tigerbeetle/tb"
+    \\
+    \\account = TB::Account.new(id: TB.id, ledger: 1, code: 1)
+    \\```
+    \\
+    \\The alias is opt-in and is not defined by `require "tigerbeetle"`.
+    ,
     .create_accounts_documentation = "",
     .account_flags_documentation =
     \\To toggle behavior for an account, combine constants from the

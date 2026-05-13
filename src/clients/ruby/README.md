@@ -74,6 +74,17 @@ TigerBeetle::Client.open(cluster_id: 0, replica_addresses:) do |client|
 end
 ```
 
+The gem also provides an optional top-level alias.
+Require `tigerbeetle/tb` to use `TB` as a shorthand for `TigerBeetle`:
+
+```ruby
+require "tigerbeetle/tb"
+
+account = TB::Account.new(id: TB.id, ledger: 1, code: 1)
+```
+
+The alias is opt-in and is not defined by `require "tigerbeetle"`.
+
 The following are valid addresses:
 * `3000` (interpreted as `127.0.0.1:3000`)
 * `127.0.0.1:3000` (interpreted as `127.0.0.1:3000`)
