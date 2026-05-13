@@ -6,9 +6,8 @@
 //! Workload steps:
 //! 1. Create accounts.
 //! 2. Create transfers.
-//! 3. Query account transfers (`get_account_transfers`).
-//! 4. Lookup accounts (when verification is enabled).
-//! 5. Lookup transfers (when verification is enabled).
+//! 3. Exercise each read/query operation in a dedicated phase.
+//! 4. Lookup accounts/transfers again when verification is enabled.
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
@@ -32,6 +31,7 @@ const Client = vsr.ClientType(tb.Operation, MessageBus);
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
 const ZipfianShuffled = stdx.ZipfianShuffled;
+const TimestampRange = vsr.lsm.TimestampRange;
 
 const cli = @import("./cli.zig");
 
@@ -171,6 +171,11 @@ pub fn main(
         stdx.unique_u128()
     else
         null;
+    const transfer_ids: ?[]u128 = if (use_tbid and cli_args.query_count > 0)
+        try allocator.alloc(u128, @intCast(cli_args.transfer_count))
+    else
+        null;
+    defer if (transfer_ids) |ids| allocator.free(ids);
 
     var benchmark = Benchmark{
         .io = io,
@@ -190,6 +195,7 @@ pub fn main(
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
+        .transfer_ids = transfer_ids,
         .tbid_generator = if (use_tbid) TbidGenerator.init(&prng) else null,
         .transfer_batch_count = cli_args.transfer_batch_count,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
@@ -210,7 +216,13 @@ pub fn main(
         try benchmark.run(.create_accounts);
         try benchmark.run(.create_transfers);
         if (benchmark.query_count > 0) {
+            try benchmark.run(.lookup_accounts);
+            try benchmark.run(.lookup_transfers);
             try benchmark.run(.get_account_transfers);
+            try benchmark.run(.get_account_balances);
+            try benchmark.run(.query_accounts);
+            try benchmark.run(.query_transfers);
+            try benchmark.run(.get_change_events);
         }
     }
 
@@ -320,6 +332,7 @@ const Benchmark = struct {
     account_generator: Generator,
     account_generator_hot: Generator,
     transfer_id_permutation: IdPermutation,
+    transfer_ids: ?[]u128,
     tbid_generator: ?TbidGenerator,
     transfer_batch_count: u32,
     transfer_batch_delay: Duration,
@@ -357,7 +370,13 @@ const Benchmark = struct {
         register,
         create_accounts,
         create_transfers,
+        lookup_accounts,
+        lookup_transfers,
         get_account_transfers,
+        get_account_balances,
+        query_accounts,
+        query_transfers,
+        get_change_events,
         validate_accounts,
         validate_transfers,
     };
@@ -382,7 +401,13 @@ const Benchmark = struct {
                 .register => b.register(client),
                 .create_accounts => b.create_accounts(client),
                 .create_transfers => b.create_transfers(client),
+                .lookup_accounts => b.lookup_accounts(client),
+                .lookup_transfers => b.lookup_transfers(client),
                 .get_account_transfers => b.get_account_transfers(client),
+                .get_account_balances => b.get_account_balances(client),
+                .query_accounts => b.query_accounts(client),
+                .query_transfers => b.query_transfers(client),
+                .get_change_events => b.get_change_events(client),
                 .validate_accounts => b.validate_accounts(client),
                 .validate_transfers => b.validate_transfers(client),
                 .idle => break, // i-1 decided not to start any work.
@@ -585,12 +610,99 @@ const Benchmark = struct {
         b.run_finish();
     }
 
+    fn lookup_accounts(b: *Benchmark, client_index: u32) void {
+        assert(b.stage == .lookup_accounts);
+        assert(!b.clients_busy.is_set(client_index));
+
+        if (b.query_index >= b.query_count) {
+            if (b.clients_busy.empty()) b.query_finish("lookup_accounts");
+            return;
+        }
+        b.query_index += 1;
+
+        const account_count = b.account_batch_count;
+        const account_ids = stdx.bytes_as_slice(
+            .exact,
+            u128,
+            &b.client_requests[client_index],
+        )[0..account_count];
+        for (account_ids) |*account_id| {
+            account_id.* = b.account_id_from_index(b.prng.int_inclusive(u64, b.account_count - 1));
+        }
+        b.request(client_index, .lookup_accounts, .{
+            .batch_count = account_count,
+            .event_size = @sizeOf(u128),
+        });
+    }
+
+    fn lookup_accounts_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.stage == .lookup_accounts);
+
+        const account_ids = stdx.bytes_as_slice(
+            .exact,
+            u128,
+            &b.client_requests[client_index],
+        )[0..b.account_batch_count];
+        const accounts = stdx.bytes_as_slice(.exact, tb.Account, result);
+        assert(accounts.len == account_ids.len);
+        for (account_ids, accounts) |account_id, account| {
+            assert(account.id == account_id);
+            assert(account.ledger == 2);
+            assert(account.code == 1);
+        }
+        b.lookup_accounts(client_index);
+    }
+
+    fn lookup_transfers(b: *Benchmark, client_index: u32) void {
+        assert(b.stage == .lookup_transfers);
+        assert(!b.clients_busy.is_set(client_index));
+
+        if (b.transfer_count == 0 or b.query_index >= b.query_count) {
+            if (b.clients_busy.empty()) b.query_finish("lookup_transfers");
+            return;
+        }
+        b.query_index += 1;
+
+        const transfer_count = b.transfer_batch_count;
+        const transfer_ids = stdx.bytes_as_slice(
+            .exact,
+            u128,
+            &b.client_requests[client_index],
+        )[0..transfer_count];
+        for (transfer_ids) |*transfer_id| {
+            transfer_id.* = b.transfer_id_from_index(
+                b.prng.int_inclusive(u64, b.transfer_count - 1),
+            );
+        }
+        b.request(client_index, .lookup_transfers, .{
+            .batch_count = transfer_count,
+            .event_size = @sizeOf(u128),
+        });
+    }
+
+    fn lookup_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.stage == .lookup_transfers);
+
+        const transfer_ids = stdx.bytes_as_slice(
+            .exact,
+            u128,
+            &b.client_requests[client_index],
+        )[0..b.transfer_batch_count];
+        const transfers = stdx.bytes_as_slice(.exact, tb.Transfer, result);
+        assert(transfers.len == transfer_ids.len);
+        for (transfer_ids, transfers) |transfer_id, transfer| {
+            assert(transfer.id == transfer_id);
+            assert(transfer.ledger == 2);
+        }
+        b.lookup_transfers(client_index);
+    }
+
     fn get_account_transfers(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .get_account_transfers);
         assert(!b.clients_busy.is_set(client_index));
 
         if (b.query_index >= b.query_count) {
-            if (b.clients_busy.empty()) b.get_account_transfers_finish();
+            if (b.clients_busy.empty()) b.query_finish("get_account_transfers");
             return;
         }
         b.query_index += 1;
@@ -611,10 +723,7 @@ const Benchmark = struct {
             .code = 0,
             .timestamp_min = 0,
             .timestamp_max = 0,
-            .limit = @divExact(
-                constants.message_size_max - @sizeOf(vsr.Header),
-                @sizeOf(tb.Transfer),
-            ),
+            .limit = tb.Operation.get_account_transfers.result_max(constants.message_body_size_max),
             .flags = .{
                 .credits = true,
                 .debits = true,
@@ -642,14 +751,145 @@ const Benchmark = struct {
         b.get_account_transfers(client_index);
     }
 
-    fn get_account_transfers_finish(b: *Benchmark) void {
-        assert(b.stage == .get_account_transfers);
+    fn get_account_balances(b: *Benchmark, client_index: u32) void {
+        assert(b.stage == .get_account_balances);
+        assert(!b.clients_busy.is_set(client_index));
 
-        b.output.print("\n{[query_count]} queries in {[query_duration_s]d:.1} s\n", .{
-            .query_count = b.request_index,
-            .query_duration_s = @as(f64, @floatFromInt(b.timer.read())) / std.time.ns_per_s,
+        if (b.query_index >= b.query_count) {
+            if (b.clients_busy.empty()) b.query_finish("get_account_balances");
+            return;
+        }
+        b.query_index += 1;
+
+        b.build_account_filter(client_index, tb.Operation.get_account_balances.result_max(
+            constants.message_body_size_max,
+        ));
+        b.request(client_index, .get_account_balances, .{
+            .batch_count = 1,
+            .event_size = @sizeOf(tb.AccountFilter),
+        });
+    }
+
+    fn get_account_balances_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.stage == .get_account_balances);
+
+        const filter = b.client_request_value(client_index, tb.AccountFilter);
+        const balances = stdx.bytes_as_slice(.exact, tb.AccountBalance, result);
+        assert(balances.len <= filter.limit);
+        for (balances) |*balance| {
+            assert(balance.timestamp >= filter.timestamp_min);
+            if (filter.timestamp_max > 0) assert(balance.timestamp <= filter.timestamp_max);
+        }
+        b.get_account_balances(client_index);
+    }
+
+    fn query_accounts(b: *Benchmark, client_index: u32) void {
+        assert(b.stage == .query_accounts);
+        assert(!b.clients_busy.is_set(client_index));
+
+        if (b.query_index >= b.query_count) {
+            if (b.clients_busy.empty()) b.query_finish("query_accounts");
+            return;
+        }
+        b.query_index += 1;
+
+        b.build_query_filter(client_index, .query_accounts);
+        b.request(client_index, .query_accounts, .{
+            .batch_count = 1,
+            .event_size = @sizeOf(tb.QueryFilter),
+        });
+    }
+
+    fn query_accounts_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.stage == .query_accounts);
+
+        const filter = b.client_request_value(client_index, tb.QueryFilter);
+        const accounts = stdx.bytes_as_slice(.exact, tb.Account, result);
+        assert(accounts.len <= filter.limit);
+        for (accounts) |*account| {
+            assert(account.ledger == 2);
+            assert(account.code == 1);
+            assert(account.timestamp >= filter.timestamp_min);
+            if (filter.timestamp_max > 0) assert(account.timestamp <= filter.timestamp_max);
+        }
+        b.query_accounts(client_index);
+    }
+
+    fn query_transfers(b: *Benchmark, client_index: u32) void {
+        assert(b.stage == .query_transfers);
+        assert(!b.clients_busy.is_set(client_index));
+
+        if (b.query_index >= b.query_count) {
+            if (b.clients_busy.empty()) b.query_finish("query_transfers");
+            return;
+        }
+        b.query_index += 1;
+
+        b.build_query_filter(client_index, .query_transfers);
+        b.request(client_index, .query_transfers, .{
+            .batch_count = 1,
+            .event_size = @sizeOf(tb.QueryFilter),
+        });
+    }
+
+    fn query_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.stage == .query_transfers);
+
+        const filter = b.client_request_value(client_index, tb.QueryFilter);
+        const transfers = stdx.bytes_as_slice(.exact, tb.Transfer, result);
+        assert(transfers.len <= filter.limit);
+        for (transfers) |*transfer| {
+            assert(transfer.ledger == 2);
+            assert(transfer.timestamp >= filter.timestamp_min);
+            if (filter.timestamp_max > 0) assert(transfer.timestamp <= filter.timestamp_max);
+        }
+        b.query_transfers(client_index);
+    }
+
+    fn get_change_events(b: *Benchmark, client_index: u32) void {
+        assert(b.stage == .get_change_events);
+        assert(!b.clients_busy.is_set(client_index));
+
+        if (b.query_index >= b.query_count) {
+            if (b.clients_busy.empty()) b.query_finish("get_change_events");
+            return;
+        }
+        b.query_index += 1;
+
+        const filter: *tb.ChangeEventsFilter = @alignCast(std.mem.bytesAsValue(
+            tb.ChangeEventsFilter,
+            b.client_requests[client_index][0..@sizeOf(tb.ChangeEventsFilter)],
+        ));
+        filter.* = .{
+            .timestamp_min = TimestampRange.timestamp_min,
+            .timestamp_max = TimestampRange.timestamp_max,
+            .limit = tb.Operation.get_change_events.result_max(constants.message_body_size_max),
+        };
+        b.request_raw(client_index, .get_change_events, @sizeOf(tb.ChangeEventsFilter));
+    }
+
+    fn get_change_events_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.stage == .get_change_events);
+
+        const filter = b.client_request_value(client_index, tb.ChangeEventsFilter);
+        const events = stdx.bytes_as_slice(.exact, tb.ChangeEvent, result);
+        assert(events.len <= filter.limit);
+        for (events) |*event| {
+            assert(event.timestamp >= filter.timestamp_min);
+            assert(event.timestamp <= filter.timestamp_max);
+        }
+        b.get_change_events(client_index);
+    }
+
+    fn query_finish(b: *Benchmark, label: []const u8) void {
+        assert(b.query_index == b.query_count or b.transfer_count == 0);
+
+        b.output.print("\n{[label]s}: {[request_count]} requests in {[duration_s]d:.1} s\n", .{
+            .label = label,
+            .request_count = b.request_index,
+            .duration_s = @as(f64, @floatFromInt(b.timer.read())) / std.time.ns_per_s,
         }) catch unreachable;
-        print_percentiles_histogram(b.output, "query", b.request_latency_histogram);
+        print_percentiles_histogram(b.output, label, b.request_latency_histogram);
 
         b.run_finish();
     }
@@ -866,6 +1106,34 @@ const Benchmark = struct {
         );
     }
 
+    fn request_raw(
+        b: *Benchmark,
+        client_index: u32,
+        operation: tb.Operation,
+        body_size: u32,
+    ) void {
+        assert(b.stage != .idle);
+        assert(b.clients_busy.count() < b.clients.len);
+        assert(!b.clients_busy.is_set(client_index));
+        assert(!operation.is_multi_batch());
+        assert(body_size <= constants.message_body_size_max);
+
+        b.clients_busy.set(client_index);
+        b.clients_request_ns[client_index] = b.timer.read();
+        b.request_index += 1;
+
+        b.clients[client_index].request(
+            request_complete,
+            @bitCast(RequestContext{
+                .benchmark = b,
+                .client_index = @intCast(client_index),
+                .request_index = @intCast(b.request_index - 1),
+            }),
+            operation,
+            b.client_requests[client_index][0..body_size],
+        );
+    }
+
     fn request_complete(
         user_data: u128,
         operation_vsr: vsr.Operation,
@@ -886,22 +1154,34 @@ const Benchmark = struct {
         const duration_ms = @divTrunc(duration_ns, std.time.ns_per_ms);
         b.request_latency_histogram[@min(duration_ms, b.request_latency_histogram.len - 1)] += 1;
 
-        const input: []const u8 = input: {
-            assert(operation.is_multi_batch());
-            var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(
-                result,
-                .{ .element_size = operation.result_size() },
-            ) catch unreachable;
+        const input: []const u8 = if (operation.is_multi_batch()) input: {
+            var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(result, .{
+                .element_size = operation.result_size(),
+            }) catch unreachable;
             assert(reply_decoder.batch_count() == 1);
             break :input reply_decoder.peek();
+        } else input: {
+            break :input result;
         };
 
         switch (operation) {
             .create_accounts => b.create_accounts_callback(client, input),
             .create_transfers => b.create_transfers_callback(client, input),
-            .lookup_accounts => b.validate_accounts_callback(client, input),
-            .lookup_transfers => b.validate_transfers_callback(client, input),
+            .lookup_accounts => switch (b.stage) {
+                .lookup_accounts => b.lookup_accounts_callback(client, input),
+                .validate_accounts => b.validate_accounts_callback(client, input),
+                else => unreachable,
+            },
+            .lookup_transfers => switch (b.stage) {
+                .lookup_transfers => b.lookup_transfers_callback(client, input),
+                .validate_transfers => b.validate_transfers_callback(client, input),
+                else => unreachable,
+            },
             .get_account_transfers => b.get_account_transfers_callback(client, input),
+            .get_account_balances => b.get_account_balances_callback(client, input),
+            .query_accounts => b.query_accounts_callback(client, input),
+            .query_transfers => b.query_transfers_callback(client, input),
+            .get_change_events => b.get_change_events_callback(client, input),
             else => unreachable,
         }
     }
@@ -915,11 +1195,74 @@ const Benchmark = struct {
     }
 
     fn next_transfer_id(b: *Benchmark) u128 {
-        if (b.tbid_generator) |*gen| {
-            return gen.next();
-        } else {
-            return b.transfer_id_permutation.encode(b.transfer_index + 1);
+        const id = if (b.tbid_generator) |*gen| id: {
+            break :id gen.next();
+        } else b.transfer_id_permutation.encode(b.transfer_index + 1);
+        if (b.transfer_ids) |transfer_ids| {
+            transfer_ids[@intCast(b.transfer_index)] = id;
         }
+        return id;
+    }
+
+    fn transfer_id_from_index(b: *const Benchmark, index: u64) u128 {
+        if (b.transfer_ids) |transfer_ids| {
+            return transfer_ids[@intCast(index)];
+        } else {
+            return b.transfer_id_permutation.encode(index + 1);
+        }
+    }
+
+    fn client_request_value(b: *const Benchmark, client_index: u32, comptime T: type) T {
+        return std.mem.bytesToValue(
+            T,
+            b.client_requests[client_index][0..@sizeOf(T)],
+        );
+    }
+
+    fn build_account_filter(b: *Benchmark, client_index: u32, limit: u32) void {
+        const request_body = b.client_requests[client_index][0..@sizeOf(tb.AccountFilter)];
+        const filter: *tb.AccountFilter = @alignCast(std.mem.bytesAsValue(
+            tb.AccountFilter,
+            request_body,
+        ));
+        filter.* = .{
+            .account_id = b.account_id_from_index(b.choose_account_index(.hot)),
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .code = 0,
+            .timestamp_min = TimestampRange.timestamp_min,
+            .timestamp_max = TimestampRange.timestamp_max,
+            .limit = limit,
+            .flags = .{
+                .credits = true,
+                .debits = true,
+                .reversed = b.prng.boolean(),
+            },
+        };
+    }
+
+    fn build_query_filter(b: *Benchmark, client_index: u32, operation: tb.Operation) void {
+        assert(operation == .query_accounts or operation == .query_transfers);
+
+        const request_body = b.client_requests[client_index][0..@sizeOf(tb.QueryFilter)];
+        const filter: *tb.QueryFilter = @alignCast(std.mem.bytesAsValue(
+            tb.QueryFilter,
+            request_body,
+        ));
+        filter.* = .{
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .ledger = 2,
+            .code = if (operation == .query_accounts) 1 else 0,
+            .timestamp_min = TimestampRange.timestamp_min,
+            .timestamp_max = TimestampRange.timestamp_max,
+            .limit = operation.result_max(constants.message_body_size_max),
+            .flags = .{
+                .reversed = b.prng.boolean(),
+            },
+        };
     }
 
     fn build_accounts(b: *Benchmark, accounts: []tb.Account) void {
