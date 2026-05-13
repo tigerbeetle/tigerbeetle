@@ -37,6 +37,31 @@ pub const RubyDocs = Docs{
     \\```
     \\
     \\The alias is opt-in and is not defined by `require "tigerbeetle"`.
+    \\
+    \\The `TigerBeetle::Client` is fiber-scheduler aware, so it works with e.g.
+    \\the `async` gem without requiring code changes.
+    \\
+    \\```ruby
+    \\require "async"
+    \\require "async/semaphore"
+    \\require "tigerbeetle"
+    \\
+    \\semaphore = Async::Semaphore.new(16)
+    \\
+    \\account_batches = Array.new(16) do
+    \\  Array.new(1_000) do
+    \\    TigerBeetle::Account.new(id: TigerBeetle.id, ledger: 1, code: 1)
+    \\  end
+    \\end
+    \\
+    \\TigerBeetle::Client.open(cluster_id: 0, replica_addresses: "3000") do |client|
+    \\  Async do
+    \\    account_batches
+    \\      .map { |batch| semaphore.async { client.create_accounts(batch) } }
+    \\      .each(&:wait)
+    \\  end
+    \\end
+    \\```
     ,
     .create_accounts_documentation = "",
     .account_flags_documentation =
