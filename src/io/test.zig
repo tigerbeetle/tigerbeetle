@@ -1012,7 +1012,13 @@ test "cancel" {
 }
 
 test "flush checks timeouts even when completions are queued" {
-    // Linux manages timeouts via io_uring, not userspace flush_timeouts.
+    // The invariant this test exercises - that flush_timeouts() runs even
+    // when the completed queue already has items - is specific to the
+    // userspace timeout queue used by Windows and Darwin. On Linux,
+    // timeouts are kernel-managed via io_uring SQEs and a non-blocking
+    // run() does not necessarily dispatch the timeouts. This test is
+    // verifying identical behavior on windows and darwin but leaves
+    // the different linux behavior to future work.
     if (builtin.target.os.tag == .linux) return error.SkipZigTest;
     try struct {
         const Context = @This();
