@@ -15,7 +15,16 @@ Gem::Specification.new do |spec|
 
   spec.require_paths = ["src"]
   spec.extensions = ["src/ext/tigerbeetle/extconf.rb"]
-  spec.files = Dir["src/**/*.rb", "src/ext/**/*", "LICENSE", "README.md"]
+  spec.files = Dir[
+    "src/**/*.rb",
+    "src/ext/tigerbeetle/extconf.rb",
+    "src/ext/tigerbeetle/rb_tb_gen.h",
+    "src/ext/tigerbeetle/tb_client.h",
+    "src/ext/tigerbeetle/tigerbeetle.c",
+    "src/ext/tigerbeetle/lib/**/*",
+    "LICENSE",
+    "README.md",
+  ]
 
   spec.required_ruby_version = ">= 3.0"
 end
