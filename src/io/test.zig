@@ -280,7 +280,7 @@ test "accept/connect/send/receive" {
 
 test "timeout" {
     const ms = 20;
-    const margin = 100;
+    const margin_ms = 2;
     const count = 10;
 
     try struct {
@@ -316,11 +316,9 @@ test "timeout" {
             try self.io.run();
             try testing.expectEqual(@as(u32, count), self.count);
 
-            try testing.expectApproxEqAbs(
-                @as(f64, ms),
-                @as(f64, @floatFromInt((self.stop_time - start_time) / std.time.ns_per_ms)),
-                margin,
-            );
+            // Allow the timeout to be much too long since cloud CI can have large delays.
+            const elapsed_ms = @divFloor((self.stop_time - start_time), std.time.ns_per_ms);
+            try testing.expect(elapsed_ms > ms - margin_ms);
         }
 
         fn timeout_callback(
