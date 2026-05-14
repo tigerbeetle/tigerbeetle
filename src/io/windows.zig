@@ -119,9 +119,9 @@ pub const IO = struct {
         // to block for timeout expiry. Without this, pure-timeout workloads
         // (io_pending == 0) would busy-loop and pick off timeouts one at a
         // time instead of batching all that expire at the same instant.
-        const should_poll = self.io_pending > 0 and self.completed.empty();
-        const should_wait = mode == .blocking and self.completed.empty() and timeout_ms != null;
-        if (should_poll or should_wait) {
+        if (self.completed.empty() and
+            (self.io_pending > 0 or mode == .blocking))
+        {
             const io_timeout = switch (mode) {
                 .blocking => timeout_ms orelse @panic("IO.flush blocking unbounded"),
                 .non_blocking => 0,
