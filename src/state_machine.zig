@@ -293,9 +293,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(@FieldType(Forest.Grooves, "accounts") == AccountsGroove);
                 assert(std.meta.fields(@TypeOf(AccountsGroove.config.derived)).len == 2);
 
-                const IndexHelperType = AccountsGroove.IndexTreeFieldHelperType;
-                assert(IndexHelperType("imported").Index == void);
-                assert(IndexHelperType("closed").Index == void);
+                const IndexHelperType = AccountsGroove.IndexHelperType;
+                assert(IndexHelperType("imported").Type == void);
+                assert(IndexHelperType("closed").Type == void);
             }
 
             // Transfers:
@@ -303,10 +303,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(@FieldType(Forest.Grooves, "transfers") == TransfersGroove);
                 assert(std.meta.fields(@TypeOf(TransfersGroove.config.derived)).len == 3);
 
-                const IndexHelperType = TransfersGroove.IndexTreeFieldHelperType;
-                assert(IndexHelperType("expires_at").Index == u64);
-                assert(IndexHelperType("imported").Index == void);
-                assert(IndexHelperType("closing").Index == void);
+                const IndexHelperType = TransfersGroove.IndexHelperType;
+                assert(IndexHelperType("expires_at").Type == u64);
+                assert(IndexHelperType("imported").Type == void);
+                assert(IndexHelperType("closing").Type == void);
             }
 
             // TransfersPending:
@@ -320,15 +320,15 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(@FieldType(Forest.Grooves, "account_events") == AccountEventsGroove);
                 assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 6);
 
-                const IndexHelperType = AccountEventsGroove.IndexTreeFieldHelperType;
-                assert(IndexHelperType("account_timestamp").Index == u64);
-                assert(IndexHelperType("dr_account_id_expired").Index == u128);
-                assert(IndexHelperType("cr_account_id_expired").Index == u128);
-                assert(IndexHelperType("transfer_pending_id_expired").Index == u128);
+                const IndexHelperType = AccountEventsGroove.IndexHelperType;
+                assert(IndexHelperType("account_timestamp").Type == u64);
+                assert(IndexHelperType("dr_account_id_expired").Type == u128);
+                assert(IndexHelperType("cr_account_id_expired").Type == u128);
+                assert(IndexHelperType("transfer_pending_id_expired").Type == u128);
                 // TODO: `ledger_expired` returns the wrong type!
                 // It should be u32 instead, the same as `ledger`.
-                assert(IndexHelperType("ledger_expired").Index == u128);
-                assert(IndexHelperType("prunable").Index == void);
+                assert(IndexHelperType("ledger_expired").Type == u128);
+                assert(IndexHelperType("prunable").Type == void);
             }
         }
 
