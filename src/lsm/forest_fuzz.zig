@@ -358,7 +358,7 @@ const Environment = struct {
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveTransfers.IndexTrees)) type {
         const Tree = @FieldType(GrooveTransfers.IndexTrees, @tagName(index));
         const Value = Tree.Table.Value;
-        const Index = GrooveTransfers.IndexHelperType(@tagName(index)).Index;
+        const Index = GrooveTransfers.IndexHelperType(@tagName(index)).Type;
 
         const ScanRange = ScanRangeType(
             Tree,
@@ -779,9 +779,9 @@ const Environment = struct {
                         },
                         inline else => |field| index: {
                             const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
-                            comptime assert(IndexHelper.Index != void);
+                            comptime assert(IndexHelper.Type != void);
 
-                            const value = IndexHelper.index_from_object(object).?;
+                            const value = IndexHelper.get(object).?;
                             assert(value >= params.min and value <= params.max);
                             break :index value;
                         },
@@ -953,15 +953,15 @@ pub fn generate_fuzz_ops(
                 break :blk switch (index) {
                     inline else => |field| {
                         const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
-                        const min: u128, const max: u128 = switch (IndexHelper.Index) {
+                        const min: u128, const max: u128 = switch (IndexHelper.Type) {
                             void => .{ 0, 0 },
                             else => range: {
-                                var min = random_id(prng, IndexHelper.Index);
+                                var min = random_id(prng, IndexHelper.Type);
                                 var max = if (prng.boolean()) min else random_id(
                                     prng,
-                                    IndexHelper.Index,
+                                    IndexHelper.Type,
                                 );
-                                if (min > max) std.mem.swap(IndexHelper.Index, &min, &max);
+                                if (min > max) std.mem.swap(IndexHelper.Type, &min, &max);
                                 assert(min <= max);
                                 break :range .{ min, max };
                             },
