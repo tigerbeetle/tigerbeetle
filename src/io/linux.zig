@@ -1883,32 +1883,32 @@ pub const IO = struct {
                     // the entire block device.
                     assert(std.mem.allEqual(u8, &read_buf, 0));
 
-                    const BLKDISCARD = os.linux.IOCTL.IO(0x12, 119);
-                    const range: extern struct { start: u64, len: u64 } = .{
-                        .start = 0,
-                        .len = block_device_size,
-                    };
+                    // const BLKDISCARD = os.linux.IOCTL.IO(0x12, 119);
+                    // const range: extern struct { start: u64, len: u64 } = .{
+                    //     .start = 0,
+                    //     .len = block_device_size,
+                    // };
 
                     // Discard normally, but not always, zeros out the sectors involved. This is ok
                     // since the zero superblock check above is to prevent accidentally overwriting
                     // a real device. replica_format.zig checks that the format doesn't depend on
                     // preexisting data.
                     log.info("discarding {}...", .{std.fmt.fmtIntSizeBin(block_device_size)});
-                    switch (os.linux.E.init(os.linux.ioctl(
-                        fd,
-                        BLKDISCARD,
-                        @intFromPtr(&range),
-                    ))) {
-                        .SUCCESS => {},
-                        else => |e| {
-                            // It's OK if the underlying device doesn't support DISCARD. Warn
-                            // about it.
-                            std.log.warn(
-                                "open_data_file: unable to discard block device: {}",
-                                .{e},
-                            );
-                        },
-                    }
+                    // switch (os.linux.E.init(os.linux.ioctl(
+                    //     fd,
+                    //     BLKDISCARD,
+                    //     @intFromPtr(&range),
+                    // ))) {
+                    //     .SUCCESS => {},
+                    //     else => |e| {
+                    //         // It's OK if the underlying device doesn't support DISCARD. Warn
+                    //         // about it.
+                    //         std.log.warn(
+                    //             "open_data_file: unable to discard block device: {}",
+                    //             .{e},
+                    //         );
+                    //     },
+                    // }
                 }
             },
         }
