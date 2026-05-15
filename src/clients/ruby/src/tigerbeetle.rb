@@ -11,6 +11,7 @@ module TigerBeetle
 
   @id_generator = ID.new
 
+  # Generates a 128-bit, time-based, monotonically increasing ID.
   def self.id
     @id_generator.generate
   end

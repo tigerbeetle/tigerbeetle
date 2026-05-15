@@ -22,6 +22,7 @@ Gem::Specification.new do |spec|
     "src/ext/tigerbeetle/tb_client.h",
     "src/ext/tigerbeetle/tigerbeetle.c",
     "src/ext/tigerbeetle/lib/**/*",
+    "sig/**/*.rbs",
     "LICENSE",
     "README.md",
   ]
