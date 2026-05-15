@@ -750,8 +750,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .multiversion = replica_multiversion(replica),
                     .test_context = cluster,
                     .tracer = &cluster.replica_tracers[replica_index],
-
-                    .commit_stall_probability = null,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);

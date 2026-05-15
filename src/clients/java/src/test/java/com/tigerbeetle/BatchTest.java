@@ -4,9 +4,13 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.math.BigInteger;
+
+import org.junit.Assert;
 import org.junit.Test;
 
 /**
@@ -59,7 +63,7 @@ public class BatchTest {
 
         var batch = new AccountBatch(1);
         batch.setPosition(1);
-        assert false; // Should be unreachable
+        fail(); // Should be unreachable
     }
 
     @Test(expected = IndexOutOfBoundsException.class)
@@ -67,7 +71,7 @@ public class BatchTest {
 
         var batch = new CreateTransferResultBatch(1);
         batch.setPosition(-1);
-        assert false; // Should be unreachable
+        fail(); // Should be unreachable
     }
 
     @Test
@@ -131,9 +135,9 @@ public class BatchTest {
         // an iterated batch is an empty one.
         try {
             batch.next();
-            assert false;
+            fail();
         } catch (IndexOutOfBoundsException exception) {
-            assert true;
+            assertTrue(true);
         }
         assertFalse(batch.isValidPosition());
     }
@@ -167,9 +171,9 @@ public class BatchTest {
         // an iterated batch is an empty one.
         try {
             batch.next();
-            assert false;
+            fail();
         } catch (IndexOutOfBoundsException exception) {
-            assert true;
+            assertTrue(true);
         }
         assertFalse(batch.isValidPosition());
     }
@@ -379,7 +383,7 @@ public class BatchTest {
 
         @SuppressWarnings("unused")
         var batch = new AccountBatch(invalidBuffer);
-        assert false;
+        fail();
     }
 
     @Test
@@ -481,7 +485,7 @@ public class BatchTest {
 
         @SuppressWarnings("unused")
         var batch = new TransferBatch(invalidBuffer);
-        assert false;
+        fail();
     }
 
     @Test
@@ -529,7 +533,7 @@ public class BatchTest {
 
         @SuppressWarnings("unused")
         var batch = new CreateAccountResultBatch(invalidBuffer);
-        assert false;
+        fail();
     }
 
     @Test
@@ -577,7 +581,7 @@ public class BatchTest {
 
         @SuppressWarnings("unused")
         var batch = new CreateTransferResultBatch(invalidBuffer);
-        assert false;
+        fail();
     }
 
     @Test
@@ -687,7 +691,7 @@ public class BatchTest {
 
         @SuppressWarnings("unused")
         var batch = new IdBatch(invalidBuffer);
-        assert false;
+        fail();
     }
 
     @Test(expected = NullPointerException.class)
@@ -696,7 +700,7 @@ public class BatchTest {
         var batch = new IdBatch(1);
         batch.add();
         batch.setId(null);
-        assert false;
+        fail();
     }
 
     @Test

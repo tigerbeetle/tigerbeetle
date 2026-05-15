@@ -6,6 +6,8 @@ const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const data_file_size_min = @import("./superblock.zig").data_file_size_min;
+const SuperBlockHeader = @import("./superblock.zig").SuperBlockHeader;
+const superblock_copy_size = @import("./superblock.zig").superblock_copy_size;
 
 /// Initialize the TigerBeetle replica's data file.
 pub fn format(
@@ -336,6 +338,10 @@ test "format" {
     });
     defer storage.deinit(allocator);
 
+    // Format only writes the minimum data needed. Verify it works with garbage in-between.
+    var prng = stdx.PRNG.from_seed_testing();
+    prng.fill(storage.memory);
+
     try format(Storage, allocator, &storage, .{
         .cluster = cluster,
         .release = vsr.Release.minimum,
@@ -391,8 +397,27 @@ test "format" {
     // Verify grid alignment. The contents of the padding are not zeroed.
     try std.testing.expect(vsr.Zone.grid.start() % constants.sector_size == 0);
 
-    // Explicitly zero client_replies and the grid padding. This is not required for formatting, but
-    // it allows for easy checksums of the entire testing storage.
+    // Set the parts of the datafile that haven't been explicitly written to a known value for
+    // checksum comparision.
+    //
+    // 0xaa is used instead of 0, as originally it implicitly relied on testing storage being
+    // undefined. By keeping it the same, the verification checksum can stay the same.
+    for (0..constants.superblock_copies) |i| {
+        const unwritten_start = vsr.Zone.superblock.offset(i * superblock_copy_size) +
+            @sizeOf(SuperBlockHeader);
+        const unwritten_size = superblock_copy_size - @sizeOf(SuperBlockHeader);
+        @memset(storage.memory[unwritten_start..][0..unwritten_size], 0xaa);
+    }
+    for (0..constants.journal_slot_count) |slot| {
+        const unwritten_start = vsr.Zone.wal_prepares.offset(slot * constants.message_size_max) +
+            vsr.sector_ceil(@sizeOf(Header.Prepare));
+        const unwritten_size = constants.message_size_max -
+            vsr.sector_ceil(@sizeOf(Header.Prepare));
+        @memset(storage.memory[unwritten_start..][0..unwritten_size], 0xaa);
+    }
+
+    // client_replies, grid_padding and the grid aren't formatted. Don't worry about the grid, as
+    // the storage size is set to data_file_size_min, which excludes it.
     @memset(
         storage.memory[vsr.Zone.client_replies.offset(0)..][0..vsr.Zone.client_replies.size().?],
         0,
@@ -410,7 +435,7 @@ test "format" {
     // This doesn't match the output from `tigerbeetle format ...` since the testing storage / slot
     // counts are lower.
     try std.testing.expectEqual(
-        vsr.checksum(storage.memory),
         339529914272821912685300045374558551362,
+        vsr.checksum(storage.memory),
     );
 }

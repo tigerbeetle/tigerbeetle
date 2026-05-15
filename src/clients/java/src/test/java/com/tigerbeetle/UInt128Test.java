@@ -3,6 +3,7 @@ package com.tigerbeetle;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.junit.Assert.assertSame;
 import java.util.concurrent.CountDownLatch;
 import java.math.BigInteger;
@@ -43,7 +44,7 @@ public class UInt128Test {
 
         @SuppressWarnings("unused")
         var nop = UInt128.asLong(null, UInt128.LeastSignificant);
-        assert false;
+        fail();
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -52,7 +53,7 @@ public class UInt128Test {
         byte[] bytes = new byte[] {1, 2, 3, 4, 5, 6};
         @SuppressWarnings("unused")
         var nop = UInt128.asLong(bytes, UInt128.LeastSignificant);
-        assert false;
+        fail();
     }
 
     @Test
@@ -95,7 +96,7 @@ public class UInt128Test {
         UUID uuid = null;
         @SuppressWarnings("unused")
         var nop = UInt128.asBytes(uuid);
-        assert false;
+        fail();
     }
 
     @Test
@@ -116,7 +117,7 @@ public class UInt128Test {
 
         @SuppressWarnings("unused")
         var nop = UInt128.asUUID(null);
-        assert false;
+        fail();
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -125,7 +126,7 @@ public class UInt128Test {
         byte[] bytes = new byte[] {1, 2, 3, 4, 5, 6};
         @SuppressWarnings("unused")
         var nop = UInt128.asUUID(bytes);
-        assert false;
+        fail();
     }
 
     @Test(expected = NullPointerException.class)
@@ -134,7 +135,7 @@ public class UInt128Test {
         BigInteger bigint = null;
         @SuppressWarnings("unused")
         var nop = UInt128.asBytes(bigint);
-        assert false;
+        fail();
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -142,7 +143,7 @@ public class UInt128Test {
         BigInteger bigint = BigInteger.valueOf(-1);
         @SuppressWarnings("unused")
         var nop = UInt128.asBytes(bigint);
-        assert false;
+        fail();
     }
 
     @Test
@@ -170,7 +171,7 @@ public class UInt128Test {
 
         @SuppressWarnings("unused")
         var nop = UInt128.asBigInteger(null);
-        assert false;
+        fail();
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -179,7 +180,7 @@ public class UInt128Test {
         byte[] bytes = new byte[] {1, 2, 3, 4, 5, 6};
         @SuppressWarnings("unused")
         var nop = UInt128.asBigInteger(bytes);
-        assert false;
+        fail();
     }
 
     @Test

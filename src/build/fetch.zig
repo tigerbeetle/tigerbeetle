@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
+const stdb = @import("./stdb.zig");
 
 const log = std.log;
 
@@ -64,7 +65,7 @@ fn fetch(arena: Allocator, options: struct {
     tmp: []const u8,
     url: []const u8,
 }) ![]const u8 {
-    if (exec_ok(arena, &.{ "curl", "--version" })) {
+    if (stdb.exec_ok(arena, &.{ "curl", "--version" })) {
         log.debug("download: curl", .{});
         const url_file_name = options.url[std.mem.lastIndexOf(u8, options.url, "/").?..];
         const tmp_dir = path_join(arena, &.{
@@ -76,7 +77,7 @@ fn fetch(arena: Allocator, options: struct {
         try std.fs.cwd().makePath(tmp_dir);
 
         const curl_output = path_join(arena, &.{ tmp_dir, url_file_name });
-        _ = try exec(arena, &(.{
+        _ = try stdb.exec(arena, &(.{
             "curl",             "--retry-all-errors",
             "--retry",          "5",
             "--retry-max-time", "120",
@@ -84,40 +85,16 @@ fn fetch(arena: Allocator, options: struct {
             "--location",       options.url,
             "--output",         curl_output,
         }));
-        return try exec(arena, &.{ options.zig, "fetch", curl_output });
+        return try stdb.exec(arena, &.{ options.zig, "fetch", curl_output });
     }
     log.debug("download: zig fetch", .{});
-    return try exec(arena, &.{ options.zig, "fetch", options.url });
+    return try stdb.exec(arena, &.{ options.zig, "fetch", options.url });
 }
 
 fn path_join(arena: Allocator, components: []const []const u8) []const u8 {
     return std.fs.path.join(arena, components) catch |err| oom(err);
 }
 
-fn exec_ok(arena: Allocator, argv: []const []const u8) bool {
-    assert(argv.len > 0);
-    const result = std.process.Child.run(.{ .allocator = arena, .argv = argv }) catch return false;
-    return result.term == .Exited and result.term.Exited == 0;
-}
-
-fn exec(arena: Allocator, argv: []const []const u8) ![]const u8 {
-    assert(argv.len > 0);
-    const result = std.process.Child.run(.{ .allocator = arena, .argv = argv }) catch |err| {
-        log.err("running {s}: {}", .{ argv, err });
-        return err;
-    };
-    if (!(result.term == .Exited and result.term.Exited == 0)) {
-        log.err("running {s}: {}\n{s}", .{ argv, result.term, result.stderr });
-        return error.Exec;
-    }
-    if (std.mem.indexOfScalar(u8, result.stdout, '\n')) |first_newline| {
-        if (first_newline + 1 == result.stdout.len) {
-            return result.stdout[0 .. result.stdout.len - 1];
-        }
-    }
-    return result.stdout;
-}
-
-fn oom(_: error{OutOfMemory}) noreturn {
+pub fn oom(_: error{OutOfMemory}) noreturn {
     @panic("OOM");
 }

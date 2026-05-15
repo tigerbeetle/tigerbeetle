@@ -180,8 +180,8 @@ test "Time monotonic smoke" {
     const time = time_os.time();
     const instant_1 = time.monotonic();
     const instant_2 = time.monotonic();
-    assert(instant_1.duration_since(instant_1).ns == 0);
-    assert(instant_2.duration_since(instant_1).ns >= 0);
+    assert(instant_1.elapsed(instant_1).ns == 0);
+    assert(instant_1.elapsed(instant_2).ns >= 0);
 }
 
 /// Equivalent to `std.time.Timer`,
@@ -201,7 +201,7 @@ pub const Timer = struct {
     pub fn read(self: *Timer) stdx.Duration {
         const current = self.time.monotonic();
         assert(current.ns >= self.started.ns);
-        return current.duration_since(self.started);
+        return self.started.elapsed(current);
     }
 
     /// Resets the timer.

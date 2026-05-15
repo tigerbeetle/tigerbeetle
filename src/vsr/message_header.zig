@@ -396,11 +396,7 @@ pub const Header = extern struct {
 
         ping_timestamp_monotonic: u64,
         release_count: u16,
-        // TODO: Remove in the next release. We switched to star replication and removed ARR.
-        route_padding: [6]u8 = @splat(0),
-        route: u64,
-
-        reserved: [80]u8 = @splat(0),
+        reserved: [94]u8 = @splat(0),
 
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
@@ -426,7 +422,6 @@ pub const Header = extern struct {
             if (self.release_count > constants.vsr_releases_max) {
                 return "release_count > vsr_releases_max";
             }
-            if (!stdx.zeroed(&self.route_padding)) return "route_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }

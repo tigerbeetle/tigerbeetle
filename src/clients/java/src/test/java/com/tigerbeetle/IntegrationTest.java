@@ -27,6 +27,7 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Integration tests using a TigerBeetle instance.
@@ -70,7 +71,7 @@ public class IntegrationTest {
     @Test(expected = NullPointerException.class)
     public void testConstructorNullReplicaAddresses() throws Throwable {
         try (final var client = new Client(clusterId, null)) {
-            assert false;
+            fail();
         }
     }
 
@@ -78,7 +79,7 @@ public class IntegrationTest {
     public void testConstructorNullElementReplicaAddresses() throws Throwable {
         final var replicaAddresses = new String[] {"3001", null};
         try (final var client = new Client(clusterId, replicaAddresses)) {
-            assert false;
+            fail();
         }
     }
 
@@ -86,7 +87,7 @@ public class IntegrationTest {
     public void testConstructorEmptyReplicaAddresses() throws Throwable {
         final var replicaAddresses = new String[0];
         try (final var client = new Client(clusterId, replicaAddresses)) {
-            assert false;
+            fail();
         }
     }
 
@@ -98,7 +99,7 @@ public class IntegrationTest {
         }
 
         try (final var client = new Client(clusterId, replicaAddresses)) {
-            assert false;
+            fail();
         } catch (InitializationException initializationException) {
             assertEquals(InitializationStatus.AddressLimitExceeded.value,
                     initializationException.getStatus());
@@ -109,7 +110,7 @@ public class IntegrationTest {
     public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
         final var replicaAddresses = new String[] {"", "", ""};
         try (final var client = new Client(clusterId, replicaAddresses)) {
-            assert false;
+            fail();
         } catch (InitializationException initializationException) {
             assertEquals(InitializationStatus.AddressInvalid.value,
                     initializationException.getStatus());
@@ -120,7 +121,7 @@ public class IntegrationTest {
     public void testConstructorInvalidReplicaAddresses() throws Throwable {
         final var replicaAddresses = new String[] {"127.0.0.1:99999"};
         try (final var client = new Client(clusterId, replicaAddresses)) {
-            assert false;
+            fail();
         } catch (InitializationException initializationException) {
             assertEquals(InitializationStatus.AddressInvalid.value,
                     initializationException.getStatus());
@@ -140,7 +141,7 @@ public class IntegrationTest {
         final var clusterIdInvalid = new byte[] {0, 0, 0};
         final var replicaAddresses = new String[] {"3001"};
         try (final var client = new Client(clusterIdInvalid, replicaAddresses)) {
-            assert false;
+            fail();
         }
     }
 
@@ -925,10 +926,10 @@ public class IntegrationTest {
         try {
             CompletableFuture<CreateAccountResultBatch> future =
                     client.createAccountsAsync(accounts);
-            assert future != null;
+            assertNotNull(future);
 
             future.get();
-            assert false;
+            fail();
         } catch (ExecutionException executionException) {
             assertTrue(executionException.getCause() instanceof TooMuchDataException);
         }
@@ -968,10 +969,10 @@ public class IntegrationTest {
         try {
             CompletableFuture<CreateTransferResultBatch> future =
                     client.createTransfersAsync(transfers);
-            assert future != null;
+            assertNotNull(future);
 
             future.get();
-            assert false;
+            fail();
 
         } catch (ExecutionException executionException) {
             assertTrue(executionException.getCause() instanceof TooMuchDataException);
@@ -1298,7 +1299,7 @@ public class IntegrationTest {
             transfers.setAmount(100);
 
             client.createTransfers(transfers);
-            assert false;
+            fail();
 
         } catch (Throwable any) {
             assertEquals(ClientClosedException.class, any.getClass());
@@ -2556,7 +2557,7 @@ public class IntegrationTest {
                     assertTrue(transferResults.getTimestamp() > 0);
                     hasError |= transferResults.getStatus() != CreateTransferStatus.Created;
                 } else
-                    assert false;
+                    fail();
             }
             return !hasError;
         } finally {

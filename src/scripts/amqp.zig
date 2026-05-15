@@ -592,13 +592,13 @@ fn run_timeout_test(
     );
     defer _ = cdc_job.kill() catch undefined;
 
-    const started = time.monotonic();
+    const timer = time.monotonic();
 
     // Kills the TigerBeetle cluster and waits for the CDC job to time out.
     tmp_beetle.deinit(gpa);
     const result = try cdc_job.wait();
 
-    const elapsed = time.monotonic().duration_since(started);
+    const elapsed = timer.elapsed(time.monotonic());
 
     try testing.expectEqual(@as(u8, 1), result.Exited);
     try testing.expect(elapsed.to_ms() > 1000);

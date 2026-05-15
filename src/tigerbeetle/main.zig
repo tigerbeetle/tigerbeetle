@@ -360,6 +360,9 @@ fn command_start(
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
             .commit_stall_probability = args.commit_stall_probability,
+            .commit_stall_lag_min = args.commit_stall_lag_min,
+            .commit_stall_lag_max = args.commit_stall_lag_max,
+            .commit_stall_multiple_max = args.commit_stall_multiple_max,
             .state_machine_options = .{
                 .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
                 .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,

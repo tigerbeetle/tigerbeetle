@@ -9,6 +9,15 @@ public final class AssertionError extends java.lang.AssertionError {
         super(String.format(format, args), cause);
     }
 
+    AssertionError() {
+        super();
+    }
+
+    public static void assertTrue(boolean condition) {
+        if (!condition)
+            throw new AssertionError();
+    }
+
     public static void assertTrue(boolean condition, String format, Object... args) {
         if (!condition)
             throw new AssertionError(format, args);

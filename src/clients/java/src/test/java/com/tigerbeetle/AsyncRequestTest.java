@@ -5,6 +5,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
@@ -25,7 +27,7 @@ public class AsyncRequestTest {
         batch.add();
 
         var request = AsyncRequest.createAccounts(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test
@@ -35,7 +37,7 @@ public class AsyncRequestTest {
         batch.add();
 
         var request = AsyncRequest.createTransfers(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test
@@ -45,7 +47,7 @@ public class AsyncRequestTest {
         batch.add();
 
         var request = AsyncRequest.lookupAccounts(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test
@@ -55,7 +57,7 @@ public class AsyncRequestTest {
         batch.add();
 
         var request = AsyncRequest.lookupTransfers(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test(expected = NullPointerException.class)
@@ -64,14 +66,14 @@ public class AsyncRequestTest {
         batch.add();
 
         AsyncRequest.createAccounts(null, batch);
-        assert false;
+        fail();
     }
 
     @Test(expected = NullPointerException.class)
     public void testConstructorWithBatchNull() {
         var client = getDummyClient();
         AsyncRequest.createAccounts(client, null);
-        assert false;
+        fail();
     }
 
     @Test
@@ -106,7 +108,7 @@ public class AsyncRequestTest {
 
         try {
             future.get();
-            assert false;
+            fail();
         } catch (ExecutionException e) {
             assertNotNull(e.getCause());
             throw e.getCause();
@@ -134,7 +136,7 @@ public class AsyncRequestTest {
 
         try {
             future.get();
-            assert false;
+            fail();
         } catch (ExecutionException e) {
             assertNotNull(e.getCause());
             throw e.getCause();
@@ -180,7 +182,7 @@ public class AsyncRequestTest {
 
         try {
             future.get();
-            assert false;
+            fail();
         } catch (ExecutionException e) {
             assertNotNull(e.getCause());
             throw e.getCause();
@@ -205,7 +207,7 @@ public class AsyncRequestTest {
 
         try {
             future.join();
-            assert false;
+            fail();
         } catch (CompletionException e) {
             assertTrue(e.getCause() instanceof TooMuchDataException);
         }
@@ -234,7 +236,7 @@ public class AsyncRequestTest {
 
         try {
             future.get();
-            assert false;
+            fail();
         } catch (ExecutionException e) {
             assertNotNull(e.getCause());
             throw e.getCause();
@@ -419,10 +421,10 @@ public class AsyncRequestTest {
             // The timeout is much smaller than the delay,
             // to avoid flaky results due to thread scheduling.
             future.get(5, TimeUnit.MILLISECONDS);
-            assert false;
+            fail();
 
         } catch (TimeoutException timeout) {
-            assert true;
+            assertTrue(true);
         }
 
         // Wait for completion
@@ -480,7 +482,7 @@ public class AsyncRequestTest {
             assertEquals(2000L, result.getId(UInt128.MostSignificant));
 
         } catch (TimeoutException timeout) {
-            assert false;
+            fail();
         }
     }
 
@@ -500,7 +502,7 @@ public class AsyncRequestTest {
 
         try {
             future.get();
-            assert false;
+            fail();
         } catch (ExecutionException exception) {
             assertTrue(exception.getCause() instanceof TooMuchDataException);
         }
@@ -522,7 +524,7 @@ public class AsyncRequestTest {
 
         try {
             future.get(1000, TimeUnit.MILLISECONDS);
-            assert false;
+            fail();
         } catch (ExecutionException exception) {
             assertTrue(exception.getCause() instanceof ClientEvictedException);
         }
@@ -540,11 +542,11 @@ public class AsyncRequestTest {
             request.setException(new Exception());
         } catch (Throwable any) {
             // No exception is expected in the first call.
-            assert false;
+            fail();
         }
         // Second time throws an exception, because it can only be completed once.
         request.setException(new Exception());
-        assert false;
+        fail();
     }
 
     private static NativeClient getDummyClient() {

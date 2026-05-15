@@ -15,7 +15,7 @@ pub const Instant = struct {
         return .{ .ns = now.ns + duration.ns };
     }
 
-    pub fn duration_since(now: Instant, earlier: Instant) Duration {
+    pub fn elapsed(earlier: Instant, now: Instant) Duration {
         assert(now.ns >= earlier.ns);
         const elapsed_ns = now.ns - earlier.ns;
         return .{ .ns = elapsed_ns };
@@ -160,10 +160,10 @@ pub const Duration = struct {
 test "Instant/Duration" {
     const instant_1: Instant = .{ .ns = 100 * std.time.ns_per_day };
     const instant_2: Instant = .{ .ns = 100 * std.time.ns_per_day + std.time.ns_per_s };
-    assert(instant_1.duration_since(instant_1).ns == 0);
-    assert(instant_2.duration_since(instant_1).ns == std.time.ns_per_s);
+    assert(instant_1.elapsed(instant_1).ns == 0);
+    assert(instant_1.elapsed(instant_2).ns == std.time.ns_per_s);
 
-    const duration = instant_2.duration_since(instant_1);
+    const duration = instant_1.elapsed(instant_2);
     assert(duration.ns == 1_000_000_000);
     assert(duration.to_us() == 1_000_000);
     assert(duration.to_ms() == 1_000);

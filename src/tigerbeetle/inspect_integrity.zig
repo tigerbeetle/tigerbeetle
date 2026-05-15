@@ -399,8 +399,8 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
     });
     defer parent_progress_node.end();
 
-    var timer = try std.time.Timer.start();
-    timer.reset();
+    var time: vsr.time.TimeOS = .{};
+    const timer = time.monotonic();
 
     while (true) {
         for (0..integrity.grid_scrubber.reads.available() + 1) |_| {
@@ -435,7 +435,7 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
 
         try integrity.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
-    const grid_duration_ms = stdx.div_ceil(timer.read(), std.time.ns_per_ms);
+    const grid_duration = timer.elapsed(time.monotonic());
 
     assert(integrity.grid_scrubber.tour == .done and
         integrity.grid_scrubber.reads.executing() == 0);
@@ -464,12 +464,12 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
 
     const throughput = @divFloor(@divFloor(
         blocks_expected_count * constants.block_size,
-        stdx.div_ceil(grid_duration_ms, std.time.ms_per_s),
+        stdx.div_ceil(grid_duration.to_ms(), std.time.ms_per_s),
     ), 1024 * 1024);
 
     log.info("successfully checked {} grid blocks in {}ms. ({}MiB/s)", .{
         blocks_expected_count,
-        grid_duration_ms,
+        grid_duration.to_ms(),
         throughput,
     });
 

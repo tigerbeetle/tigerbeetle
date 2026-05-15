@@ -19,7 +19,7 @@ pub const IO = struct {
     pub const NextTickSource = common.NextTickSource;
 
     iocp: os.windows.HANDLE,
-    time_os: TimeOS = .{},
+    time: TimeOS = .{},
     io_pending: usize = 0,
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
@@ -67,8 +67,9 @@ pub const IO = struct {
 
         defer self.stats.trace();
 
-        var timer = try std.time.Timer.start();
-        defer self.stats.window.time_run_for_ns.ns += timer.read();
+        const timer = self.time.monotonic();
+        defer self.stats.window.time_run_for_ns.ns +=
+            timer.elapsed(self.time.monotonic()).ns;
 
         const Callback = struct {
             fn on_timeout(
@@ -156,14 +157,15 @@ pub const IO = struct {
         var completed = self.completed;
         self.completed.reset();
 
-        var timer = try std.time.Timer.start();
+        const timer = self.time.monotonic();
         while (completed.pop()) |completion| {
             (completion.callback)(Completion.Context{
                 .io = self,
                 .completion = completion,
             });
         }
-        self.stats.window.time_callbacks.ns += timer.read();
+        const elapsed = timer.elapsed(self.time.monotonic());
+        self.stats.window.time_callbacks.ns += elapsed.ns;
     }
 
     fn flush_timeouts(self: *IO) ?u64 {
@@ -174,7 +176,7 @@ pub const IO = struct {
         var timeouts_iterator = self.timeouts.iterate();
         while (timeouts_iterator.next()) |completion| {
             // Lazily get the current time.
-            const now = current_time orelse self.time_os.monotonic().ns;
+            const now = current_time orelse self.time.monotonic().ns;
             current_time = now;
 
             // Move the completion to completed if it expired.
@@ -1051,7 +1053,7 @@ pub const IO = struct {
             callback,
             completion,
             .timeout,
-            .{ .deadline = self.time_os.monotonic().ns + nanoseconds },
+            .{ .deadline = self.time.monotonic().ns + nanoseconds },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) TimeoutError!void {
                     _ = ctx;

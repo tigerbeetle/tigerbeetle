@@ -2,6 +2,7 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 import java.math.BigInteger;
 
@@ -76,7 +77,7 @@ public class AccountTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         accounts.setId(id);
-        assert false;
+        fail();
     }
 
     @Test
@@ -224,7 +225,7 @@ public class AccountTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         accounts.setUserData128(id);
-        assert false;
+        fail();
     }
 
     @Test

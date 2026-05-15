@@ -2,6 +2,8 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
 import java.math.BigInteger;
 import org.junit.Test;
 
@@ -79,7 +81,7 @@ public class TransferTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         transfers.setId(id);
-        assert false;
+        fail();
     }
 
     @Test
@@ -130,7 +132,7 @@ public class TransferTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         transfers.setDebitAccountId(id);
-        assert false;
+        fail();
     }
 
     @Test
@@ -181,7 +183,7 @@ public class TransferTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         transfers.setCreditAccountId(id);
-        assert false;
+        fail();
     }
 
     @Test
@@ -261,7 +263,7 @@ public class TransferTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         transfers.setPendingId(id);
-        assert false;
+        fail();
     }
 
     @Test
@@ -312,7 +314,7 @@ public class TransferTest {
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         transfers.setUserData128(id);
-        assert false;
+        fail();
     }
 
     @Test

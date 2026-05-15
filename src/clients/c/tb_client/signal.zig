@@ -174,9 +174,8 @@ test "signal" {
             try Signal.init(&self.signal, &self.io, on_signal);
             defer self.signal.deinit();
 
-            var time_os = TimeOS{};
-            const timer = time_os.time();
-            const start = timer.monotonic();
+            var time: TimeOS = .{};
+            const timer = time.monotonic();
 
             const thread = try std.Thread.spawn(.{}, Context.notify, .{&self});
 
@@ -195,7 +194,7 @@ test "signal" {
             assert(self.count == events_count);
 
             // Make sure at least some time has passed.
-            const elapsed = timer.monotonic().duration_since(start);
+            const elapsed = timer.elapsed(time.monotonic());
             assert(elapsed.ns >= delay);
         }
 

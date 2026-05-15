@@ -57,6 +57,7 @@ features of TigerBeetle.
 them, then post the transfer.
 * [Many Two-Phase Transfers](/src/clients/dotnet/samples/two-phase-many/): Create two accounts and start a number of pending transfers
 between them, posting and voiding alternating transfers.
+
 ## Creating a Client
 
 A client is created with a cluster ID and replica

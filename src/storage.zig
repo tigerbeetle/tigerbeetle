@@ -152,17 +152,16 @@ pub fn StorageType(comptime IO: type) type {
             // Do a bit of pointer trickery to keep the grid on_next_tick interface the same for
             // now.
             storage.io.next_tick(
-                ?*anyopaque,
-                @ptrCast(@constCast(callback)),
+                *anyopaque,
+                @constCast(callback),
                 struct {
                     fn adapter(
-                        ctx: ?*anyopaque,
+                        ctx: *anyopaque,
                         completion: *IO.Completion,
                         _: IO.NextTickResult,
                     ) void {
-                        const callback_original: *const fn (*NextTick) void = @ptrCast(
-                            @alignCast(ctx.?),
-                        );
+                        const callback_original: *const fn (*NextTick) void =
+                            @ptrCast(@alignCast(ctx));
                         callback_original(completion);
                     }
                 }.adapter,
@@ -220,7 +219,7 @@ pub fn StorageType(comptime IO: type) type {
 
                 self.tracer.timing(
                     .{ .storage_read = .{ .zone = read.zone } },
-                    self.tracer.time.monotonic().duration_since(read.start.?),
+                    read.start.?.elapsed(self.tracer.time.monotonic()),
                 );
 
                 read.callback(read);
@@ -431,7 +430,7 @@ pub fn StorageType(comptime IO: type) type {
             if (write.buffer.len == 0) {
                 self.tracer.timing(
                     .{ .storage_write = .{ .zone = write.zone } },
-                    self.tracer.time.monotonic().duration_since(write.start.?),
+                    write.start.?.elapsed(self.tracer.time.monotonic()),
                 );
 
                 write.callback(write);

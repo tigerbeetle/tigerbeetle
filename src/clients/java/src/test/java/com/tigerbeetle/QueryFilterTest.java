@@ -2,6 +2,8 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
 import org.junit.Test;
 
 public class QueryFilterTest {
@@ -64,7 +66,7 @@ public class QueryFilterTest {
 
         final var data = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         queryFilter.setUserData128(data);
-        assert false;
+        fail();
     }
 
     @Test
@@ -157,7 +159,7 @@ public class QueryFilterTest {
         final var queryFilter = new QueryFilterBatch(1);
         queryFilter.add();
         queryFilter.setReserved(new byte[7]);
-        assert false;
+        fail();
     }
 
 }

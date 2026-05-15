@@ -2,6 +2,8 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
 import org.junit.Test;
 
 public class AccountFilterTest {
@@ -62,7 +64,7 @@ public class AccountFilterTest {
 
         final var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         accountFilter.setAccountId(id);
-        assert false;
+        fail();
     }
 
     @Test
@@ -108,7 +110,7 @@ public class AccountFilterTest {
 
         final var data = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
         accountFilter.setUserData128(data);
-        assert false;
+        fail();
     }
 
     @Test
@@ -160,7 +162,7 @@ public class AccountFilterTest {
         final var accountFilter = new AccountFilterBatch(1);
         accountFilter.add();
         accountFilter.setReserved(new byte[59]);
-        assert false;
+        fail();
     }
 
     @Test

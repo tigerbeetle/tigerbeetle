@@ -1785,7 +1785,13 @@ fn build_node_client(
     });
 
     // Run `npm install` to get access to node headers.
-    var npm_install = b.addSystemCommand(&.{ "npm", "install" });
+    var npm_install = b.addRunArtifact(b.addExecutable(.{
+        .name = "npm-install",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("./src/build/npm_install.zig"),
+            .target = b.graph.host,
+        }),
+    }));
     npm_install.cwd = b.path("./src/clients/node");
 
     // For windows, compile a set of all symbols that could be exported by node and write it to a

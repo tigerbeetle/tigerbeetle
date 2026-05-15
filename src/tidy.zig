@@ -1231,6 +1231,7 @@ const DeadFilesDetector = struct {
             "main.zig",
             "node_bindings.zig",
             "node.zig",
+            "npm_install.zig",
             "page_writer.zig",
             "python_bindings.zig",
             "rust_bindings.zig",

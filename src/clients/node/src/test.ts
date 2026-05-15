@@ -17,6 +17,10 @@ import {
   RequestError,
 } from '.'
 
+async function sleep_ms(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms))
+}
+
 const client = createClient({
   cluster_id: 0n,
   replica_addresses: [process.env.TB_ADDRESS || '3000']
@@ -69,7 +73,7 @@ test('id() monotonically increasing', async (): Promise<void> => {
   for (let i = 0; i < 10_000_000; i++) {
     // Ensure ID is monotonic between milliseconds if the loop executes too fast.
     if (i % 10_000 == 0) {
-      await new Promise(resolve => setTimeout(resolve, 1))
+      await sleep_ms(1)
     }
 
     const idB = id();
@@ -115,8 +119,8 @@ test('error if timestamp is not set to 0n on account', async (): Promise<void> =
 
 test('batch max size', async (): Promise<void> => {
   const BATCH_SIZE = 10_000;
-  var transfers: Transfer[] = [];
-  for (var i=0; i<BATCH_SIZE;i++) {
+  const transfers: Transfer[] = [];
+  for (let i=0; i<BATCH_SIZE;i++) {
     transfers.push({
       id: 0n,
       debit_account_id: 0n,
@@ -431,7 +435,7 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   assert.ok(transfers_results[0].timestamp > 0)
   assert.deepStrictEqual(transfers_results[0].status, CreateTransferStatus.created)
 
-  var accounts = await client.lookupAccounts([accountA.id, accountB.id])
+  let accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
   assert.strictEqual(accounts[0].credits_posted, 150n)
   assert.strictEqual(accounts[0].credits_pending, 50n)
@@ -446,9 +450,8 @@ test('cannot void an expired transfer', async (): Promise<void> => {
   // We need to wait 1s for the server to expire the transfer, however the
   // server can pulse the expiry operation anytime after the timeout,
   // so adding an extra delay to avoid flaky tests.
-  // TODO: Use `await setTimeout(1000)` when upgrade to Node.js > 15.
   const extra_wait_time = 500;
-  await new Promise(_ => setTimeout(_, (transfer.timeout * 1000) + extra_wait_time));
+  await sleep_ms((transfer.timeout * 1000) + extra_wait_time);
 
   // Looking up the accounts again for the updated balance.
   accounts = await client.lookupAccounts([accountA.id, accountB.id])
@@ -566,9 +569,9 @@ test('can get account transfers', async (): Promise<void> => {
   assert.ok(account_results[0].timestamp > 0)
   assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
 
-  var transfers_created : Transfer[] = [];
+  const transfers_created : Transfer[] = [];
   // Create transfers where the new account is either the debit or credit account:
-  for (var i=0; i<10;i++) {
+  for (let i=0; i<10;i++) {
     transfers_created.push({
       id: BigInt(i + 10000),
       debit_account_id: i % 2 == 0 ? accountC.id : accountA.id,
@@ -594,7 +597,7 @@ test('can get account transfers', async (): Promise<void> => {
   }
 
   // Query all transfers for accountC:
-  var filter: AccountFilter = {
+  let filter: AccountFilter = {
     account_id: accountC.id,
     user_data_128: 0n,
     user_data_64: 0n,
@@ -605,14 +608,14 @@ test('can get account transfers', async (): Promise<void> => {
     limit: BATCH_MAX,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
-  var transfers = await client.getAccountTransfers(filter)
-  var account_balances = await client.getAccountBalances(filter)
+  let transfers = await client.getAccountTransfers(filter)
+  let account_balances = await client.getAccountBalances(filter)
   assert.strictEqual(transfers.length, transfers_created.length)
   assert.strictEqual(account_balances.length, transfers.length)
 
-  var timestamp = 0n;
-  var i = 0;
-  for (var transfer of transfers) {
+  let timestamp = 0n;
+  let i = 0;
+  for (const transfer of transfers) {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
 
@@ -640,7 +643,7 @@ test('can get account transfers', async (): Promise<void> => {
 
   timestamp = 1n << 64n;
   i = 0;
-  for (var transfer of transfers) {
+  for (const transfer of transfers) {
     assert.ok(transfer.timestamp < timestamp);
     timestamp = transfer.timestamp;
 
@@ -668,7 +671,7 @@ test('can get account transfers', async (): Promise<void> => {
 
   timestamp = 1n << 64n;
   i = 0;
-  for (var transfer of transfers) {
+  for (const transfer of transfers) {
     assert.ok(transfer.timestamp < timestamp);
     timestamp = transfer.timestamp;
 
@@ -696,7 +699,7 @@ test('can get account transfers', async (): Promise<void> => {
 
   timestamp = 0n;
   i = 0;
-  for (var transfer of transfers) {
+  for (const transfer of transfers) {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
 
@@ -723,7 +726,7 @@ test('can get account transfers', async (): Promise<void> => {
   assert.strictEqual(account_balances.length, transfers.length)
 
   i = 0;
-  for (var transfer of transfers) {
+  for (const transfer of transfers) {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
 
@@ -769,7 +772,7 @@ test('can get account transfers', async (): Promise<void> => {
 
   timestamp = 1n << 64n;
   i = 0;
-  for (var transfer of transfers) {
+  for (const transfer of transfers) {
     assert.ok(timestamp > transfer.timestamp);
     timestamp = transfer.timestamp;
 
@@ -796,7 +799,7 @@ test('can get account transfers', async (): Promise<void> => {
   assert.strictEqual(account_balances.length, transfers.length)
 
   i = 0;
-  for (var transfer of transfers) {
+  for (const transfer of transfers) {
     assert.ok(timestamp > transfer.timestamp);
     timestamp = transfer.timestamp;
 
@@ -954,9 +957,9 @@ test('can get account transfers', async (): Promise<void> => {
 
 test('can query accounts', async (): Promise<void> => {
   {
-    var accounts : Account[] = [];
+    const accounts : Account[] = [];
     // Create transfers:
-    for (var i=0; i<10;i++) {
+    for (let i=0; i<10;i++) {
       accounts.push({
         id: id(),
         debits_pending: 0n,
@@ -986,7 +989,7 @@ test('can query accounts', async (): Promise<void> => {
     // Querying accounts where:
     // `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
     // AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 1000n,
       user_data_64: 100n,
       user_data_32: 10,
@@ -997,11 +1000,11 @@ test('can query accounts', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
-    var query: Account[] = await client.queryAccounts(filter)
+    const query: Account[] = await client.queryAccounts(filter)
     assert.strictEqual(query.length, 5)
 
-    var timestamp = 0n;
-    for (var account of query) {
+    let timestamp = 0n;
+    for (const account of query) {
       assert.ok(timestamp < account.timestamp);
       timestamp = account.timestamp;
 
@@ -1017,7 +1020,7 @@ test('can query accounts', async (): Promise<void> => {
     // Querying accounts where:
     // `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
     // AND code=999 AND ledger=1 ORDER BY timestamp DESC`.
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 2000n,
       user_data_64: 200n,
       user_data_32: 20,
@@ -1028,11 +1031,11 @@ test('can query accounts', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.reversed,
     }
-    var query: Account[] = await client.queryAccounts(filter)
+    const query: Account[] = await client.queryAccounts(filter)
     assert.strictEqual(query.length, 5)
 
-    var timestamp = 1n << 64n;
-    for (var account of query) {
+    let timestamp = 1n << 64n;
+    for (const account of query) {
       assert.ok(timestamp > account.timestamp);
       timestamp = account.timestamp;
 
@@ -1047,7 +1050,7 @@ test('can query accounts', async (): Promise<void> => {
   {
     // Querying accounts where:
     // `code=999 ORDER BY timestamp ASC`
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 0n,
       user_data_64: 0n,
       user_data_32: 0,
@@ -1058,11 +1061,11 @@ test('can query accounts', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
-    var query: Account[] = await client.queryAccounts(filter)
+    const query: Account[] = await client.queryAccounts(filter)
     assert.strictEqual(query.length, 10)
 
-    var timestamp = 0n;
-    for (var account of query) {
+    let timestamp = 0n;
+    for (const account of query) {
       assert.ok(timestamp < account.timestamp);
       timestamp = account.timestamp;
 
@@ -1073,7 +1076,7 @@ test('can query accounts', async (): Promise<void> => {
   {
     // Querying accounts where:
     // `code=999 ORDER BY timestamp DESC LIMIT 5`.
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 0n,
       user_data_64: 0n,
       user_data_32: 0,
@@ -1086,11 +1089,11 @@ test('can query accounts', async (): Promise<void> => {
     }
 
     // First 5 items:
-    var query: Account[] = await client.queryAccounts(filter)
+    let query: Account[] = await client.queryAccounts(filter)
     assert.strictEqual(query.length, 5)
 
-    var timestamp = 1n << 64n;
-    for (var account of query) {
+    let timestamp = 1n << 64n;
+    for (const account of query) {
       assert.ok(timestamp > account.timestamp);
       timestamp = account.timestamp;
 
@@ -1102,7 +1105,7 @@ test('can query accounts', async (): Promise<void> => {
     query = await client.queryAccounts(filter)
     assert.strictEqual(query.length, 5)
 
-    for (var account of query) {
+    for (const account of query) {
       assert.ok(timestamp > account.timestamp);
       timestamp = account.timestamp;
 
@@ -1117,7 +1120,7 @@ test('can query accounts', async (): Promise<void> => {
 
   {
     // Not found:
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 0n,
       user_data_64: 200n,
       user_data_32: 10,
@@ -1128,7 +1131,7 @@ test('can query accounts', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
-    var query: Account[] = await client.queryAccounts(filter)
+    const query: Account[] = await client.queryAccounts(filter)
     assert.strictEqual(query.length, 0)
   }
 })
@@ -1155,9 +1158,9 @@ test('can query transfers', async (): Promise<void> => {
     assert.ok(account_results[0].timestamp > 0)
     assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.created)
 
-    var transfers_created : Transfer[] = [];
+    const transfers_created : Transfer[] = [];
     // Create transfers:
-    for (var i=0; i<10;i++) {
+    for (let i=0; i<10;i++) {
       transfers_created.push({
         id: id(),
         debit_account_id: i % 2 == 0 ? account.id : accountA.id,
@@ -1187,7 +1190,7 @@ test('can query transfers', async (): Promise<void> => {
     // Querying transfers where:
     // `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
     // AND code=999 AND ledger=1 ORDER BY timestamp ASC`.
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 1000n,
       user_data_64: 100n,
       user_data_32: 10,
@@ -1198,11 +1201,11 @@ test('can query transfers', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
-    var query: Transfer[] = await client.queryTransfers(filter)
+    const query: Transfer[] = await client.queryTransfers(filter)
     assert.strictEqual(query.length, 5)
 
-    var timestamp = 0n;
-    for (var transfer of query) {
+    let timestamp = 0n;
+    for (const transfer of query) {
       assert.ok(timestamp < transfer.timestamp);
       timestamp = transfer.timestamp;
 
@@ -1218,7 +1221,7 @@ test('can query transfers', async (): Promise<void> => {
     // Querying transfers where:
     // `user_data_128=2000 AND user_data_64=200 AND user_data_32=20
     // AND code=999 AND ledger=1 ORDER BY timestamp DESC`.
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 2000n,
       user_data_64: 200n,
       user_data_32: 20,
@@ -1229,11 +1232,11 @@ test('can query transfers', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.reversed,
     }
-    var query: Transfer[] = await client.queryTransfers(filter)
+    const query: Transfer[] = await client.queryTransfers(filter)
     assert.strictEqual(query.length, 5)
 
-    var timestamp = 1n << 64n;
-    for (var transfer of query) {
+    let timestamp = 1n << 64n;
+    for (const transfer of query) {
       assert.ok(timestamp > transfer.timestamp);
       timestamp = transfer.timestamp;
 
@@ -1248,7 +1251,7 @@ test('can query transfers', async (): Promise<void> => {
   {
     // Querying transfers where:
     // `code=999 ORDER BY timestamp ASC`
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 0n,
       user_data_64: 0n,
       user_data_32: 0,
@@ -1259,11 +1262,11 @@ test('can query transfers', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
-    var query: Transfer[] = await client.queryTransfers(filter)
+    const query: Transfer[] = await client.queryTransfers(filter)
     assert.strictEqual(query.length, 10)
 
-    var timestamp = 0n;
-    for (var transfer of query) {
+    let timestamp = 0n;
+    for (const transfer of query) {
       assert.ok(timestamp < transfer.timestamp);
       timestamp = transfer.timestamp;
 
@@ -1274,7 +1277,7 @@ test('can query transfers', async (): Promise<void> => {
   {
     // Querying transfers where:
     // `code=999 ORDER BY timestamp DESC LIMIT 5`.
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 0n,
       user_data_64: 0n,
       user_data_32: 0,
@@ -1287,11 +1290,11 @@ test('can query transfers', async (): Promise<void> => {
     }
 
     // First 5 items:
-    var query: Transfer[] = await client.queryTransfers(filter)
+    let query: Transfer[] = await client.queryTransfers(filter)
     assert.strictEqual(query.length, 5)
 
-    var timestamp = 1n << 64n;
-    for (var transfer of query) {
+    let timestamp = 1n << 64n;
+    for (const transfer of query) {
       assert.ok(timestamp > transfer.timestamp);
       timestamp = transfer.timestamp;
 
@@ -1303,7 +1306,7 @@ test('can query transfers', async (): Promise<void> => {
     query = await client.queryTransfers(filter)
     assert.strictEqual(query.length, 5)
 
-    for (var transfer of query) {
+    for (const transfer of query) {
       assert.ok(timestamp > transfer.timestamp);
       timestamp = transfer.timestamp;
 
@@ -1318,7 +1321,7 @@ test('can query transfers', async (): Promise<void> => {
 
   {
     // Not found:
-    var filter: QueryFilter = {
+    const filter: QueryFilter = {
       user_data_128: 0n,
       user_data_64: 200n,
       user_data_32: 10,
@@ -1329,7 +1332,7 @@ test('can query transfers', async (): Promise<void> => {
       limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
-    var query: Transfer[] = await client.queryTransfers(filter)
+    const query: Transfer[] = await client.queryTransfers(filter)
     assert.strictEqual(query.length, 0)
   }
 })
@@ -1461,7 +1464,7 @@ test('can import accounts and transfers', async (): Promise<void> => {
 
   // Wait 10 ms so we can use the account's timestamp as the reference for past time
   // after the last object inserted.
-  await new Promise(_ => setTimeout(_, 10));
+  await sleep_ms(10);
 
   const accountA: Account = {
     id: id(),
@@ -1554,12 +1557,16 @@ test('accept zero-length lookup_transfers', async (): Promise<void> => {
 test("destroy client in-flight", async (): Promise<void> => {
   // Non-existing cluster.
   const client = createClient({ cluster_id: 92n, replica_addresses: ["99"] });
-  setTimeout(() => client.destroy(), 30);
+  const destroy = (async () => {
+    await sleep_ms(30)
+    client.destroy()
+  })()
   assert.rejects(async () => await client.lookupAccounts([0n]), (err) => {
     assert.ok(err instanceof RequestError)
     assert.strictEqual(err.code,  ErrorCodes.ERR_CLIENT_CLOSED)
     return true
   })
+  await destroy
 });
 
 async function main () {

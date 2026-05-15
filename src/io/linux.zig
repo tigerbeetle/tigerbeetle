@@ -128,7 +128,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
-            self.time.monotonic().duration_since(timer).ns;
+            timer.elapsed(self.time.monotonic()).ns;
 
         var now = self.time.monotonic();
         const deadline = now.add(.{ .ns = nanoseconds });
@@ -163,7 +163,7 @@ pub const IO = struct {
             // Doesn't account for flush_completions below; which indicates a bad assumption either
             // on our sizing of the loop, or a bug in the kernel.
             defer self.stats.window.time_kernel.ns +=
-                self.time.monotonic().duration_since(timer).ns;
+                timer.elapsed(self.time.monotonic()).ns;
 
             const submitted = submit_and_wait_timeout(
                 &self.ring,
@@ -227,7 +227,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_callbacks.ns +=
-            self.time.monotonic().duration_since(timer).ns;
+            timer.elapsed(self.time.monotonic()).ns;
 
         if (completion.operation == .next_tick) {
             // next_tick completions are never submitted to the kernel,
@@ -527,9 +527,9 @@ pub const IO = struct {
         result: i32 = undefined,
         link: QueueType(Completion).Link = .{},
         operation: Operation,
-        context: ?*anyopaque,
+        context: *anyopaque,
         callback: *const fn (
-            context: ?*anyopaque,
+            context: *anyopaque,
             completion: *Completion,
             result: *const anyopaque,
         ) void,
@@ -1489,7 +1489,7 @@ pub const IO = struct {
             var buffer: u64 = undefined;
 
             fn on_read(
-                _: *Context,
+                _: *void,
                 completion_inner: *Completion,
                 result: ReadError!usize,
             ) void {
@@ -1500,8 +1500,8 @@ pub const IO = struct {
         };
 
         self.read(
-            *Context,
-            undefined,
+            *void,
+            @constCast(&{}),
             Context.on_read,
             completion,
             event,
@@ -1874,9 +1874,41 @@ pub const IO = struct {
                             .{std.fmt.fmtIntSizeBin(superblock_zone_size)},
                         );
                     }
+
                     // Reset position in the block device to compensate for read(2).
                     try posix.lseek_CUR(fd, -superblock_zone_size);
                     assert(try posix.lseek_CUR_get(fd) == 0);
+
+                    // In a similar vein to the fs_allocate for the .file case above, BLKDISCARD
+                    // the entire block device.
+                    assert(std.mem.allEqual(u8, &read_buf, 0));
+
+                    const BLKDISCARD = os.linux.IOCTL.IO(0x12, 119);
+                    const range: extern struct { start: u64, len: u64 } = .{
+                        .start = 0,
+                        .len = block_device_size,
+                    };
+
+                    // Discard normally, but not always, zeros out the sectors involved. This is ok
+                    // since the zero superblock check above is to prevent accidentally overwriting
+                    // a real device. replica_format.zig checks that the format doesn't depend on
+                    // preexisting data.
+                    log.info("discarding {}...", .{std.fmt.fmtIntSizeBin(block_device_size)});
+                    switch (os.linux.E.init(os.linux.ioctl(
+                        fd,
+                        BLKDISCARD,
+                        @intFromPtr(&range),
+                    ))) {
+                        .SUCCESS => {},
+                        else => |e| {
+                            // It's OK if the underlying device doesn't support DISCARD. Warn
+                            // about it.
+                            std.log.warn(
+                                "open_data_file: unable to discard block device: {}",
+                                .{e},
+                            );
+                        },
+                    }
                 }
             },
         }
@@ -2001,10 +2033,11 @@ pub const IO = struct {
             completion: *Completion,
             result: Result,
         ) void,
-    ) *const fn (?*anyopaque, *Completion, *const anyopaque) void {
+    ) *const fn (*anyopaque, *Completion, *const anyopaque) void {
+        comptime assert(@typeInfo(Context) == .pointer);
         return &struct {
             fn erased(
-                ctx_any: ?*anyopaque,
+                ctx_any: *anyopaque,
                 completion: *Completion,
                 result_any: *const anyopaque,
             ) void {

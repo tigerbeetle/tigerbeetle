@@ -2,7 +2,10 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.junit.Test;
@@ -17,7 +20,7 @@ public class BlockingRequestTest {
         batch.add();
 
         var request = BlockingRequest.createAccounts(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test
@@ -27,7 +30,7 @@ public class BlockingRequestTest {
         batch.add();
 
         var request = BlockingRequest.createTransfers(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test
@@ -37,7 +40,7 @@ public class BlockingRequestTest {
         batch.add();
 
         var request = BlockingRequest.lookupAccounts(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test
@@ -47,7 +50,7 @@ public class BlockingRequestTest {
         batch.add();
 
         var request = BlockingRequest.lookupTransfers(client, batch);
-        assert request != null;
+        assertNotNull(request);
     }
 
     @Test(expected = NullPointerException.class)
@@ -56,14 +59,14 @@ public class BlockingRequestTest {
         batch.add();
 
         BlockingRequest.createAccounts(null, batch);
-        assert false;
+        fail();
     }
 
     @Test(expected = NullPointerException.class)
     public void testConstructorWithBatchNull() {
         var client = getDummyClient();
         BlockingRequest.createAccounts(client, null);
-        assert false;
+        fail();
     }
 
     @Test
@@ -99,7 +102,7 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
 
         request.waitForResult();
-        assert false;
+        fail();
     }
 
     @Test(expected = AssertionError.class)
@@ -120,7 +123,7 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
 
         request.waitForResult();
-        assert false;
+        fail();
     }
 
     @Test
@@ -160,7 +163,7 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
 
         request.waitForResult();
-        assert false;
+        fail();
     }
 
     @Test(expected = AssertionError.class)
@@ -174,7 +177,7 @@ public class BlockingRequestTest {
         assertFalse(request.isDone());
 
         request.getResult();
-        assert false;
+        fail();
     }
 
     @Test
@@ -196,7 +199,7 @@ public class BlockingRequestTest {
 
         try {
             request.waitForResult();
-            assert false;
+            fail();
         } catch (ClientReleaseException exception) {
             assertEquals(ClientReleaseException.Reason.ClientReleaseTooLow, exception.getReason());
         }
@@ -247,7 +250,7 @@ public class BlockingRequestTest {
                     System.nanoTime());
         } catch (Throwable any) {
             // No exception is expected in the first call.
-            assert false;
+            fail();
         }
 
         assertTrue(request.isDone());
@@ -446,7 +449,7 @@ public class BlockingRequestTest {
 
         try {
             callback.request.waitForResult();
-            assert false;
+            fail();
         } catch (ClientReleaseException exception) {
             assertEquals(ClientReleaseException.Reason.ClientReleaseTooHigh, exception.getReason());
         }

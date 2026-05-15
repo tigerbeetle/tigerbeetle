@@ -66,7 +66,7 @@ const mode: enum { smoke, benchmark } =
 
 seed: u64,
 time: TimeOS = .{},
-instant_start: ?Instant = null,
+timer: ?Instant = null,
 
 const Bench = @This();
 
@@ -78,7 +78,7 @@ pub fn init() Bench {
 }
 
 pub fn deinit(bench: *Bench) void {
-    assert(bench.instant_start == null);
+    assert(bench.timer == null);
     bench.* = undefined;
 }
 
@@ -112,19 +112,19 @@ fn parameter_fallible(
 }
 
 pub fn start(bench: *Bench) void {
-    assert(bench.instant_start == null);
-    defer assert(bench.instant_start != null);
+    assert(bench.timer == null);
+    defer assert(bench.timer != null);
 
-    bench.instant_start = bench.time.time().monotonic();
+    bench.timer = bench.time.time().monotonic();
 }
 
 pub fn stop(bench: *Bench) Duration {
-    assert(bench.instant_start != null);
-    defer assert(bench.instant_start == null);
+    assert(bench.timer != null);
+    defer assert(bench.timer == null);
 
     const instant_stop = bench.time.time().monotonic();
-    const elapsed = instant_stop.duration_since(bench.instant_start.?);
-    bench.instant_start = null;
+    const elapsed = bench.timer.?.elapsed(instant_stop);
+    bench.timer = null;
     return elapsed;
 }
 

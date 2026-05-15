@@ -281,6 +281,57 @@ pub fn StateMachineType(comptime Storage: type) type {
             .account_events = AccountEventsGroove,
         });
 
+        comptime {
+            // Being intentional about the types we expect for derived indexes.
+            // Indexes based on object fields are already validated by the struct size
+            // and alignment requirements. Derived indexes, however, are not part of the
+            // struct layout and need this extra sanity check.
+            assert(std.meta.fields(Forest.Grooves).len == 4);
+
+            // Accounts:
+            {
+                assert(@FieldType(Forest.Grooves, "accounts") == AccountsGroove);
+                assert(std.meta.fields(@TypeOf(AccountsGroove.config.derived)).len == 2);
+
+                const IndexHelperType = AccountsGroove.IndexTreeFieldHelperType;
+                assert(IndexHelperType("imported").Index == void);
+                assert(IndexHelperType("closed").Index == void);
+            }
+
+            // Transfers:
+            {
+                assert(@FieldType(Forest.Grooves, "transfers") == TransfersGroove);
+                assert(std.meta.fields(@TypeOf(TransfersGroove.config.derived)).len == 3);
+
+                const IndexHelperType = TransfersGroove.IndexTreeFieldHelperType;
+                assert(IndexHelperType("expires_at").Index == u64);
+                assert(IndexHelperType("imported").Index == void);
+                assert(IndexHelperType("closing").Index == void);
+            }
+
+            // TransfersPending:
+            {
+                assert(@FieldType(Forest.Grooves, "transfers_pending") == TransfersPendingGroove);
+                assert(std.meta.fields(@TypeOf(TransfersPendingGroove.config.derived)).len == 0);
+            }
+
+            // AccountEvents:
+            {
+                assert(@FieldType(Forest.Grooves, "account_events") == AccountEventsGroove);
+                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 6);
+
+                const IndexHelperType = AccountEventsGroove.IndexTreeFieldHelperType;
+                assert(IndexHelperType("account_timestamp").Index == u64);
+                assert(IndexHelperType("dr_account_id_expired").Index == u128);
+                assert(IndexHelperType("cr_account_id_expired").Index == u128);
+                assert(IndexHelperType("transfer_pending_id_expired").Index == u128);
+                // TODO: `ledger_expired` returns the wrong type!
+                // It should be u32 instead, the same as `ledger`.
+                assert(IndexHelperType("ledger_expired").Index == u128);
+                assert(IndexHelperType("prunable").Index == void);
+            }
+        }
+
         pub const batch_max = struct {
             pub const create_accounts: u32 = @max(
                 Operation.create_accounts.event_max(

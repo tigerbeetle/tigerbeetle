@@ -2,11 +2,10 @@ package com.tigerbeetle.samples;
 
 import java.util.Arrays;
 
-import static com.tigerbeetle.AssertionError.assertTrue;
-
 import java.math.BigInteger;
 
 import com.tigerbeetle.*;
+import static com.tigerbeetle.AssertionError.assertTrue;
 
 public final class Main {
     public static void main(String[] args) throws Exception {
@@ -33,10 +32,9 @@ public final class Main {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating account %d: %s\n",
+                        throw new Exception(String.format("Error creating account %d: %s\n",
                                 accountResults.getPosition(),
-                                accountResults.getStatus());
-                        assert false;
+                                accountResults.getStatus()));
                 }
             }
 
@@ -50,15 +48,16 @@ public final class Main {
             transfers.setAmount(10);
 
             CreateTransferResultBatch transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+            
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
@@ -66,21 +65,20 @@ public final class Main {
             ids.add(1);
             ids.add(2);
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 10;
-                    assert accounts.getCreditsPosted().intValueExact() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 10);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
                 } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 0;
-                    assert accounts.getCreditsPosted().intValueExact() == 10;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 10);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
         }

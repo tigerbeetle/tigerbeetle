@@ -186,7 +186,7 @@ pub const RepairBudgetJournal = struct {
                 // to a new checkpoint), in which case we request a unique op from each replica.
                 budget.replicas_repair_latency[replica_index] = ewma_add_duration(
                     budget.replicas_repair_latency[replica_index],
-                    now.duration_since(requested_prepare.value),
+                    requested_prepare.value.elapsed(now),
                 );
             }
         }
@@ -219,7 +219,7 @@ pub const RepairBudgetJournal = struct {
 
             while (requested_prepares_index < requested_prepares.entries.len) {
                 const requested_at = requested_prepares.values()[requested_prepares_index];
-                const duration_since_requested_at = now.duration_since(requested_at);
+                const duration_since_requested_at = requested_at.elapsed(now);
                 const duration_expiry_ns = @min(
                     budget.repair_latency_multiple_expiry *
                         budget.replicas_repair_latency[replica_index].ns,
@@ -385,7 +385,7 @@ pub const RepairBudgetGrid = struct {
         for (budget.replicas_requested_blocks, 0..) |requested_blocks, index| {
             if (requested_blocks.get(block_identifier)) |requested_at| {
                 assert(index != budget.replica_index);
-                const duration_since_requested = now.duration_since(requested_at);
+                const duration_since_requested = requested_at.elapsed(now);
                 if (duration_since_requested_min == null or
                     duration_since_requested.ns < duration_since_requested_min.?.ns)
                 {
@@ -450,7 +450,7 @@ pub const RepairBudgetGrid = struct {
 
             while (requested_blocks_index < requested_blocks.entries.len) {
                 const requested_at = requested_blocks.values()[requested_blocks_index];
-                const duration_since_requested_at = now.duration_since(requested_at);
+                const duration_since_requested_at = requested_at.elapsed(now);
 
                 if (duration_since_requested_at.ns > duration_expiry.ns) {
                     requested_blocks.swapRemoveAt(requested_blocks_index);

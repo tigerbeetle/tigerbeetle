@@ -157,6 +157,7 @@ fn readme_root(ctx: *Context) !void {
                 });
             }
         }
+        ctx.print("\n", .{});
 
         if (ctx.docs.examples.len != 0) {
             ctx.paragraph(ctx.docs.examples);

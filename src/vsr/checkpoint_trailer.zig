@@ -231,6 +231,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             defer assert(trailer.callback == .open);
 
             assert(reference.trailer_size % trailer.trailer_type.item_size() == 0);
+            assert(block_count_for_trailer_size(reference.trailer_size) <= trailer.blocks.len);
             assert(trailer.size == 0);
             assert(trailer.size_transferred == 0);
             assert(trailer.block_index == 0);

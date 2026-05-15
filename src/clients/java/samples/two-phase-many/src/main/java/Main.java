@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.math.BigInteger;
 
 import com.tigerbeetle.*;
+import static com.tigerbeetle.AssertionError.assertTrue;
 
 public final class Main {
     public static void main(String[] args) throws Exception {
@@ -30,10 +31,9 @@ public final class Main {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating account %d: %s\n",
+                        throw new Exception(String.format("Error creating account %d: %s\n",
                                 accountResults.getPosition(),
-                                accountResults.getStatus());
-                        assert false;
+                                accountResults.getStatus()));
                 }
             }
 
@@ -45,7 +45,7 @@ public final class Main {
             transfers.setCreditAccountId(2);
             transfers.setLedger(1);
             transfers.setCode(1);
-            transfers.setAmount(500);
+            transfers.setAmount(100);
             transfers.setFlags(TransferFlags.PENDING);
 
             transfers.add();
@@ -85,15 +85,16 @@ public final class Main {
             transfers.setFlags(TransferFlags.PENDING);
 
             CreateTransferResultBatch transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+            
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
@@ -103,24 +104,23 @@ public final class Main {
             ids.add(1);
             ids.add(2);
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 0;
-                    assert accounts.getCreditsPosted().intValueExact() == 0;
-                    assert accounts.getDebitsPending().intValueExact() == 500;
-                    assert accounts.getCreditsPending().intValueExact() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 1500);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 0);
                 } else if (Arrays.equals(accounts.getId(), UInt128.asBytes(2))) {
-                    assert accounts.getDebitsPosted().intValueExact() == 0;
-                    assert accounts.getCreditsPosted().intValueExact() == 0;
-                    assert accounts.getDebitsPending().intValueExact() == 0;
-                    assert accounts.getCreditsPending().intValueExact() == 500;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 1500);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
 
@@ -137,39 +137,39 @@ public final class Main {
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
             transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
             // Validate account balances after posting 1st pending transfer.
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 100;
-                    assert accounts.getCreditsPosted().intValueExact() == 0;
-                    assert accounts.getDebitsPending().intValueExact() == 1400;
-                    assert accounts.getCreditsPending().intValueExact() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 100);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 1400);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 0);
                 } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 0;
-                    assert accounts.getCreditsPosted().intValueExact() == 100;
-                    assert accounts.getDebitsPending().intValueExact() == 0;
-                    assert accounts.getCreditsPending().intValueExact() == 1400;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 100);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 1400);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
 
@@ -186,39 +186,39 @@ public final class Main {
             transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
             transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
             // Validate account balances after voiding 2nd pending transfer.
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 100;
-                    assert accounts.getCreditsPosted().intValueExact() == 0;
-                    assert accounts.getDebitsPending().intValueExact() == 1200;
-                    assert accounts.getCreditsPending().intValueExact() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 100);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 1200);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 0);
                 } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 0;
-                    assert accounts.getCreditsPosted().intValueExact() == 100;
-                    assert accounts.getDebitsPending().intValueExact() == 0;
-                    assert accounts.getCreditsPending().intValueExact() == 1200;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 100);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 1200);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
 
@@ -235,39 +235,39 @@ public final class Main {
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
             transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
             // Validate account balances after posting 3rd pending transfer.
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValue() == 400;
-                    assert accounts.getCreditsPosted().intValue() == 0;
-                    assert accounts.getDebitsPending().intValue() == 900;
-                    assert accounts.getCreditsPending().intValue() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValue() == 400);
+                    assertTrue(accounts.getCreditsPosted().intValue() == 0);
+                    assertTrue(accounts.getDebitsPending().intValue() == 900);
+                    assertTrue(accounts.getCreditsPending().intValue() == 0);
                 } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValue() == 0;
-                    assert accounts.getCreditsPosted().intValue() == 400;
-                    assert accounts.getDebitsPending().intValue() == 0;
-                    assert accounts.getCreditsPending().intValue() == 900;
+                    assertTrue(accounts.getDebitsPosted().intValue() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValue() == 400);
+                    assertTrue(accounts.getDebitsPending().intValue() == 0);
+                    assertTrue(accounts.getCreditsPending().intValue() == 900);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
 
@@ -284,88 +284,88 @@ public final class Main {
             transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
             transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
             // Validate account balances after voiding 4th pending transfer.
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValue() == 400;
-                    assert accounts.getCreditsPosted().intValue() == 0;
-                    assert accounts.getDebitsPending().intValue() == 500;
-                    assert accounts.getCreditsPending().intValue() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValue() == 400);
+                    assertTrue(accounts.getCreditsPosted().intValue() == 0);
+                    assertTrue(accounts.getDebitsPending().intValue() == 500);
+                    assertTrue(accounts.getCreditsPending().intValue() == 0);
                 } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValue() == 0;
-                    assert accounts.getCreditsPosted().intValue() == 400;
-                    assert accounts.getDebitsPending().intValue() == 0;
-                    assert accounts.getCreditsPending().intValue() == 500;
+                    assertTrue(accounts.getDebitsPosted().intValue() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValue() == 400);
+                    assertTrue(accounts.getDebitsPending().intValue() == 0);
+                    assertTrue(accounts.getCreditsPending().intValue() == 500);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
 
             // Create a 10th transfer posting the 5th transfer.
             transfers = new TransferBatch(1);
             transfers.add();
-            transfers.setId(6);
-            transfers.setPendingId(1);
+            transfers.setId(10);
+            transfers.setPendingId(5);
             transfers.setDebitAccountId(1);
             transfers.setCreditAccountId(2);
             transfers.setLedger(1);
             transfers.setCode(1);
-            transfers.setAmount(100);
+            transfers.setAmount(500);
             transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
             transferResults = client.createTransfers(transfers);
+            assertTrue(transferResults.getLength() == transfers.getLength());
+            
             while (transferResults.next()) {
                 switch (transferResults.getStatus()) {
                     case Created:
                         break;
                     default:
-                        System.err.printf("Error creating transfer %d: %s\n",
+                        throw new Exception(String.format("Error creating transfer %d: %s\n",
                                 transferResults.getPosition(),
-                                transferResults.getStatus());
-                        assert false;
+                                transferResults.getStatus()));
                 }
             }
 
             // Validate account balances after posting 5th pending transfer.
             accounts = client.lookupAccounts(ids);
-            assert accounts.getCapacity() == 2;
+            assertTrue(accounts.getLength() == 2);
 
             while (accounts.next()) {
                 if (accounts.getId(UInt128.LeastSignificant) == 1
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 900;
-                    assert accounts.getCreditsPosted().intValueExact() == 0;
-                    assert accounts.getDebitsPending().intValueExact() == 0;
-                    assert accounts.getCreditsPending().intValueExact() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 900);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 0);
                 } else if (accounts.getId(UInt128.LeastSignificant) == 2
                         && accounts.getId(UInt128.MostSignificant) == 0) {
-                    assert accounts.getDebitsPosted().intValueExact() == 0;
-                    assert accounts.getCreditsPosted().intValueExact() == 900;
-                    assert accounts.getDebitsPending().intValueExact() == 0;
-                    assert accounts.getCreditsPending().intValueExact() == 0;
+                    assertTrue(accounts.getDebitsPosted().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPosted().intValueExact() == 900);
+                    assertTrue(accounts.getDebitsPending().intValueExact() == 0);
+                    assertTrue(accounts.getCreditsPending().intValueExact() == 0);
                 } else {
-                    System.err.printf("Unexpected account: %s\n",
-                            UInt128.asBigInteger(accounts.getId()).toString());
-                    assert false;
+                    throw new Exception(String.format("Unexpected account: %s\n",
+                            UInt128.asBigInteger(accounts.getId()).toString()));
                 }
             }
         }

@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const constants = @import("./constants.zig");
 const fuzz = @import("./testing/fuzz.zig");
+const TimeOS = @import("./time.zig").TimeOS;
 
 const log = std.log.scoped(.fuzz);
 
@@ -114,7 +115,8 @@ pub fn main() !void {
 }
 
 fn main_smoke(gpa: std.mem.Allocator) !void {
-    var timer_all = try std.time.Timer.start();
+    var time: TimeOS = .{};
+    const timer_all = time.monotonic();
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
             .smoke => continue,
@@ -140,20 +142,21 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
             => null,
         };
 
-        var timer_single = try std.time.Timer.start();
+        const timer_single = time.monotonic();
         try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
             .seed = 123,
             .events_max = events_max,
         });
-        const fuzz_duration = timer_single.lap();
-        if (fuzz_duration > 10 * std.time.ns_per_s) {
+        const fuzz_duration = timer_single.elapsed(time.monotonic());
+        if (fuzz_duration.ns > 10 * std.time.ns_per_s) {
             log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {}", .{
-                std.fmt.fmtDuration(fuzz_duration),
+                std.fmt.fmtDuration(fuzz_duration.ns),
             });
         }
     }
 
-    log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
+    const elapsed = timer_all.elapsed(time.monotonic());
+    log.info("done in {}", .{std.fmt.fmtDuration(elapsed.ns)});
 }
 
 fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
@@ -162,7 +165,8 @@ fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     const seed = cli_args.seed orelse std.crypto.random.int(u64);
     log.info("Fuzz seed = {}", .{seed});
 
-    var timer = try std.time.Timer.start();
+    var time: TimeOS = .{};
+    const timer = time.monotonic();
     switch (cli_args.fuzzer) {
         .smoke => unreachable,
         .canary => {
@@ -175,5 +179,6 @@ fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             .events_max = cli_args.events_max,
         }),
     }
-    log.info("done in {}", .{std.fmt.fmtDuration(timer.lap())});
+    const elapsed = timer.elapsed(time.monotonic());
+    log.info("done in {}", .{std.fmt.fmtDuration(elapsed.ns)});
 }
