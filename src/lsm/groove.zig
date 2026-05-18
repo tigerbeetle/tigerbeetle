@@ -1025,6 +1025,11 @@ pub fn GrooveType(
                         // table needs to be sorted and binary-searched.
                         tree.table_mutable.sort();
                         if (tree.table_mutable.get(value)) |tree_value| {
+                            if (tree_value.tombstone()) {
+                                entry.value_ptr.* = .not_found;
+                                return;
+                            }
+
                             // Timestamp cannot be zero,
                             // as orphaned objects are only expected for primary keys.
                             assert(TimestampRange.valid(tree_value.timestamp));
@@ -1052,11 +1057,18 @@ pub fn GrooveType(
                         // table by checking the object cache.
                         // When searching by other unique keys, the mutable
                         // table needs to be sorted and binary-searched.
-                        if (groove.sort_and_search_table_mutable(key, timestamp)) |primary_key| {
-                            entry.value_ptr.* = .{
-                                .found = primary_key,
-                            };
-                            return;
+                        switch (groove.sort_and_search_table_mutable(key, timestamp)) {
+                            .found => |primary_key| {
+                                entry.value_ptr.* = .{
+                                    .found = primary_key,
+                                };
+                                return;
+                            },
+                            .tombstone => {
+                                entry.value_ptr.* = .not_found;
+                                return;
+                            },
+                            .not_found => {},
                         }
                     }
                 }
@@ -1130,14 +1142,21 @@ pub fn GrooveType(
                                 // table by checking the object cache.
                                 // When searching by other unique keys, the mutable
                                 // table needs to be sorted and binary-searched.
-                                if (groove.sort_and_search_table_mutable(
+                                switch (groove.sort_and_search_table_mutable(
                                     key,
                                     tree_value.timestamp,
-                                )) |primary_key| {
-                                    entry.value_ptr.* = .{
-                                        .found = primary_key,
-                                    };
-                                    return;
+                                )) {
+                                    .found => |primary_key| {
+                                        entry.value_ptr.* = .{
+                                            .found = primary_key,
+                                        };
+                                        return;
+                                    },
+                                    .tombstone => {
+                                        entry.value_ptr.* = .not_found;
+                                        return;
+                                    },
+                                    .not_found => {},
                                 }
                             }
 
@@ -1221,7 +1240,11 @@ pub fn GrooveType(
             groove: *Groove,
             key: UniqueKey,
             timestamp: u64,
-        ) ?PrimaryKey {
+        ) union(enum) {
+            found: PrimaryKey,
+            tombstone,
+            not_found,
+        } {
             assert(!is_primary_key(std.meta.activeTag(key)));
 
             // The mutable table needs to be sorted to enable searching.
@@ -1238,15 +1261,19 @@ pub fn GrooveType(
                     },
                 }
 
+                if (ObjectTreeHelper.tombstone(object)) {
+                    return .tombstone;
+                }
+
                 const primary_key: PrimaryKey = @field(
                     object,
                     groove_options.primary_key,
                 );
                 assert(groove.objects_cache.has(primary_key));
-                return primary_key;
+                return .{ .found = primary_key };
             }
 
-            return null;
+            return .not_found;
         }
 
         /// Ensure the objects corresponding to all ids enqueued with prefetch_enqueue() are
@@ -1585,17 +1612,27 @@ pub fn GrooveType(
                             // table by checking the object cache.
                             // When searching by other unique keys, the mutable
                             // table needs to be sorted and binary-searched.
-                            if (worker.context.groove.sort_and_search_table_mutable(
+                            switch (worker.context.groove.sort_and_search_table_mutable(
                                 entry.key_ptr.*,
                                 tree_value.timestamp,
-                            )) |primary_key| {
-                                entry.value_ptr.* = .{
-                                    .found = primary_key,
-                                };
+                            )) {
+                                .found => |primary_key| {
+                                    entry.value_ptr.* = .{
+                                        .found = primary_key,
+                                    };
 
-                                worker.current = null;
-                                worker.lookup_start_next();
-                                return;
+                                    worker.current = null;
+                                    worker.lookup_start_next();
+                                    return;
+                                },
+                                .tombstone => {
+                                    entry.value_ptr.* = .not_found;
+
+                                    worker.current = null;
+                                    worker.lookup_start_next();
+                                    return;
+                                },
+                                .not_found => {},
                             }
                         }
 
