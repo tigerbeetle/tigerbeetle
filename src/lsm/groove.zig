@@ -1031,7 +1031,10 @@ pub fn GrooveType(
                             groove.prefetch_keys.putAssumeCapacityNoClobber(key, .not_found);
                         },
                         .positive => |tree_value| {
-                            if (Tree.Value.tombstone(tree_value)) return;
+                            if (Tree.Value.tombstone(tree_value)) {
+                                groove.prefetch_keys.putAssumeCapacityNoClobber(key, .not_found);
+                                return;
+                            }
 
                             if (tree_value.timestamp == 0) {
                                 if (!groove_options.primary_key_orphaned) unreachable;
