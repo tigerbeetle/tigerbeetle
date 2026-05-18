@@ -1764,12 +1764,12 @@ pub fn GrooveType(
         }
 
         pub fn remove_orphaned_primary_key(groove: *Groove, id: u128) void {
-            comptime assert(groove_options.orphaned_ids);
+            comptime assert(groove_options.primary_key_orphaned);
             comptime assert(!is_primary_key(.timestamp));
 
             // TODO: Nothing currently calls or tests this method. The forest fuzzer should be
             // extended to cover it.
-            assert(false);
+            comptime assert(false);
 
             _ = groove;
             _ = id;
