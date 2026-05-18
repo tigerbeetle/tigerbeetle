@@ -605,29 +605,82 @@ pub fn GrooveType(
             );
         };
 
-        const PrefetchKeys = std.AutoHashMapUnmanaged(
-            UniqueKey,
-            union(enum) {
-                /// The key is enqueued for prefetching.
-                prefetching: struct {
-                    level: u8,
-                    /// When prefetching by unique keys, the Object's timestamp might
-                    /// already be known, so we don't need to scan the secondary tree.
-                    /// Invariant: when prefetching by `timestamp`, it is never null.
-                    timestamp_hint: ?u64,
-                },
-                /// The key enqueued for prefetching was found, and the corresponding
-                /// object with this primary key is present in the object cache.
-                found: PrimaryKey,
-                /// The key enqueued for prefetching exists, but there is no corresponding
-                /// object associated with it.
-                /// Invariant: this is only possible when prefetching by the primary key on
-                /// Grooves that allow orphaned keys.
-                found_orphaned,
-                /// The key enqueued for prefetching was not found.
-                not_found,
+        const PrefetchKeys = std.ArrayHashMapUnmanaged(UniqueKey, union(enum) {
+            /// The key is enqueued for prefetching.
+            prefetching: struct {
+                level: u8,
+                /// When prefetching by unique keys, the Object's timestamp might
+                /// already be known, so we don't need to scan the secondary tree.
+                /// Invariant: when prefetching by `timestamp`, it is never null.
+                timestamp_hint: ?u64,
             },
-        );
+            /// The key enqueued for prefetching was found, and the corresponding
+            /// object with this primary key is present in the object cache.
+            found: PrimaryKey,
+            /// The key enqueued for prefetching exists, but there is no corresponding
+            /// object associated with it.
+            /// Invariant: this is only possible when prefetching by the primary key on
+            /// Grooves that allow orphaned keys.
+            found_orphaned,
+            /// The key enqueued for prefetching was not found.
+            not_found,
+        }, struct {
+            pub fn hash(ctx: @This(), key: UniqueKey) u32 {
+                _ = ctx;
+
+                const hash_u64: u64 = stdx.hash_inline(switch (key) {
+                    inline else => |value, tag| value: {
+                        if (groove_options.unique_keys.len == 0) {
+                            comptime assert(tag == .timestamp);
+                            break :value value;
+                        }
+
+                        // The hash takes the tag as the most significant bytes
+                        // and the value as the least significant bytes.
+                        // Ensures it is the smallest aligned integer possible.
+                        const Tag = std.meta.Tag(std.meta.Tag(UniqueKey));
+                        comptime assert(@sizeOf(Tag) > 0);
+
+                        const Value = @TypeOf(value);
+                        const size_bytes = comptime std.mem.alignForward(
+                            usize,
+                            @sizeOf(Tag) + @sizeOf(Value),
+                            @alignOf(Value),
+                        );
+                        comptime assert(size_bytes >= @sizeOf(Value) + @sizeOf(Tag));
+
+                        const Int = std.meta.Int(.unsigned, size_bytes * 8);
+                        comptime assert(stdx.no_padding(Int));
+
+                        const tag_shift = @bitSizeOf(Int) - @bitSizeOf(Tag);
+                        break :value (@as(Int, @intFromEnum(tag)) << tag_shift) |
+                            @as(Int, value);
+                    },
+                });
+
+                // Combines both halves of the `u64` hash into `u32`
+                // so the upper bits also contribute.
+                return @as(u32, @truncate(hash_u64)) ^
+                    @as(u32, @truncate(hash_u64 >> 32));
+            }
+
+            pub fn eql(ctx: @This(), a: UniqueKey, b: UniqueKey, b_index: usize) bool {
+                _ = b_index;
+                _ = ctx;
+                switch (a) {
+                    inline else => |value, tag| {
+                        // Disable runtime safety: we do not have to check the tag of `b` when
+                        // accessing the field, since it has already been checked against `a`.
+                        @setRuntimeSafety(builtin.mode != .ReleaseSafe);
+                        return b == tag and
+                            value == @field(b, @tagName(tag));
+                    },
+                }
+            }
+        }, store_hash: {
+            // Do not store the hash, as the `eql` function is very cheap.
+            break :store_hash false;
+        });
 
         const ObjectCacheResult = if (groove_options.primary_key_orphaned) union(enum) {
             found_object: Object,
