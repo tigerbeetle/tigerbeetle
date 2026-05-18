@@ -606,7 +606,11 @@ pub fn GrooveType(
         };
 
         const PrefetchKeys = std.ArrayHashMapUnmanaged(UniqueKey, union(enum) {
-            /// The key is enqueued for prefetching.
+            /// The key was enqueued for prefetching.
+            /// Invariant: Only possible during `prefetch_enqueue`.
+            enqueued,
+            /// The key must be prefetched from storage.
+            /// Invariant: Only possible before the prefetch callback runs.
             prefetching: struct {
                 level: u8,
                 /// When prefetching by unique keys, the Object's timestamp might
@@ -907,7 +911,7 @@ pub fn GrooveType(
             assert(prefetch_status != null);
 
             switch (prefetch_status.?) {
-                .prefetching => unreachable,
+                .enqueued, .prefetching => unreachable,
                 .found => |primary_key| {
                     const object: ?*Object = groove.objects_cache.get(primary_key);
                     assert(object != null);
@@ -945,7 +949,12 @@ pub fn GrooveType(
         ) void {
             const entry = groove.prefetch_keys.getOrPutAssumeCapacity(key);
             // No need to check again if the key is already enqueued for prefetching.
-            if (entry.found_existing) return;
+            if (entry.found_existing) {
+                assert(entry.value_ptr.* != .enqueued);
+                return;
+            }
+            entry.value_ptr.* = .enqueued;
+            defer assert(entry.value_ptr.* != .enqueued);
 
             const timestamp_hint: ?u64 = switch (key) {
                 inline else => |value, field| timestamp: {
@@ -1075,6 +1084,9 @@ pub fn GrooveType(
             entry: PrefetchKeys.GetOrPutResult,
         ) void {
             assert(!entry.found_existing);
+            assert(entry.value_ptr.* == .enqueued);
+            defer assert(entry.value_ptr.* != .enqueued);
+
             const key: UniqueKey = entry.key_ptr.*;
 
             switch (key) {
@@ -1159,6 +1171,9 @@ pub fn GrooveType(
             },
         ) void {
             assert(!options.entry.found_existing);
+            assert(options.entry.value_ptr.* == .enqueued);
+            defer assert(options.entry.value_ptr.* != .enqueued);
+
             assert(TimestampRange.valid(options.timestamp_hint));
 
             const key: UniqueKey = options.entry.key_ptr.*;
@@ -1334,7 +1349,7 @@ pub fn GrooveType(
                     var it = context.groove.prefetch_keys.iterator();
                     while (it.next()) |entry| {
                         switch (entry.value_ptr.*) {
-                            .prefetching => unreachable,
+                            .enqueued, .prefetching => unreachable,
                             .found => |primary_key| {
                                 assert(primary_key != 0);
                                 if (is_primary_key(std.meta.activeTag(entry.key_ptr.*))) {
@@ -1445,8 +1460,9 @@ pub fn GrooveType(
                 worker.current = prefetch_entry: {
                     while (worker.context.key_iterator.next()) |entry| {
                         switch (entry.value_ptr.*) {
+                            .enqueued => unreachable,
                             .prefetching => break :prefetch_entry entry,
-                            else => continue, // Already prefetched.
+                            .found, .not_found, .found_orphaned => continue, // Already prefetched.
                         }
                     }
 
