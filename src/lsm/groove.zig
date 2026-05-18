@@ -890,8 +890,9 @@ pub fn GrooveType(
             groove: *Groove,
             key: UniqueKey,
         ) void {
+            const entry = groove.prefetch_keys.getOrPutAssumeCapacity(key);
             // No need to check again if the key is already enqueued for prefetching.
-            if (groove.prefetch_keys.contains(key)) return;
+            if (entry.found_existing) return;
 
             const timestamp_hint: ?u64 = switch (key) {
                 inline else => |value, field| timestamp: {
@@ -902,9 +903,9 @@ pub fn GrooveType(
 
                         if (comptime is_primary_key(.timestamp)) {
                             if (groove.objects_cache.has(value)) {
-                                groove.prefetch_keys.putAssumeCapacityNoClobber(key, .{
+                                entry.value_ptr.* = .{
                                     .found = value,
-                                });
+                                };
                                 return;
                             }
                         }
@@ -913,7 +914,7 @@ pub fn GrooveType(
                             groove.prefetch_snapshot.?,
                             value,
                         )) {
-                            groove.prefetch_keys.putAssumeCapacityNoClobber(key, .not_found);
+                            entry.value_ptr.* = .not_found;
                             return;
                         }
 
@@ -929,18 +930,15 @@ pub fn GrooveType(
                         if (groove.objects_cache.get(value)) |object| {
                             if (groove_options.primary_key_orphaned) {
                                 if (object.timestamp == 0) {
-                                    groove.prefetch_keys.putAssumeCapacityNoClobber(
-                                        key,
-                                        .found_orphaned,
-                                    );
+                                    entry.value_ptr.* = .found_orphaned;
                                     return;
                                 }
                             }
                             assert(TimestampRange.valid(object.timestamp));
 
-                            groove.prefetch_keys.putAssumeCapacityNoClobber(key, .{
+                            entry.value_ptr.* = .{
                                 .found = value,
-                            });
+                            };
                             return;
                         }
                     }
@@ -948,7 +946,7 @@ pub fn GrooveType(
                     const Tree = @FieldType(IndexTrees, @tagName(field));
                     const tree: *Tree = &@field(groove.indexes, @tagName(field));
                     if (!tree.key_range_contains(groove.prefetch_snapshot.?, value)) {
-                        groove.prefetch_keys.putAssumeCapacityNoClobber(key, .not_found);
+                        entry.value_ptr.* = .not_found;
                         return;
                     }
 
@@ -976,9 +974,9 @@ pub fn GrooveType(
                 if (!is_primary_key(std.meta.activeTag(key))) {
                     if (comptime is_primary_key(.timestamp)) {
                         if (groove.objects_cache.has(timestamp)) {
-                            groove.prefetch_keys.putAssumeCapacityNoClobber(key, .{
+                            entry.value_ptr.* = .{
                                 .found = timestamp,
-                            });
+                            };
                             return;
                         }
                     } else {
@@ -987,9 +985,9 @@ pub fn GrooveType(
                         // When searching by other unique keys, the mutable
                         // table needs to be sorted and binary-searched.
                         if (groove.sort_and_search_table_mutable(key, timestamp)) |primary_key| {
-                            groove.prefetch_keys.putAssumeCapacityNoClobber(key, .{
+                            entry.value_ptr.* = .{
                                 .found = primary_key,
-                            });
+                            };
                             return;
                         }
                     }
@@ -998,7 +996,7 @@ pub fn GrooveType(
                 // We can still use the timestamp hint if it is present in
                 // the secondary tree's mutable table, but not in the object table.
                 groove.prefetch_from_memory_by_timestamp(.{
-                    .key = key,
+                    .entry = entry,
                     .timestamp_hint = timestamp,
                 });
                 return;
@@ -1007,13 +1005,19 @@ pub fn GrooveType(
             assert(key != .timestamp);
 
             // Not found in the mutable table.
-            groove.prefetch_from_memory_by_unique_key(key);
+            groove.prefetch_from_memory_by_unique_key(entry);
         }
 
         /// This function attempts to prefetch a value for the given unique key from the
         /// secondary tree table blocks in the grid cache.
         /// If found in the secondary tree, we attempt to prefetch a value for the timestamp.
-        fn prefetch_from_memory_by_unique_key(groove: *Groove, key: UniqueKey) void {
+        fn prefetch_from_memory_by_unique_key(
+            groove: *Groove,
+            entry: PrefetchKeys.GetOrPutResult,
+        ) void {
+            assert(!entry.found_existing);
+            const key: UniqueKey = entry.key_ptr.*;
+
             switch (key) {
                 inline else => |value, field| {
                     // Timestamp is handled by `prefetch_from_memory_by_timestamp`.
@@ -1028,11 +1032,11 @@ pub fn GrooveType(
                         value,
                     )) {
                         .negative => {
-                            groove.prefetch_keys.putAssumeCapacityNoClobber(key, .not_found);
+                            entry.value_ptr.* = .not_found;
                         },
                         .positive => |tree_value| {
                             if (Tree.Value.tombstone(tree_value)) {
-                                groove.prefetch_keys.putAssumeCapacityNoClobber(key, .not_found);
+                                entry.value_ptr.* = .not_found;
                                 return;
                             }
 
@@ -1044,10 +1048,7 @@ pub fn GrooveType(
 
                                 // Zeroed timestamp indicates the object is not present,
                                 // and this id cannot be used anymore.
-                                groove.prefetch_keys.putAssumeCapacityNoClobber(
-                                    key,
-                                    .found_orphaned,
-                                );
+                                entry.value_ptr.* = .found_orphaned;
                                 groove.insert_orphaned_object(value);
                                 return;
                             }
@@ -1062,9 +1063,9 @@ pub fn GrooveType(
                                     key,
                                     tree_value.timestamp,
                                 )) |primary_key| {
-                                    groove.prefetch_keys.putAssumeCapacityNoClobber(key, .{
+                                    entry.value_ptr.* = .{
                                         .found = primary_key,
-                                    });
+                                    };
                                     return;
                                 }
                             }
@@ -1072,20 +1073,17 @@ pub fn GrooveType(
                             // We can still use the timestamp hint if it is present in
                             // the secondary tree's mutable table, but not in the object table.
                             groove.prefetch_from_memory_by_timestamp(.{
-                                .key = key,
+                                .entry = entry,
                                 .timestamp_hint = tree_value.timestamp,
                             });
                         },
                         .possible => |level| {
-                            groove.prefetch_keys.putAssumeCapacityNoClobber(
-                                key,
-                                .{
-                                    .prefetching = .{
-                                        .level = level,
-                                        .timestamp_hint = null,
-                                    },
+                            entry.value_ptr.* = .{
+                                .prefetching = .{
+                                    .level = level,
+                                    .timestamp_hint = null,
                                 },
-                            );
+                            };
                         },
                     }
                 },
@@ -1097,44 +1095,44 @@ pub fn GrooveType(
         fn prefetch_from_memory_by_timestamp(
             groove: *Groove,
             options: struct {
-                key: UniqueKey,
+                entry: PrefetchKeys.GetOrPutResult,
                 timestamp_hint: u64,
             },
         ) void {
+            assert(!options.entry.found_existing);
             assert(TimestampRange.valid(options.timestamp_hint));
-            if (options.key == .timestamp) assert(options.key.timestamp == options.timestamp_hint);
+
+            const key: UniqueKey = options.entry.key_ptr.*;
+            if (key == .timestamp) assert(key.timestamp == options.timestamp_hint);
 
             switch (groove.objects.lookup_from_levels_cache(
                 groove.prefetch_snapshot.?,
                 options.timestamp_hint,
             )) {
                 .negative => {
-                    groove.prefetch_keys.putAssumeCapacityNoClobber(options.key, .not_found);
+                    options.entry.value_ptr.* = .not_found;
                 },
                 .positive => |object| {
                     assert(!ObjectTreeHelper.tombstone(object));
                     assert(object.timestamp == options.timestamp_hint);
-                    switch (options.key) {
+                    switch (key) {
                         inline else => |value, field| {
                             const IndexHelper = IndexHelperType(@tagName(field));
                             assert(IndexHelper.get(object).? == value);
                         },
                     }
                     groove.objects_cache.upsert(object);
-                    groove.prefetch_keys.putAssumeCapacityNoClobber(options.key, .{
+                    options.entry.value_ptr.* = .{
                         .found = @field(object, groove_options.primary_key),
-                    });
+                    };
                 },
                 .possible => |level| {
-                    groove.prefetch_keys.putAssumeCapacityNoClobber(
-                        options.key,
-                        .{
-                            .prefetching = .{
-                                .level = level,
-                                .timestamp_hint = options.timestamp_hint,
-                            },
+                    options.entry.value_ptr.* = .{
+                        .prefetching = .{
+                            .level = level,
+                            .timestamp_hint = options.timestamp_hint,
                         },
-                    );
+                    };
                 },
             }
         }
@@ -1389,7 +1387,7 @@ pub fn GrooveType(
                     while (worker.context.key_iterator.next()) |entry| {
                         switch (entry.value_ptr.*) {
                             .prefetching => break :prefetch_entry entry,
-                            else => continue, // Already prefetched from memory.
+                            else => continue, // Already prefetched.
                         }
                     }
 
