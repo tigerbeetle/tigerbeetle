@@ -899,7 +899,10 @@ pub fn GrooveType(
                     if (field == .timestamp) {
                         // Instead of asserting, we allow and ignore invalid timestamps,
                         // so the prefetch step does not need to verify the data's validity.
-                        if (!TimestampRange.valid(value)) return;
+                        if (!TimestampRange.valid(value)) {
+                            entry.value_ptr.* = .not_found;
+                            return;
+                        }
 
                         if (comptime is_primary_key(.timestamp)) {
                             if (groove.objects_cache.has(value)) {
@@ -924,7 +927,10 @@ pub fn GrooveType(
 
                     // Instead of asserting, we allow and ignore zeroes keys (most likely zero),
                     // so the prefetch step does not need to verify the data's validity.
-                    if (value == 0) return;
+                    if (value == 0) {
+                        entry.value_ptr.* = .not_found;
+                        return;
+                    }
 
                     if (comptime is_primary_key(field)) {
                         if (groove.objects_cache.get(value)) |object| {
