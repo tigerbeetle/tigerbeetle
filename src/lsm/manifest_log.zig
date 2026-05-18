@@ -179,10 +179,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 try RingBufferType(BlockPtr, .slice).init(allocator, blocks_count);
             errdefer manifest_log.blocks.deinit(allocator);
 
-            for (manifest_log.blocks.buffer, 0..) |*block, i| {
-                errdefer for (manifest_log.blocks.buffer[0..i]) |b| grid.block_unref(b);
-                block.* = grid.get_block();
-            }
+            for (manifest_log.blocks.buffer) |*block| block.* = grid.get_block();
             errdefer for (manifest_log.blocks.buffer) |b| grid.block_unref(b);
 
             manifest_log.writes = try allocator.alloc(Write, blocks_count);
