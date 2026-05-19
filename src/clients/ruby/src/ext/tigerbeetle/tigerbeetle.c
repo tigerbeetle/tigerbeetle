@@ -220,6 +220,19 @@ static VALUE rb_tb_client_close(VALUE self) {
     return Qnil;
 }
 
+typedef struct rb_tb_serialize_context {
+    TB_OPERATION operation;
+    VALUE items_rb;
+    uint8_t *buf;
+    long count;
+} rb_tb_serialize_context_t;
+
+static VALUE rb_tb_serialize_protected(VALUE context_value) {
+    rb_tb_serialize_context_t *context = (rb_tb_serialize_context_t *)context_value;
+    rb_tb_serialize(context->operation, context->items_rb, context->buf, context->count);
+    return Qnil;
+}
+
 static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb) {
     tb_client_t *client;
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
@@ -242,9 +255,21 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
             free(req);
             rb_raise(rb_eNoMemError, "failed to allocate send buffer");
         }
-        // Question: Is it worth wrapping this in rb_protect? Serialization
-        // failures are caller errors before submission.
-        rb_tb_serialize(operation, items_rb, req->send_buf, count);
+
+        rb_tb_serialize_context_t serialize_context = {
+            .operation = operation,
+            .items_rb = items_rb,
+            .buf = req->send_buf,
+            .count = count,
+        };
+        int serialize_state = 0;
+        rb_protect(rb_tb_serialize_protected, (VALUE)&serialize_context, &serialize_state);
+        if (serialize_state) {
+            free(req->send_buf);
+            free(req);
+            rb_jump_tag(serialize_state);
+        }
+
         req->packet.data_size = (uint32_t)send_size;
     }
 
