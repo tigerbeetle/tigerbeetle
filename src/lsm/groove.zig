@@ -471,21 +471,21 @@ pub fn GrooveType(
 
                 pub const IndexPrefix = IndexType(Type);
 
-                const is_unique_key: bool = is_unique: {
+                pub const is_unique_key: bool = is_unique: {
                     for (groove_options.unique_keys) |unique_key| {
                         if (std.mem.eql(u8, unique_key, field_name)) break :is_unique true;
                     }
                     break :is_unique false;
                 };
 
-                const is_derived: bool = is_derived: {
+                pub const is_derived: bool = is_derived: {
                     for (derived_fields) |derived_field| {
                         if (std.mem.eql(u8, derived_field.name, field_name)) break :is_derived true;
                     }
                     break :is_derived false;
                 };
 
-                const allow_zero: bool = allow_zero: {
+                pub const allow_zero: bool = allow_zero: {
                     for (groove_options.optional) |optional| {
                         if (std.mem.eql(u8, field_name, optional)) {
                             assert(!is_derived);
@@ -1777,11 +1777,12 @@ pub fn GrooveType(
                 const new_index = IndexHelper.index_from_object(new);
 
                 if (IndexHelper.is_unique_key) {
-                    // The unique keys can't change.
+                    // Invariant: Unique keys cannot change.
                     assert(old_index == new_index);
                     continue;
                 }
                 comptime assert(!IndexHelper.is_unique_key);
+                comptime maybe(IndexHelper.is_derived);
 
                 // Only update the indexes that change.
                 if (old_index != new_index) {

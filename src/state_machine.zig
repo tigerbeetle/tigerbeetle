@@ -4211,6 +4211,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(timestamp_actual == timestamp_event);
                 assert(timestamp_expiry > timestamp_event);
                 // Removing the pending `expires_at` index.
+                // Invariant: Unique keys cannot be removed.
+                const IndexHelper = TransfersGroove.IndexHelperType("expires_at");
+                comptime assert(!IndexHelper.is_unique_key);
+                comptime assert(IndexHelper.is_derived);
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .field = timestamp_expiry,
                     .timestamp = p.timestamp,
@@ -4596,6 +4600,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.transfer_update_pending_status(&transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
+                // Invariant: Unique keys cannot be removed.
+                const IndexHelper = TransfersGroove.IndexHelperType("expires_at");
+                comptime assert(!IndexHelper.is_unique_key);
+                comptime assert(IndexHelper.is_derived);
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .timestamp = p.timestamp,
                     .field = expires_at,
