@@ -99,10 +99,7 @@ static VALUE rb_tb_request_result(VALUE self) {
         }
     }
 
-    VALUE ary = rb_ary_new_capa(2);
-    rb_ary_push(ary, UINT2NUM(req->status));
-    rb_ary_push(ary, result);
-    return ary;
+    return rb_ary_new_from_args(2, UINT2NUM(req->status), result);
 }
 
 static void rb_tb_write_completion(int fd, rb_tb_request_t *req) {
