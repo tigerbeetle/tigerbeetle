@@ -25,7 +25,7 @@ pub fn IOPSType(comptime T: type, comptime size: u8) type {
             self.busy.unset(i);
         }
 
-        pub fn index(self: *IOPS, item: *T) usize {
+        pub fn index(self: *const IOPS, item: *const T) usize {
             const i = @divExact(
                 (@intFromPtr(item) - @intFromPtr(&self.items)),
                 @sizeOf(T),

@@ -30,7 +30,7 @@ const ResourcePool = @import("compaction.zig").ResourcePoolType(Grid);
 
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
-const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
+const ScanBuffer = @import("scan_buffer.zig").ScanBufferType(Grid);
 const TreeType = @import("tree.zig").TreeType;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const SortedSegmentedArrayType = @import("./segmented_array.zig").SortedSegmentedArrayType;
@@ -172,6 +172,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
                 .blocks_released_prior_checkpoint_durability_max = 0,
+                .stash_blocks_count = block_count + 64,
             });
             defer env.grid.deinit(gpa);
 
@@ -192,8 +193,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree = undefined;
             env.lookup_value = null;
 
-            try env.scan_buffer.init(gpa, .{ .index = 0 });
-            defer env.scan_buffer.deinit(gpa);
+            env.scan_buffer.init(&env.grid, .{ .index = 0 });
+            defer env.scan_buffer.deinit(&env.grid);
 
             env.scan_results = try gpa.alloc(Value, scan_results_max);
             env.scan_results_count = 0;
@@ -202,8 +203,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.scan_results_model = try gpa.alloc(Value, scan_results_max);
             defer gpa.free(env.scan_results_model);
 
-            env.pool = try ResourcePool.init(gpa, block_count);
-            defer env.pool.deinit(gpa);
+            env.pool = try ResourcePool.init(gpa, &env.grid, block_count);
+            defer env.pool.deinit(gpa, &env.grid);
 
             env.radix_buffer = try .init(gpa, value_count_max * @sizeOf(Value));
             defer env.radix_buffer.deinit(gpa);

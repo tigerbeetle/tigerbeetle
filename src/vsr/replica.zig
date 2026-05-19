@@ -13,7 +13,6 @@ const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 
 const StaticAllocator = @import("../static_allocator.zig");
-const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
 const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPSType = stdx.IOPSType;
@@ -1022,6 +1021,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
             assert(!self.grid.blocks_missing.repairing_tables());
+            assert(self.grid.stash_available <= 1); // Only the burst block may be free.
             self.assert_free_set_consistent();
 
             log.info("{}: state_machine_open_callback: sync_ops={}..{}", .{
@@ -1232,10 +1232,21 @@ pub fn ReplicaType(
             });
             errdefer client_replies.deinit();
 
+            const stash_blocks_count =
+                constants.grid_iops_read_max +
+                constants.grid_repair_writes_max +
+                // Scans: *2 is for 1 index and 1 value block (per scan per level).
+                constants.lsm_scans_max * @as(u64, constants.lsm_levels) * 2 +
+                options.state_machine_options.lsm_forest_compaction_block_count +
+                vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size) +
+                Forest.manifest_log_compaction_pace.blocks_count() +
+                1; // GridScrubber.tour_index_block
+
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .trace = self.trace,
                 .cache_blocks_count = options.grid_cache_blocks_count,
+                .stash_blocks_count = stash_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
                 .blocks_released_prior_checkpoint_durability_max = Forest
@@ -1252,10 +1263,10 @@ pub fn ReplicaType(
             errdefer for (&self.grid_repair_table_bitsets) |*b| b.deinit(allocator);
 
             for (&self.grid_repair_write_blocks, 0..) |*block, i| {
-                errdefer for (self.grid_repair_write_blocks[0..i]) |b| allocator.free(b);
-                block.* = try allocate_block(allocator);
+                errdefer for (self.grid_repair_write_blocks[0..i]) |b| self.grid.block_unref(b);
+                block.* = self.grid.get_block();
             }
-            errdefer for (self.grid_repair_write_blocks) |b| allocator.free(b);
+            errdefer for (self.grid_repair_write_blocks) |b| self.grid.block_unref(b);
 
             try self.state_machine.init(
                 allocator,
@@ -1460,6 +1471,12 @@ pub fn ReplicaType(
         pub fn deinit(self: *Replica, allocator: Allocator) void {
             self.static_allocator.transition_from_static_to_deinit();
 
+            var grid_reads = self.grid_reads.iterate();
+            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
+
+            for (self.grid_repair_write_blocks) |block| self.grid.block_unref(block);
+            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
+
             self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);
@@ -1490,12 +1507,6 @@ pub fn ReplicaType(
             }
 
             if (self.sync_view) |message| self.message_bus.unref(message);
-
-            var grid_reads = self.grid_reads.iterate();
-            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
-
-            for (self.grid_repair_write_blocks) |block| allocator.free(block);
-            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
 
             for (self.join_view_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
@@ -1992,28 +2003,19 @@ pub fn ReplicaType(
         ///
         /// The primary starts by sending a prepare message to itself.
         ///
-        /// Each replica (including the primary) then forwards this prepare message to the next
-        /// replica in the configuration, in parallel to writing to its own journal, closing the
-        /// circle until the next replica is back to the primary, in which case the replica does not
-        /// forward.
+        /// The primary broadcasts this prepare message to every other replica and standby, in
+        /// parallel to writing to its own journal.
         ///
-        /// This keeps the primary's outgoing bandwidth limited (one-for-one) to incoming bandwidth,
-        /// since the primary need only replicate to the next replica. Otherwise, the primary would
-        /// need to replicate to multiple backups, dividing available bandwidth.
-        ///
-        /// This does not impact latency, since with Flexible Paxos we need only one remote
-        /// prepare_ok. It is ideal if this synchronous replication to one remote replica is to the
-        /// next replica, since that is the replica next in line to be primary, which will need to
-        /// be up-to-date before it can start the next view.
+        /// Star replication prioritizes latency: with Flexible Paxos the primary can commit after
+        /// the fastest prepare_ok quorum returns, without waiting for a ring of forwards.
         ///
         /// At the same time, asynchronous replication keeps going, so that if our local disk is
         /// slow, then any latency spike will be masked by more remote prepare_ok messages as they
         /// come in. This gives automatic tail latency tolerance for storage latency spikes.
         ///
-        /// The remaining problem then is tail latency tolerance for network latency spikes.
-        /// If the next replica is down or partitioned, then the primary's prepare timeout will
-        /// fire, and the primary will resend but to another replica, until it receives enough
-        /// prepare_ok's.
+        /// The remaining problem then is tail latency tolerance for network latency spikes. If
+        /// prepare_oks do not arrive in time, the primary's prepare timeout fires and resends to
+        /// all replicas still missing from the prepare's ack set.
         fn on_prepare(self: *Replica, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
@@ -2032,15 +2034,14 @@ pub fn ReplicaType(
             }
 
             // Replication balances two goals:
-            // - replicate anything that the next replica is likely missing,
+            // - replicate anything that remote replicas are likely missing,
             // - avoid a feedback loop of cascading needless replication.
-            // Replicate anything that we didn't previously had ourselves.
+            // Replicate anything that we didn't previously have ourselves.
             //
             // Use `has_prepare` (checks whether a replica has both the header and the corresponding
             // prepare) instead of `has_header` (checks whether the replica has the header). The
-            // latter is prone to a race wherein a replica that receives a future header *before*
-            // the corresponding prepare (via View for instance) would end up not forwarding
-            // the prepare, thereby breaking the replication chain.
+            // latter is prone to a race where a replica that receives a future header before the
+            // corresponding prepare (via View, for instance) would not help repair the prepare.
             if (message.header.op > self.commit_min and !self.journal.has_prepare(message.header)) {
                 self.replicate(message);
                 if (message.header.op > self.op) {
@@ -3474,9 +3475,19 @@ pub fn ReplicaType(
                 return;
             }
 
-            const block = message.buffer[0..constants.block_size];
+            const write = self.grid_repair_writes.acquire().?;
+            const write_index = self.grid_repair_writes.index(write);
+            const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
+            assert(self.grid.block_references(write_block.*) == 1);
 
-            const grid_fulfill = self.grid.fulfill_block(block);
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                write_block.*,
+                message.buffer[0..message.header.size],
+            );
+
+            const grid_fulfill = self.grid.fulfill_block(write_block.*);
             if (grid_fulfill) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
@@ -3493,10 +3504,6 @@ pub fn ReplicaType(
             if (grid_repair) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
-                const write = self.grid_repair_writes.acquire().?;
-                const write_index = self.grid_repair_writes.index(write);
-                const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
-
                 log.debug("{}: on_block: repairing address={} checksum={x:0>32} {s}", .{
                     self.log_prefix(),
                     message.header.address,
@@ -3504,15 +3511,13 @@ pub fn ReplicaType(
                     @tagName(message.header.block_type),
                 });
 
-                stdx.copy_disjoint(
-                    .inexact,
-                    u8,
-                    write_block.*,
-                    message.buffer[0..message.header.size],
-                );
-
                 write.* = .{ .replica = self };
                 self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
+            } else {
+                self.grid_repair_writes.release(write);
+                // A recipient of fulfill_block() may be borrowing this block.
+                self.grid.block_unref(write_block.*);
+                write_block.* = self.grid.get_block();
             }
 
             if (grid_fulfill or grid_repair) {
@@ -3537,6 +3542,9 @@ pub fn ReplicaType(
         fn grid_repair_block_callback(grid_write: *Grid.Write) void {
             const write: *BlockWrite = @fieldParentPtr("write", grid_write);
             const self = write.replica;
+            const write_index = self.grid_repair_writes.index(write);
+            assert(self.grid.block_references(self.grid_repair_write_blocks[write_index]) == 1);
+
             defer {
                 self.grid_repair_writes.release(write);
             }
@@ -3651,24 +3659,14 @@ pub fn ReplicaType(
 
             assert(waiting_count < self.replica_count);
             for (waiting[0..waiting_count]) |replica| {
-                assert(replica < self.replica_count);
+                assert(replica != self.replica);
 
-                log.debug("{}: on_prepare_timeout: waiting for replica {}", .{
+                log.debug("{}: on_prepare_timeout: waiting for replica {}; replicating", .{
                     self.log_prefix(),
                     replica,
                 });
+                self.send_message_to_replica(replica, prepare.message);
             }
-
-            // Cycle through the list to reach live replicas and get around partitions:
-            // We do not assert `prepare_timeout.attempts > 0` since the counter may wrap back to 0.
-            const replica = waiting[self.prepare_timeout.attempts % waiting_count];
-            assert(replica != self.replica);
-
-            log.debug("{}: on_prepare_timeout: replicating to replica {}", .{
-                self.log_prefix(),
-                replica,
-            });
-            self.send_message_to_replica(replica, prepare.message);
         }
 
         fn on_primary_abdicate_timeout(self: *Replica) void {
@@ -8479,16 +8477,14 @@ pub fn ReplicaType(
             if (!self.journal.has_header(header)) self.journal.set_header_as_dirty(header);
         }
 
-        /// Replicates to the next replica in the configuration (until we get back to the primary):
-        /// Replication starts and ends with the primary, we never forward back to the primary.
+        /// Replicates from the primary to every other replica and standby.
         /// Does not flood the network with prepares that have already committed.
-        /// Replication to standbys works similarly, jumping off the replica just before primary.
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
         fn replicate(self: *Replica, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
 
-            // Older prepares should be replicated --- if we missed such a prepare in the past,
-            // our next-in-ring is likely missing it too!
+            // Older prepares should be replicated; if we missed such a prepare in the past,
+            // other replicas may be missing it too.
             maybe(message.header.op < self.op);
             maybe(message.header.op < self.commit_max);
             maybe(message.header.view < self.view);
@@ -10399,7 +10395,14 @@ pub fn ReplicaType(
             self.grid_scrubber.cancel();
 
             var grid_repair_writes = self.grid_repair_writes.iterate();
-            while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);
+            while (grid_repair_writes.next()) |write| {
+                self.grid_repair_writes.release(write);
+                // The write is canceled, but a read may have acquired a reference to it from the
+                // write queue in the mean time.
+                const write_index = self.grid_repair_writes.index(write);
+                self.grid.block_unref(self.grid_repair_write_blocks[write_index]);
+                self.grid_repair_write_blocks[write_index] = self.grid.get_block();
+            }
 
             // Resume View/sync flow.
             const message = self.sync_view.?;

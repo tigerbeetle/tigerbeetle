@@ -219,8 +219,8 @@ fn emit_docs(
         try buffer.writer().print(
             \\
             \\{[indent]s}/**
-            \\{[indent]s}* See [{[name]s}](https://docs.tigerbeetle.com/{[docs_link]s}{[field]s})
-            \\{[indent]s}*/
+            \\{[indent]s} * See [{[name]s}](https://docs.tigerbeetle.com/{[docs_link]s}{[field]s})
+            \\{[indent]s} */
             \\
         , .{
             .indent = "  " ** indent,

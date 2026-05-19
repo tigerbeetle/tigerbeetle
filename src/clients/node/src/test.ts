@@ -21,9 +21,18 @@ async function sleep_ms(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function range(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i);
+}
+
+function random_index(array: Array<any>): number {
+  return Math.floor(Math.random() * array.length);
+}
+
+const REPLICA_ADDRESSES = [process.env.TB_ADDRESS || '3000'];
 const client = createClient({
   cluster_id: 0n,
-  replica_addresses: [process.env.TB_ADDRESS || '3000']
+  replica_addresses: REPLICA_ADDRESSES
 })
 
 // Test data
@@ -1555,18 +1564,48 @@ test('accept zero-length lookup_transfers', async (): Promise<void> => {
 })
 
 test("destroy client in-flight", async (): Promise<void> => {
-  // Non-existing cluster.
-  const client = createClient({ cluster_id: 92n, replica_addresses: ["99"] });
-  const destroy = (async () => {
-    await sleep_ms(30)
-    client.destroy()
-  })()
-  assert.rejects(async () => await client.lookupAccounts([0n]), (err) => {
-    assert.ok(err instanceof RequestError)
-    assert.strictEqual(err.code,  ErrorCodes.ERR_CLIENT_CLOSED)
-    return true
-  })
-  await destroy
+  const client_count = 5;
+  const action_count = 50;
+
+  const clients = range(client_count).map(() =>
+    createClient({
+      cluster_id: 0n,
+      replica_addresses: REPLICA_ADDRESSES,
+    })
+  );
+
+  const ids: Array<bigint> = [];
+  const actions = range(action_count).map(() => async () => {
+    await sleep_ms(Math.random() < 0.2 ? 0 : Math.random());
+    const client = clients[random_index(clients)];
+    if (Math.random() < 0.1) {
+      client.destroy();
+      return;
+    }
+    if (Math.random() < 0.7) {
+      const id_new = id();
+      ids.push(id_new);
+      try {
+        await client.createAccounts([{ ...accountA, id: id_new }]);
+      } catch (err) {
+        assert.ok(err instanceof RequestError);
+        assert.strictEqual(err.code, ErrorCodes.ERR_CLIENT_CLOSED);
+      }
+      return;
+    }
+    try {
+      const id_lookup = (Math.random() < 0.2 || ids.length == 0)
+        ? BigInt(Math.floor(Math.random() * 10000))
+        : ids[random_index(ids)];
+      await client.lookupAccounts([id_lookup]);
+    } catch (err) {
+        assert.ok(err instanceof RequestError);
+        assert.strictEqual(err.code, ErrorCodes.ERR_CLIENT_CLOSED);
+    }
+  });
+
+  await Promise.all(actions.map((f) => f()));
+  for (const client of clients) client.destroy();
 });
 
 async function main () {
