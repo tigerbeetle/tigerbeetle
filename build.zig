@@ -1913,61 +1913,25 @@ fn build_ruby_client(
     },
 ) void {
     // Ruby bindings for flags, structs, etc.
-    const ruby_bindings_options = b.addOptions();
-    ruby_bindings_options.addOption([]const u8, "output", "ruby");
-    const ruby_bindings_generator = b.addExecutable(.{
-        .name = "ruby_bindings",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
-            .target = b.graph.host,
-        }),
-    });
-    ruby_bindings_generator.root_module.addImport("vsr", options.vsr_module);
-    ruby_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
-    ruby_bindings_generator.root_module.addOptions("ruby_bindings_options", ruby_bindings_options);
-    const bindings = Generated.file(b, .{
-        .generator = ruby_bindings_generator,
+    step_clients_ruby.dependOn(&build_ruby_client_generate(b, .ruby, .{
         .path = "./src/clients/ruby/src/tigerbeetle/bindings.rb",
-    });
-    step_clients_ruby.dependOn(&bindings.step);
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+    }).step);
 
     // Serializer/deserializer code for Ruby C extension
-    const ruby_header_options = b.addOptions();
-    ruby_header_options.addOption([]const u8, "output", "c_header");
-    const ruby_header_generator = b.addExecutable(.{
-        .name = "ruby_bindings_header",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
-            .target = b.graph.host,
-        }),
-    });
-    ruby_header_generator.root_module.addImport("vsr", options.vsr_module);
-    ruby_header_generator.root_module.addOptions("vsr_options", options.vsr_options);
-    ruby_header_generator.root_module.addOptions("ruby_bindings_options", ruby_header_options);
-    const header = Generated.file(b, .{
-        .generator = ruby_header_generator,
+    step_clients_ruby.dependOn(&build_ruby_client_generate(b, .c_header, .{
         .path = "./src/clients/ruby/src/ext/tigerbeetle/rb_tb_gen.h",
-    });
-    step_clients_ruby.dependOn(&header.step);
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+    }).step);
 
     // Ruby types
-    const ruby_rbs_options = b.addOptions();
-    ruby_rbs_options.addOption([]const u8, "output", "rbs");
-    const ruby_rbs_generator = b.addExecutable(.{
-        .name = "ruby_bindings_rbs",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
-            .target = b.graph.host,
-        }),
-    });
-    ruby_rbs_generator.root_module.addImport("vsr", options.vsr_module);
-    ruby_rbs_generator.root_module.addOptions("vsr_options", options.vsr_options);
-    ruby_rbs_generator.root_module.addOptions("ruby_bindings_options", ruby_rbs_options);
-    const rbs = Generated.file(b, .{
-        .generator = ruby_rbs_generator,
+    step_clients_ruby.dependOn(&build_ruby_client_generate(b, .rbs, .{
         .path = "./src/clients/ruby/sig/tigerbeetle.rbs",
-    });
-    step_clients_ruby.dependOn(&rbs.step);
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+    }).step);
 
     const tb_client_header_copy = Generated.file_copy(b, .{
         .from = options.tb_client_header,
@@ -1980,6 +1944,33 @@ fn build_ruby_client(
         .install_dir = .prefix,
         .install_subdir = "../src/clients/ruby/src/ext/tigerbeetle/lib/",
     }).step);
+}
+
+fn build_ruby_client_generate(
+    b: *std.Build,
+    what: enum { ruby, rbs, c_header },
+    options: struct {
+        path: []const u8,
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+    },
+) *Generated {
+    const ruby_bindings_options = b.addOptions();
+    ruby_bindings_options.addOption([]const u8, "output", @tagName(what));
+    const generator = b.addExecutable(.{
+        .name = "ruby_bindings",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    generator.root_module.addImport("vsr", options.vsr_module);
+    generator.root_module.addOptions("vsr_options", options.vsr_options);
+    generator.root_module.addOptions("ruby_bindings_options", ruby_bindings_options);
+    return Generated.file(b, .{
+        .generator = generator,
+        .path = options.path,
+    });
 }
 
 fn build_c_client(
