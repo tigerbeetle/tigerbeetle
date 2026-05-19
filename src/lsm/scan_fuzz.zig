@@ -813,8 +813,9 @@ const Environment = struct {
         const thing: *const Thing = &env.model.items[model_index];
         const groove: *ThingsGroove = &env.forest.grooves.things;
 
-        // Ensure the object is in the objects cache before removing it.
-        assert(groove.objects_cache.has(thing.id));
+        // The object may not be in the cache.
+        // The real state machine would prefetch the object before deleting it.
+        maybe(groove.objects_cache.has(thing.id));
 
         // TODO: This block is a naive implementation of the deletion logic.
         // We should call `env.forest.grooves.things.remove(thing.id);` once
