@@ -810,12 +810,27 @@ const Environment = struct {
         const model_index = env.pick_live_index_for_mutation(query_specs) orelse return false;
         assert(env.model_live.isSet(model_index));
 
-        const thing = &env.model.items[model_index];
+        const thing: *const Thing = &env.model.items[model_index];
+        const groove: *ThingsGroove = &env.forest.grooves.things;
 
-        // Simulate what prefetch does in the real state machine: ensure the object is in
-        // the objects cache before calling remove, which asserts its presence.
-        env.forest.grooves.things.objects_cache.upsert(thing);
-        env.forest.grooves.things.remove(thing.id);
+        // Ensure the object is in the objects cache before removing it.
+        assert(groove.objects_cache.has(thing.id));
+
+        // TODO: This block is a naive implementation of the deletion logic.
+        // We should call `env.forest.grooves.things.remove(thing.id);` once
+        // it is fully implemented.
+        // See the TODOs in `Groove.remove()` for more details.
+        groove.objects.remove(thing);
+        inline for (std.meta.fields(ThingsGroove.IndexTrees)) |field| {
+            const IndexHelper = ThingsGroove.IndexHelperType(field.name);
+            if (IndexHelper.index_from_object(thing)) |value| {
+                @field(groove.indexes, field.name).remove(&.{
+                    .timestamp = thing.timestamp,
+                    .field = value,
+                });
+            }
+        }
+        groove.objects_cache.remove(thing.id);
 
         env.model_live.setValue(model_index, false);
         for (query_specs, &env.model_matches) |_, *query_matches| {

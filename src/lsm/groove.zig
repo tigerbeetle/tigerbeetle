@@ -1814,8 +1814,8 @@ pub fn GrooveType(
         pub fn remove(groove: *Groove, key: PrimaryKey) void {
             assert(ObjectsCache != void);
 
-            // TODO: Nothing currently calls or tests this method. The forest fuzzer should be
-            // extended to cover it.
+            // TODO: Nothing currently calls or tests this method.
+            // The forest fuzzer should be extended to cover it.
             comptime assert(false);
 
             const object: *const Object = groove.objects_cache.get(key).?;
