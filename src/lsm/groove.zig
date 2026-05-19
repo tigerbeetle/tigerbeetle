@@ -1811,14 +1811,18 @@ pub fn GrooveType(
             groove.objects.put(new);
         }
 
-        /// Asserts that the object with the given PrimaryKey exists.
         pub fn remove(groove: *Groove, key: PrimaryKey) void {
             assert(ObjectsCache != void);
+
+            // TODO: Nothing currently calls or tests this method. The forest fuzzer should be
+            // extended to cover it.
+            comptime assert(false);
 
             const object: *const Object = groove.objects_cache.get(key).?;
             assert(TimestampRange.valid(object.timestamp));
 
-            // TODO: should update the timestamp and id range, see `key_range_update`.
+            // TODO: should update the timestamp, primary key and and unique keys range,
+            // see `key_range_update`.
             groove.objects.remove(object);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
@@ -1833,6 +1837,13 @@ pub fn GrooveType(
 
             // Remove from the cache last: `object` is a pointer into the cache,
             // so removing it first would invalidate the pointer used above.
+
+            // TODO: Lookups by the primary key hit the object cache instead of
+            // the mutable table. If not found in the cache, the immutable table
+            // and lower levels of the LSM tree will be searched, where the tombstone
+            // might be found. However, if the tombstone is in the mutable table,
+            // the lookup will skip it and possibly find an outdated version of
+            // the object instead.
             groove.objects_cache.remove(key);
         }
 
