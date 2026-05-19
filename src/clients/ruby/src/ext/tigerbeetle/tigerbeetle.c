@@ -1,3 +1,5 @@
+// Ruby doesn't guarantee ABI stability, so we must use ruby.h present on the user's machine.
+// We don't want to run a Zig compiler there though, so we have to implement this thin wrapper in C.
 #include "rb_tb_gen.h"
 #include "ruby.h"
 #include "ruby/thread.h"
