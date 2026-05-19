@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 
 const stdx = @import("stdx");
 const constants = @import("../constants.zig");
+const is_unique_key = @import("unique_key.zig").is_unique_key;
 const is_composite_key = @import("composite_key.zig").is_composite_key;
 
 const GridType = @import("../vsr/grid.zig").GridType;
@@ -124,27 +125,27 @@ pub fn ScanBuilderType(
             ) catch unreachable; //TODO: define error handling for the query API.
         }
 
-        /// Initializes a Scan over the `id` searching for an exact match.
+        /// Initializes a Scan over a unique key searching for an exact match.
         /// Produces the criteria equivalent to `WHERE id = $value`.
         /// Results are always unique.
-        pub fn scan_id(
+        pub fn scan_unique_key(
             self: *ScanBuilder,
+            comptime index: std.meta.FieldEnum(Groove.IndexTrees),
             buffer: *ScanBuffer,
             snapshot: u64,
-            id: u128,
+            value: UniqueKeyType(index),
             direction: Direction,
         ) *Scan {
-            comptime assert(Groove.IdTree != void);
-
-            const ScanImpl = ScanImplType(.id);
+            const field = comptime std.enums.nameCast(std.meta.FieldEnum(Scan.Dispatcher), index);
+            const ScanImpl = ScanImplType(field);
             return self.scan_add(
-                .id,
+                field,
                 ScanImpl.init(
-                    &self.groove().ids,
+                    &@field(self.groove().indexes, @tagName(index)),
                     buffer,
                     snapshot,
-                    id,
-                    id,
+                    value,
+                    value,
                     direction,
                 ),
             ) catch unreachable; //TODO: define error handling for the query API.
@@ -275,14 +276,21 @@ pub fn ScanBuilderType(
             return scan;
         }
 
-        fn CompositeKeyType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
+        fn TableValueType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
             const IndexTree = @FieldType(Groove.IndexTrees, @tagName(index));
             return IndexTree.Table.Value;
         }
 
         fn CompositeKeyPrefixType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            const CompositeKey = CompositeKeyType(index);
+            const CompositeKey = TableValueType(index);
+            comptime assert(is_composite_key(CompositeKey));
             return @FieldType(CompositeKey, "field");
+        }
+
+        fn UniqueKeyType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
+            const UniqueKey = TableValueType(index);
+            comptime assert(is_unique_key(UniqueKey));
+            return @FieldType(UniqueKey, "field");
         }
 
         fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
@@ -293,8 +301,8 @@ pub fn ScanBuilderType(
             comptime field: std.meta.FieldEnum(Groove.IndexTrees),
             prefix: CompositeKeyPrefixType(field),
             timestamp: u64,
-        ) CompositeKeyType(field).Key {
-            return CompositeKeyType(field).key_from_value(&.{
+        ) TableValueType(field).Key {
+            return TableValueType(field).key_from_value(&.{
                 .field = prefix,
                 .timestamp = timestamp,
             });
@@ -359,17 +367,6 @@ pub fn ScanType(
                 merge_intersection: ScanMergeIntersectionType(Groove, Storage),
                 merge_difference: ScanMergeDifferenceType(Groove, Storage),
             });
-
-            // Union field for the id tree:
-            if (Groove.IdTree != void) {
-                const ScanTree = ScanTreeType(*Context, Groove.IdTree, Storage);
-                type_info.@"union".fields = type_info.@"union".fields ++
-                    [_]std.builtin.Type.UnionField{.{
-                        .name = "id",
-                        .type = ScanTree,
-                        .alignment = @alignOf(ScanTree),
-                    }};
-            }
 
             // Union fields for each index tree:
             for (std.meta.fields(Groove.IndexTrees)) |field| {
@@ -439,19 +436,16 @@ pub fn ScanType(
                             continue;
                         }
 
-                        if (Groove.IdTree != void) {
-                            if (index == .id) {
-                                // When iterating over `IdTree` it can return a timestamp zero,
-                                // which indicates an orphaned id.
-                                if (value.timestamp == 0) {
-                                    assert(Groove.config.orphaned_ids);
-                                    continue;
-                                }
+                        if (comptime Groove.is_primary_key(index)) {
+                            // When iterating over the primary key,
+                            // it can return a timestamp zero, which indicates an orphaned id.
+                            if (value.timestamp == 0) {
+                                assert(Groove.config.primary_key_orphaned);
+                                continue;
                             }
                         }
+                        assert(TimestampRange.valid(value.timestamp));
 
-                        assert(value.timestamp >= TimestampRange.timestamp_min);
-                        assert(value.timestamp <= TimestampRange.timestamp_max);
                         return value.timestamp;
                     }
                     return null;
@@ -478,7 +472,7 @@ pub fn ScanType(
                 .merge_intersection,
                 .merge_difference,
                 => |*scan_impl| scan_impl.probe(timestamp),
-                inline else => |*scan_impl, tag| {
+                inline else => |*scan_impl| {
                     const ScanTree = @TypeOf(scan_impl.*);
                     const Value = ScanTree.Tree.Table.Value;
 
@@ -494,10 +488,10 @@ pub fn ScanType(
                             .timestamp = timestamp,
                         }));
                     } else {
-                        comptime assert(tag == .id);
-                        comptime assert(Groove.IdTree != void);
+                        comptime assert(is_unique_key(Value));
+                        comptime assert(Groove.config.unique_keys.len > 0);
 
-                        // Scans over the IdTree cannot probe for a next timestamp.
+                        // Scans over the unique keys cannot probe for a next timestamp.
                         assert(scan_impl.key_lower == scan_impl.key_upper);
                     }
                 },
@@ -512,7 +506,7 @@ pub fn ScanType(
                 .merge_intersection,
                 .merge_difference,
                 => |*scan_impl| return scan_impl.direction,
-                inline else => |*scan_impl, tag| {
+                inline else => |*scan_impl| {
                     const ScanTree = @TypeOf(scan_impl.*);
                     const Value = ScanTree.Tree.Table.Value;
                     if (comptime is_composite_key(Value)) {
@@ -521,8 +515,8 @@ pub fn ScanType(
                         assert(Value.key_prefix(scan_impl.key_lower) ==
                             Value.key_prefix(scan_impl.key_upper));
                     } else {
-                        comptime assert(tag == .id);
-                        comptime assert(Groove.IdTree != void);
+                        comptime assert(is_unique_key(Value));
+                        comptime assert(Groove.config.unique_keys.len > 0);
                         assert(scan_impl.key_lower == scan_impl.key_upper);
                     }
 

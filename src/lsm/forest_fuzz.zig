@@ -13,7 +13,6 @@ const log = std.log.scoped(.lsm_forest_fuzz);
 const tb = @import("../tigerbeetle.zig");
 
 const TimeSim = @import("../testing/time.zig").TimeSim;
-const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const Reservation = @import("../vsr/free_set.zig").Reservation;
@@ -33,10 +32,11 @@ const FuzzOpAction = union(enum) {
         checkpoint: bool,
         checkpoint_durable: bool,
     },
-    put_account: Account,
-    get_account: u128,
-    exists_account: u64,
-    scan_account: ScanParams,
+    put: tb.Transfer,
+    get_by_id: UniqueKey,
+    get_by_timestamp: UniqueKey,
+    get_by_pending_id: UniqueKey,
+    scan: ScanParams,
 };
 const FuzzOpActionTag = std.meta.Tag(FuzzOpAction);
 
@@ -52,13 +52,19 @@ const FuzzOp = struct {
     modifier: FuzzOpModifier,
 };
 
-const GrooveAccounts = type: {
-    const forest: Forest = undefined;
-    break :type @TypeOf(forest.grooves.accounts);
-};
+/// This fuzzer skips the StateMachine logic, so it inserts
+/// `Transfers` without validating the existence of accounts
+/// and pending transfers, which is useful for testing secondary
+/// indexes and unique keys.
+const GrooveTransfers = @FieldType(
+    @FieldType(Forest, "grooves"),
+    "transfers",
+);
+
+const UniqueKey = GrooveTransfers.UniqueKey;
 
 const ScanParams = struct {
-    index: std.meta.FieldEnum(GrooveAccounts.IndexTrees),
+    index: std.meta.FieldEnum(GrooveTransfers.IndexTrees),
     min: u128, // Type-erased field min.
     max: u128, // Type-erased field max.
     direction: Direction,
@@ -67,7 +73,7 @@ const ScanParams = struct {
 const Environment = struct {
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
-    const cache_entries_max = GrooveAccounts.ObjectsCache.Cache.value_count_max_multiple;
+    const cache_entries_max = GrooveTransfers.ObjectsCache.Cache.value_count_max_multiple;
     const forest_options = StateMachine.forest_options(.{
         .batch_size_limit = constants.message_body_size_max,
         .lsm_forest_compaction_block_count = Forest.Options.compaction_block_count_min,
@@ -84,9 +90,9 @@ const Environment = struct {
 
     // We must call compact after every 'batch'.
     // Every `lsm_compaction_ops` batches may put/remove `value_count_max` values per index.
-    // Every `FuzzOp.put_account` issues one remove and one put per index.
+    // Every `FuzzOp.put` issues one remove and one put per index.
     const puts_since_compact_max = @divTrunc(
-        Forest.groove_config.accounts.ObjectTree.Table.value_count_max,
+        Forest.groove_config.transfers.ObjectTree.Table.value_count_max,
         2 * constants.lsm_compaction_ops,
     );
 
@@ -111,7 +117,7 @@ const Environment = struct {
     forest: Forest,
     checkpoint_op: ?u64,
     ticks_remaining: usize,
-    scan_lookup_buffer: []tb.Account,
+    scan_lookup_buffer: []tb.Transfer,
 
     fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
@@ -127,8 +133,8 @@ const Environment = struct {
         });
 
         env.scan_lookup_buffer = try gpa.alloc(
-            tb.Account,
-            StateMachine.batch_max.create_accounts,
+            tb.Transfer,
+            StateMachine.batch_max.create_transfers,
         );
 
         env.forest = undefined;
@@ -294,23 +300,23 @@ const Environment = struct {
         env.change_state(.superblock_checkpoint, .fuzzing);
     }
 
-    fn prefetch_account(env: *Environment, id: u128, snapshot: u64) !void {
+    fn prefetch(env: *Environment, key: UniqueKey, snapshot: u64) !void {
         const Context = struct {
-            _id: u128,
+            _key: UniqueKey,
             _snapshot: u64,
-            _groove_accounts: *GrooveAccounts,
+            _groove: *GrooveTransfers,
 
             finished: bool = false,
-            prefetch_context: GrooveAccounts.PrefetchContext = undefined,
+            prefetch_context: GrooveTransfers.PrefetchContext = undefined,
 
             fn prefetch_start(getter: *@This()) void {
-                const groove = getter._groove_accounts;
+                const groove = getter._groove;
                 groove.prefetch_setup(getter._snapshot);
-                groove.prefetch_enqueue(getter._id);
+                groove.prefetch_enqueue(getter._key);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 
-            fn prefetch_callback(prefetch_context: *GrooveAccounts.PrefetchContext) void {
+            fn prefetch_callback(prefetch_context: *GrooveTransfers.PrefetchContext) void {
                 const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
                 assert(!context.finished);
                 context.finished = true;
@@ -318,9 +324,9 @@ const Environment = struct {
         };
 
         var context = Context{
-            ._id = id,
+            ._key = key,
             ._snapshot = snapshot,
-            ._groove_accounts = &env.forest.grooves.accounts,
+            ._groove = &env.forest.grooves.transfers,
         };
         context.prefetch_start();
         while (!context.finished) {
@@ -330,66 +336,29 @@ const Environment = struct {
         }
     }
 
-    fn prefetch_exists_account(env: *Environment, timestamp: u64, snapshot: u64) !void {
-        const Context = struct {
-            _timestamp: u64,
-            _snapshot: u64,
-            _groove_accounts: *GrooveAccounts,
-
-            finished: bool = false,
-            prefetch_context: GrooveAccounts.PrefetchContext = undefined,
-
-            fn prefetch_start(getter: *@This()) void {
-                const groove = getter._groove_accounts;
-                groove.prefetch_setup(getter._snapshot);
-                groove.prefetch_enqueue_by_timestamp(getter._timestamp);
-                groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
-            }
-
-            fn prefetch_callback(prefetch_context: *GrooveAccounts.PrefetchContext) void {
-                const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
-                assert(!context.finished);
-                context.finished = true;
-            }
-        };
-
-        var context = Context{
-            ._snapshot = snapshot,
-            ._timestamp = timestamp,
-            ._groove_accounts = &env.forest.grooves.accounts,
-        };
-        context.prefetch_start();
-        while (!context.finished) {
-            if (env.ticks_remaining == 0) return error.OutOfTicks;
-            env.ticks_remaining -= 1;
-            env.storage.run();
-        }
-    }
-
-    fn put_account(env: *Environment, a: *const Account, maybe_old: ?Account) void {
+    fn put(env: *Environment, a: *const tb.Transfer, maybe_old: ?tb.Transfer) void {
         if (maybe_old) |*old| {
-            env.forest.grooves.accounts.update(.{ .old = old, .new = a });
+            env.forest.grooves.transfers.update(.{ .old = old, .new = a });
         } else {
-            env.forest.grooves.accounts.insert(a);
+            env.forest.grooves.transfers.insert(a);
         }
     }
 
-    fn get_account(env: *Environment, id: u128) ?Account {
-        return switch (env.forest.grooves.accounts.get(id)) {
-            .found_object => |a| a,
-            .found_orphaned_id => unreachable,
-            .not_found => null,
+    fn get(env: *Environment, key: UniqueKey) ?tb.Transfer {
+        return switch (key) {
+            .id => |id| switch (env.forest.grooves.transfers.get(id)) {
+                .found_object => |transfer| transfer,
+                .found_orphaned => unreachable, // TODO: test orphaned IDs.
+                .not_found => null,
+            },
+            else => env.forest.grooves.transfers.indirect_lookup(key),
         };
     }
 
-    fn exists(env: *Environment, timestamp: u64) bool {
-        return env.forest.grooves.accounts.exists(timestamp);
-    }
-
-    fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveAccounts.IndexTrees)) type {
-        const Tree = @FieldType(GrooveAccounts.IndexTrees, @tagName(index));
+    fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveTransfers.IndexTrees)) type {
+        const Tree = @FieldType(GrooveTransfers.IndexTrees, @tagName(index));
         const Value = Tree.Table.Value;
-        const Index = GrooveAccounts.IndexTreeFieldHelperType(@tagName(index)).Index;
+        const Index = GrooveTransfers.IndexHelperType(@tagName(index)).Type;
 
         const ScanRange = ScanRangeType(
             Tree,
@@ -408,7 +377,7 @@ const Environment = struct {
         );
 
         const ScanLookup = ScanLookupType(
-            GrooveAccounts,
+            GrooveTransfers,
             ScanRange,
             Storage,
         );
@@ -417,14 +386,14 @@ const Environment = struct {
             const ScannerIndex = @This();
 
             lookup: ScanLookup = undefined,
-            result: ?[]const tb.Account = null,
+            result: ?[]const tb.Transfer = null,
 
             fn scan(
                 self: *ScannerIndex,
                 env: *Environment,
                 params: ScanParams,
                 snapshot: u64,
-            ) ![]const tb.Account {
+            ) ![]const tb.Transfer {
                 const min: Index, const max: Index = switch (Index) {
                     void => range: {
                         assert(params.min == 0);
@@ -440,7 +409,7 @@ const Environment = struct {
                 };
 
                 const scan_buffer_pool = &env.forest.scan_buffer_pool;
-                const groove_accounts = &env.forest.grooves.accounts;
+                const groove = &env.forest.grooves.transfers;
                 defer scan_buffer_pool.reset();
 
                 // It's not expected to exceed `lsm_scans_max` here.
@@ -448,7 +417,7 @@ const Environment = struct {
 
                 var scan_range = ScanRange.init(
                     {},
-                    &@field(groove_accounts.indexes, @tagName(index)),
+                    &@field(groove.indexes, @tagName(index)),
                     scan_buffer,
                     snapshot,
                     Value.key_from_value(&.{
@@ -462,7 +431,7 @@ const Environment = struct {
                     params.direction,
                 );
 
-                self.lookup = ScanLookup.init(groove_accounts, &scan_range);
+                self.lookup = ScanLookup.init(groove, &scan_range);
                 self.lookup.read(env.scan_lookup_buffer, &scan_lookup_callback);
 
                 while (self.result == null) {
@@ -474,7 +443,7 @@ const Environment = struct {
                 return self.result.?;
             }
 
-            fn scan_lookup_callback(lookup: *ScanLookup, result: []const tb.Account) void {
+            fn scan_lookup_callback(lookup: *ScanLookup, result: []const tb.Transfer) void {
                 const self: *ScannerIndex = @fieldParentPtr("lookup", lookup);
                 assert(self.result == null);
                 self.result = result;
@@ -482,7 +451,7 @@ const Environment = struct {
         };
     }
 
-    fn scan_accounts(env: *Environment, params: ScanParams, snapshot: u64) ![]const tb.Account {
+    fn scan(env: *Environment, params: ScanParams, snapshot: u64) ![]const tb.Transfer {
         switch (params.index) {
             inline else => |index| {
                 const Scanner = ScannerIndexType(index);
@@ -494,15 +463,15 @@ const Environment = struct {
 
     // The forest should behave like a simple key-value data-structure.
     const Model = struct {
-        const Map = std.hash_map.AutoHashMap(u128, Account);
-        const Set = std.hash_map.AutoHashMap(u64, void);
-        const LogEntry = struct { op: u64, account: Account };
+        const ObjectsMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
+        const UniqueKeysMap = std.hash_map.AutoHashMap(UniqueKey, u128);
+        const LogEntry = struct { op: u64, transfer: tb.Transfer };
         const Log = std.fifo.LinearFifo(LogEntry, .Dynamic);
 
         // Represents persistent state:
         checkpointed: struct {
-            objects: Map,
-            timestamps: Set,
+            objects: ObjectsMap,
+            unique_keys: UniqueKeysMap,
         },
 
         // Represents in-memory state:
@@ -511,8 +480,8 @@ const Environment = struct {
         pub fn init(gpa: std.mem.Allocator) Model {
             return .{
                 .checkpointed = .{
-                    .objects = Map.init(gpa),
-                    .timestamps = Set.init(gpa),
+                    .objects = ObjectsMap.init(gpa),
+                    .unique_keys = UniqueKeysMap.init(gpa),
                 },
                 .log = Log.init(gpa),
             };
@@ -520,28 +489,31 @@ const Environment = struct {
 
         pub fn deinit(model: *Model) void {
             model.checkpointed.objects.deinit();
-            model.checkpointed.timestamps.deinit();
+            model.checkpointed.unique_keys.deinit();
             model.log.deinit();
         }
 
-        pub fn put_account(model: *Model, account: *const Account, op: u64) !void {
-            try model.log.writeItem(.{ .op = op, .account = account.* });
+        pub fn put(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
+            try model.log.writeItem(.{ .op = op, .transfer = transfer.* });
         }
 
-        pub fn get_account(model: *const Model, id: u128) ?Account {
-            return model.get_account_from_log(.{ .id = id }) orelse
-                model.checkpointed.objects.get(id);
+        pub fn get(model: *const Model, key: UniqueKey) ?tb.Transfer {
+            return model.get_object_from_log(key) orelse
+                switch (key) {
+                    .id => model.checkpointed.objects.get(key.id),
+                    else => object: {
+                        const id = model.checkpointed.unique_keys.get(key) orelse
+                            break :object null;
+
+                        break :object model.checkpointed.objects.get(id);
+                    },
+                };
         }
 
-        pub fn exists_account(model: *const Model, timestamp: u64) bool {
-            return model.get_account_from_log(.{ .timestamp = timestamp }) != null or
-                model.checkpointed.timestamps.contains(timestamp);
-        }
-
-        fn get_account_from_log(
+        fn get_object_from_log(
             model: *const Model,
-            key: union(enum) { id: u128, timestamp: u64 },
-        ) ?Account {
+            key: UniqueKey,
+        ) ?tb.Transfer {
             var latest_op: ?u64 = null;
             const log_size = model.log.readableLength();
             var log_left = log_size;
@@ -554,10 +526,11 @@ const Environment = struct {
                 assert(latest_op.? >= entry.op);
 
                 if (switch (key) {
-                    .id => |id| entry.account.id == id,
-                    .timestamp => |timestamp| entry.account.timestamp == timestamp,
+                    .id => |id| entry.transfer.id == id,
+                    .timestamp => |timestamp| entry.transfer.timestamp == timestamp,
+                    .pending_id => |id| id != 0 and entry.transfer.pending_id == id,
                 }) {
-                    return entry.account;
+                    return entry.transfer;
                 }
             }
             return null;
@@ -573,8 +546,15 @@ const Environment = struct {
                     break;
                 }
 
-                try model.checkpointed.objects.put(entry.account.id, entry.account);
-                try model.checkpointed.timestamps.put(entry.account.timestamp, {});
+                try model.checkpointed.objects.put(entry.transfer.id, entry.transfer);
+                try model.checkpointed.unique_keys.put(
+                    .{ .timestamp = entry.transfer.timestamp },
+                    entry.transfer.id,
+                );
+                if (entry.transfer.pending_id != 0) try model.checkpointed.unique_keys.put(
+                    .{ .pending_id = entry.transfer.pending_id },
+                    entry.transfer.id,
+                );
             }
             model.log.discard(log_index);
         }
@@ -600,12 +580,12 @@ const Environment = struct {
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
             const model_size = brk: {
-                const account_count = model.log.readableLength() +
+                const object_count = model.log.readableLength() +
                     model.checkpointed.objects.count();
-                break :brk account_count * @sizeOf(Account);
+                break :brk object_count * @sizeOf(tb.Transfer);
             };
             // NOTE: This isn't accurate anymore because the model can contain multiple copies of
-            // an account in the log
+            // an object in the log
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
@@ -664,28 +644,28 @@ const Environment = struct {
                 var log_index: usize = 0;
                 while (log_index < log_size) : (log_index += 1) {
                     const entry = model.log.peekItem(log_index);
-                    const id = entry.account.id;
-                    if (model.checkpointed.objects.get(id)) |*checkpointed_account| {
-                        try env.prefetch_account(id, snapshot);
-                        if (env.get_account(id)) |lsm_account| {
-                            assert(stdx.equal_bytes(Account, &lsm_account, checkpointed_account));
+                    const id = entry.transfer.id;
+                    if (model.checkpointed.objects.get(id)) |*checkpointed_object| {
+                        try env.prefetch(.{ .id = id }, snapshot);
+                        if (env.get(.{ .id = id })) |lsm_object| {
+                            assert(stdx.equal_bytes(tb.Transfer, &lsm_object, checkpointed_object));
                         } else {
                             std.debug.panic(
-                                "Account checkpointed but not in lsm after crash.\n {}\n",
-                                .{checkpointed_account},
+                                "Object checkpointed but not in lsm after crash.\n {}\n",
+                                .{checkpointed_object},
                             );
                         }
 
                         // There are strict limits around how many values can be prefetched by one
                         // commit, see `stash_value_count_max` in groove.zig. Thus, we need to make
                         // sure we manually call groove.objects_cache.compact() every
-                        // `stash_value_count_max` operations here. This is specific to this fuzzing
-                        // code.
-                        const groove_stash_value_count_max =
-                            env.forest.grooves.accounts.objects_cache.options.stash_value_count_max;
+                        // `stash_value_count_max` operations here.
+                        // This is specific to this fuzzing code.
+                        const groove_stash_value_count_max = env.forest.grooves
+                            .transfers.objects_cache.options.stash_value_count_max;
 
                         if (log_index % groove_stash_value_count_max == 0) {
-                            env.forest.grooves.accounts.objects_cache.compact();
+                            env.forest.grooves.transfers.objects_cache.compact();
                         }
                     }
                 }
@@ -718,90 +698,119 @@ const Environment = struct {
                     try env.checkpoint(fuzz_op.op);
                 }
             },
-            .put_account => |account| {
+            .put => |object| {
                 // The forest requires prefetch before put.
-                try env.prefetch_account(account.id, snapshot);
-                const lsm_account = env.get_account(account.id);
+                assert(object.id != 0);
 
-                env.put_account(&account, lsm_account);
-                try model.put_account(&account, fuzz_op.op);
+                try env.prefetch(.{ .id = object.id }, snapshot);
+                const lsm_object = env.get(.{ .id = object.id });
+
+                env.put(&object, lsm_object);
+                try model.put(&object, fuzz_op.op);
             },
-            .get_account => |id| {
-                // Get account from lsm.
-                try env.prefetch_account(id, snapshot);
-                const lsm_account = env.get_account(id);
+            inline .get_by_id,
+            .get_by_timestamp,
+            .get_by_pending_id,
+            => |key, action| {
+                // Get object from lsm.
+                try env.prefetch(key, snapshot);
+                const lsm_object = lsm_object: {
+                    switch (action) {
+                        .get_by_id => {
+                            assert(key == .id);
+                            assert(key.id != 0);
+                            break :lsm_object env.get(key);
+                        },
+                        .get_by_timestamp => {
+                            assert(key == .timestamp);
+                            assert(TimestampRange.valid(key.timestamp));
+                            break :lsm_object env.get(key);
+                        },
+                        .get_by_pending_id => {
+                            assert(key == .pending_id);
+                            break :lsm_object if (key.pending_id == 0)
+                                null
+                            else
+                                env.get(key);
+                        },
+                        else => comptime unreachable,
+                    }
+                };
 
                 // Compare result to model.
-                const model_account = model.get_account(id);
-                if (model_account == null) {
-                    assert(lsm_account == null);
+                const model_object = model.get(key);
+                if (model_object == null) {
+                    assert(lsm_object == null);
                 } else {
-                    assert(stdx.equal_bytes(Account, &model_account.?, &lsm_account.?));
+                    assert(lsm_object != null);
+                    assert(stdx.equal_bytes(tb.Transfer, &model_object.?, &lsm_object.?));
                 }
             },
-            .exists_account => |timestamp| {
-                try env.prefetch_exists_account(timestamp, snapshot);
-                const lsm_found = env.exists(timestamp);
-                const model_found = model.exists_account(timestamp);
-                assert(lsm_found == model_found);
-            },
-            .scan_account => |params| {
-                const accounts = try env.scan_accounts(params, snapshot);
+            .scan => |params| {
+                const results = try env.scan(params, snapshot);
 
                 var timestamp_last: ?u64 = null;
                 var prefix_last: ?u128 = null;
 
                 // Asserting the positive space:
                 // all objects found by the scan must exist in our model.
-                for (accounts) |*account| {
+                for (results) |*object| {
                     const prefix_current: u128 = switch (params.index) {
+                        .expires_at => index: {
+                            assert(object.timeout != 0);
+                            const value = object.timeout_ns();
+                            assert(value >= params.min and value <= params.max);
+                            break :index value;
+                        },
                         .imported => index: {
                             assert(params.min == 0);
                             assert(params.max == 0);
                             assert(prefix_last == null);
-                            assert(account.flags.imported);
+                            assert(object.flags.imported);
                             break :index undefined;
                         },
-                        .closed => index: {
+                        .closing => index: {
                             assert(params.min == 0);
                             assert(params.max == 0);
                             assert(prefix_last == null);
-                            assert(account.flags.closed);
+                            assert(object.flags.closing_debit or
+                                object.flags.closing_credit);
                             break :index undefined;
                         },
                         inline else => |field| index: {
-                            const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
-                            comptime assert(Helper.Index != void);
+                            const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
+                            comptime assert(IndexHelper.Type != void);
 
-                            const value = Helper.index_from_object(account).?;
+                            const value = IndexHelper.get(object).?;
                             assert(value >= params.min and value <= params.max);
                             break :index value;
                         },
                     };
 
-                    const model_account = model.get_account(account.id).?;
-                    assert(model_account.id == account.id);
-                    assert(model_account.user_data_128 == account.user_data_128);
-                    assert(model_account.user_data_64 == account.user_data_64);
-                    assert(model_account.user_data_32 == account.user_data_32);
-                    assert(model_account.timestamp == account.timestamp);
-                    assert(model_account.ledger == account.ledger);
-                    assert(model_account.code == account.code);
-                    assert(stdx.equal_bytes(
-                        tb.AccountFlags,
-                        &model_account.flags,
-                        &account.flags,
-                    ));
+                    const model_object = model.get(.{ .id = object.id }).?;
+                    assert(model_object.id == object.id);
+                    assert(model_object.debit_account_id == object.debit_account_id);
+                    assert(model_object.credit_account_id == object.credit_account_id);
+                    assert(model_object.user_data_128 == object.user_data_128);
+                    assert(model_object.user_data_64 == object.user_data_64);
+                    assert(model_object.user_data_32 == object.user_data_32);
+                    assert(model_object.timestamp == object.timestamp);
+                    assert(model_object.ledger == object.ledger);
+                    assert(model_object.code == object.code);
+                    assert(model_object.pending_id == object.pending_id);
+                    assert(model_object.timeout == object.timeout);
+                    assert(model_object.amount == object.amount);
+                    assert(model_object.flags == object.flags);
 
                     if (params.min == params.max) {
                         // If exact match (min == max), it's expected to be sorted by timestamp.
                         if (timestamp_last) |timestamp| {
                             switch (params.direction) {
-                                .ascending => assert(account.timestamp > timestamp),
-                                .descending => assert(account.timestamp < timestamp),
+                                .ascending => assert(object.timestamp > timestamp),
+                                .descending => assert(object.timestamp < timestamp),
                             }
                         }
-                        timestamp_last = account.timestamp;
+                        timestamp_last = object.timestamp;
                     } else {
                         assert(params.index != .imported);
 
@@ -816,11 +825,11 @@ const Environment = struct {
                             if (prefix_current == prefix) {
                                 if (timestamp_last) |timestamp| {
                                     switch (params.direction) {
-                                        .ascending => assert(account.timestamp > timestamp),
-                                        .descending => assert(account.timestamp < timestamp),
+                                        .ascending => assert(object.timestamp > timestamp),
+                                        .descending => assert(object.timestamp < timestamp),
                                     }
                                 }
-                                timestamp_last = account.timestamp;
+                                timestamp_last = object.timestamp;
                             } else {
                                 timestamp_last = null;
                             }
@@ -837,7 +846,7 @@ fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
     return fuzz.random_id(prng, Int, .{
         .average_hot = 8,
         .average_cold = Environment.cache_entries_max,
-    });
+    }) + 1; // Does not allow zero.
 }
 
 pub fn generate_fuzz_ops(
@@ -854,13 +863,13 @@ pub fn generate_fuzz_ops(
         // Maybe compact more often than forced to by `puts_since_compact`.
         .compact = if (prng.boolean()) 0 else 1,
         // Always do puts.
-        .put_account = constants.lsm_compaction_ops * 2,
+        .put = constants.lsm_compaction_ops * 2,
         // Maybe do some gets.
-        .get_account = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
-        // Maybe do some exists.
-        .exists_account = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
+        .get_by_id = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
+        .get_by_timestamp = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
+        .get_by_pending_id = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan_account = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
+        .scan = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
     };
     log.info("action_weights = {:.2}", .{action_weights});
 
@@ -873,8 +882,8 @@ pub fn generate_fuzz_ops(
 
     log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
 
-    var id_to_account = std.hash_map.AutoHashMap(u128, Account).init(gpa);
-    defer id_to_account.deinit();
+    var id_to_object = std.hash_map.AutoHashMap(u128, tb.Transfer).init(gpa);
+    defer id_to_object.deinit();
 
     var op: u64 = 1;
     var persisted_op: u64 = 0;
@@ -896,47 +905,70 @@ pub fn generate_fuzz_ops(
                 }
                 break :action action;
             },
-            .put_account => action: {
-                const action = generate_put_account(
+            .put => action: {
+                const action = generate_put(
                     prng,
-                    &id_to_account,
+                    &id_to_object,
                     fuzz_op_index + 1, // Timestamp cannot be zero.
                 );
-                try id_to_account.put(action.put_account.id, action.put_account);
+                assert(action.put.id != 0);
+
+                try id_to_object.put(action.put.id, action.put);
                 break :action action;
             },
-            .get_account => FuzzOpAction{ .get_account = random_id(prng, u128) },
-            .exists_account => FuzzOpAction{
-                // Not all ops generate accounts, so the timestamp may or may not be found.
-                .exists_account = prng.range_inclusive(
+            .get_by_id => FuzzOpAction{ .get_by_id = .{
+                .id = random_id(prng, u128),
+            } },
+            .get_by_timestamp => FuzzOpAction{
+                // Not all ops generate objects, so the timestamp may or may not be found.
+                .get_by_timestamp = .{ .timestamp = prng.range_inclusive(
                     u64,
                     TimestampRange.timestamp_min,
                     fuzz_op_index + 1,
-                ),
+                ) },
             },
-            .scan_account => blk: {
+            .get_by_pending_id => FuzzOpAction{
+                .get_by_pending_id = .{
+                    .pending_id = id: {
+                        // Not all transfers have the pending_id,
+                        // so it may or may not be found.
+                        const it = id_to_object.keyIterator();
+                        for (0..it.len) |_| {
+                            const index = prng.int_inclusive(usize, it.len - 1);
+                            if (!it.metadata[index].isUsed()) continue;
+
+                            const id = it.items[index];
+                            const object = id_to_object.get(id).?;
+                            break :id object.pending_id;
+                        }
+
+                        break :id 0;
+                    },
+                },
+            },
+            .scan => blk: {
                 @setEvalBranchQuota(10_000);
-                const Index = std.meta.FieldEnum(GrooveAccounts.IndexTrees);
+                const Index = std.meta.FieldEnum(GrooveTransfers.IndexTrees);
                 const index = prng.enum_uniform(Index);
                 break :blk switch (index) {
                     inline else => |field| {
-                        const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
-                        const min: u128, const max: u128 = switch (Helper.Index) {
+                        const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
+                        const min: u128, const max: u128 = switch (IndexHelper.Type) {
                             void => .{ 0, 0 },
                             else => range: {
-                                var min = random_id(prng, Helper.Index);
+                                var min = random_id(prng, IndexHelper.Type);
                                 var max = if (prng.boolean()) min else random_id(
                                     prng,
-                                    Helper.Index,
+                                    IndexHelper.Type,
                                 );
-                                if (min > max) std.mem.swap(Helper.Index, &min, &max);
+                                if (min > max) std.mem.swap(IndexHelper.Type, &min, &max);
                                 assert(min <= max);
                                 break :range .{ min, max };
                             },
                         };
 
                         break :blk FuzzOpAction{
-                            .scan_account = .{
+                            .scan = .{
                                 .index = index,
                                 .min = min,
                                 .max = max,
@@ -987,10 +1019,11 @@ pub fn generate_fuzz_ops(
                 op += 1;
                 puts_since_compact = 0;
             },
-            .put_account => puts_since_compact += 1,
-            .get_account => {},
-            .exists_account => {},
-            .scan_account => {},
+            .put => puts_since_compact += 1,
+            .get_by_id => {},
+            .get_by_timestamp => {},
+            .get_by_pending_id => {},
+            .scan => {},
         }
     }
 
@@ -1033,40 +1066,52 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
     } };
 }
 
-fn generate_put_account(
+fn generate_put(
     prng: *stdx.PRNG,
-    id_to_account: *const std.AutoHashMap(u128, Account),
+    id_to_object: *const std.AutoHashMap(u128, tb.Transfer),
     timestamp: u64,
 ) FuzzOpAction {
     const id = random_id(prng, u128);
-    var account = id_to_account.get(id) orelse Account{
+    var object: tb.Transfer = id_to_object.get(id) orelse .{
+        // `id` is the primary key.
         .id = id,
-        // `timestamp` must be unique.
+        // `timestamp` is a unique key.
         .timestamp = timestamp,
-        .user_data_128 = random_id(prng, u128),
-        .user_data_64 = random_id(prng, u64),
-        .user_data_32 = random_id(prng, u32),
-        .reserved = 0,
-        .ledger = random_id(prng, u32),
-        .code = random_id(prng, u16),
-        .flags = .{
-            .debits_must_not_exceed_credits = prng.boolean(),
-            .credits_must_not_exceed_debits = prng.boolean(),
-            .imported = prng.boolean(),
-            .closed = prng.boolean(),
-        },
-        .debits_pending = 0,
-        .debits_posted = 0,
-        .credits_pending = 0,
-        .credits_posted = 0,
+        // `pending_id` is a unique key, but optional.
+        // Don't use `random_id` to avoid collision.
+        .pending_id = if (prng.boolean() or id_to_object.count() == 0) 0 else prng.int(u128),
+
+        .debit_account_id = 0,
+        .credit_account_id = 0,
+        .user_data_128 = 0,
+        .user_data_64 = 0,
+        .user_data_32 = 0,
+        .ledger = 0,
+        .code = 0,
+        .flags = .{},
+        .timeout = 0,
+        .amount = 0,
     };
 
-    // These are the only fields we are allowed to change on existing accounts.
-    account.debits_pending = prng.int(u64);
-    account.debits_posted = prng.int(u64);
-    account.credits_pending = prng.int(u64);
-    account.credits_posted = prng.int(u64);
-    return FuzzOpAction{ .put_account = account };
+    // Although the StateMachine does not allow mutating a `Transfer`,
+    // the LSM object and secondary indexes can still be updated,
+    // so we do it for fuzzing purposes.
+    object.debit_account_id = random_id(prng, u128);
+    object.credit_account_id = random_id(prng, u128);
+    object.user_data_128 = random_id(prng, u128);
+    object.user_data_64 = random_id(prng, u64);
+    object.user_data_32 = random_id(prng, u32);
+    object.ledger = random_id(prng, u32);
+    object.code = random_id(prng, u16);
+    object.timeout = if (prng.boolean()) 0 else prng.int(u32);
+    object.flags.imported = prng.boolean();
+    object.flags.closing_debit = prng.boolean();
+    object.flags.closing_credit = prng.boolean();
+
+    // Increment this field as a version indicator.
+    object.amount += 1;
+
+    return FuzzOpAction{ .put = object };
 }
 
 const io_latency_mean_ticks = 20;

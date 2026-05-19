@@ -286,8 +286,7 @@ pub const TestContext = struct {
 
     fn get_account_from_cache(context: *TestContext, id: u128) ?Account {
         return switch (context.state_machine.forest.grooves.accounts.get(id)) {
-            .found_object => |a| a,
-            .found_orphaned_id => unreachable,
+            .found_object => |object| object,
             .not_found => null,
         };
     }

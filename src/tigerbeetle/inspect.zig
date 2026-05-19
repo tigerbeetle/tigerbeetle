@@ -392,14 +392,9 @@ fn print_objects(output: std.io.AnyWriter) !void {
         const Groove = groove_field.type;
         const ObjectTree = Groove.ObjectTree;
 
-        comptime var size_total: usize = 0;
-
         const object_size = @sizeOf(ObjectTree.Table.Value);
+        comptime var size_total: usize = 0;
         size_total += object_size;
-
-        const id_size = if (Groove.IdTree == void) 0 else @sizeOf(Groove.IdTree.Table.Value);
-        size_total += id_size;
-
         comptime {
             for (std.meta.fields(Groove.IndexTrees)) |index_field| {
                 const IndexTree = index_field.type;
@@ -413,9 +408,6 @@ fn print_objects(output: std.io.AnyWriter) !void {
 
         try print_header(output, 1, "object");
         try print_size_count(output, object_size, ObjectTree.Table.value_count_max);
-
-        try print_header(output, 1, "id");
-        try print_size_count(output, id_size, 1);
 
         inline for (std.meta.fields(Groove.IndexTrees)) |index_field| {
             const IndexTree = index_field.type;

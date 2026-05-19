@@ -108,6 +108,22 @@ pub fn is_composite_key(comptime Value: type) bool {
     return false;
 }
 
+comptime {
+    assert(is_composite_key(CompositeKeyType(void)));
+    assert(is_composite_key(CompositeKeyType(u64)));
+    assert(is_composite_key(CompositeKeyType(u128)));
+
+    const UniqueKeyType = @import("unique_key.zig").UniqueKeyType;
+    assert(!is_composite_key(UniqueKeyType(u64)));
+    assert(!is_composite_key(UniqueKeyType(u128)));
+
+    assert(!is_composite_key(u64));
+    assert(!is_composite_key(u128));
+    assert(!is_composite_key(struct { field: void, timestamp: u64 }));
+    assert(!is_composite_key(struct { field: u64, timestamp: u64 }));
+    assert(!is_composite_key(struct { field: u128, timestamp: u64 }));
+}
+
 test "composite_key - u64 and u128" {
     inline for (.{ u128, u64 }) |Prefix| {
         const CompositeKey = CompositeKeyType(Prefix);
