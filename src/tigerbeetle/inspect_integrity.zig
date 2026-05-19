@@ -173,17 +173,20 @@ fn init(
     integrity.superblock.working.vsr_state.assert_internally_consistent();
     log.info("superblock opened and checked", .{});
 
-    integrity.client_sessions_checkpoint = try CheckpointTrailer.init(
-        gpa,
-        .client_sessions,
-        vsr.ClientSessions.encode_size,
-    );
-    errdefer integrity.client_sessions_checkpoint.deinit(gpa);
+    const stash_blocks_count =
+        constants.grid_iops_read_max +
+        // Scans: *2 is for 1 index and 1 value block (per scan per level).
+        constants.lsm_scans_max * @as(u64, constants.lsm_levels) * 2 +
+        Forest.Options.compaction_block_count_min +
+        vsr.checkpoint_trailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size) +
+        Forest.manifest_log_compaction_pace.blocks_count() +
+        1; // GridScrubber.tour_index_block
 
     integrity.grid = try Grid.init(gpa, .{
         .superblock = &integrity.superblock,
         .trace = tracer,
         .cache_blocks_count = Grid.Cache.value_count_max_multiple,
+        .stash_blocks_count = stash_blocks_count,
         .missing_blocks_max = constants.grid_missing_blocks_max,
         .missing_tables_max = constants.grid_missing_tables_max,
         .blocks_released_prior_checkpoint_durability_max = Forest
@@ -191,6 +194,13 @@ fn init(
             vsr.checkpoint_trailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size),
     });
     errdefer integrity.grid.deinit(gpa);
+
+    integrity.client_sessions_checkpoint = try CheckpointTrailer.init(
+        gpa,
+        .client_sessions,
+        vsr.ClientSessions.encode_size,
+    );
+    errdefer integrity.client_sessions_checkpoint.deinit(gpa);
 
     try integrity.forest.init(
         gpa,
@@ -288,11 +298,11 @@ fn deinit(integrity: *Integrity, gpa: std.mem.Allocator) void {
     gpa.free(integrity.buffer_headers);
     gpa.free(integrity.buffer_prepare);
 
+    integrity.client_sessions_checkpoint.deinit(gpa);
     integrity.grid_blocks_scrubbed.deinit(gpa);
     integrity.grid_scrubber.deinit(gpa);
     integrity.forest.deinit(gpa);
     integrity.grid.deinit(gpa);
-    integrity.client_sessions_checkpoint.deinit(gpa);
     integrity.superblock.deinit(gpa);
     integrity.storage.deinit();
 }

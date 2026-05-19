@@ -7,11 +7,12 @@ const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const is_composite_key = @import("composite_key.zig").is_composite_key;
 
+const GridType = @import("../vsr/grid.zig").GridType;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const ScanMergeUnionType = @import("scan_merge.zig").ScanMergeUnionType;
 const ScanMergeIntersectionType = @import("scan_merge.zig").ScanMergeIntersectionType;
 const ScanMergeDifferenceType = @import("scan_merge.zig").ScanMergeDifferenceType;
-const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
+const ScanBufferType = @import("scan_buffer.zig").ScanBufferType;
 const ScanState = @import("scan_state.zig").ScanState;
 
 const Direction = @import("../direction.zig").Direction;
@@ -54,6 +55,7 @@ pub fn ScanBuilderType(
     return struct {
         const ScanBuilder = @This();
 
+        const ScanBuffer = ScanBufferType(GridType(Storage));
         pub const Scan = ScanType(Groove, Storage);
 
         /// Each `ScanTree` consumes memory and I/O, so they are limited by `lsm_scans_max`.
@@ -101,7 +103,7 @@ pub fn ScanBuilderType(
         pub fn scan_prefix(
             self: *ScanBuilder,
             comptime index: std.meta.FieldEnum(Groove.IndexTrees),
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             prefix: CompositeKeyPrefixType(index),
             timestamp_range: TimestampRange,
@@ -127,7 +129,7 @@ pub fn ScanBuilderType(
         /// Results are always unique.
         pub fn scan_id(
             self: *ScanBuilder,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             id: u128,
             direction: Direction,
@@ -153,7 +155,7 @@ pub fn ScanBuilderType(
         /// Results are ordered by `timestamp`.
         pub fn scan_timestamp(
             self: *ScanBuilder,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             snapshot: u64,
             timestamp_range: TimestampRange,
             direction: Direction,
