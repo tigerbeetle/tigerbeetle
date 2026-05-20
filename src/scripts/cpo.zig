@@ -324,11 +324,13 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
     const benchmark_result = try shell.exec_stdout(
-        "./tigerbeetle benchmark --transfer-count=1_000_000 --file={block_device}",
+        "./tigerbeetle benchmark --transfer-count=1_000_000_000 --file={block_device}",
         .{ .block_device = block_device },
     );
 
-    // TODO: track more metrics here.
+    const batch_p1_ms = try get_measurement(benchmark_result, "batch latency p1  ", "ms");
+    const batch_p50_ms = try get_measurement(benchmark_result, "batch latency p50 ", "ms");
+    const batch_p99_ms = try get_measurement(benchmark_result, "batch latency p99 ", "ms");
     const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
 
@@ -341,6 +343,9 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
         },
         .metrics = &[_]Metric{
             .{ .name = "long TPS", .value = tps, .unit = "count" },
+            .{ .name = "long batch p1", .value = batch_p1_ms, .unit = "ms" },
+            .{ .name = "long batch p50", .value = batch_p50_ms, .unit = "ms" },
+            .{ .name = "long batch p99", .value = batch_p99_ms, .unit = "ms" },
             .{ .name = "long batch p100", .value = batch_p100_ms, .unit = "ms" },
         },
     };
