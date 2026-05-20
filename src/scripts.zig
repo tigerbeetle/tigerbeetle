@@ -18,6 +18,7 @@ const cfo = @import("./scripts/cfo.zig");
 const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
+const cpo = @import("./scripts/cpo.zig");
 const changelog = @import("./scripts/changelog.zig");
 const amqp = @import("./scripts/amqp.zig");
 
@@ -38,6 +39,7 @@ const CLIArgs = union(enum) {
     ci: ci.CLIArgs,
     release: release.CLIArgs,
     devhub: devhub.CLIArgs,
+    cpo: cpo.CLIArgs,
     changelog: void,
     amqp: amqp.CLIArgs,
 
@@ -54,6 +56,8 @@ const CLIArgs = union(enum) {
         \\                          [--build-docs]
         \\
         \\  zig build scripts -- devhub --sha=<commit>
+        \\
+        \\  zig build scripts -- cpo [--sha=<commit>]
         \\
         \\  zig build scripts -- release --sha=<commit>
         \\
@@ -99,6 +103,7 @@ pub fn main() !void {
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
+        .cpo => |args_cpo| try cpo.main(shell, gpa, args_cpo),
         .changelog => try changelog.main(shell, gpa),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
     }
