@@ -116,7 +116,6 @@ module TigerBeetle
     private
 
     def native_submit(operation, payload)
-      return [] if payload.empty?
       raise ClientClosedError if closed?
 
       req = COMPLETION_DISPATCHER.submit_and_wait_for(@native, operation, payload)

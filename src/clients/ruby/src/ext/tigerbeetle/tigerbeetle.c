@@ -4,10 +4,10 @@
 #include "ruby.h"
 #include "ruby/thread.h"
 #include "tb_client.h"
-#include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -49,7 +49,25 @@ void Init_tigerbeetle(void) {
     rb_tb_init_native_client(rb_mTigerBeetle);
 }
 
-#pragma region Ruby Bridge
+static inline void tb_assert_fail(
+    const char *condition,
+    const char *file,
+    int line,
+    const char *function
+) {
+    fprintf(stderr, "tb_assert failed: %s at %s:%d in %s\n", condition, file, line, function);
+    abort();
+}
+
+// Macro inspired by PostgreSQL.
+// See: https://github.com/postgres/postgres/blob/REL_18_4/src/include/c.h#L852-L856
+// do { ... } while (0) makes it safe in braceless if/else constructs.
+#define tb_assert(condition) \
+    do { \
+        if (!(condition)) { \
+            tb_assert_fail(#condition, __FILE__, __LINE__, __func__); \
+        } \
+    } while (0)
 
 static void rb_tb_request_free(void *ptr) {
     rb_tb_request_t *req = (rb_tb_request_t *)ptr;
@@ -59,7 +77,7 @@ static void rb_tb_request_free(void *ptr) {
         return;
     }
     // Callback already fired (state == REQ_DONE), we own cleanup.
-    assert(expected == REQ_DONE);
+    tb_assert(expected == REQ_DONE);
     free(req->result);
     free(req);
 }
@@ -96,7 +114,9 @@ static VALUE rb_tb_request_result(VALUE self) {
         if (req->result_size == 0) {
             result = rb_ary_new();
         } else {
-            assert(req->result != NULL);
+            if (!req->result) {
+                rb_raise(rb_eNoMemError, "failed to allocate result buffer");
+            }
             result = rb_tb_deserialize(req->operation, req->result, req->result_size);
         }
     }
@@ -108,7 +128,7 @@ static void rb_tb_write_completion(int fd, rb_tb_request_t *req) {
     uint64_t request_id = (uint64_t)(uintptr_t)req;
     ssize_t written = write(fd, &request_id, sizeof(request_id));
     (void)written;
-    assert(written == sizeof(request_id));
+    tb_assert(written == sizeof(request_id));
 }
 
 static void rb_tb_on_completion(
@@ -127,19 +147,20 @@ static void rb_tb_on_completion(
 
     if (packet->status == TB_PACKET_OK) {
         req->result_size = result_size;
-        assert(result != NULL);
+        tb_assert(result != NULL);
 
         if (result_size > 0) {
             req->result = malloc(result_size);
-            assert(req->result != NULL);
-            memcpy(req->result, result, result_size);
+            if (req->result) {
+                memcpy(req->result, result, result_size);
+            }
         }
     }
 
     rb_tb_request_state_t expected = REQ_PENDING;
     if (!atomic_compare_exchange_strong(&req->state, &expected, REQ_DONE)) {
         // dfree already ran (state == REQ_ABANDONED). We own cleanup.
-        assert(expected == REQ_ABANDONED);
+        tb_assert(expected == REQ_ABANDONED);
         free(req->result);
         free(req);
         return;
@@ -147,10 +168,6 @@ static void rb_tb_on_completion(
 
     rb_tb_write_completion((int)completion_ctx, req);
 }
-
-#pragma endregion
-
-#pragma region Native Client
 
 static void rb_tb_client_free(void *ptr) {
     tb_client_deinit((tb_client_t *)ptr);
@@ -307,5 +324,3 @@ static void rb_tb_init_native_client(VALUE mTigerBeetle) {
     rb_define_method(rb_cRequest, "id", rb_tb_request_id, 0);
     rb_define_method(rb_cRequest, "result", rb_tb_request_result, 0);
 }
-
-#pragma endregion
