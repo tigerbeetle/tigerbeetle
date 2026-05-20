@@ -191,6 +191,17 @@ pub fn ClientType(
             self.message_bus.deinit(allocator);
         }
 
+        /// Begin a graceful shutdown of the underlying message bus connections. The caller
+        /// must continue to drive `io.run_for_ns()` until `shutdown_complete()` returns true
+        /// before calling `deinit()`.
+        pub fn shutdown(self: *Client) void {
+            self.message_bus.shutdown();
+        }
+
+        pub fn shutdown_complete(self: *const Client) bool {
+            return self.message_bus.shutdown_complete();
+        }
+
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
             while (buffer.next_header()) |header| {
