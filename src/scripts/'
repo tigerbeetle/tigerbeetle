@@ -80,10 +80,10 @@ const Worktrees = struct {
     path_worktree: []const u8,
 
     fn remove(worktrees: Worktrees, shell: *Shell) void {
-        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.path_baseline }) catch |err| {
+        shell.exec("git worktree remove --force {}", .{ worktrees.path_baseline }) catch |err| {
             log.err("failed to remove baseline worktree {s}: {}", .{ worktrees.path_baseline, err });
         };
-        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.path_worktree }) catch |err| {
+        shell.exec("git worktree remove --force {}", .{ worktrees.path_worktree }) catch |err| {
             log.err("failed to remove comparison worktree {s}: {}", .{ worktrees.path_worktree, err });
         };
         shell.project_root.deleteTree(worktrees.path_root) catch |err| {
@@ -200,30 +200,26 @@ fn build_worktrees_step(
 
     const cmd = switch (build_step) {
         .release => "build -Drelease install",
-        .micro => "build test:unit:build -- benchmark: ",
+        .micro => "build test:unit:build -- \"benchmark: k-way\"",
     };
 
     try shell.pushd(context_baseline.path);
     defer shell.popd();
 
     var child_baseline: std.process.Child = try shell.spawn_zig(.{}, cmd, .{});
-    errdefer {
-        _ = child_baseline.kill() catch unreachable;
-    }
+    errdefer child_baseline.kill();
 
     try shell.pushd(context_worktree.path);
     defer shell.popd();
 
     var child_worktree: std.process.Child = try shell.spawn_zig(.{}, cmd, .{});
-    errdefer {
-        _ = child_worktree.kill() catch unreachable;
-    }
+    errdefer child_worktree.kill();
 
 
     const term_baseline = try child_worktree.wait();
     const term_worktree = try child_baseline.wait();
 
-    inline for (.{ term_baseline, term_worktree }) |term| {
+    for (.{ term_baseline, term_worktree }) |term| {
         switch (term) {
             .Exited => |code| if (code != 0) return error.ExecNonZeroExitStatus,
             else => return error.ExecFailed,
