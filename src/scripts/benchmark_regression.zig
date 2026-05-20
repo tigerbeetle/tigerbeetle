@@ -46,7 +46,7 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     });
     defer worktrees.remove(shell);
 
-    try build_worktrees(worktrees);
+    try build_worktrees(shell, worktrees);
 
     const baseline = try run_benchmarks(shell, "baseline", worktrees.baseline_path);
     const current = try run_benchmarks(shell, "current", worktrees.current_path);
@@ -157,20 +157,12 @@ const BuildContext = struct {
     env_map: *std.process.EnvMap,
 };
 
-fn build_worktrees(worktrees: Worktrees) !void {
-    var section = try std.time.Timer.start();
-    defer log.info("build benchmark artifacts: {}", .{std.fmt.fmtDuration(section.read())});
+fn build_worktrees(shell: *Shell, worktrees: Worktrees) !void {
+    var section = try shell.open_section("build benchmark artifacts");
+    defer section.close();
 
-    const zig_exe_env = std.process.getEnvVarOwned(
-        std.heap.page_allocator,
-        "ZIG_EXE",
-    ) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => null,
-        else => |e| return e,
-    };
-    defer if (zig_exe_env) |zig_exe| std.heap.page_allocator.free(zig_exe);
-
-    const zig_exe = zig_exe_env orelse "./zig/zig";
+    const zig_exe = shell.env_get_option("ZIG_EXE") orelse
+        try shell.project_root.realpathAlloc(shell.arena.allocator(), "zig/zig");
 
     var env_map = try std.process.getEnvMap(std.heap.page_allocator);
     defer env_map.deinit();
@@ -458,10 +450,12 @@ fn has_duration_measurement(output: []const u8, label: []const u8) bool {
 }
 
 fn has_github_label(shell: *Shell, expected_label: []const u8) !bool {
-    if (try has_github_event_label(shell, expected_label)) {
+    const event = try read_github_event(shell);
+
+    if (has_github_event_label(event, expected_label)) {
         return true;
     }
-    if (try has_github_merge_group_label(shell, expected_label)) {
+    if (try has_github_merge_group_label(shell, event, expected_label)) {
         return true;
     }
 
@@ -492,61 +486,56 @@ const GhEvent = struct {
     repository: ?GhRepository = null,
 };
 
-fn has_github_event_label(shell: *Shell, expected_label: []const u8) !bool {
-    const event_path = shell.env_get_option("GITHUB_EVENT_PATH") orelse return false;
-    const event_text = read_file_absolute_alloc(shell.arena.allocator(), event_path, 16 * stdx.MiB) catch |err| {
+fn read_github_event(shell: *Shell) !?GhEvent {
+    const event_path = shell.env_get_option("GITHUB_EVENT_PATH") orelse return null;
+    const event_text = read_file_absolute_alloc(
+        shell.arena.allocator(),
+        event_path,
+        16 * stdx.MiB,
+    ) catch |err| {
         log.warn("could not read GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
-        return false;
+        return null;
     };
 
-    const event = std.json.parseFromSliceLeaky(
+    return std.json.parseFromSliceLeaky(
         GhEvent,
         shell.arena.allocator(),
         event_text,
         .{ .ignore_unknown_fields = true },
     ) catch |err| {
         log.warn("could not parse GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
-        return false;
+        return null;
     };
+}
 
-    if (event.pull_request) |pull_request| {
+fn has_github_event_label(event: ?GhEvent, expected_label: []const u8) bool {
+    const event_unwrapped = event orelse return false;
+
+    if (event_unwrapped.pull_request) |pull_request| {
         if (has_label_name(pull_request.labels, expected_label)) return true;
     }
-    if (event.issue) |issue| {
+    if (event_unwrapped.issue) |issue| {
         if (has_label_name(issue.labels, expected_label)) return true;
     }
 
     return false;
 }
 
-fn has_github_merge_group_label(shell: *Shell, expected_label: []const u8) !bool {
+fn has_github_merge_group_label(
+    shell: *Shell,
+    event: ?GhEvent,
+    expected_label: []const u8,
+) !bool {
     if (!std.mem.eql(u8, shell.env_get_option("GITHUB_EVENT_NAME") orelse "", "merge_group")) {
         return false;
     }
-    if (shell.env_get_option("GH_TOKEN") == null and
-        shell.env_get_option("GITHUB_TOKEN") == null)
-    {
+    if (!has_github_token(shell)) {
         return false;
     }
 
-    const event_path = shell.env_get_option("GITHUB_EVENT_PATH") orelse return false;
-    const event_text = read_file_absolute_alloc(shell.arena.allocator(), event_path, 16 * stdx.MiB) catch |err| {
-        log.warn("could not read GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
-        return false;
-    };
-
-    const event = std.json.parseFromSliceLeaky(
-        GhEvent,
-        shell.arena.allocator(),
-        event_text,
-        .{ .ignore_unknown_fields = true },
-    ) catch |err| {
-        log.warn("could not parse GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
-        return false;
-    };
-
-    const merge_group = event.merge_group orelse return false;
-    const repository = if (event.repository) |repository|
+    const event_unwrapped = event orelse return false;
+    const merge_group = event_unwrapped.merge_group orelse return false;
+    const repository = if (event_unwrapped.repository) |repository|
         repository.full_name
     else
         shell.env_get_option("GITHUB_REPOSITORY") orelse return false;
@@ -601,9 +590,7 @@ fn has_github_merge_group_label(shell: *Shell, expected_label: []const u8) !bool
 }
 
 fn has_github_pr_label(shell: *Shell, expected_label: []const u8) !bool {
-    if (shell.env_get_option("GH_TOKEN") == null and
-        shell.env_get_option("GITHUB_TOKEN") == null)
-    {
+    if (!has_github_token(shell)) {
         return false;
     }
 
@@ -649,6 +636,11 @@ fn has_label_line(labels: []const u8, expected_label: []const u8) bool {
     }
 
     return false;
+}
+
+fn has_github_token(shell: *Shell) bool {
+    return shell.env_get_option("GH_TOKEN") != null or
+        shell.env_get_option("GITHUB_TOKEN") != null;
 }
 
 fn has_label_name(labels: []const GhLabel, expected_label: []const u8) bool {
