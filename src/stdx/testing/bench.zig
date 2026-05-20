@@ -54,9 +54,11 @@ test "benchmark: API tutorial" { // `benchmark:` in the name is important!
 const std = @import("std");
 const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
+const maybe = stdx.maybe;
 const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 const Time = @import("time.zig");
+const ratchet = @import("ratchet.zig");
 
 const seed_benchmark: u64 = 42;
 
@@ -145,5 +147,43 @@ pub fn report(_: *const Bench, comptime fmt: []const u8, args: anytype) void {
     switch (mode) {
         .smoke => {},
         .benchmark => std.debug.print(fmt ++ "\n", args),
+    }
+}
+
+pub fn report_ratchet(
+    _: *const Bench,
+    comptime src: std.builtin.SourceLocation,
+    params: anytype,
+    measurements: anytype,
+) void {
+    assert(std.meta.fields(@TypeOf(measurements)).len > 0);
+    switch (mode) {
+        .smoke => {},
+        .benchmark => {
+            var output_buffer: [4096]u8 = undefined;
+            var output = std.io.fixedBufferStream(&output_buffer);
+            const writer = output.writer();
+
+            writer.print("CI_PERF: {s} // ", .{src.fn_name}) catch unreachable;
+            inline for (std.meta.fields(@TypeOf(params))) |field| {
+                writer.print("{s}={any} ", .{
+                    field.name,
+                    @field(params, field.name),
+                }) catch unreachable;
+            }
+            writer.writeAll("// ") catch unreachable;
+            inline for (std.meta.fields(@TypeOf(measurements))) |field| {
+                const field_type = @typeInfo(field.type);
+                comptime assert(field_type == .int or field_type == .float);
+                writer.print("{s}={any} ", .{
+                    field.name,
+                    @field(measurements, field.name),
+                }) catch unreachable;
+            }
+            writer.writeByte('\n') catch unreachable;
+
+            ratchet.measurement_write(src, output.writer(), params, measurements) catch unreachable;
+            std.debug.print("{s}", .{output.getWritten()});
+        },
     }
 }

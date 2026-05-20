@@ -1127,7 +1127,9 @@ comptime {
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
     _ = @import("testing/bench.zig");
+    _ = @import("testing/ratchet.zig");
     _ = @import("testing/snaptest.zig");
+    _ = @import("testing/time.zig");
     _ = @import("time_units.zig");
     _ = @import("unshare.zig");
     _ = @import("vendored/aegis.zig");
