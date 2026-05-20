@@ -313,6 +313,7 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     defer section.close();
 
     const block_device = "/dev/md0";
+    const transfer_count = 100_000_000;
 
     // overwrite the first 96 bytes for block device
     try shell.exec(
@@ -324,8 +325,11 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
     const benchmark_result = try shell.exec_stdout(
-        "./tigerbeetle benchmark --transfer-count=1_000_000_000 --file={block_device}",
-        .{ .block_device = block_device },
+        "./tigerbeetle benchmark --transfer-count={transfer_count} --file={block_device}",
+        .{
+            .transfer_count = transfer_count,
+            .block_device = block_device,
+        },
     );
 
     const batch_p1_ms = try get_measurement(benchmark_result, "batch latency p1  ", "ms");
@@ -347,6 +351,7 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
             .{ .name = "long batch p50", .value = batch_p50_ms, .unit = "ms" },
             .{ .name = "long batch p99", .value = batch_p99_ms, .unit = "ms" },
             .{ .name = "long batch p100", .value = batch_p100_ms, .unit = "ms" },
+            .{ .name = "transfer count", .value = transfer_count, .unit = "count" },
         },
     };
 
