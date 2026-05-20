@@ -219,7 +219,6 @@ fn build_worktrees_step(
         _ = child_worktree.kill() catch unreachable;
     }
 
-
     const term_baseline = try child_worktree.wait();
     const term_worktree = try child_baseline.wait();
 

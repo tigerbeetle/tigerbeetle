@@ -875,6 +875,7 @@ fn build_test(
     test_options.addOption(bool, "benchmark", for (b.args orelse &.{}) |arg| {
         if (std.mem.indexOf(u8, arg, "benchmark") != null) break true;
     } else false);
+    test_options.addOption(bool, "ci", try std.process.hasEnvVar(b.allocator, "CI"));
 
     const stdx_unit_tests = b.addTest(.{
         .name = "test-stdx",
