@@ -276,10 +276,7 @@ fn run_micro_benchmark(shell: *Shell) !MicroBenchmark {
     var section = try shell.open_section("micro benchmark");
     defer section.close();
 
-    const stdout, const stderr = try shell.exec_stdout_stderr(
-        "./zig-out/bin/test-unit {filter}",
-        .{ .filter = "benchmark: k-way" },
-    );
+    const stdout, const stderr = try shell.exec_stdout_stderr("./zig-out/bin/test-unit", .{});
     const output = try std.mem.concat(shell.arena.allocator(), u8, &.{ stdout, "\n", stderr });
 
     return .{
