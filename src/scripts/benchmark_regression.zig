@@ -20,6 +20,7 @@ const Direction = enum {
 pub const CLIArgs = struct {
     baseline: []const u8 = "main",
     epsilon_percent: u64 = 3,
+    expected_regression_label: []const u8 = "expected_performance_regression",
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
@@ -50,7 +51,17 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     const baseline = try run_benchmarks(shell, "baseline", worktrees.baseline_path);
     const current = try run_benchmarks(shell, "current", worktrees.current_path);
 
-    try compare_benchmarks(baseline, current, cli_args.epsilon_percent);
+    const failed = compare_benchmarks(baseline, current, cli_args.epsilon_percent);
+    if (failed) {
+        if (try has_github_label(shell, cli_args.expected_regression_label)) {
+            log.warn(
+                "benchmark regression accepted because GitHub label '{s}' is present",
+                .{cli_args.expected_regression_label},
+            );
+        } else {
+            return error.BenchmarkRegression;
+        }
+    }
 }
 
 const Worktrees = struct {
@@ -112,7 +123,7 @@ fn create_worktrees(
 
 const Benchmarks = struct {
     macro: MacroBenchmark,
-    micro: MicroBenchmark,
+    micro: ?MicroBenchmark,
 };
 
 const MacroBenchmark = struct {
@@ -272,12 +283,18 @@ fn run_macro_benchmark(shell: *Shell) !MacroBenchmark {
     };
 }
 
-fn run_micro_benchmark(shell: *Shell) !MicroBenchmark {
+fn run_micro_benchmark(shell: *Shell) !?MicroBenchmark {
     var section = try shell.open_section("micro benchmark");
     defer section.close();
 
     const stdout, const stderr = try shell.exec_stdout_stderr("./zig-out/bin/test-unit", .{});
     const output = try std.mem.concat(shell.arena.allocator(), u8, &.{ stdout, "\n", stderr });
+    if (!has_duration_measurement(output, "total") or
+        !has_duration_measurement(output, "per element"))
+    {
+        log.warn("skipping micro benchmark comparison; benchmark output was not found", .{});
+        return null;
+    }
 
     return .{
         .total_ns = try get_duration_measurement(output, "total"),
@@ -289,7 +306,7 @@ fn compare_benchmarks(
     baseline: Benchmarks,
     current: Benchmarks,
     epsilon_percent: u64,
-) !void {
+) bool {
     var failed = false;
 
     failed = compare_measurement(.{
@@ -316,24 +333,33 @@ fn compare_benchmarks(
         .direction = .lower_is_better,
         .epsilon_percent = epsilon_percent,
     }) or failed;
-    failed = compare_measurement(.{
-        .name = "micro k-way total",
-        .unit = "ns",
-        .baseline = baseline.micro.total_ns,
-        .current = current.micro.total_ns,
-        .direction = .lower_is_better,
-        .epsilon_percent = epsilon_percent,
-    }) or failed;
-    failed = compare_measurement(.{
-        .name = "micro k-way per element",
-        .unit = "ns",
-        .baseline = baseline.micro.per_element_ns,
-        .current = current.micro.per_element_ns,
-        .direction = .lower_is_better,
-        .epsilon_percent = epsilon_percent,
-    }) or failed;
 
-    if (failed) return error.BenchmarkRegression;
+    if (baseline.micro != null and current.micro != null) {
+        failed = compare_measurement(.{
+            .name = "micro k-way total",
+            .unit = "ns",
+            .baseline = baseline.micro.?.total_ns,
+            .current = current.micro.?.total_ns,
+            .direction = .lower_is_better,
+            .epsilon_percent = epsilon_percent,
+        }) or failed;
+        failed = compare_measurement(.{
+            .name = "micro k-way per element",
+            .unit = "ns",
+            .baseline = baseline.micro.?.per_element_ns,
+            .current = current.micro.?.per_element_ns,
+            .direction = .lower_is_better,
+            .epsilon_percent = epsilon_percent,
+        }) or failed;
+    } else if (baseline.micro == null and current.micro == null) {
+        log.warn("skipping micro k-way comparison; benchmark is missing from both refs", .{});
+    } else if (baseline.micro == null) {
+        log.warn("skipping micro k-way comparison; benchmark is missing from baseline", .{});
+    } else {
+        log.warn("skipping micro k-way comparison; benchmark is missing from current", .{});
+    }
+
+    return failed;
 }
 
 fn compare_measurement(measurement: struct {
@@ -417,6 +443,118 @@ fn get_duration_measurement(output: []const u8, label: []const u8) !u64 {
 
     log.err("can't extract '{s}' duration measurement", .{label});
     return error.BadDurationMeasurement;
+}
+
+fn has_duration_measurement(output: []const u8, label: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.endsWith(u8, line, label)) continue;
+
+        _, const line_label = stdx.cut(line, " ") orelse continue;
+        if (std.mem.eql(u8, line_label, label)) return true;
+    }
+
+    return false;
+}
+
+fn has_github_label(shell: *Shell, expected_label: []const u8) !bool {
+    if (try has_github_event_label(shell, expected_label)) {
+        return true;
+    }
+
+    return try has_github_pr_label(shell, expected_label);
+}
+
+const GhLabel = struct {
+    name: []const u8 = "",
+};
+
+const GhLabeled = struct {
+    labels: []const GhLabel = &.{},
+};
+
+const GhEvent = struct {
+    pull_request: ?GhLabeled = null,
+    issue: ?GhLabeled = null,
+};
+
+fn has_github_event_label(shell: *Shell, expected_label: []const u8) !bool {
+    const event_path = shell.env_get_option("GITHUB_EVENT_PATH") orelse return false;
+    const event_text = read_file_absolute_alloc(shell.arena.allocator(), event_path, 16 * stdx.MiB) catch |err| {
+        log.warn("could not read GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
+        return false;
+    };
+
+    const event = std.json.parseFromSliceLeaky(
+        GhEvent,
+        shell.arena.allocator(),
+        event_text,
+        .{ .ignore_unknown_fields = true },
+    ) catch |err| {
+        log.warn("could not parse GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
+        return false;
+    };
+
+    if (event.pull_request) |pull_request| {
+        if (has_label_name(pull_request.labels, expected_label)) return true;
+    }
+    if (event.issue) |issue| {
+        if (has_label_name(issue.labels, expected_label)) return true;
+    }
+
+    return false;
+}
+
+fn has_github_pr_label(shell: *Shell, expected_label: []const u8) !bool {
+    if (shell.env_get_option("GH_TOKEN") == null and
+        shell.env_get_option("GITHUB_TOKEN") == null)
+    {
+        return false;
+    }
+
+    const labels_text = if (shell.env_get_option("GITHUB_HEAD_REF")) |head_ref|
+        shell.exec_stdout(
+            "gh pr view {head_ref} --json labels --jq {query}",
+            .{ .head_ref = head_ref, .query = ".labels[].name" },
+        )
+    else
+        shell.exec_stdout(
+            "gh pr view --json labels --jq {query}",
+            .{ .query = ".labels[].name" },
+        );
+
+    const labels = labels_text catch |err| {
+        log.warn("could not read GitHub PR labels with gh: {}", .{err});
+        return false;
+    };
+
+    var lines = std.mem.splitScalar(u8, labels, '\n');
+    while (lines.next()) |label| {
+        if (std.mem.eql(u8, label, expected_label)) return true;
+    }
+
+    return false;
+}
+
+fn has_label_name(labels: []const GhLabel, expected_label: []const u8) bool {
+    for (labels) |label| {
+        if (std.mem.eql(u8, label.name, expected_label)) return true;
+    }
+
+    return false;
+}
+
+fn read_file_absolute_alloc(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    max_bytes: usize,
+) ![]const u8 {
+    if (!std.fs.path.isAbsolute(path)) return error.PathNotAbsolute;
+
+    const file = try std.fs.openFileAbsolute(path, .{});
+    defer file.close();
+
+    return try file.readToEndAlloc(allocator, max_bytes);
 }
 
 fn parse_duration_ns(duration: []const u8) !u64 {

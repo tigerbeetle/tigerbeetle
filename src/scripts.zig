@@ -57,6 +57,7 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\  zig build scripts -- benchmark-regression [--baseline=<ref>] [--epsilon-percent=<percent>]
+        \\                                            [--expected-regression-label=<label>]
         \\
         \\  zig build scripts -- release --sha=<commit>
         \\
