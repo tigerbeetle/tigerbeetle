@@ -53,7 +53,7 @@ test "benchmark: API tutorial" { // `benchmark:` in the name is important!
 
 const std = @import("std");
 const assert = std.debug.assert;
-const stdx = @import("stdx");
+const stdx = @import("../stdx.zig");
 const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 const TimeOS = @import("../time.zig").TimeOS;
@@ -115,14 +115,14 @@ pub fn start(bench: *Bench) void {
     assert(bench.timer == null);
     defer assert(bench.timer != null);
 
-    bench.timer = bench.time.time().monotonic();
+    bench.timer = bench.time.monotonic();
 }
 
 pub fn stop(bench: *Bench) Duration {
     assert(bench.timer != null);
     defer assert(bench.timer == null);
 
-    const instant_stop = bench.time.time().monotonic();
+    const instant_stop = bench.time.monotonic();
     const elapsed = bench.timer.?.elapsed(instant_stop);
     bench.timer = null;
     return elapsed;

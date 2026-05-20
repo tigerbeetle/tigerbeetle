@@ -13,6 +13,7 @@ pub const IOPSType = @import("iops.zig").IOPSType;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
 pub const PRNG = @import("prng.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+pub const Bench = @import("testing/bench.zig");
 pub const Snap = @import("testing/snaptest.zig").Snap;
 pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
@@ -1254,6 +1255,7 @@ comptime {
     _ = @import("shell.zig");
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
+    _ = @import("testing/bench.zig");
     _ = @import("testing/snaptest.zig");
     _ = @import("time_units.zig");
     _ = @import("unshare.zig");
