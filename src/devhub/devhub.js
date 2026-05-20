@@ -236,16 +236,36 @@ async function main_seeds() {
 async function main_metrics() {
   const data_url =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
-  const data = await (await fetch(data_url)).text();
+  const cpo_long_data_url =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb-cpo/main/long/data.json";
   const max_batches = 200;
-  const batches = data.split("\n")
-    .filter((it) => it.length > 0)
-    .map((it) => JSON.parse(it))
-    .slice(-1 * max_batches)
-    .reverse();
 
+  const batches = await fetch_batches(data_url, max_batches);
   const series = batches_to_series(batches);
   plot_series(series, document.querySelector("#charts"), batches.length);
+
+  try {
+    const cpo_long_batches = await fetch_batches(
+      cpo_long_data_url,
+      max_batches,
+    );
+    const cpo_long_tps_batches = filter_batches_metrics(cpo_long_batches, [
+      "long TPS",
+      "long batch p100",
+    ]);
+    const cpo_long_tps_series = batches_to_series(cpo_long_tps_batches);
+    plot_series(
+      cpo_long_tps_series,
+      document.querySelector("#cpo-charts"),
+      cpo_long_tps_batches.length,
+      {
+        group: "devhub-cpo",
+        outlier_count: 0,
+      },
+    );
+  } catch (error) {
+    console.error("Failed to load CPO metrics", error);
+  }
 }
 
 function is_main(record) {
@@ -267,6 +287,27 @@ function pull_request_number(record) {
     return parseInt(pr_number, 10);
   }
   return undefined;
+}
+
+async function fetch_batches(url, max_batches) {
+  const data = await (await fetch(url, { cache: "no-cache" })).text();
+  return data.split("\n")
+    .filter((it) => it.length > 0)
+    .map((it) => JSON.parse(it))
+    .slice(-1 * max_batches)
+    .reverse();
+}
+
+function filter_batches_metrics(batches, metric_names) {
+  const metric_names_set = new Set(metric_names);
+  return batches
+    .map((batch) => ({
+      ...batch,
+      metrics: batch.metrics.filter((metric) =>
+        metric_names_set.has(metric.name)
+      ),
+    }))
+    .filter((batch) => batch.metrics.length > 0);
 }
 
 function format_duration(duration_ms) {
@@ -359,9 +400,10 @@ function batches_to_series(batches) {
   return Array.from(results.values());
 }
 
-function plot_series(series_list, root_node, batch_count) {
+function plot_series(series_list, root_node, batch_count, options_extra = {}) {
   const now_seconds = Date.now() / 1000;
-  const outlier_count = 3;
+  const outlier_count = options_extra.outlier_count ?? 3;
+  const group = options_extra.group ?? "devhub";
 
   const outile_indices = series_list.map(
     (series, index) => ({
@@ -386,7 +428,7 @@ function plot_series(series_list, root_node, batch_count) {
       },
       chart: {
         id: series.name,
-        group: "devhub",
+        group: group,
         type: "line",
         height: "400px",
         animations: {

@@ -178,12 +178,12 @@ section#fuzz-runs {
     }
 }
 
-section#metrics {
+section.metrics {
     display: flex;
     flex-direction: column;
     gap: 12px;
 
-    #charts {
+    .charts {
         border: 1px solid var(--gray-4);
         border-radius: 6px;
         display: flex;
@@ -199,7 +199,7 @@ section#metrics {
 }
 
 @media (prefers-color-scheme: dark) {
-    #charts {
+    .charts {
         color: var(--gray-1);
 
         >div {
