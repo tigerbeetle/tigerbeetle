@@ -167,6 +167,11 @@ const Environment = struct {
             const model_value = env.model.get(TestTable.key_from_value(stash_value));
 
             // Even if the stash has stale values, the key must still exist in the model.
+            if (TestTable.tombstone(stash_value)) {
+                stdx.maybe(model_value == null);
+                continue;
+            }
+            assert(!TestTable.tombstone(stash_value));
             assert(model_value != null);
 
             const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
@@ -360,6 +365,8 @@ pub fn generate_fuzz_ops(
                 } };
             },
             .remove => blk: {
+                upserts_since_compact += 1; // remove() adds a tombstone to the stash.
+
                 if (scope_is_open) {
                     operations_since_scope_open += 1;
                 }

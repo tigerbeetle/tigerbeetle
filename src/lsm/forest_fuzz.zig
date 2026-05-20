@@ -33,6 +33,7 @@ const FuzzOpAction = union(enum) {
         checkpoint_durable: bool,
     },
     put: tb.Transfer,
+    remove: u128,
     get_by_id: UniqueKey,
     get_by_timestamp: UniqueKey,
     get_by_pending_id: UniqueKey,
@@ -60,7 +61,7 @@ const GrooveTransfers = @FieldType(
     @FieldType(Forest, "grooves"),
     "transfers",
 );
-
+const ObjectTable = GrooveTransfers.ObjectTree.Table;
 const UniqueKey = GrooveTransfers.UniqueKey;
 
 const ScanParams = struct {
@@ -344,6 +345,10 @@ const Environment = struct {
         }
     }
 
+    fn remove(env: *Environment, transfer: *const tb.Transfer) void {
+        env.forest.grooves.transfers.remove(transfer.id);
+    }
+
     fn get(env: *Environment, key: UniqueKey) ?tb.Transfer {
         return switch (key) {
             .id => |id| switch (env.forest.grooves.transfers.get(id)) {
@@ -497,9 +502,21 @@ const Environment = struct {
             try model.log.writeItem(.{ .op = op, .transfer = transfer.* });
         }
 
+        pub fn remove(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
+            var tombstone_object: tb.Transfer = ObjectTable.tombstone_from_key(transfer.timestamp);
+            tombstone_object.id = transfer.id;
+            tombstone_object.pending_id = transfer.pending_id;
+            try model.log.writeItem(.{
+                .op = op,
+                .transfer = tombstone_object,
+            });
+        }
+
         pub fn get(model: *const Model, key: UniqueKey) ?tb.Transfer {
-            return model.get_object_from_log(key) orelse
-                switch (key) {
+            return switch (model.get_object_from_log(key)) {
+                .found => |object| object,
+                .tombstone => null,
+                .not_found => switch (key) {
                     .id => model.checkpointed.objects.get(key.id),
                     else => object: {
                         const id = model.checkpointed.unique_keys.get(key) orelse
@@ -507,13 +524,18 @@ const Environment = struct {
 
                         break :object model.checkpointed.objects.get(id);
                     },
-                };
+                },
+            };
         }
 
         fn get_object_from_log(
             model: *const Model,
             key: UniqueKey,
-        ) ?tb.Transfer {
+        ) union(enum) {
+            found: tb.Transfer,
+            not_found,
+            tombstone,
+        } {
             var latest_op: ?u64 = null;
             const log_size = model.log.readableLength();
             var log_left = log_size;
@@ -527,13 +549,16 @@ const Environment = struct {
 
                 if (switch (key) {
                     .id => |id| entry.transfer.id == id,
-                    .timestamp => |timestamp| entry.transfer.timestamp == timestamp,
+                    .timestamp => |timestamp| ObjectTable.key_from_value(
+                        &entry.transfer,
+                    ) == timestamp,
                     .pending_id => |id| id != 0 and entry.transfer.pending_id == id,
                 }) {
-                    return entry.transfer;
+                    if (ObjectTable.tombstone(&entry.transfer)) return .tombstone;
+                    return .{ .found = entry.transfer };
                 }
             }
-            return null;
+            return .not_found;
         }
 
         pub fn checkpoint(model: *Model, op: u64) !void {
@@ -544,6 +569,20 @@ const Environment = struct {
                 const entry = model.log.peekItem(log_index);
                 if (entry.op > checkpointable) {
                     break;
+                }
+                if (ObjectTable.tombstone(&entry.transfer)) {
+                    const removed = model.checkpointed.objects.remove(entry.transfer.id);
+                    assert(removed);
+
+                    assert(model.checkpointed.unique_keys.remove(.{
+                        .timestamp = ObjectTable.key_from_value(&entry.transfer),
+                    }));
+                    if (entry.transfer.pending_id != 0) {
+                        assert(model.checkpointed.unique_keys.remove(.{
+                            .pending_id = entry.transfer.pending_id,
+                        }));
+                    }
+                    continue;
                 }
 
                 try model.checkpointed.objects.put(entry.transfer.id, entry.transfer);
@@ -708,6 +747,23 @@ const Environment = struct {
                 env.put(&object, lsm_object);
                 try model.put(&object, fuzz_op.op);
             },
+            .remove => |id| {
+                try env.prefetch(.{ .id = id }, snapshot);
+                const lsm_object = env.get(.{ .id = id });
+
+                const model_object = model.get(.{ .id = id });
+                if (model_object == null) {
+                    // The non-checkpointed object
+                    // might have been be lost on `crash_after_ticks`.
+                    assert(lsm_object == null);
+                } else {
+                    assert(lsm_object != null);
+                    assert(stdx.equal_bytes(tb.Transfer, &model_object.?, &lsm_object.?));
+
+                    env.remove(&lsm_object.?);
+                    try model.remove(&lsm_object.?, fuzz_op.op);
+                }
+            },
             inline .get_by_id,
             .get_by_timestamp,
             .get_by_pending_id,
@@ -864,6 +920,8 @@ pub fn generate_fuzz_ops(
         .compact = if (prng.boolean()) 0 else 1,
         // Always do puts.
         .put = constants.lsm_compaction_ops * 2,
+        // Do some removes.
+        .remove = constants.lsm_compaction_ops / 4,
         // Maybe do some gets.
         .get_by_id = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         .get_by_timestamp = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
@@ -915,6 +973,18 @@ pub fn generate_fuzz_ops(
 
                 try id_to_object.put(action.put.id, action.put);
                 break :action action;
+            },
+            .remove => FuzzOpAction{
+                .remove = id: {
+                    const it = id_to_object.keyIterator();
+                    for (0..it.len) |_| {
+                        const index = prng.int_inclusive(usize, it.len - 1);
+                        if (!it.metadata[index].isUsed()) continue;
+
+                        break :id it.items[index];
+                    }
+                    break :id 0;
+                },
             },
             .get_by_id => FuzzOpAction{ .get_by_id = .{
                 .id = random_id(prng, u128),
@@ -1020,6 +1090,7 @@ pub fn generate_fuzz_ops(
                 puts_since_compact = 0;
             },
             .put => puts_since_compact += 1,
+            .remove => puts_since_compact += 1,
             .get_by_id => {},
             .get_by_timestamp => {},
             .get_by_pending_id => {},

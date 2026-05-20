@@ -142,8 +142,31 @@ pub fn CacheMapType(
         }
 
         pub fn get(self: *const CacheMap, key: Key) ?*Value {
-            return (if (self.cache) |*cache| cache.get(key) else null) orelse
-                self.stash.getKeyPtr(tombstone_from_key(key));
+            return (if (self.cache) |*cache| cache.get(key) else null) orelse stash: {
+                if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
+                    // Deleted keys are represented as tombstones in the stash.
+                    break :stash if (tombstone(object)) null else object;
+                }
+                break :stash null;
+            };
+        }
+
+        pub fn get_or_tombstone(self: *const CacheMap, key: Key) union(enum) {
+            found: *Value,
+            not_found,
+            tombstone,
+        } {
+            if (self.cache) |*cache| {
+                if (cache.get(key)) |object| {
+                    return .{ .found = object };
+                }
+            }
+            if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
+                // Deleted keys are represented as tombstones in the stash.
+                return if (tombstone(object)) .tombstone else .{ .found = object };
+            }
+
+            return .not_found;
         }
 
         pub fn cache_entries(self: *const CacheMap) u64 {
@@ -185,7 +208,10 @@ pub fn CacheMapType(
                     switch (result.updated) {
                         .update => {
                             assert(key_from_value(evicted) == key);
-                            if (constants.verify) assert(!self.stash.contains(value.*));
+                            if (constants.verify) {
+                                const stash: ?Value = self.stash.getKey(value.*);
+                                assert(stash == null or tombstone(&stash.?));
+                            }
 
                             // There was an eviction because an item was updated,
                             // the evicted item is always its previous version.
@@ -199,7 +225,7 @@ pub fn CacheMapType(
                             const stash_updated = self.stash_upsert(evicted);
 
                             // We don't expect stale values on the stash.
-                            assert(stash_updated == null);
+                            assert(stash_updated == null or tombstone(&stash_updated.?));
                         },
                     }
                 } else {
@@ -256,10 +282,12 @@ pub fn CacheMapType(
 
         fn stash_remove(self: *CacheMap, key: Key) ?Value {
             assert(self.stash.count() <= self.options.stash_value_count_max);
-            return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
-                kv.key
-            else
-                null;
+
+            const tombstone_object = tombstone_from_key(key);
+            const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
+            defer entry.key_ptr.* = tombstone_object;
+
+            return if (entry.found_existing) entry.key_ptr.* else null;
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -295,12 +323,15 @@ pub fn CacheMapType(
 
                     // A tombstone in the rollback log can only occur when the value doesn't exist
                     // in _both_ the cache and stash on insert.
-                    const cache_removed =
+                    const cache_removed: bool =
                         if (self.cache) |*cache| cache.remove(key) != null else false;
 
                     // The key should be in the stash iff it wasn't in the cache.
-                    const stash_removed = self.stash_remove(key) != null;
-                    assert(stash_removed != cache_removed);
+                    if (self.stash_remove(key)) |*stash_value| {
+                        assert(!cache_removed or tombstone(stash_value));
+                    } else {
+                        assert(cache_removed);
+                    }
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
                     self.upsert(rollback_value);
