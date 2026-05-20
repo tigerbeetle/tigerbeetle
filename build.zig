@@ -170,7 +170,17 @@ pub fn build(b: *std.Build) !void {
         (build_options.config_release_client_min == null));
 
     const target = try resolve_target(b, build_options.target);
+    const test_options = b.addOptions();
+    // Benchmarks can run in two modes.
+    // - ./zig/zig build test
+    // - ./zig/zig build -Drelease test -- "benchmark: name"
+    // The former uses small parameter values and is silent.
+    // The latter is the real benchmark, which prints the output.
+    test_options.addOption(bool, "benchmark", for (b.args orelse &.{}) |arg| {
+        if (std.mem.indexOf(u8, arg, "benchmark") != null) break true;
+    } else false);
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
+    stdx_module.addOptions("test_options", test_options);
 
     assert(build_options.git_commit.len == 40);
     const vsr_options, const vsr_module = build_vsr_module(b, .{
@@ -300,6 +310,7 @@ pub fn build(b: *std.Build) !void {
         .vsr_options_test = vsr_options_test,
         .tigerbeetle_test = tigerbeetle_test,
         .vortex_options = vortex_options,
+        .test_options = test_options,
     });
 
     // zig build test:jni
@@ -873,18 +884,9 @@ fn build_test(
         vsr_options_test: *std.Build.Step.Options,
         tigerbeetle_test: std.Build.LazyPath,
         vortex_options: *std.Build.Step.Options,
+        test_options: *std.Build.Step.Options,
     },
 ) !void {
-    const test_options = b.addOptions();
-    // Benchmark run in two modes.
-    // - ./zig/zig build test
-    // - ./zig/zig build -Drelease test -- "benchmark: name"
-    // The former uses small parameter values and is silent.
-    // The latter is the real benchmark, which prints the output.
-    test_options.addOption(bool, "benchmark", for (b.args orelse &.{}) |arg| {
-        if (std.mem.indexOf(u8, arg, "benchmark") != null) break true;
-    } else false);
-
     const stdx_unit_tests = b.addTest(.{
         .name = "test-stdx",
         .root_module = b.createModule(.{
@@ -894,6 +896,8 @@ fn build_test(
         }),
         .filters = b.args orelse &.{},
     });
+    stdx_unit_tests.root_module.addOptions("test_options", options.test_options);
+
     const unit_tests = b.addTest(.{
         .name = "test-unit",
         .root_module = b.createModule(.{
@@ -905,7 +909,7 @@ fn build_test(
     });
     unit_tests.root_module.addImport("stdx", options.stdx_module);
     unit_tests.root_module.addOptions("vsr_options", options.vsr_options_test);
-    unit_tests.root_module.addOptions("test_options", test_options);
+    unit_tests.root_module.addOptions("test_options", options.test_options);
 
     steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
     steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);

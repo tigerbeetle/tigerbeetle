@@ -7,7 +7,7 @@ const KiB = stdx.KiB;
 const MiB = stdx.MiB;
 const GiB = stdx.GiB;
 
-const Bench = @import("../testing/bench.zig");
+const Bench = stdx.Bench;
 
 const binary_search_values_upsert_index =
     @import("./binary_search.zig").binary_search_values_upsert_index;
