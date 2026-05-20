@@ -4,13 +4,13 @@
 //! - Building and link-checking docs.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 
 const stdx = @import("stdx");
-const Shell = @import("../shell.zig");
 
+const Shell = @import("../shell.zig");
 const client_readmes = @import("./client_readmes.zig");
 
 pub const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
@@ -186,7 +186,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     defer gpa.free(tigerbeetle_absolute_path);
 
     inline for (comptime std.enums.values(Language)) |language| {
-        if (language_requested == language or language_requested == null) {
+        if ((language_requested == language or language_requested == null) and
+            language != .ruby) // The published tigerbeetle gem is not ours.
+        {
             const ci = @field(LanguageCI, @tagName(language));
             try ci.validate_release(shell, gpa, .{
                 .tigerbeetle = tigerbeetle_absolute_path,
@@ -198,7 +200,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     // Check all the client releases to ensure the latest published release is what it should be.
     inline for (comptime std.enums.values(Language)) |language| {
         if ((language == language_requested or language_requested == null) and
-            language != .rust) // Rust isn't published yet.
+            language != .rust and // Rust isn't published yet.
+            language != .ruby) // The published tigerbeetle gem is not ours.
         {
             const ci = @field(LanguageCI, @tagName(language));
             const release_published_latest = try ci.release_published_latest(shell);
