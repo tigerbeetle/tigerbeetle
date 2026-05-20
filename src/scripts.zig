@@ -18,6 +18,7 @@ const cfo = @import("./scripts/cfo.zig");
 const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
+const benchmark_regression = @import("./scripts/benchmark_regression.zig");
 const changelog = @import("./scripts/changelog.zig");
 const amqp = @import("./scripts/amqp.zig");
 
@@ -38,6 +39,7 @@ const CLIArgs = union(enum) {
     ci: ci.CLIArgs,
     release: release.CLIArgs,
     devhub: devhub.CLIArgs,
+    @"benchmark-regression": benchmark_regression.CLIArgs,
     changelog: void,
     amqp: amqp.CLIArgs,
 
@@ -54,6 +56,7 @@ const CLIArgs = union(enum) {
         \\                          [--build-docs]
         \\
         \\  zig build scripts -- devhub --sha=<commit>
+        \\  zig build scripts -- benchmark-regression [--baseline=<ref>] [--epsilon-percent=<percent>]
         \\
         \\  zig build scripts -- release --sha=<commit>
         \\
@@ -99,6 +102,9 @@ pub fn main() !void {
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
+        .@"benchmark-regression" => |args_benchmark_regression| {
+            try benchmark_regression.main(shell, gpa, args_benchmark_regression);
+        },
         .changelog => try changelog.main(shell, gpa),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
     }
