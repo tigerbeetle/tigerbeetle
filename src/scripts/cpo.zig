@@ -38,7 +38,7 @@ const log = std.log;
 
 pub const CLIArgs = struct {
     sha: ?[]const u8 = null,
-    skip_kcov: bool = true,
+    skip_kcov: bool = false,
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
@@ -303,7 +303,7 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
         log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
     }
 
-    upload_run(shell, &batch) catch |err| {
+    upload_run(shell, &batch, "./short/data.json") catch |err| {
         log.err("failed to upload devhubdb metrics: {}", .{err});
     };
 }
@@ -349,7 +349,7 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
         log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
     }
 
-    upload_run(shell, &batch) catch |err| {
+    upload_run(shell, &batch, "./long/data.json") catch |err| {
         log.err("failed to upload long benchmark devhubdb metrics: {}", .{err});
     };
 }
@@ -370,7 +370,7 @@ fn get_measurement(
     return try std.fmt.parseInt(u64, value_string, 10);
 }
 
-fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
+fn upload_run(shell: *Shell, batch: *const MetricBatch, data_file: []const u8) !void {
     const token = shell.env_get_option("DEVHUBDB_PAT");
     try shell.cwd.deleteTree("./devhubdb");
     try shell.exec(
@@ -389,7 +389,7 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
         try shell.exec("git reset --hard origin/main", .{});
 
         {
-            const file = try shell.cwd.openFile("./data.json", .{
+            const file = try shell.cwd.openFile(data_file, .{
                 .mode = .write_only,
             });
             defer file.close();
@@ -399,7 +399,7 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
             try file.writeAll("\n");
         }
 
-        try shell.exec("git add data.json", .{});
+        try shell.exec("git add {data_file}", .{ .data_file = data_file });
         try shell.git_env_setup(.{ .use_hostname = false });
         try shell.exec("git commit -m 📈", .{});
         if (token) |_| {
