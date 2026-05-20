@@ -461,6 +461,9 @@ fn has_github_label(shell: *Shell, expected_label: []const u8) !bool {
     if (try has_github_event_label(shell, expected_label)) {
         return true;
     }
+    if (try has_github_merge_group_label(shell, expected_label)) {
+        return true;
+    }
 
     return try has_github_pr_label(shell, expected_label);
 }
@@ -473,9 +476,20 @@ const GhLabeled = struct {
     labels: []const GhLabel = &.{},
 };
 
+const GhMergeGroup = struct {
+    base_sha: []const u8 = "",
+    head_sha: []const u8 = "",
+};
+
+const GhRepository = struct {
+    full_name: []const u8 = "",
+};
+
 const GhEvent = struct {
     pull_request: ?GhLabeled = null,
     issue: ?GhLabeled = null,
+    merge_group: ?GhMergeGroup = null,
+    repository: ?GhRepository = null,
 };
 
 fn has_github_event_label(shell: *Shell, expected_label: []const u8) !bool {
@@ -505,6 +519,87 @@ fn has_github_event_label(shell: *Shell, expected_label: []const u8) !bool {
     return false;
 }
 
+fn has_github_merge_group_label(shell: *Shell, expected_label: []const u8) !bool {
+    if (!std.mem.eql(u8, shell.env_get_option("GITHUB_EVENT_NAME") orelse "", "merge_group")) {
+        return false;
+    }
+    if (shell.env_get_option("GH_TOKEN") == null and
+        shell.env_get_option("GITHUB_TOKEN") == null)
+    {
+        return false;
+    }
+
+    const event_path = shell.env_get_option("GITHUB_EVENT_PATH") orelse return false;
+    const event_text = read_file_absolute_alloc(shell.arena.allocator(), event_path, 16 * stdx.MiB) catch |err| {
+        log.warn("could not read GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
+        return false;
+    };
+
+    const event = std.json.parseFromSliceLeaky(
+        GhEvent,
+        shell.arena.allocator(),
+        event_text,
+        .{ .ignore_unknown_fields = true },
+    ) catch |err| {
+        log.warn("could not parse GITHUB_EVENT_PATH={s}: {}", .{ event_path, err });
+        return false;
+    };
+
+    const merge_group = event.merge_group orelse return false;
+    const repository = if (event.repository) |repository|
+        repository.full_name
+    else
+        shell.env_get_option("GITHUB_REPOSITORY") orelse return false;
+    if (merge_group.base_sha.len == 0 or merge_group.head_sha.len == 0 or repository.len == 0) {
+        return false;
+    }
+
+    const commits_text = shell.exec_stdout(
+        "git rev-list --reverse {base}..{head}",
+        .{ .base = merge_group.base_sha, .head = merge_group.head_sha },
+    ) catch |err| {
+        log.warn("could not enumerate merge_group commits: {}", .{err});
+        return false;
+    };
+
+    var pull_requests_seen = std.AutoHashMap(u32, void).init(shell.arena.allocator());
+    var commits = std.mem.splitScalar(u8, commits_text, '\n');
+    while (commits.next()) |commit| {
+        if (commit.len == 0) continue;
+
+        const pull_requests_text = shell.exec_stdout(
+            "gh api {endpoint} --jq {query}",
+            .{
+                .endpoint = try shell.fmt(
+                    "repos/{s}/commits/{s}/pulls",
+                    .{ repository, commit },
+                ),
+                .query = ".[].number",
+            },
+        ) catch |err| {
+            log.warn("could not resolve pull requests for commit {s}: {}", .{ commit, err });
+            continue;
+        };
+
+        var pull_requests = std.mem.splitScalar(u8, pull_requests_text, '\n');
+        while (pull_requests.next()) |pull_request| {
+            if (pull_request.len == 0) continue;
+            const pull_request_number = std.fmt.parseInt(u32, pull_request, 10) catch |err| {
+                log.warn("could not parse pull request number '{s}': {}", .{ pull_request, err });
+                continue;
+            };
+            if (pull_requests_seen.contains(pull_request_number)) continue;
+            try pull_requests_seen.put(pull_request_number, {});
+
+            if (try has_github_pr_number_label(shell, pull_request_number, expected_label)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 fn has_github_pr_label(shell: *Shell, expected_label: []const u8) !bool {
     if (shell.env_get_option("GH_TOKEN") == null and
         shell.env_get_option("GITHUB_TOKEN") == null)
@@ -528,6 +623,26 @@ fn has_github_pr_label(shell: *Shell, expected_label: []const u8) !bool {
         return false;
     };
 
+    return has_label_line(labels, expected_label);
+}
+
+fn has_github_pr_number_label(
+    shell: *Shell,
+    pull_request_number: u32,
+    expected_label: []const u8,
+) !bool {
+    const labels = shell.exec_stdout(
+        "gh pr view {pull_request_number} --json labels --jq {query}",
+        .{ .pull_request_number = pull_request_number, .query = ".labels[].name" },
+    ) catch |err| {
+        log.warn("could not read labels for pull request #{}: {}", .{ pull_request_number, err });
+        return false;
+    };
+
+    return has_label_line(labels, expected_label);
+}
+
+fn has_label_line(labels: []const u8, expected_label: []const u8) bool {
     var lines = std.mem.splitScalar(u8, labels, '\n');
     while (lines.next()) |label| {
         if (std.mem.eql(u8, label, expected_label)) return true;
