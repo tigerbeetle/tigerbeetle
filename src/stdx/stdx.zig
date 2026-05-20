@@ -811,6 +811,26 @@ pub fn EnumUnionType(
     } });
 }
 
+/// Constructs an `enum` type from names.
+pub fn EnumType(comptime names: anytype) type {
+    comptime assert(names.len > 0);
+    const EnumField = std.builtin.Type.EnumField;
+    var fields: [names.len]EnumField = undefined;
+    for (names, 0..) |name, i| {
+        fields[i] = .{
+            .name = name,
+            .value = i,
+        };
+    }
+
+    return @Type(.{ .@"enum" = .{
+        .fields = &fields,
+        .decls = &.{},
+        .tag_type = std.math.IntFittingRange(0, names.len),
+        .is_exhaustive = true,
+    } });
+}
+
 /// Creates a slice to a comptime slice without triggering
 /// `error: runtime value contains reference to comptime var`
 pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @TypeOf(slice[0]) {

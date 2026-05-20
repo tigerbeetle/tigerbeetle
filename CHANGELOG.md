@@ -3,6 +3,50 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.5
+
+Released: 2026-05-15
+
+### Safety And Performance
+
+- [#3717](https://github.com/tigerbeetle/tigerbeetle/pull/3717)
+
+  Fix a potential crash in the I/O event listener.
+
+- [#3709](https://github.com/tigerbeetle/tigerbeetle/pull/3709)
+
+  Correct assertions in the code.
+
+- [#3592](https://github.com/tigerbeetle/tigerbeetle/pull/3592)
+
+  Run DISCARD when formatting a block device on Linux, improving SSD performance.
+
+- [#3712](https://github.com/tigerbeetle/tigerbeetle/pull/3712)
+
+  Replace Java's assert keyword with `AssertionError.assertTrue` to prevent silent failures.
+
+### Features
+
+- [#3702](https://github.com/tigerbeetle/tigerbeetle/pull/3702)
+
+  Track the highest `commit_min` observed from all backups on the primary,
+  and use it to decide when to inject commit stalls for lagging replicas.
+
+### Internals
+
+- [#3716](https://github.com/tigerbeetle/tigerbeetle/pull/3716),
+  [#3710](https://github.com/tigerbeetle/tigerbeetle/pull/3710)
+
+  Cleanup `Time` usage and drop `std.time.Timer` uses ahead of its removal in Zig 0.16.
+
+- [#3721](https://github.com/tigerbeetle/tigerbeetle/pull/3721)
+
+  Raise the clock-skew warning threshold from 1ms to 50ms.
+
+### TigerTracks 🎧
+
+- [Sonne Scheint Nicht](https://www.youtube.com/watch?v=DxTs-pY7XB4)
+
 ## TigerBeetle 0.17.4
 
 Released: 2026-05-08

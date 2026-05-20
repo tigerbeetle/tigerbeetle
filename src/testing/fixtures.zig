@@ -116,10 +116,12 @@ pub fn init_grid(gpa: std.mem.Allocator, trace: *Tracer, superblock: *SuperBlock
     missing_blocks_max: u64 = 0,
     missing_tables_max: u64 = 0,
     blocks_released_prior_checkpoint_durability_max: u64 = 0,
+    stash_blocks_count: u64 = 1024,
 }) !Grid {
     return try Grid.init(gpa, .{
         .superblock = superblock,
         .trace = trace,
+        .stash_blocks_count = options.stash_blocks_count,
         .missing_blocks_max = options.missing_blocks_max,
         .missing_tables_max = options.missing_tables_max,
         .blocks_released_prior_checkpoint_durability_max = //

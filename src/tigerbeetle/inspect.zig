@@ -26,7 +26,6 @@ const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = @import("main.zig").StateMachine;
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
-const allocate_block = vsr.grid.allocate_block;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
 
 const EventMetric = vsr.trace.EventMetric;
@@ -393,14 +392,9 @@ fn print_objects(output: std.io.AnyWriter) !void {
         const Groove = groove_field.type;
         const ObjectTree = Groove.ObjectTree;
 
-        comptime var size_total: usize = 0;
-
         const object_size = @sizeOf(ObjectTree.Table.Value);
+        comptime var size_total: usize = 0;
         size_total += object_size;
-
-        const id_size = if (Groove.IdTree == void) 0 else @sizeOf(Groove.IdTree.Table.Value);
-        size_total += id_size;
-
         comptime {
             for (std.meta.fields(Groove.IndexTrees)) |index_field| {
                 const IndexTree = index_field.type;
@@ -414,9 +408,6 @@ fn print_objects(output: std.io.AnyWriter) !void {
 
         try print_header(output, 1, "object");
         try print_size_count(output, object_size, ObjectTree.Table.value_count_max);
-
-        try print_header(output, 1, "id");
-        try print_size_count(output, id_size, 1);
 
         inline for (std.meta.fields(Groove.IndexTrees)) |index_field| {
             const IndexTree = index_field.type;
@@ -1655,4 +1646,12 @@ fn GroupByType(comptime count_max: usize) type {
             return group_by.matches[0..distinct];
         }
     };
+}
+
+fn allocate_block(
+    allocator: std.mem.Allocator,
+) error{OutOfMemory}!*align(constants.sector_size) [constants.block_size]u8 {
+    const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
+    @memset(block, 0);
+    return block[0..constants.block_size];
 }

@@ -11,11 +11,12 @@ const maybe = stdx.maybe;
 const constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
+const GridType = @import("vsr/grid.zig").GridType;
 const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 const GrooveType = @import("lsm/groove.zig").GrooveType;
 const ForestType = @import("lsm/forest.zig").ForestType;
-const ScanBuffer = @import("lsm/scan_buffer.zig").ScanBuffer;
+const ScanBufferType = @import("lsm/scan_buffer.zig").ScanBufferType;
 const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
 
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
@@ -255,7 +256,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         aof_recovery: bool,
 
         const StateMachine = @This();
-        const Grid = @import("vsr/grid.zig").GridType(Storage);
+        const Grid = GridType(Storage);
 
         /// Re-exports the `Contract` declarations, so it can be interchangeable
         /// with a concrete state machine type.
@@ -280,6 +281,57 @@ pub fn StateMachineType(comptime Storage: type) type {
             .transfers_pending = TransfersPendingGroove,
             .account_events = AccountEventsGroove,
         });
+
+        comptime {
+            // Being intentional about the types we expect for derived indexes.
+            // Indexes based on object fields are already validated by the struct size
+            // and alignment requirements. Derived indexes, however, are not part of the
+            // struct layout and need this extra sanity check.
+            assert(std.meta.fields(Forest.Grooves).len == 4);
+
+            // Accounts:
+            {
+                assert(@FieldType(Forest.Grooves, "accounts") == AccountsGroove);
+                assert(std.meta.fields(@TypeOf(AccountsGroove.config.derived)).len == 2);
+
+                const IndexHelperType = AccountsGroove.IndexHelperType;
+                assert(IndexHelperType("imported").Type == void);
+                assert(IndexHelperType("closed").Type == void);
+            }
+
+            // Transfers:
+            {
+                assert(@FieldType(Forest.Grooves, "transfers") == TransfersGroove);
+                assert(std.meta.fields(@TypeOf(TransfersGroove.config.derived)).len == 3);
+
+                const IndexHelperType = TransfersGroove.IndexHelperType;
+                assert(IndexHelperType("expires_at").Type == u64);
+                assert(IndexHelperType("imported").Type == void);
+                assert(IndexHelperType("closing").Type == void);
+            }
+
+            // TransfersPending:
+            {
+                assert(@FieldType(Forest.Grooves, "transfers_pending") == TransfersPendingGroove);
+                assert(std.meta.fields(@TypeOf(TransfersPendingGroove.config.derived)).len == 0);
+            }
+
+            // AccountEvents:
+            {
+                assert(@FieldType(Forest.Grooves, "account_events") == AccountEventsGroove);
+                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 6);
+
+                const IndexHelperType = AccountEventsGroove.IndexHelperType;
+                assert(IndexHelperType("account_timestamp").Type == u64);
+                assert(IndexHelperType("dr_account_id_expired").Type == u128);
+                assert(IndexHelperType("cr_account_id_expired").Type == u128);
+                assert(IndexHelperType("transfer_pending_id_expired").Type == u128);
+                // TODO: `ledger_expired` returns the wrong type!
+                // It should be u32 instead, the same as `ledger`.
+                assert(IndexHelperType("ledger_expired").Type == u128);
+                assert(IndexHelperType("prunable").Type == void);
+            }
+        }
 
         pub const batch_max = struct {
             pub const create_accounts: u32 = @max(
@@ -337,7 +389,12 @@ pub fn StateMachineType(comptime Storage: type) type {
             .{
                 .ids = tree_ids.Account,
                 .batch_value_count_max = tree_values_count_max.accounts,
-                .ignored = &[_][]const u8{
+                .primary_key = "id",
+                .primary_key_orphaned = false,
+                .unique_keys = &[_][:0]const u8{
+                    "id",
+                },
+                .ignored = &[_][:0]const u8{
                     "debits_posted",
                     "debits_pending",
                     "credits_posted",
@@ -345,7 +402,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "flags",
                     "reserved",
                 },
-                .optional = &[_][]const u8{
+                .optional = &[_][:0]const u8{
                     "user_data_128",
                     "user_data_64",
                     "user_data_32",
@@ -362,7 +419,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.closed,
                 },
-                .orphaned_ids = false,
                 .objects_cache = true,
             },
         );
@@ -373,8 +429,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             .{
                 .ids = tree_ids.Transfer,
                 .batch_value_count_max = tree_values_count_max.transfers,
-                .ignored = &[_][]const u8{ "timeout", "flags" },
-                .optional = &[_][]const u8{
+                .primary_key = "id",
+                .primary_key_orphaned = true,
+                .unique_keys = &[_][:0]const u8{
+                    "id",
+                    "pending_id",
+                },
+                .ignored = &[_][:0]const u8{ "timeout", "flags" },
+                .optional = &[_][:0]const u8{
                     "pending_id",
                     "user_data_128",
                     "user_data_64",
@@ -404,7 +466,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.closing,
                 },
-                .orphaned_ids = true,
                 .objects_cache = true,
             },
         );
@@ -415,8 +476,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             .{
                 .ids = tree_ids.TransferPending,
                 .batch_value_count_max = tree_values_count_max.transfers_pending,
-                .ignored = &[_][]const u8{"padding"},
-                .optional = &[_][]const u8{
+                .primary_key = "timestamp",
+                .primary_key_orphaned = false,
+                .unique_keys = &[_][:0]const u8{},
+                .ignored = &[_][:0]const u8{"padding"},
+                .optional = &[_][:0]const u8{
                     // Index the current status of a pending transfer.
                     // Examples:
                     //   "Pending transfers that are still pending."
@@ -424,7 +488,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "status",
                 },
                 .derived = .{},
-                .orphaned_ids = false,
                 .objects_cache = true,
             },
         );
@@ -435,7 +498,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             .{
                 .ids = tree_ids.AccountEvents,
                 .batch_value_count_max = tree_values_count_max.account_events,
-                .ignored = &[_][]const u8{
+                .primary_key = "timestamp",
+                .primary_key_orphaned = false,
+                .unique_keys = &[_][:0]const u8{"transfer_pending_id_expired"},
+                .ignored = &[_][:0]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
                     "dr_debits_posted",
@@ -458,7 +524,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "ledger",
                     "reserved",
                 },
-                .optional = &[_][]const u8{},
+                .optional = &[_][:0]const u8{},
                 .derived = .{
                     // Placeholder derived index (will be inserted during `account_event`).
                     //
@@ -537,7 +603,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.prunable,
                 },
-                .orphaned_ids = false,
                 .objects_cache = false,
             },
         );
@@ -1187,7 +1252,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_input.?,
             );
             for (accounts) |*a| {
-                self.forest.grooves.accounts.prefetch_enqueue(a.id);
+                self.forest.grooves.accounts.prefetch_enqueue(.{ .id = a.id });
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -1216,7 +1281,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             {
                 // Looking for transfers with the same timestamp.
                 for (accounts) |*a| {
-                    self.forest.grooves.transfers.prefetch_enqueue_by_timestamp(a.timestamp);
+                    self.forest.grooves.transfers.prefetch_enqueue(.{
+                        .timestamp = a.timestamp,
+                    });
                 }
 
                 self.forest.grooves.transfers.prefetch(
@@ -1253,10 +1320,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_input.?,
             );
             for (transfers) |*t| {
-                self.forest.grooves.transfers.prefetch_enqueue(t.id);
+                self.forest.grooves.transfers.prefetch_enqueue(.{ .id = t.id });
 
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                    self.forest.grooves.transfers.prefetch_enqueue(t.pending_id);
+                    self.forest.grooves.transfers.prefetch_enqueue(.{ .id = t.pending_id });
                 }
             }
 
@@ -1284,16 +1351,22 @@ pub fn StateMachineType(comptime Storage: type) type {
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     if (self.get_transfer(t.pending_id)) |p| {
-                        // This prefetch isn't run yet, but enqueue it here as well to save an extra
-                        // iteration over transfers.
-                        self.forest.grooves.transfers_pending.prefetch_enqueue(p.timestamp);
-
-                        self.forest.grooves.accounts.prefetch_enqueue(p.debit_account_id);
-                        self.forest.grooves.accounts.prefetch_enqueue(p.credit_account_id);
+                        // The `transfers_pending` prefetch isn't run yet,
+                        // but enqueue it here as well to save an extra iteration
+                        // over transfers.
+                        self.forest.grooves.transfers_pending.prefetch_enqueue(.{
+                            .timestamp = p.timestamp,
+                        });
+                        self.forest.grooves.accounts.prefetch_enqueue(.{
+                            .id = p.debit_account_id,
+                        });
+                        self.forest.grooves.accounts.prefetch_enqueue(.{
+                            .id = p.credit_account_id,
+                        });
                     }
                 } else {
-                    self.forest.grooves.accounts.prefetch_enqueue(t.debit_account_id);
-                    self.forest.grooves.accounts.prefetch_enqueue(t.credit_account_id);
+                    self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.debit_account_id });
+                    self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.credit_account_id });
                 }
             }
 
@@ -1304,7 +1377,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // This logic could be in the loop above, but we choose to iterate again,
                 // avoiding an extra comparison in the more common case of non-imported batches.
                 for (transfers) |*t| {
-                    self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(t.timestamp);
+                    self.forest.grooves.accounts.prefetch_enqueue(.{
+                        .timestamp = t.timestamp,
+                    });
                 }
             }
 
@@ -1354,7 +1429,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_input.?,
             );
             for (ids) |id| {
-                self.forest.grooves.accounts.prefetch_enqueue(id);
+                self.forest.grooves.accounts.prefetch_enqueue(.{ .id = id });
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -1384,7 +1459,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_input.?,
             );
             for (ids) |id| {
-                self.forest.grooves.transfers.prefetch_enqueue(id);
+                self.forest.grooves.transfers.prefetch_enqueue(.{ .id = id });
             }
 
             self.forest.grooves.transfers.prefetch(
@@ -1505,7 +1580,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(filters.len > 0);
             assert(filters.len == 1 or self.prefetch_operation.?.is_multi_batch());
             for (filters) |*filter| {
-                self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
+                self.forest.grooves.accounts.prefetch_enqueue(.{ .id = filter.account_id });
             }
             self.forest.grooves.accounts.prefetch(
                 prefetch_get_account_balances_lookup_account_callback,
@@ -2238,15 +2313,21 @@ pub fn StateMachineType(comptime Storage: type) type {
                         assert(result.dr_account_timestamp != 0);
                         assert(result.cr_account_timestamp != 0);
 
-                        accounts.prefetch_enqueue_by_timestamp(result.dr_account_timestamp);
-                        accounts.prefetch_enqueue_by_timestamp(result.cr_account_timestamp);
+                        accounts.prefetch_enqueue(.{
+                            .timestamp = result.dr_account_timestamp,
+                        });
+                        accounts.prefetch_enqueue(.{
+                            .timestamp = result.cr_account_timestamp,
+                        });
                         if (result.transfer_pending_status == .expired) {
                             // For expiry events, the timestamp isn't associated with any transfer.
                             // Instead, the original pending transfer is prefetched.
                             assert(result.transfer_pending_id != 0);
-                            transfers.prefetch_enqueue(result.transfer_pending_id);
+                            transfers.prefetch_enqueue(.{ .id = result.transfer_pending_id });
                         } else {
-                            transfers.prefetch_enqueue_by_timestamp(result.timestamp);
+                            transfers.prefetch_enqueue(.{
+                                .timestamp = result.timestamp,
+                            });
                         }
                     },
                     .former => |former| {
@@ -2257,9 +2338,11 @@ pub fn StateMachineType(comptime Storage: type) type {
                         assert(former.dr_account_id != 0);
                         assert(former.cr_account_id != 0);
 
-                        accounts.prefetch_enqueue(former.dr_account_id);
-                        accounts.prefetch_enqueue(former.cr_account_id);
-                        transfers.prefetch_enqueue_by_timestamp(former.timestamp);
+                        accounts.prefetch_enqueue(.{ .id = former.dr_account_id });
+                        accounts.prefetch_enqueue(.{ .id = former.cr_account_id });
+                        transfers.prefetch_enqueue(.{
+                            .timestamp = former.timestamp,
+                        });
                     },
                 }
             }
@@ -2441,9 +2524,9 @@ pub fn StateMachineType(comptime Storage: type) type {
 
                 assert(expires_at <= self.prefetch_timestamp);
 
-                grooves.accounts.prefetch_enqueue(expired.debit_account_id);
-                grooves.accounts.prefetch_enqueue(expired.credit_account_id);
-                grooves.transfers_pending.prefetch_enqueue(expired.timestamp);
+                grooves.accounts.prefetch_enqueue(.{ .id = expired.debit_account_id });
+                grooves.accounts.prefetch_enqueue(.{ .id = expired.credit_account_id });
+                grooves.transfers_pending.prefetch_enqueue(.{ .timestamp = expired.timestamp });
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -3161,7 +3244,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => if (result_status.transient()) {
-                    self.forest.grooves.transfers.insert_orphaned_id(id);
+                    self.forest.grooves.transfers.insert_orphaned_primary_key(id);
                 },
                 else => comptime unreachable,
             }
@@ -3348,10 +3431,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .pending,
                 .posted,
                 .voided,
-                => switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
-                    .found_object => |transfer| transfer,
-                    .found_orphaned_id, .not_found => unreachable,
-                },
+                => self.forest.grooves.transfers.indirect_lookup(.{
+                    .timestamp = result.timestamp,
+                }).?,
                 .expired => self.get_transfer(result.transfer_pending_id).?,
             };
             const dr_account = self.get_account(result.dr_account_id).?;
@@ -3449,11 +3531,10 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) ChangeEvent {
             assert(result.dr_account_id != 0);
             assert(result.cr_account_id != 0);
-            const transfer: Transfer =
-                switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
-                    .found_object => |transfer| transfer,
-                    .found_orphaned_id, .not_found => unreachable,
-                };
+
+            const transfer: Transfer = self.forest.grooves.transfers.indirect_lookup(.{
+                .timestamp = result.timestamp,
+            }).?;
             const dr_account = self.get_account(result.dr_account_id).?;
             const cr_account = self.get_account(result.cr_account_id).?;
             assert(transfer.debit_account_id == dr_account.id);
@@ -3544,11 +3625,13 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (a.id == 0) return .id_must_not_be_zero;
             if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
-            switch (self.forest.grooves.accounts.get(a.id)) {
-                .found_object => |e| return create_account_exists(a, &e),
-                .found_orphaned_id => unreachable,
-                .not_found => {},
+            if (self.get_account(a.id)) |e| {
+                return create_account_exists(a, &e);
             }
+            // Ensure that this key was enqueued for prefetching.
+            if (constants.verify) assert(
+                self.forest.grooves.accounts.prefetch_keys.get(.{ .id = a.id }).? == .not_found,
+            );
 
             if (a.flags.debits_must_not_exceed_credits and a.flags.credits_must_not_exceed_debits) {
                 return .flags_are_mutually_exclusive;
@@ -3574,7 +3657,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
-                    if (self.forest.grooves.transfers.exists(a.timestamp)) {
+                    if (self.forest.grooves.transfers.indirect_lookup(.{
+                        .timestamp = a.timestamp,
+                    }) != null) {
                         return .imported_event_timestamp_must_not_regress;
                     }
                     break :timestamp a.timestamp;
@@ -3646,10 +3731,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |*e| return self.create_transfer_exists(t, e),
-                .found_orphaned_id => return .id_already_failed,
+                .found_object => |e| return self.create_transfer_exists(t, &e),
+                .found_orphaned => return .id_already_failed,
                 .not_found => {},
             }
+            // Ensure that this key was enqueued for prefetching.
+            if (constants.verify) assert(
+                self.forest.grooves.transfers.prefetch_keys.get(.{ .id = t.id }).? == .not_found,
+            );
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                 return self.post_or_void_pending_transfer(timestamp_event, t);
@@ -3681,10 +3770,24 @@ pub fn StateMachineType(comptime Storage: type) type {
             // 2. standing for debit record and credit record, or
             // 3. relating to debtor and creditor.
             // We use them to distinguish between `cr` (credit account), and `c` (commit).
-            const dr_account = self.get_account(t.debit_account_id) orelse
+            const dr_account = self.get_account(t.debit_account_id) orelse {
+                // Ensure that this key was enqueued for prefetching.
+                if (constants.verify) assert(
+                    self.forest.grooves.accounts.prefetch_keys.get(.{
+                        .id = t.debit_account_id,
+                    }).? == .not_found,
+                );
                 return .debit_account_not_found;
-            const cr_account = self.get_account(t.credit_account_id) orelse
+            };
+            const cr_account = self.get_account(t.credit_account_id) orelse {
+                // Ensure that this key was enqueued for prefetching.
+                if (constants.verify) assert(
+                    self.forest.grooves.accounts.prefetch_keys.get(.{
+                        .id = t.credit_account_id,
+                    }).? == .not_found,
+                );
                 return .credit_account_not_found;
+            };
             assert(dr_account.id == t.debit_account_id);
             assert(cr_account.id == t.credit_account_id);
 
@@ -3706,7 +3809,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
-                    if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                    if (self.forest.grooves.accounts.indirect_lookup(.{
+                        .timestamp = t.timestamp,
+                    }) != null) {
                         return .imported_event_timestamp_must_not_regress;
                     }
 
@@ -3951,7 +4056,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         ) CreateTransferStatusUnion {
             assert(t.id != 0);
             assert(t.id != std.math.maxInt(u128));
-            assert(self.forest.grooves.transfers.get(t.id) == .not_found);
+            assert(self.get_transfer(t.id) == null);
             assert(t.flags.padding == 0);
             assert(timestamp_event != 0);
             assert(timestamp_event > self.commit_timestamp or t.flags.imported);
@@ -3971,7 +4076,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             if (t.pending_id == t.id) return .pending_id_must_be_different;
             if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
 
-            const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
+            const p = self.get_transfer(t.pending_id) orelse {
+                // Ensure that this key was enqueued for prefetching.
+                if (constants.verify) assert(
+                    self.forest.grooves.transfers.prefetch_keys.get(.{
+                        .id = t.pending_id,
+                    }).? == .not_found,
+                );
+                return .pending_transfer_not_found;
+            };
             assert(p.id == t.pending_id);
             assert(p.timestamp < timestamp_event);
             if (!p.flags.pending) return .pending_transfer_not_pending;
@@ -4054,7 +4167,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
-                    if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                    if (self.forest.grooves.accounts.indirect_lookup(.{
+                        .timestamp = t.timestamp,
+                    }) != null) {
                         return .imported_event_timestamp_must_not_regress;
                     }
                     break :timestamp t.timestamp;
@@ -4097,6 +4212,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(timestamp_actual == timestamp_event);
                 assert(timestamp_expiry > timestamp_event);
                 // Removing the pending `expires_at` index.
+                // Invariant: Unique keys cannot be removed.
+                const IndexHelper = TransfersGroove.IndexHelperType("expires_at");
+                comptime assert(!IndexHelper.is_unique_key);
+                comptime assert(IndexHelper.is_derived);
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .field = timestamp_expiry,
                     .timestamp = p.timestamp,
@@ -4346,15 +4465,14 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         fn get_transfer(self: *const StateMachine, id: u128) ?Transfer {
             return switch (self.forest.grooves.transfers.get(id)) {
-                .found_object => |t| t,
-                .found_orphaned_id, .not_found => null,
+                .found_object => |object| object,
+                .found_orphaned, .not_found => null,
             };
         }
 
         fn get_account(self: *const StateMachine, id: u128) ?Account {
             return switch (self.forest.grooves.accounts.get(id)) {
-                .found_object => |a| a,
-                .found_orphaned_id => unreachable,
+                .found_object => |object| object,
                 .not_found => null,
             };
         }
@@ -4366,8 +4484,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             pending_timestamp: u64,
         ) ?TransferPending {
             return switch (self.forest.grooves.transfers_pending.get(pending_timestamp)) {
-                .found_object => |a| a,
-                .found_orphaned_id => unreachable,
+                .found_object => |object| object,
                 .not_found => null,
             };
         }
@@ -4478,12 +4595,16 @@ pub fn StateMachineType(comptime Storage: type) type {
                     });
                 }
 
-                const transfer_pending = self.get_transfer_pending(p.timestamp).?;
-                assert(p.timestamp == transfer_pending.timestamp);
+                const transfer_pending: TransferPending = self.get_transfer_pending(p.timestamp).?;
+                assert(transfer_pending.timestamp == p.timestamp);
                 assert(transfer_pending.status == .pending);
                 self.transfer_update_pending_status(&transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
+                // Invariant: Unique keys cannot be removed.
+                const IndexHelper = TransfersGroove.IndexHelperType("expires_at");
+                comptime assert(!IndexHelper.is_unique_key);
+                comptime assert(IndexHelper.is_derived);
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .timestamp = p.timestamp,
                     .field = expires_at,
@@ -4561,9 +4682,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .tree_options_object = .{
                         .batch_value_count_limit = tree_values_count_limit.accounts.timestamp,
                     },
-                    .tree_options_id = .{
-                        .batch_value_count_limit = tree_values_count_limit.accounts.id,
-                    },
                     .tree_options_index = index_tree_options(
                         AccountsGroove.IndexTreeOptions,
                         tree_values_count_limit.accounts,
@@ -4582,9 +4700,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .tree_options_object = .{
                         .batch_value_count_limit = tree_values_count_limit.transfers.timestamp,
                     },
-                    .tree_options_id = .{
-                        .batch_value_count_limit = tree_values_count_limit.transfers.id,
-                    },
                     .tree_options_index = index_tree_options(
                         TransfersGroove.IndexTreeOptions,
                         tree_values_count_limit.transfers,
@@ -4602,7 +4717,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                         .batch_value_count_limit = tree_values_count_limit
                             .transfers_pending.timestamp,
                     },
-                    .tree_options_id = {},
                     .tree_options_index = index_tree_options(
                         TransfersPendingGroove.IndexTreeOptions,
                         tree_values_count_limit.transfers_pending,
@@ -4617,7 +4731,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                         .batch_value_count_limit = tree_values_count_limit
                             .account_events.timestamp,
                     },
-                    .tree_options_id = {},
                     .tree_options_index = index_tree_options(
                         AccountEventsGroove.IndexTreeOptions,
                         tree_values_count_limit.account_events,
@@ -4770,6 +4883,7 @@ fn ExpirePendingTransfersType(
 
         const Tree = @FieldType(TransfersGroove.IndexTrees, "expires_at");
         const Value = Tree.Table.Value;
+        const ScanBuffer = ScanBufferType(GridType(Storage));
 
         // TODO(zig) Context should be `*ExpirePendingTransfers`,
         // but its a dependency loop.
@@ -4813,7 +4927,7 @@ fn ExpirePendingTransfersType(
         fn scan(
             self: *ExpirePendingTransfers,
             tree: *Tree,
-            buffer: *const ScanBuffer,
+            buffer: *ScanBuffer,
             filter: struct {
                 snapshot: u64,
                 /// Will fetch transfers expired before this timestamp (inclusive).
@@ -4920,6 +5034,7 @@ fn ChangeEventsScanLookupType(
     comptime Storage: type,
 ) type {
     const ScanTreeType = @import("lsm/scan_tree.zig").ScanTreeType;
+    const ScanBuffer = ScanBufferType(GridType(Storage));
 
     return struct {
         const AccountEventsLookup = @This();
@@ -4945,7 +5060,7 @@ fn ChangeEventsScanLookupType(
         fn init(
             self: *AccountEventsLookup,
             tree: *AccountEventsGroove.ObjectTree,
-            scan_buffer: *const ScanBuffer,
+            scan_buffer: *ScanBuffer,
             snapshot: u64,
             timestamp_range: TimestampRange,
         ) void {

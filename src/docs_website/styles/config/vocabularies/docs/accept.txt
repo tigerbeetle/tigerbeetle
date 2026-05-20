@@ -231,6 +231,7 @@ namespaced
 namespaces
 Nearline
 networkd
+Nicht
 noaccess
 noload
 nounset
@@ -313,6 +314,7 @@ RTTs
 sandboxed
 Sauron
 Scatman
+Scheint
 screencast
 scrollbar
 seccomp
@@ -332,6 +334,7 @@ snapshotting
 snaptest
 Solana
 Sonderling
+Sonne
 spcsc
 Spotify
 SQPOLL

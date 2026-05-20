@@ -33,9 +33,8 @@ const schema = @import("../lsm/schema.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = stdx.IOPSType;
 
-const allocate_block = @import("./grid.zig").allocate_block;
 const GridType = @import("./grid.zig").GridType;
-const BlockPtr = @import("./grid.zig").BlockPtr;
+const BlockPtrConst = @import("./grid.zig").BlockPtrConst;
 const ForestTableIteratorType = @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 
 pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime_int) type {
@@ -112,7 +111,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                 index_checksum: u128,
                 index_address: u64,
                 /// Points to `tour_index_block` once the index block has been read.
-                index_block: ?BlockPtr = null,
+                index_block: ?BlockPtrConst = null,
                 value_block_index: u32 = 0,
             },
             /// The manifest log tour iterates manifest blocks in reverse order.
@@ -131,7 +130,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
         tour_tables_origin: ?WrappingForestTableIterator.Origin,
 
         /// Contains a table index block when tour=table_value.
-        tour_index_block: BlockPtr,
+        tour_index_block: BlockPtrConst,
 
         /// These counters reset after every tour cycle.
         /// NB: tour_blocks_scrubbed_count will include repeat index blocks reads.
@@ -143,8 +142,10 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
             forest: *Forest,
             client_sessions_checkpoint: *const CheckpointTrailer,
         ) error{OutOfMemory}!GridScrubber {
-            const tour_index_block = try allocate_block(allocator);
-            errdefer allocator.free(tour_index_block);
+            _ = allocator;
+
+            const tour_index_block = forest.grid.get_block();
+            errdefer forest.grid.block_unref(tour_index_block);
 
             return .{
                 .superblock = forest.grid.superblock,
@@ -159,8 +160,9 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
         }
 
         pub fn deinit(scrubber: *GridScrubber, allocator: std.mem.Allocator) void {
-            allocator.free(scrubber.tour_index_block);
+            _ = allocator;
 
+            scrubber.forest.grid.block_unref(scrubber.tour_index_block);
             scrubber.* = undefined;
         }
 
@@ -335,7 +337,9 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                 assert(scrubber.tour.table_value.value_block_index == 0);
 
                 if (result == .valid) {
-                    stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, result.valid);
+                    scrubber.forest.grid.block_unref(scrubber.tour_index_block);
+                    scrubber.tour_index_block =
+                        scrubber.forest.grid.block_ref(result.valid);
                     scrubber.tour.table_value.index_block = scrubber.tour_index_block;
                 } else {
                     // The scrubber can't scrub the table value blocks until it has the

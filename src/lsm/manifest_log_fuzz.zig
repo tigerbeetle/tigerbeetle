@@ -504,16 +504,18 @@ const Environment = struct {
             env.superblock_verify.deinit(env.gpa);
             env.superblock_verify = try fixtures.init_superblock(env.gpa, &env.storage_verify, .{});
 
+            env.manifest_log_verify.deinit(env.gpa);
             env.grid_verify.deinit(env.gpa);
+
             env.grid_verify = try Grid.init(env.gpa, .{
                 .superblock = &env.superblock_verify,
                 .trace = &env.trace_verify,
+                .stash_blocks_count = 1024,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
                 .blocks_released_prior_checkpoint_durability_max = 0,
             });
 
-            env.manifest_log_verify.deinit(env.gpa);
             try env.manifest_log_verify.init(
                 env.gpa,
                 &env.grid_verify,

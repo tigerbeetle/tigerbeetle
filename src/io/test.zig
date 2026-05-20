@@ -1017,3 +1017,92 @@ test "cancel" {
         }
     }.run_test();
 }
+
+test "flush checks timeouts even when completions are queued" {
+    // The invariant this test exercises - that flush_timeouts() runs even
+    // when the completed queue already has items - is specific to the
+    // userspace timeout queue used by Windows and Darwin. On Linux,
+    // timeouts are kernel-managed via io_uring SQEs and a non-blocking
+    // run() does not necessarily dispatch the timeouts. This test is
+    // verifying identical behavior on windows and darwin but leaves
+    // the different linux behavior to future work.
+    if (builtin.target.os.tag == .linux) return error.SkipZigTest;
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        instant_fired: bool = false,
+        timeout_fired: bool = false,
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // next_tick goes directly into the completed queue.
+            // The 1ns timeout goes into the timeouts queue and expires
+            // immediately on the next flush_timeouts call. If flush
+            // skips flush_timeouts when completed is non-empty, the
+            // 1ns timeout will be stranded.
+            var c1: IO.Completion = undefined;
+            var c2: IO.Completion = undefined;
+            self.io.next_tick(*Context, &self, on_instant, &c1, .vsr);
+            self.io.timeout(*Context, &self, on_timeout, &c2, 1);
+
+            try self.io.run();
+
+            try testing.expect(self.instant_fired);
+            try testing.expect(self.timeout_fired);
+        }
+
+        fn on_instant(self: *Context, _: *IO.Completion, _: IO.NextTickResult) void {
+            self.instant_fired = true;
+        }
+
+        fn on_timeout(self: *Context, _: *IO.Completion, result: IO.TimeoutError!void) void {
+            _ = result catch @panic("timeout error");
+            self.timeout_fired = true;
+        }
+    }.run_test();
+}
+
+test "chained zero-delay callbacks complete in a single flush" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        count: u32 = 0,
+        completions: [chain_length]IO.Completion = undefined,
+
+        const chain_length = 10;
+
+        fn run_test() !void {
+            var self: Context = .{ .io = try IO.init(32, 0) };
+            defer self.io.deinit();
+
+            // Start the chain with a single next_tick.
+            self.io.next_tick(*Context, &self, on_next_tick, &self.completions[0], .vsr);
+
+            // A single run() calls flush once. If the dispatch loop
+            // drains the live completed queue, each callback's next_tick
+            // successor is picked up in the same pass and the entire
+            // chain completes. If completed were snapshot'd, only the
+            // first link would fire per run() call.
+            try self.io.run();
+
+            try testing.expectEqual(@as(u32, chain_length), self.count);
+        }
+
+        fn on_next_tick(self: *Context, _: *IO.Completion, _: IO.NextTickResult) void {
+            self.count += 1;
+            if (self.count < chain_length) {
+                self.io.next_tick(
+                    *Context,
+                    self,
+                    on_next_tick,
+                    &self.completions[self.count],
+                    .vsr,
+                );
+            }
+        }
+    }.run_test();
+}

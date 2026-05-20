@@ -532,11 +532,19 @@ fn after_synchronization(self: *Clock) void {
     const upper = self.epoch.realtime + elapsed + new_interval.upper_bound;
     const cluster = std.math.clamp(system, lower, upper);
 
+    // The only current hard limit on what the clock skew can actually be is from
+    // `clock_offset_tolerance_max`.
+    //
+    // Warn at 50ms, since that's a reasonable amount of NTP clock skew, and ensure that 50ms is a
+    // reasonable (sub 1%) portion of `clock_offset_tolerance_max`.
+    const delta_warning = 50 * std.time.ns_per_ms;
+    comptime assert(delta_warning < @divFloor(clock_offset_tolerance_max, 100));
+
     if (system == cluster) {} else if (system < lower) {
         const delta = lower - system;
         if (self.trace) |trace| trace.gauge(.clock_delta_ns, delta);
 
-        if (delta < std.time.ns_per_ms) {
+        if (delta < delta_warning) {
             log.debug("{}: system time is {} behind", .{
                 self.replica,
                 fmt.fmtDurationSigned(delta),
@@ -554,7 +562,7 @@ fn after_synchronization(self: *Clock) void {
         const delta = system - upper;
         if (self.trace) |trace| trace.gauge(.clock_delta_ns, delta);
 
-        if (delta < std.time.ns_per_ms) {
+        if (delta < delta_warning) {
             log.debug("{}: system time is {} ahead", .{
                 self.replica,
                 fmt.fmtDurationSigned(delta),
