@@ -33,11 +33,20 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
         return error.DirtyWorktree;
     }
 
+    const github_event = try read_github_event(shell);
+    const baseline_ref = baseline_ref: {
+        if (try merge_group_base_sha(shell, github_event)) |base_sha| {
+            log.info("using merge_group.base_sha as baseline", .{});
+            break :baseline_ref base_sha;
+        }
+        break :baseline_ref cli_args.baseline;
+    };
+
     const original_sha = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
     const baseline_sha =
-        try shell.exec_stdout("git rev-parse --verify {baseline}", .{ .baseline = cli_args.baseline });
+        try shell.exec_stdout("git rev-parse --verify {baseline}", .{ .baseline = baseline_ref });
 
-    log.info("baseline: {s} ({s})", .{ cli_args.baseline, baseline_sha });
+    log.info("baseline: {s} ({s})", .{ baseline_ref, baseline_sha });
     log.info("current:  {s}", .{original_sha});
 
     const worktrees = try create_worktrees(shell, .{
@@ -53,7 +62,7 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     const failed = compare_benchmarks(baseline, current, cli_args.epsilon_percent);
     if (failed) {
-        if (try has_github_label(shell, cli_args.expected_regression_label)) {
+        if (try has_github_label(shell, github_event, cli_args.expected_regression_label)) {
             log.warn(
                 "benchmark regression accepted because GitHub label '{s}' is present",
                 .{cli_args.expected_regression_label},
@@ -449,9 +458,11 @@ fn has_duration_measurement(output: []const u8, label: []const u8) bool {
     return false;
 }
 
-fn has_github_label(shell: *Shell, expected_label: []const u8) !bool {
-    const event = try read_github_event(shell);
-
+fn has_github_label(
+    shell: *Shell,
+    event: ?GhEvent,
+    expected_label: []const u8,
+) !bool {
     if (has_github_event_label(event, expected_label)) {
         return true;
     }
@@ -460,6 +471,17 @@ fn has_github_label(shell: *Shell, expected_label: []const u8) !bool {
     }
 
     return try has_github_pr_label(shell, expected_label);
+}
+
+fn merge_group_base_sha(shell: *Shell, event: ?GhEvent) !?[]const u8 {
+    if (!std.mem.eql(u8, shell.env_get_option("GITHUB_EVENT_NAME") orelse "", "merge_group")) {
+        return null;
+    }
+
+    const merge_group = (event orelse return null).merge_group orelse return null;
+    if (merge_group.base_sha.len == 0) return null;
+
+    return merge_group.base_sha;
 }
 
 const GhLabel = struct {
