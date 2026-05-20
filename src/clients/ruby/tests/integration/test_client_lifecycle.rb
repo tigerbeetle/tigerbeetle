@@ -124,6 +124,6 @@ class TestClientLifecycle < Minitest::Test
     threads.each(&:value)
 
   ensure
-    clients&.each { it.close unless it.closed? }
+    clients&.each { |client| client.close unless client.closed? }
   end
 end

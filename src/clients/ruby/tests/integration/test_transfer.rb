@@ -211,8 +211,8 @@ class TestTransfers < TigerBeetleIntegrationTest
 
     results = @client.lookup_transfers([id1, id2])
     assert_equal(2, results.length)
-    r1 = results.find { it.id == id1 }
-    r2 = results.find { it.id == id2 }
+    r1 = results.find { |result| result.id == id1 }
+    r2 = results.find { |result| result.id == id2 }
     refute_nil(r1)
     refute_nil(r2)
     assert_equal(10, r1.amount)

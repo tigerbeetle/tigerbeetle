@@ -21,7 +21,7 @@ class TestQueryFilter < TigerBeetleIntegrationTest
 
     results = @client.create_accounts(accounts)
     assert_equal(10, results.length)
-    assert_all(results) { it.status == TigerBeetle::CreateAccountStatus::CREATED }
+    assert_all(results) { |result| result.status == TigerBeetle::CreateAccountStatus::CREATED }
 
     ascending = @client.query_accounts(
       TigerBeetle::QueryFilter.new(
@@ -35,11 +35,11 @@ class TestQueryFilter < TigerBeetleIntegrationTest
     )
     assert_equal(5, ascending.length)
     assert_strictly_ascending(ascending.map(&:timestamp))
-    assert_all(ascending) { it.user_data_128 == 1000 }
-    assert_all(ascending) { it.user_data_64 == 100 }
-    assert_all(ascending) { it.user_data_32 == 10 }
-    assert_all(ascending) { it.ledger == ledger }
-    assert_all(ascending) { it.code == code }
+    assert_all(ascending) { |account| account.user_data_128 == 1000 }
+    assert_all(ascending) { |account| account.user_data_64 == 100 }
+    assert_all(ascending) { |account| account.user_data_32 == 10 }
+    assert_all(ascending) { |account| account.ledger == ledger }
+    assert_all(ascending) { |account| account.code == code }
 
     reversed = @client.query_accounts(
       TigerBeetle::QueryFilter.new(
@@ -63,14 +63,14 @@ class TestQueryFilter < TigerBeetleIntegrationTest
     )
     first_page = @client.query_accounts(page_filter)
     assert_equal(5, first_page.length)
-    assert_all(first_page) { it.ledger == ledger }
-    assert_all(first_page) { it.code == code }
+    assert_all(first_page) { |account| account.ledger == ledger }
+    assert_all(first_page) { |account| account.code == code }
 
     page_filter.timestamp_max = first_page.last.timestamp - 1
     second_page = @client.query_accounts(page_filter)
     assert_equal(5, second_page.length)
-    assert_all(second_page) { it.ledger == ledger }
-    assert_all(second_page) { it.code == code }
+    assert_all(second_page) { |account| account.ledger == ledger }
+    assert_all(second_page) { |account| account.code == code }
 
     page_filter.timestamp_max = second_page.last.timestamp - 1
     assert_empty(@client.query_accounts(page_filter))
@@ -105,7 +105,7 @@ class TestQueryFilter < TigerBeetleIntegrationTest
 
     results = @client.create_transfers(transfers)
     assert_equal(10, results.length)
-    assert_all(results) { it.status == TigerBeetle::CreateTransferStatus::CREATED }
+    assert_all(results) { |result| result.status == TigerBeetle::CreateTransferStatus::CREATED }
 
     ascending = @client.query_transfers(
       TigerBeetle::QueryFilter.new(
@@ -119,11 +119,11 @@ class TestQueryFilter < TigerBeetleIntegrationTest
     )
     assert_equal(5, ascending.length)
     assert_strictly_ascending(ascending.map(&:timestamp))
-    assert_all(ascending) { it.user_data_128 == 1000 }
-    assert_all(ascending) { it.user_data_64 == 100 }
-    assert_all(ascending) { it.user_data_32 == 10 }
-    assert_all(ascending) { it.ledger == ledger }
-    assert_all(ascending) { it.code == code }
+    assert_all(ascending) { |transfer| transfer.user_data_128 == 1000 }
+    assert_all(ascending) { |transfer| transfer.user_data_64 == 100 }
+    assert_all(ascending) { |transfer| transfer.user_data_32 == 10 }
+    assert_all(ascending) { |transfer| transfer.ledger == ledger }
+    assert_all(ascending) { |transfer| transfer.code == code }
 
     reversed = @client.query_transfers(
       TigerBeetle::QueryFilter.new(
@@ -147,14 +147,14 @@ class TestQueryFilter < TigerBeetleIntegrationTest
     )
     first_page = @client.query_transfers(page_filter)
     assert_equal(5, first_page.length)
-    assert_all(first_page) { it.ledger == ledger }
-    assert_all(first_page) { it.code == code }
+    assert_all(first_page) { |transfer| transfer.ledger == ledger }
+    assert_all(first_page) { |transfer| transfer.code == code }
 
     page_filter.timestamp_max = first_page.last.timestamp - 1
     second_page = @client.query_transfers(page_filter)
     assert_equal(5, second_page.length)
-    assert_all(second_page) { it.ledger == ledger }
-    assert_all(second_page) { it.code == code }
+    assert_all(second_page) { |transfer| transfer.ledger == ledger }
+    assert_all(second_page) { |transfer| transfer.code == code }
 
     page_filter.timestamp_max = second_page.last.timestamp - 1
     assert_empty(@client.query_transfers(page_filter))
