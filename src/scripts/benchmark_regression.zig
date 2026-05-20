@@ -1,9 +1,9 @@
 //! Standalone comparative benchmarks.
 //!
-//! This intentionally does not upload to devhub. It checks out a baseline ref, runs the macro
-//! benchmark already used by devhub plus a microbenchmark stage, then checks out the original
-//! commit and runs the same stages again. The run fails if the original commit is more than
-//! `--epsilon-percent` slower than the baseline.
+//! This intentionally does not upload to devhub. It creates a temporary worktree for a baseline ref
+//! and a second temporary worktree for the current commit, builds their benchmark artifacts in
+//! parallel, and then runs the same benchmark stages sequentially. The run fails if the current
+//! commit is more than `--epsilon-percent` slower than the baseline.
 
 const std = @import("std");
 
@@ -27,37 +27,87 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     const dirty = try shell.exec_stdout("git status --porcelain", .{});
     if (dirty.len != 0) {
-        log.err("benchmark-regression requires a clean worktree before checking out refs", .{});
+        log.err("benchmark-regression requires a clean worktree", .{});
         log.err("git status --porcelain:\n{s}", .{dirty});
         return error.DirtyWorktree;
     }
 
     const original_sha = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
-    const original_branch = try shell.exec_stdout("git rev-parse --abbrev-ref HEAD", .{});
-    const original_checkout = if (std.mem.eql(u8, original_branch, "HEAD"))
-        original_sha
-    else
-        original_branch;
-
-    defer {
-        shell.exec("git checkout --quiet {ref}", .{ .ref = original_checkout }) catch |err| {
-            log.err("failed to restore checkout {s}: {}", .{ original_checkout, err });
-        };
-    }
-
     const baseline_sha =
         try shell.exec_stdout("git rev-parse --verify {baseline}", .{ .baseline = cli_args.baseline });
 
     log.info("baseline: {s} ({s})", .{ cli_args.baseline, baseline_sha });
     log.info("current:  {s}", .{original_sha});
 
-    try shell.exec("git checkout --quiet {ref}", .{ .ref = cli_args.baseline });
-    const baseline = try run_benchmarks(shell, "baseline");
+    const worktrees = try create_worktrees(shell, .{
+        .baseline_sha = baseline_sha,
+        .current_sha = original_sha,
+    });
+    defer worktrees.remove(shell);
 
-    try shell.exec("git checkout --quiet {ref}", .{ .ref = original_sha });
-    const current = try run_benchmarks(shell, "current");
+    try build_worktrees(worktrees);
+
+    const baseline = try run_benchmarks(shell, "baseline", worktrees.baseline_path);
+    const current = try run_benchmarks(shell, "current", worktrees.current_path);
 
     try compare_benchmarks(baseline, current, cli_args.epsilon_percent);
+}
+
+const Worktrees = struct {
+    root_path: []const u8,
+    baseline_path: []const u8,
+    current_path: []const u8,
+
+    fn remove(worktrees: Worktrees, shell: *Shell) void {
+        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.baseline_path }) catch |err| {
+            log.err("failed to remove baseline worktree {s}: {}", .{ worktrees.baseline_path, err });
+        };
+        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.current_path }) catch |err| {
+            log.err("failed to remove current worktree {s}: {}", .{ worktrees.current_path, err });
+        };
+        shell.project_root.deleteTree(worktrees.root_path) catch |err| {
+            log.err("failed to remove benchmark worktree root {s}: {}", .{ worktrees.root_path, err });
+        };
+    }
+};
+
+fn create_worktrees(
+    shell: *Shell,
+    refs: struct {
+        baseline_sha: []const u8,
+        current_sha: []const u8,
+    },
+) !Worktrees {
+    var section = try shell.open_section("create worktrees");
+    defer section.close();
+
+    const root_path = try shell.create_tmp_dir();
+    const baseline_path = try std.fs.path.join(
+        shell.arena.allocator(),
+        &.{ root_path, "baseline" },
+    );
+    const current_path = try std.fs.path.join(
+        shell.arena.allocator(),
+        &.{ root_path, "current" },
+    );
+
+    try shell.exec(
+        "git worktree add --detach {path} {ref}",
+        .{ .path = baseline_path, .ref = refs.baseline_sha },
+    );
+    errdefer shell.exec("git worktree remove --force {path}", .{ .path = baseline_path }) catch {};
+
+    try shell.exec(
+        "git worktree add --detach {path} {ref}",
+        .{ .path = current_path, .ref = refs.current_sha },
+    );
+    errdefer shell.exec("git worktree remove --force {path}", .{ .path = current_path }) catch {};
+
+    return .{
+        .root_path = root_path,
+        .baseline_path = baseline_path,
+        .current_path = current_path,
+    };
 }
 
 const Benchmarks = struct {
@@ -76,14 +126,130 @@ const MicroBenchmark = struct {
     per_element_ns: u64,
 };
 
-fn run_benchmarks(shell: *Shell, name: []const u8) !Benchmarks {
+fn run_benchmarks(shell: *Shell, name: []const u8, worktree_path: []const u8) !Benchmarks {
     var section = try shell.open_section(name);
     defer section.close();
+
+    try shell.pushd(worktree_path);
+    defer shell.popd();
 
     return .{
         .macro = try run_macro_benchmark(shell),
         .micro = try run_micro_benchmark(shell),
     };
+}
+
+const BuildContext = struct {
+    name: []const u8,
+    path: []const u8,
+    zig_exe: []const u8,
+    env_map: *std.process.EnvMap,
+};
+
+fn build_worktrees(worktrees: Worktrees) !void {
+    var section = try std.time.Timer.start();
+    defer log.info("build benchmark artifacts: {}", .{std.fmt.fmtDuration(section.read())});
+
+    const zig_exe_env = std.process.getEnvVarOwned(
+        std.heap.page_allocator,
+        "ZIG_EXE",
+    ) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => |e| return e,
+    };
+    defer if (zig_exe_env) |zig_exe| std.heap.page_allocator.free(zig_exe);
+
+    const zig_exe = zig_exe_env orelse "./zig/zig";
+
+    var env_map = try std.process.getEnvMap(std.heap.page_allocator);
+    defer env_map.deinit();
+
+    const baseline_context: BuildContext = .{
+        .name = "baseline",
+        .path = worktrees.baseline_path,
+        .zig_exe = zig_exe,
+        .env_map = &env_map,
+    };
+    const current_context: BuildContext = .{
+        .name = "current",
+        .path = worktrees.current_path,
+        .zig_exe = zig_exe,
+        .env_map = &env_map,
+    };
+
+    try build_worktrees_step("release binary", .release, &.{ baseline_context, current_context });
+    try build_worktrees_step("k-way microbenchmark", .micro, &.{ baseline_context, current_context });
+}
+
+const BuildStep = enum {
+    release,
+    micro,
+};
+
+fn build_worktrees_step(
+    step_name: []const u8,
+    build_step: BuildStep,
+    contexts: *const [2]BuildContext,
+) !void {
+    var timer = try std.time.Timer.start();
+
+    log.info("building {s}", .{step_name});
+
+    var children: [2]std.process.Child = undefined;
+    var children_spawned: usize = 0;
+    errdefer for (children[0..children_spawned]) |*child| {
+        _ = child.kill() catch {};
+    };
+
+    for (&children, contexts) |*child, *context| {
+        const argv_release = [_][]const u8{ context.zig_exe, "build", "-Drelease", "install" };
+        const argv_micro = [_][]const u8{
+            context.zig_exe,
+            "build",
+            "test:unit:build",
+            "--",
+            "benchmark: k-way",
+        };
+        const argv: []const []const u8 = switch (build_step) {
+            .release => &argv_release,
+            .micro => &argv_micro,
+        };
+
+        child.* = std.process.Child.init(argv, std.heap.page_allocator);
+        child.cwd = context.path;
+        child.env_map = context.env_map;
+        child.stdin_behavior = .Ignore;
+        child.stdout_behavior = .Inherit;
+        child.stderr_behavior = .Inherit;
+        try child.spawn();
+        children_spawned += 1;
+    }
+
+    var failed = false;
+    for (&children, contexts) |*child, *context| {
+        const term = try child.wait();
+        switch (term) {
+            .Exited => |code| if (code != 0) {
+                log.err("{s}: {s} build failed with exit code {}", .{
+                    context.name,
+                    step_name,
+                    code,
+                });
+                failed = true;
+            },
+            else => {
+                log.err("{s}: {s} build failed with {}", .{
+                    context.name,
+                    step_name,
+                    term,
+                });
+                failed = true;
+            },
+        }
+    }
+
+    log.info("{s}: {}", .{ step_name, std.fmt.fmtDuration(timer.read()) });
+    if (failed) return error.BuildFailed;
 }
 
 fn run_macro_benchmark(shell: *Shell) !MacroBenchmark {
@@ -92,13 +258,6 @@ fn run_macro_benchmark(shell: *Shell) !MacroBenchmark {
 
     shell.cwd.deleteFile("datafile-benchmark-regression") catch {};
     defer shell.cwd.deleteFile("datafile-benchmark-regression") catch {};
-
-    try shell.exec_zig_options(
-        .{ .timeout = .minutes(30) },
-        "build -Drelease install",
-        .{},
-    );
-    defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
     const stdout, _ = try shell.exec_stdout_stderr(
         "./tigerbeetle benchmark --validate --checksum-performance --log-debug-replica " ++
@@ -118,7 +277,7 @@ fn run_micro_benchmark(shell: *Shell) !MicroBenchmark {
     defer section.close();
 
     const stdout, const stderr = try shell.exec_stdout_stderr(
-        "./zig/zig build test -- {filter}",
+        "./zig-out/bin/test-unit {filter}",
         .{ .filter = "benchmark: k-way" },
     );
     const output = try std.mem.concat(shell.arena.allocator(), u8, &.{ stdout, "\n", stderr });
