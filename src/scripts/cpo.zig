@@ -325,7 +325,7 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
     const benchmark_result = try shell.exec_stdout(
-        "./tigerbeetle benchmark --transfer-count={transfer_count} --file={block_device}",
+        "./tigerbeetle benchmark --transfer-count={transfer_count} --file={block_device} --cache-grid=32GiB",
         .{
             .transfer_count = transfer_count,
             .block_device = block_device,

@@ -106,7 +106,7 @@ pub fn build(b: *std.Build) !void {
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
     };
 
-    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
+    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .Debug });
 
     // Build options passed with `-D` flags.
     const build_options = .{
