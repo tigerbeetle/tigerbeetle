@@ -2,8 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
+const Bench = stdx.Bench;
 
-const Bench = @import("../testing/bench.zig");
 const Pending = error{Pending};
 const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
 

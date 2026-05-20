@@ -8,7 +8,7 @@ const stdx = @import("stdx");
 const KiB = stdx.KiB;
 const MiB = stdx.MiB;
 
-const Bench = @import("../testing/bench.zig");
+const Bench = stdx.Bench;
 
 const repetitions = 35;
 
