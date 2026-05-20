@@ -283,6 +283,17 @@ pub const Supervisor = struct {
                 }
             }
         }
+
+        if (supervisor.workload) |workload| {
+            // Driver subprocess should never exit on its own.
+            const result = std.posix.waitpid(workload.driver.id, std.posix.W.NOHANG);
+            if (result.pid != 0) {
+                assert(result.pid == workload.driver.id);
+
+                const term = stdx.term_from_status(result.status);
+                fatal(.workload_exit_early, "workload exited with: {}", .{term});
+            }
+        }
     }
 
     fn tick_check_liveness(supervisor: *Supervisor) !void {
