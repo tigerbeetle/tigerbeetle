@@ -179,6 +179,8 @@ pub fn build(b: *std.Build) !void {
     test_options.addOption(bool, "benchmark", for (b.args orelse &.{}) |arg| {
         if (std.mem.indexOf(u8, arg, "benchmark") != null) break true;
     } else false);
+    test_options.addOption(bool, "ci", try std.process.hasEnvVar(b.allocator, "CI"));
+
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
     stdx_module.addOptions("test_options", test_options);
 

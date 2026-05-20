@@ -56,19 +56,21 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const Duration = stdx.Duration;
 const Instant = stdx.Instant;
-const BenchmarkTimer = @import("timer.zig");
+const Time = @import("time.zig");
 
 const seed_benchmark: u64 = 42;
 
 const mode: enum { smoke, benchmark } =
     // See build.zig for how this is ultimately determined.
     if (@import("test_options").benchmark) .benchmark else .smoke;
-
-seed: u64,
-time: TimeOS = .{},
-timer: ?Instant = null,
+const disable_parameter_override = mode == .smoke or @import("test_options").ci;
 
 const Bench = @This();
+
+seed: u64,
+time: Time = .{},
+timer: ?Instant = null,
+
 
 pub fn init() Bench {
     return .{
@@ -104,9 +106,12 @@ fn parameter_fallible(
     assert(value_smoke < value_benchmark);
     return switch (mode) {
         .smoke => value_smoke,
-        .benchmark => std.process.parseEnvVarInt(name, u64, 10) catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => return value_benchmark,
-            else => |e| return e,
+        .benchmark => {
+            if (disable_parameter_override) return value_benchmark;
+            std.process.parseEnvVarInt(name, u64, 10) catch |err| switch (err) {
+                error.EnvironmentVariableNotFound => return value_benchmark,
+                else => |e| return e,
+            };
         },
     };
 }
