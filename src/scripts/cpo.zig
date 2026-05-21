@@ -313,7 +313,7 @@ fn benchmark_long(
     defer section.close();
 
     const block_device = "/dev/md0";
-    const transfer_count = 10_000;
+    const transfer_count = 10_000_000_000;
 
     // overwrite the first 96 bytes for block device
     try shell.exec(
