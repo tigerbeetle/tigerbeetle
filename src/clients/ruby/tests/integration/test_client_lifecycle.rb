@@ -66,6 +66,12 @@ class TestClientLifecycle < Minitest::Test
     assert_equal("Init error: address_invalid", err.message)
   end
 
+  def test_replica_addresses_must_be_a_string
+    assert_raises(TypeError) do
+      TigerBeetle::Client.new(cluster_id: 0, replica_addresses: [@tb_address])
+    end
+  end
+
   def test_multiple_clients_submit_from_multiple_threads
     clients = Array.new(2) do
       TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address)

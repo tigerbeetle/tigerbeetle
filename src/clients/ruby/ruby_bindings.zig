@@ -1,10 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const generator_options = @import("ruby_bindings_options");
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const tb = vsr.tigerbeetle;
-const generator_options = @import("ruby_bindings_options");
 
 const flag_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
@@ -201,7 +201,10 @@ fn emit_struct_class(
 
     inline for (fields) |field| {
         if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-        buffer.print("    attr_{s} :{s}\n", .{ if (read_only) "reader" else "accessor", field.name });
+        buffer.print(
+            "    attr_{s} :{s}\n",
+            .{ if (read_only) "reader" else "accessor", field.name },
+        );
     }
     buffer.print("\n", .{});
 
@@ -284,7 +287,10 @@ fn emit_rbs_struct_class(
 
     inline for (fields) |field| {
         if (comptime std.mem.eql(u8, field.name, "reserved")) continue;
-        buffer.print("    attr_{s} {s}: Integer\n", .{ if (read_only) "reader" else "accessor", field.name });
+        buffer.print(
+            "    attr_{s} {s}: Integer\n",
+            .{ if (read_only) "reader" else "accessor", field.name },
+        );
     }
     buffer.print("\n", .{});
 
@@ -328,9 +334,11 @@ fn emit_rbs_bindings(buffer: *Buffer) void {
         \\  end
         \\
         \\  class Client
-        \\    def self.open: (cluster_id: Integer, replica_addresses: String | Array[String]) { (Client) -> untyped } -> untyped
-        \\
-        \\    def initialize: (cluster_id: Integer, replica_addresses: String | Array[String]) -> void
+    );
+    buffer.write("\n    def self.open: (cluster_id: Integer, replica_addresses: String)");
+    buffer.write(" { (Client) -> untyped } -> untyped\n\n");
+    buffer.write(
+        \\    def initialize: (cluster_id: Integer, replica_addresses: String) -> void
         \\    def close: () -> nil
         \\    def closed?: () -> bool
         \\
@@ -458,7 +466,11 @@ fn emit_c_init_error_message(buffer: *Buffer) void {
     );
 }
 
-fn emit_c_num_from_ruby(buffer: *Buffer, comptime FieldType: type, comptime ruby_value: []const u8) void {
+fn emit_c_num_from_ruby(
+    buffer: *Buffer,
+    comptime FieldType: type,
+    comptime ruby_value: []const u8,
+) void {
     const bits = comptime int_bits(FieldType);
     switch (bits) {
         8, 16, 32 => buffer.print("({s})NUM2UINT({s})", .{ c_uint_type(bits), ruby_value }),
@@ -467,7 +479,11 @@ fn emit_c_num_from_ruby(buffer: *Buffer, comptime FieldType: type, comptime ruby
     }
 }
 
-fn emit_c_value_from_field(buffer: *Buffer, comptime FieldType: type, comptime field_expr: []const u8) void {
+fn emit_c_value_from_field(
+    buffer: *Buffer,
+    comptime FieldType: type,
+    comptime field_expr: []const u8,
+) void {
     const bits = comptime int_bits(FieldType);
     switch (bits) {
         8, 16, 32 => buffer.print("UINT2NUM({s})", .{field_expr}),
@@ -481,9 +497,12 @@ fn emit_c_serialize_struct(buffer: *Buffer, comptime operation: tb.Operation) vo
     const Type = operation.EventType();
     const operation_name = comptime operation_function_name(operation);
     const c_name = comptime c_type_name(Type);
-    buffer.print("static void rb_tb_serialize_{s}(VALUE items_rb, uint8_t *buf, long count) {{\n", .{
-        operation_name,
-    });
+    buffer.print(
+        "static void rb_tb_serialize_{s}(VALUE items_rb, uint8_t *buf, long count) {{\n",
+        .{
+            operation_name,
+        },
+    );
     buffer.print("    {s} *items = ({s} *)buf;\n", .{ c_name, c_name });
     buffer.print("    for (long i = 0; i < count; i++) {{\n", .{});
     buffer.print("        VALUE item_rb = RARRAY_AREF(items_rb, i);\n", .{});
@@ -495,7 +514,10 @@ fn emit_c_serialize_struct(buffer: *Buffer, comptime operation: tb.Operation) vo
         const value_expr = "rb_ivar_get(item_rb, rb_intern(\"@" ++ field.name ++ "\"))";
         switch (@typeInfo(field.type)) {
             .int => |info| if (info.bits == 128) {
-                buffer.print("        rb_tb_pack_u128({s}, &item->{s});\n", .{ value_expr, field.name });
+                buffer.print(
+                    "        rb_tb_pack_u128({s}, &item->{s});\n",
+                    .{ value_expr, field.name },
+                );
             } else {
                 buffer.print("        item->{s} = ", .{field.name});
                 emit_c_num_from_ruby(buffer, field.type, value_expr);
@@ -585,7 +607,15 @@ fn emit_c_event_size(buffer: *Buffer) void {
 }
 
 fn emit_c_serialize_dispatch(buffer: *Buffer) void {
-    buffer.print("static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf, long count) {{\n", .{});
+    buffer.write(
+        \\static void rb_tb_serialize(
+        \\    TB_OPERATION operation,
+        \\    VALUE items_rb,
+        \\    uint8_t *buf,
+        \\    long count
+        \\) {
+        \\
+    );
     buffer.print("    switch (operation) {{\n", .{});
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);
@@ -612,7 +642,14 @@ fn emit_c_serialize_dispatch(buffer: *Buffer) void {
 }
 
 fn emit_c_deserialize_dispatch(buffer: *Buffer) void {
-    buffer.print("static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint32_t buf_size) {{\n", .{});
+    buffer.write(
+        \\static VALUE rb_tb_deserialize(
+        \\    TB_OPERATION operation,
+        \\    const uint8_t *buf,
+        \\    uint32_t buf_size
+        \\) {
+        \\
+    );
     buffer.print("    switch (operation) {{\n", .{});
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);

@@ -127,7 +127,6 @@ static VALUE rb_tb_request_result(VALUE self) {
 static void rb_tb_write_completion(int fd, rb_tb_request_t *req) {
     uint64_t request_id = (uint64_t)(uintptr_t)req;
     ssize_t written = write(fd, &request_id, sizeof(request_id));
-    (void)written;
     tb_assert(written == sizeof(request_id));
 }
 

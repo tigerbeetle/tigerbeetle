@@ -363,7 +363,12 @@ static size_t rb_tb_event_size(TB_OPERATION operation) {
     }
 }
 
-static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf, long count) {
+static void rb_tb_serialize(
+    TB_OPERATION operation,
+    VALUE items_rb,
+    uint8_t *buf,
+    long count
+) {
     switch (operation) {
     case TB_OPERATION_LOOKUP_ACCOUNTS:
         rb_tb_serialize_u128(items_rb, buf, count);
@@ -394,7 +399,11 @@ static void rb_tb_serialize(TB_OPERATION operation, VALUE items_rb, uint8_t *buf
     }
 }
 
-static VALUE rb_tb_deserialize(TB_OPERATION operation, const uint8_t *buf, uint32_t buf_size) {
+static VALUE rb_tb_deserialize(
+    TB_OPERATION operation,
+    const uint8_t *buf,
+    uint32_t buf_size
+) {
     switch (operation) {
     case TB_OPERATION_LOOKUP_ACCOUNTS:
         return rb_tb_deserialize_lookup_accounts(buf, buf_size);

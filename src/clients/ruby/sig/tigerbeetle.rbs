@@ -18,9 +18,9 @@ module TigerBeetle
   end
 
   class Client
-    def self.open: (cluster_id: Integer, replica_addresses: String | Array[String]) { (Client) -> untyped } -> untyped
+    def self.open: (cluster_id: Integer, replica_addresses: String) { (Client) -> untyped } -> untyped
 
-    def initialize: (cluster_id: Integer, replica_addresses: String | Array[String]) -> void
+    def initialize: (cluster_id: Integer, replica_addresses: String) -> void
     def close: () -> nil
     def closed?: () -> bool
 

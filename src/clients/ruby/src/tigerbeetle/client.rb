@@ -29,8 +29,7 @@ module TigerBeetle
     # @raise [TigerBeetle::InitError] if the native client cannot be
     #   initialized.
     def initialize(cluster_id:, replica_addresses:)
-      addresses = Array(replica_addresses).join(",")
-      @native = NativeClient.new(cluster_id, addresses, COMPLETION_DISPATCHER.write_fileno)
+      @native = NativeClient.new(cluster_id, replica_addresses, COMPLETION_DISPATCHER.write_fileno)
       @closed = false
     end
 
