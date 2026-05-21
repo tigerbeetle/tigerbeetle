@@ -5,38 +5,56 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 
+
+pub const RatchetDirection = union(enum) {
+    above,
+    below,
+    exact,
+    above_epsilon: f64,
+    below_epsilon: f64,
+    exact_epsilon: f64,
+
+    fn as_string(direction: RatchetDirection) []const u8 {
+        return switch(direction)  {
+            .above => ">",
+            .below => "<",
+            .exact => "=",
+            // TODO
+            .above_epsilon => ">",
+            .below_epsilon => "<",
+            .exact_epsilon => "=",
+        };
+    }
+};
+
+pub const RatchetSpec = struct {
+    []const u8,
+    RatchetDirection,
+    f64,
+};
+
+
 pub fn ratchet_write(
-    comptime src: std.builtin.SourceLocation,
     writer: anytype,
-    params: anytype,
-    metrics: anytype,
+    comptime ratchet_name: []const u8,
+    comptime fmt: []const u8,
+    params: anytype, 
+    ratchet_specs: []RatchetSpec
 ) !void {
-    assert(std.meta.fields(@TypeOf(metrics)).len > 0);
+    assert(std.meta.fields(@TypeOf(ratchet_specs)).len > 0);
     maybe(std.meta.fields(@TypeOf(params)).len == 0);
     // we use a custom format (instead of json/zon) to reduce
-    // noise and improve human readability in the logs
-    try writer.print("RATCHET {s} // ", .{src.fn_name});
-    inline for (comptime lexicographic_fields(@TypeOf(params))) |field| {
-        const format_string = comptime format_string_from_type(field.type);
-        try writer.print("{s}=" ++ format_string ++ " ", .{
-            field.name,
-            @field(params, field.name),
-        });
+    // noise in the output and improve readability for humans
+    try writer.print("{s} //" ++ fmt ++ " // ", .{ratchet_name} ++ params);
+    const SortContext = struct {
+        fn less_than(_: @This(), lhs: *const RatchetSpec, rhs: *const RatchetSpec) bool {
+            return std.mem.order(lhs[0], rhs[1]) != .gt;
+        }
+    };
+    std.mem.sort(RatchetSpec, ratchet_specs, .{}, SortContext.less_than);
+    for (&ratchet_specs) |ratchet| {
+        try writer.print(" {s}{s}{d:.2}\n", .{ ratchet[0], ratchet[1].as_string(), ratchet[2] });
     }
-    try writer.writeAll("// ");
-    inline for (comptime lexicographic_fields(@TypeOf(metrics))) |field| {
-        const field_type = @typeInfo(field.type);
-        comptime assert(
-            field_type == .int or field_type == .float or
-                field_type == .comptime_float or field_type == .comptime_int,
-        );
-        const format_string = comptime format_string_from_type(field.type);
-        try writer.print("{s}=" ++ format_string ++ " ", .{
-            field.name,
-            @field(metrics, field.name),
-        });
-    }
-    try writer.writeByte('\n');
 }
 
 test "ratchet_write accepts empty parameters" {
@@ -44,14 +62,14 @@ test "ratchet_write accepts empty parameters" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     ratchet_write(
-        @src(),
+        @src().fn_name,
         output.writer(),
         .{},
         .{ .time_ms = 10, .checksum = 1.61 },
     ) catch unreachable;
 
     try std.testing.expectEqualStrings(
-        "RATCHET test.ratchet_write accepts empty parameters // // checksum=1.61 time_ms=10 \n",
+        "test.ratchet_write accepts empty parameters // // checksum=1.61 time_ms=10 \n",
         output.getWritten(),
     );
 }
@@ -61,14 +79,14 @@ test "ratchet_write prints parameters" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     try ratchet_write(
-        @src(),
+        @src().fn_name,
         output.writer(),
         .{ .factor = 50.3, .strategy = "random" },
         .{ .time_s = 3.9 },
     );
 
     try std.testing.expectEqualStrings(
-        "RATCHET test.ratchet_write prints parameters " ++
+        "test.ratchet_write prints parameters " ++
             "// factor=50.30 strategy=random // time_s=3.90 \n",
         output.getWritten(),
     );
@@ -135,31 +153,31 @@ const RatchetLine = struct {
     bench_name: []const u8,
     params: []const u8,
     metrics: []const u8,
-};
 
-const RatchetKey = struct {
-    bench_name: []const u8,
-    params: []const u8,
-};
+    const RatchetKey = struct {
+        bench_name: []const u8,
+        params: []const u8,
+    };
 
-const RatchetKeyContext = struct {
-    pub fn hash(_: RatchetKeyContext, key: RatchetKey) u64 {
-        var hasher = std.hash.Wyhash.init(0);
-        hasher.update(key.bench_name);
-        hasher.update("\x00");
-        hasher.update(key.params);
-        return hasher.final();
-    }
+    const RatchetMetricData = struct {
+        metrics: []const u8,
+        matched: bool = false,
+    };
 
-    pub fn eql(_: RatchetKeyContext, a: RatchetKey, b: RatchetKey) bool {
-        return std.mem.eql(u8, a.bench_name, b.bench_name) and
-            std.mem.eql(u8, a.params, b.params);
-    }
-};
+    const RatchetKeyContext = struct {
+        pub fn hash(_: RatchetKeyContext, key: RatchetKey) u64 {
+            var hasher = std.hash.Wyhash.init(0);
+            hasher.update(key.bench_name);
+            hasher.update("\x00");
+            hasher.update(key.params);
+            return hasher.final();
+        }
 
-const RatchetMetricData = struct {
-    metrics: []const u8,
-    matched: bool = false,
+        pub fn eql(_: RatchetKeyContext, a: RatchetKey, b: RatchetKey) bool {
+            return std.mem.eql(u8, a.bench_name, b.bench_name) and
+                std.mem.eql(u8, a.params, b.params);
+        }
+    };
 };
 
 fn read_ratchet_line(line: []const u8) struct { RatchetLine, []const u8 } {
@@ -195,6 +213,7 @@ test read_ratchet_line {
 /// - worktree removes ratchets
 /// Returns the number of failing cases, and outputs them to failing_writer
 pub fn report_regressions(
+    comptime marker: []const u8,
     gpa: std.mem.Allocator,
     input_baseline: []const u8,
     input_worktree: []const u8,
@@ -207,9 +226,9 @@ pub fn report_regressions(
 ) u32 {
     const epsilon_factor = (1.0 + options.epsilon_percent / 100.0);
     const Map = std.HashMap(
-        RatchetKey,
-        RatchetMetricData,
-        RatchetKeyContext,
+        RatchetLine.RatchetKey,
+        RatchetLine.RatchetMetricData,
+        RatchetLine.RatchetKeyContext,
         std.hash_map.default_max_load_percentage,
     );
 
@@ -217,7 +236,7 @@ pub fn report_regressions(
     defer worktree_ratchets.deinit();
 
     var worktree_tail = input_worktree;
-    while (next_ratchet_line(&worktree_tail)) |ratchet_line| {
+    while (next_ratchet_line(marker, &worktree_tail)) |ratchet_line| {
         const result = worktree_ratchets.getOrPut(.{
             .bench_name = ratchet_line.bench_name,
             .params = ratchet_line.params,
@@ -227,7 +246,7 @@ pub fn report_regressions(
 
     var failing_counter: u32 = 0;
     var baseline_tail = input_baseline;
-    while (next_ratchet_line(&baseline_tail)) |baseline| {
+    while (next_ratchet_line(marker, &baseline_tail)) |baseline| {
         const worktree = worktree_ratchets.getPtr(.{
             .bench_name = baseline.bench_name,
             .params = baseline.params,
@@ -295,8 +314,11 @@ pub fn report_regressions(
     return failing_counter;
 }
 
-fn next_ratchet_line(tail: *[]const u8) ?RatchetLine {
-    const head, tail.* = stdx.cut(tail.*, "RATCHET ") orelse return null;
+fn next_ratchet_line(
+    comptime marker: []const u8,
+    tail: *[]const u8,
+) ?RatchetLine {
+    const head, tail.* = stdx.cut(tail.*, marker) orelse return null;
     assert(head.len == 0 or head[head.len - 1] == '\n');
     const ratchet, tail.* = read_ratchet_line(tail.*);
     return ratchet;

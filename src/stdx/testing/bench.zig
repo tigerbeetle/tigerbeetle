@@ -47,8 +47,8 @@ test "benchmark: API tutorial" { // `benchmark:` in the name is important!
     // If CI should ratchet performance for this benchmark, also report
     // its parameters and regressible outputs in a standardized format.
     bench.report_ratchet(@src(), .{ .a = a, .b = b }, .{
-        .elapsed_ns = elapsed.ns,
-        .checksum = c });
+         .elapsed_ns = elapsed.ns,
+         .checksum = c });
 
     // You can compile individual benchmark  via
     //   ./zig/zig build test:unit:build -- "benchmark: binary search"
@@ -158,35 +158,21 @@ pub fn report_ratchet(
     _: *const Bench,
     comptime src: std.builtin.SourceLocation,
     params: anytype,
-    measurements: anytype,
+    metrics: anytype,
 ) void {
-    assert(std.meta.fields(@TypeOf(measurements)).len > 0);
+    assert(std.meta.fields(@TypeOf(metrics)).len > 0);
     switch (mode) {
         .smoke => {},
         .benchmark => {
+            comptime assert(std.mem.startsWith(u8, src.fn_name, "test.benchmark: "));
             var output_buffer: [4096]u8 = undefined;
             var output = std.io.fixedBufferStream(&output_buffer);
-            const writer = output.writer();
-
-            writer.print("CI_PERF: {s} // ", .{src.fn_name}) catch unreachable;
-            inline for (std.meta.fields(@TypeOf(params))) |field| {
-                writer.print("{s}={any} ", .{
-                    field.name,
-                    @field(params, field.name),
-                }) catch unreachable;
-            }
-            writer.writeAll("// ") catch unreachable;
-            inline for (std.meta.fields(@TypeOf(measurements))) |field| {
-                const field_type = @typeInfo(field.type);
-                comptime assert(field_type == .int or field_type == .float);
-                writer.print("{s}={any} ", .{
-                    field.name,
-                    @field(measurements, field.name),
-                }) catch unreachable;
-            }
-            writer.writeByte('\n') catch unreachable;
-
-            ratchet.measurement_write(src, output.writer(), params, measurements) catch unreachable;
+            ratchet.ratchet_write(
+                src.fn_name,
+                output.writer(),
+                params,
+                metrics,
+            ) catch unreachable;
             std.debug.print("{s}", .{output.getWritten()});
         },
     }

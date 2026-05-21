@@ -36,7 +36,6 @@ const scenarios = [_]Scenario{
     },
 };
 
-const body_fmt = "{s} K={:_>2}B V={:_>3}B N={:_>5}: WT={}";
 const repetitions: usize = 32;
 
 test "benchmark: binary search" {
@@ -61,7 +60,8 @@ test "benchmark: binary search" {
             const page_buffer_size = @min(blob_size, scenario.page_buffer_size);
             checksum +%= try run_benchmark(
                 &bench,
-                scenario.name,
+                &scenario,
+                @src(),
                 .{
                     .key_size = kv.key_size,
                     .value_size = kv.value_size,
@@ -74,12 +74,13 @@ test "benchmark: binary search" {
             );
         }
     }
-    bench.report("checksum {}", .{checksum});
+    bench.report("{s} checksum {}", .{@src().fn_name, checksum});
 }
 
 fn run_benchmark(
     bench: *Bench,
-    scenario_name: []const u8,
+    scenario: *const Scenario,
+    comptime src: std.builtin.SourceLocation,
     comptime layout: Layout,
     search_count: u64,
     page_buffer: []u8,
@@ -136,12 +137,17 @@ fn run_benchmark(
 
     const result = bench.estimate(&duration_samples);
 
+    const body_fmt = "{s} K={:_>2}B V={:_>3}B N={:_>5}: WT={}";
     bench.report(body_fmt, .{
-        scenario_name,
+        scenario.name,
         layout.key_size,
         layout.value_size,
         layout.values_count,
         result,
+    });
+
+    bench.report_ratchet(src, .{
+       .element_ns = result.ns 
     });
 
     return checksum;

@@ -624,19 +624,43 @@ pub fn exec_raw(
     });
 }
 
+pub const SpawnOptions = struct {
+    stdin_behavior: std.process.Child.StdIo = .Ignore,
+    stdout_behavior: std.process.Child.StdIo = .Ignore,
+    stderr_behavior: std.process.Child.StdIo = .Ignore,
+};
+
 pub fn spawn(
     shell: *Shell,
-    options: struct {
-        stdin_behavior: std.process.Child.StdIo = .Ignore,
-        stdout_behavior: std.process.Child.StdIo = .Ignore,
-        stderr_behavior: std.process.Child.StdIo = .Ignore,
-    },
+    options: SpawnOptions,
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !std.process.Child {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
+    return shell.spawn_argv(options, &argv);
+}
+
+pub fn spawn_zig(
+    shell: *Shell,
+    options: SpawnOptions,
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) !std.process.Child {
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try argv.append_new_arg("{s}", .{shell.zig_exe.?});
+    try expand_argv(&argv, cmd, cmd_args);
+    return shell.spawn_argv(options, &argv);
+}
+
+fn spawn_argv(
+    shell: *Shell,
+    options: SpawnOptions,
+    argv: *const Argv,
+) !std.process.Child {
     var child = std.process.Child.init(argv.slice(), shell.gpa);
     child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
     child.env_map = &shell.env;

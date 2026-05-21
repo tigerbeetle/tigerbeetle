@@ -1,9 +1,9 @@
 //! Standalone comparative benchmarks.
 //!
-//! This intentionally does not upload to devhub. It creates a temporary worktree for a baseline ref
-//! and a second temporary worktree for the current commit, builds their benchmark artifacts in
-//! parallel, and then runs the same benchmark stages sequentially. The run fails if the current
-//! commit is more than `--epsilon-percent` slower than the baseline.
+//! This intentionally does not upload to devhub. It creates a temporary worktree for a
+//! baseline ref (the control) and a second temporary worktree for the current commit,
+//! builds their benchmark artifacts in parallel, and then runs the same benchmarks sequentially.
+//! The run fails if the current commit is more than `--epsilon-percent` slower than the baseline.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -13,13 +13,8 @@ const Shell = @import("../shell.zig");
 
 const log = std.log;
 
-const Direction = enum {
-    higher_is_better,
-    lower_is_better,
-};
-
 pub const CLIArgs = struct {
-    baseline: []const u8 = "main",
+    control: []const u8 = "main",
     epsilon_percent: u64 = 3,
     expected_regression_label: []const u8 = "expected_performance_regression",
 };
@@ -35,33 +30,35 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     }
 
     const github_event = try read_github_event(shell);
-    const ref_baseline = ref_baseline: {
+    const ref_control = ref_control: {
         if (try merge_group_base_sha(shell, github_event)) |base_sha| {
-            log.info("using merge_group.base_sha as baseline", .{});
-            break :ref_baseline base_sha;
+            log.info("using merge_group.base_sha as control", .{});
+            break :ref_control base_sha;
         }
-        break :ref_baseline cli_args.baseline;
+        break :ref_control cli_args.control;
     };
 
-    const sha_worktree = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
-    const sha_baseline =
-        try shell.exec_stdout("git rev-parse --verify {ref_baseline}", .{ .ref_baseline = ref_baseline });
+    const sha_current = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
+    const sha_control = try shell.exec_stdout(
+        "git rev-parse --verify {ref_control}",
+        .{ .ref_control = ref_control },
+    );
 
-    log.info("baseline: {s} ({s})", .{ ref_baseline, sha_baseline });
-    log.info("worktree:  {s}", .{sha_worktree});
+    log.info("control: {s} ({s})", .{ ref_control, sha_control });
+    log.info("current:  {s}", .{sha_current});
 
     const worktrees = try create_worktrees(shell, .{
-        .sha_baseline = sha_baseline,
-        .sha_worktree = sha_worktree,
+        .sha_control = sha_control,
+        .sha_current = sha_current,
     });
     defer worktrees.remove(shell);
 
-    try build_worktrees(shell, worktrees);
+    try build_worktrees(shell, &worktrees);
 
-    const baseline = try run_benchmarks(shell, "baseline", worktrees.path_baseline);
-    const worktree = try run_benchmarks(shell, "worktree", worktrees.path_worktree);
+    const control = try run_benchmarks(shell, "control", worktrees.path_control);
+    const current = try run_benchmarks(shell, "current", worktrees.path_current);
 
-    const failed = compare_benchmarks(baseline, worktree, cli_args.epsilon_percent);
+    const failed = compare_benchmarks_macro(control, current, cli_args.epsilon_percent);
     if (failed) {
         if (try has_github_label(shell, github_event, cli_args.expected_regression_label)) {
             log.warn(
@@ -76,15 +73,15 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
 
 const Worktrees = struct {
     path_root: []const u8,
-    path_baseline: []const u8,
-    path_worktree: []const u8,
+    path_control: []const u8,
+    path_current: []const u8,
 
     fn remove(worktrees: Worktrees, shell: *Shell) void {
-        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.path_baseline }) catch |err| {
-            log.err("failed to remove baseline worktree {s}: {}", .{ worktrees.path_baseline, err });
+        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.path_control }) catch |err| {
+            log.err("failed to remove control worktree {s}: {}", .{ worktrees.path_control, err });
         };
-        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.path_worktree }) catch |err| {
-            log.err("failed to remove comparison worktree {s}: {}", .{ worktrees.path_worktree, err });
+        shell.exec("git worktree remove --force {path}", .{ .path = worktrees.path_current }) catch |err| {
+            log.err("failed to remove comparison worktree {s}: {}", .{ worktrees.path_current, err });
         };
         shell.project_root.deleteTree(worktrees.path_root) catch |err| {
             log.err("failed to remove benchmark worktree root {s}: {}", .{ worktrees.path_root, err });
@@ -95,45 +92,45 @@ const Worktrees = struct {
 fn create_worktrees(
     shell: *Shell,
     refs: struct {
-        sha_baseline: []const u8,
-        sha_worktree: []const u8,
+        sha_control: []const u8,
+        sha_current: []const u8,
     },
 ) !Worktrees {
     var section = try shell.open_section("create worktrees");
     defer section.close();
 
     const path_root = try shell.create_tmp_dir();
-    const path_baseline = try std.fs.path.join(
+    const path_control = try std.fs.path.join(
         shell.arena.allocator(),
-        &.{ path_root, "baseline" },
+        &.{ path_root, "control" },
     );
-    const path_worktree = try std.fs.path.join(
+    const path_current = try std.fs.path.join(
         shell.arena.allocator(),
         &.{ path_root, "current" },
     );
 
     try shell.exec(
         "git worktree add --detach {path} {ref}",
-        .{ .path = path_baseline, .ref = refs.sha_baseline },
+        .{ .path = path_control, .ref = refs.sha_control },
     );
-    errdefer shell.exec("git worktree remove --force {path}", .{ .path = path_baseline }) catch {};
+    errdefer shell.exec("git worktree remove --force {path}", .{ .path = path_control }) catch {};
 
     try shell.exec(
         "git worktree add --detach {path} {ref}",
-        .{ .path = path_worktree, .ref = refs.sha_worktree },
+        .{ .path = path_current, .ref = refs.sha_current },
     );
-    errdefer shell.exec("git worktree remove --force {path}", .{ .path = path_worktree }) catch {};
+    errdefer shell.exec("git worktree remove --force {path}", .{ .path = path_current }) catch {};
 
     return .{
         .path_root = path_root,
-        .path_baseline = path_baseline,
-        .path_worktree = path_worktree,
+        .path_control = path_control,
+        .path_current = path_current,
     };
 }
 
 const Benchmarks = struct {
+    micro: MicroBenchmark,
     macro: MacroBenchmark,
-    micro: ?MicroBenchmark,
 };
 
 const MacroBenchmark = struct {
@@ -143,8 +140,8 @@ const MacroBenchmark = struct {
 };
 
 const MicroBenchmark = struct {
-    total_ns: u64,
-    per_element_ns: u64,
+    stdout: []const u8,
+    stderr: []const u8,
 };
 
 fn run_benchmarks(shell: *Shell, name: []const u8, worktree_path: []const u8) !Benchmarks {
@@ -165,21 +162,21 @@ const BuildContext = struct {
     path: []const u8,
 };
 
-fn build_worktrees(shell: *Shell, worktrees: Worktrees) !void {
+fn build_worktrees(shell: *Shell, worktrees: *const Worktrees) !void {
     var section = try shell.open_section("build benchmark artifacts");
     defer section.close();
 
-    const context_baseline: BuildContext = .{
-        .name = "baseline",
-        .path = worktrees.path_baseline,
-    };
-    const context_worktree: BuildContext = .{
-        .name = "current",
-        .path = worktrees.path_worktree,
-    };
+    try build_artifact(
+        shell,
+        "build -Drelease install",
+        worktrees
+    );
 
-    try build_worktrees_step(shell, "release binary", .release, &context_baseline, &context_worktree);
-    try build_worktrees_step(shell, "k-way microbenchmark", .micro, &context_baseline, &context_worktree);
+    try build_artifact(
+        shell,
+        "build test:unit:build -- benchmark: ",
+        worktrees
+    );
 }
 
 const BuildStep = enum {
@@ -187,50 +184,42 @@ const BuildStep = enum {
     micro,
 };
 
-fn build_worktrees_step(
+fn build_artifact(
     shell: *Shell,
-    step_name: []const u8,
-    comptime build_step: BuildStep,
-    context_baseline: *const BuildContext,
-    context_worktree: *const BuildContext
+    comptime cmd: []const u8,
+    worktrees: *const Worktrees
 ) !void {
     var timer = try std.time.Timer.start();
 
-    log.info("building {s}", .{step_name});
+    log.info("building {s}", .{cmd});
 
-    const cmd = switch (build_step) {
-        .release => "build -Drelease install",
-        .micro => "build test:unit:build -- benchmark: ",
-    };
-
-    try shell.pushd(context_baseline.path);
+    try shell.pushd(worktrees.path_control);
     defer shell.popd();
 
-    var child_baseline: std.process.Child = try shell.spawn_zig(.{}, cmd, .{});
+    var child_control: std.process.Child = try shell.spawn_zig(.{}, cmd, .{});
     errdefer {
-        _ = child_baseline.kill() catch unreachable;
+        _ = child_control.kill() catch unreachable;
     }
 
-    try shell.pushd(context_worktree.path);
+    try shell.pushd(worktrees.path_current);
     defer shell.popd();
 
-    var child_worktree: std.process.Child = try shell.spawn_zig(.{}, cmd, .{});
+    var child_current: std.process.Child = try shell.spawn_zig(.{}, cmd, .{});
     errdefer {
-        _ = child_worktree.kill() catch unreachable;
+        _ = child_current.kill() catch unreachable;
     }
 
+    const term_control = try child_control.wait();
+    const term_current = try child_current.wait();
 
-    const term_baseline = try child_worktree.wait();
-    const term_worktree = try child_baseline.wait();
-
-    inline for (.{ term_baseline, term_worktree }) |term| {
+    inline for (.{ term_control, term_current }) |term| {
         switch (term) {
             .Exited => |code| if (code != 0) return error.ExecNonZeroExitStatus,
             else => return error.ExecFailed,
         }
     }
 
-    log.info("{s}: {}", .{ step_name, std.fmt.fmtDuration(timer.read()) });
+    log.info("{s}: {}", .{ cmd, std.fmt.fmtDuration(timer.read()) });
 }
 
 fn run_macro_benchmark(shell: *Shell) !MacroBenchmark {
@@ -258,23 +247,17 @@ fn run_micro_benchmark(shell: *Shell) !?MicroBenchmark {
     defer section.close();
 
     const stdout, const stderr = try shell.exec_stdout_stderr("./zig-out/bin/test-unit", .{});
-    const output = try std.mem.concat(shell.arena.allocator(), u8, &.{ stdout, "\n", stderr });
-    if (!has_duration_measurement(output, "total") or
-        !has_duration_measurement(output, "per element"))
-    {
-        log.warn("skipping micro benchmark comparison; benchmark output was not found", .{});
-        return null;
-    }
-
-    return .{
-        .total_ns = try get_duration_measurement(output, "total"),
-        .per_element_ns = try get_duration_measurement(output, "per element"),
-    };
+    return .{ .stdout = stdout, .stderr = stderr };
 }
 
-fn compare_benchmarks(
-    baseline: Benchmarks,
-    current: Benchmarks,
+const Direction = enum {
+    higher_is_better,
+    lower_is_better,
+};
+
+fn compare_benchmarks_macro(
+    control: MacroBenchmark,
+    current: MacroBenchmark,
     epsilon_percent: u64,
 ) bool {
     var failed = false;
@@ -282,52 +265,27 @@ fn compare_benchmarks(
     failed = compare_measurement(.{
         .name = "macro TPS",
         .unit = "tx/s",
-        .baseline = baseline.macro.tps,
-        .current = current.macro.tps,
+        .control = control.tps,
+        .current = current.tps,
         .direction = .higher_is_better,
         .epsilon_percent = epsilon_percent,
     }) or failed;
     failed = compare_measurement(.{
         .name = "macro batch p100",
         .unit = "ms",
-        .baseline = baseline.macro.batch_p100_ms,
-        .current = current.macro.batch_p100_ms,
+        .control = control.batch_p100_ms,
+        .current = current.batch_p100_ms,
         .direction = .lower_is_better,
         .epsilon_percent = epsilon_percent,
     }) or failed;
     failed = compare_measurement(.{
         .name = "macro query p100",
         .unit = "ms",
-        .baseline = baseline.macro.query_p100_ms,
-        .current = current.macro.query_p100_ms,
+        .control = control.query_p100_ms,
+        .current = current.query_p100_ms,
         .direction = .lower_is_better,
         .epsilon_percent = epsilon_percent,
     }) or failed;
-
-    if (baseline.micro != null and current.micro != null) {
-        failed = compare_measurement(.{
-            .name = "micro k-way total",
-            .unit = "ns",
-            .baseline = baseline.micro.?.total_ns,
-            .current = current.micro.?.total_ns,
-            .direction = .lower_is_better,
-            .epsilon_percent = epsilon_percent,
-        }) or failed;
-        failed = compare_measurement(.{
-            .name = "micro k-way per element",
-            .unit = "ns",
-            .baseline = baseline.micro.?.per_element_ns,
-            .current = current.micro.?.per_element_ns,
-            .direction = .lower_is_better,
-            .epsilon_percent = epsilon_percent,
-        }) or failed;
-    } else if (baseline.micro == null and current.micro == null) {
-        log.warn("skipping micro k-way comparison; benchmark is missing from both refs", .{});
-    } else if (baseline.micro == null) {
-        log.warn("skipping micro k-way comparison; benchmark is missing from baseline", .{});
-    } else {
-        log.warn("skipping micro k-way comparison; benchmark is missing from current", .{});
-    }
 
     return failed;
 }
@@ -335,13 +293,13 @@ fn compare_benchmarks(
 fn compare_measurement(measurement: struct {
     name: []const u8,
     unit: []const u8,
-    baseline: u64,
+    control: u64,
     current: u64,
     direction: Direction,
     epsilon_percent: u64,
 }) bool {
     const regression = is_regression(
-        measurement.baseline,
+        measurement.control,
         measurement.current,
         measurement.direction,
         measurement.epsilon_percent,
@@ -349,11 +307,11 @@ fn compare_measurement(measurement: struct {
 
     const status: []const u8 = if (regression) "REGRESSION" else "ok";
     log.info(
-        "{s}: {s}: baseline={} {s}, current={} {s}, epsilon={}%",
+        "{s}: {s}: control={} {s}, current={} {s}, epsilon={}%",
         .{
             status,
             measurement.name,
-            measurement.baseline,
+            measurement.control,
             measurement.unit,
             measurement.current,
             measurement.unit,
@@ -365,12 +323,12 @@ fn compare_measurement(measurement: struct {
 }
 
 fn is_regression(
-    baseline: u64,
+    control: u64,
     current: u64,
     direction: Direction,
     epsilon_percent: u64,
 ) bool {
-    if (baseline == 0) {
+    if (control == 0) {
         return switch (direction) {
             .higher_is_better => false,
             .lower_is_better => current != 0,
@@ -378,8 +336,8 @@ fn is_regression(
     }
 
     return switch (direction) {
-        .higher_is_better => @as(u128, current) * 100 < @as(u128, baseline) * (100 - epsilon_percent),
-        .lower_is_better => @as(u128, current) * 100 > @as(u128, baseline) * (100 + epsilon_percent),
+        .higher_is_better => @as(u128, current) * 100 < @as(u128, control) * (100 - epsilon_percent),
+        .lower_is_better => @as(u128, current) * 100 > @as(u128, control) * (100 + epsilon_percent),
     };
 }
 
