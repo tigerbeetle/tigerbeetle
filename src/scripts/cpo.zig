@@ -99,7 +99,7 @@ fn cpo_metrics(shell: *Shell, sha: []const u8) !void {
         try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
     const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
 
-    try cpo_short_benchmark(shell, sha, commit_timestamp);
+    // try cpo_short_benchmark(shell, sha, commit_timestamp);
 
     try cpo_long_benchmark(shell, sha, commit_timestamp);
 }
@@ -130,7 +130,7 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
     defer shell.project_root.deleteFile("tigerbeetle") catch {};
     // `--log-debug-replica` is explicitly enabled, to measure the performance hit from debug
     // logging and count the log lines.
-    // TODO: make useful benchmark (tbid etc.) and remove performance.
+    // TODO: make useful benchmark (tbid etc.) and remove checksum once we replace devhub.
     const benchmark_result, const benchmark_stderr = try shell.exec_stdout_stderr(
         "./tigerbeetle benchmark --validate --checksum-performance --log-debug-replica " ++
             "--file=datafile-devhub",
@@ -313,7 +313,7 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     defer section.close();
 
     const block_device = "/dev/md0";
-    const transfer_count = 100_000_000;
+    const transfer_count = 10_000_000_000;
 
     // overwrite the first 96 bytes for block device
     try shell.exec(
@@ -325,8 +325,8 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
     const benchmark_result = try shell.exec_stdout(
-        "./tigerbeetle benchmark --transfer-count={transfer_count}" ++
-            "--file={block_device} --cache-grid=32GiB",
+        "./tigerbeetle benchmark --transfer-count={transfer_count} " ++
+            "--file={block_device} --cache-grid=32GiB --query-count=100",
         .{
             .transfer_count = transfer_count,
             .block_device = block_device,
@@ -337,6 +337,11 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     const batch_p50_ms = try get_measurement(benchmark_result, "batch latency p50 ", "ms");
     const batch_p99_ms = try get_measurement(benchmark_result, "batch latency p99 ", "ms");
     const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
+
+    const query_p1_ms = try get_measurement(benchmark_result, "query latency p1  ", "ms");
+    const query_p50_ms = try get_measurement(benchmark_result, "query latency p50 ", "ms");
+    const query_p99_ms = try get_measurement(benchmark_result, "query latency p99 ", "ms");
+    const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
 
     const batch = MetricBatch{
@@ -352,6 +357,10 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
             .{ .name = "long batch p50", .value = batch_p50_ms, .unit = "ms" },
             .{ .name = "long batch p99", .value = batch_p99_ms, .unit = "ms" },
             .{ .name = "long batch p100", .value = batch_p100_ms, .unit = "ms" },
+            .{ .name = "long query p1", .value = query_p1_ms, .unit = "ms" },
+            .{ .name = "long query p50", .value = query_p50_ms, .unit = "ms" },
+            .{ .name = "long query p99", .value = query_p99_ms, .unit = "ms" },
+            .{ .name = "long query p100", .value = query_p100_ms, .unit = "ms" },
             .{ .name = "transfer count", .value = transfer_count, .unit = "count" },
         },
     };
