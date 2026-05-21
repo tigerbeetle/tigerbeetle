@@ -49,7 +49,7 @@ pub const CLIArgs = struct {
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     const sha = cli_args.sha orelse try shell.exec_stdout("git rev-parse HEAD", .{});
     try metrics_collect(shell, sha, .{
-        .long_benchmark_timeout = cli_args.benchmark_long_timeout,
+        .benchmark_long_timeout = cli_args.benchmark_long_timeout,
     });
 
     if (!cli_args.skip_kcov) {
@@ -91,7 +91,6 @@ fn metrics_collect(
 }
 
 fn benchmark_short(shell: *Shell, commit: Commit) !void {
-
     // Only build the TigerBeetle binary to test build speed and build size. Keep the release build
     // to run both cpo benchmarks.
     var timer = try std.time.Timer.start();
@@ -310,7 +309,7 @@ fn benchmark_long(
     defer section.close();
 
     const block_device = "/dev/md0";
-    const transfer_count = 10_000_000_000;
+    const transfer_count = 10_000;
 
     // overwrite the first 96 bytes for block device
     try shell.exec(
@@ -331,6 +330,11 @@ fn benchmark_long(
         },
     );
 
+    const benchmark_metrics = try devhub_common.benchmark_metrics(benchmark_result);
+    const metrics = benchmark_metrics ++ [_]Metric{
+        .{ .name = "transfer count", .value = transfer_count, .unit = "count" },
+    };
+
     const batch = MetricBatch{
         .timestamp = commit.timestamp,
         .attributes = .{
@@ -338,72 +342,7 @@ fn benchmark_long(
             .git_commit = commit.sha[0..],
             .branch = "main",
         },
-        .metrics = &[_]Metric{
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long TPS",
-                "load accepted",
-                "tx/s",
-                "count",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long batch p1",
-                "batch latency p1  ",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long batch p50",
-                "batch latency p50 ",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long batch p99",
-                "batch latency p99 ",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long batch p100",
-                "batch latency p100",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long query p1",
-                "query latency p1  ",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long query p50",
-                "query latency p50 ",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long query p99",
-                "query latency p99 ",
-                "ms",
-                "ms",
-            ),
-            try devhub_common.benchmark_metric(
-                benchmark_result,
-                "long query p100",
-                "query latency p100",
-                "ms",
-                "ms",
-            ),
-            .{ .name = "transfer count", .value = transfer_count, .unit = "count" },
-        },
+        .metrics = &metrics,
     };
 
     devhub_common.log_metrics(&batch);

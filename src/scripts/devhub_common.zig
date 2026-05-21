@@ -60,6 +60,74 @@ pub fn get_measurement(
     return try std.fmt.parseInt(u64, value_string, 10);
 }
 
+pub fn benchmark_metrics(benchmark_result: []const u8) ![9]Metric {
+    return .{
+        try benchmark_metric(
+            benchmark_result,
+            "long TPS",
+            "load accepted",
+            "tx/s",
+            "count",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long batch p1",
+            "batch latency p1  ",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long batch p50",
+            "batch latency p50 ",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long batch p99",
+            "batch latency p99 ",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long batch p100",
+            "batch latency p100",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long query p1",
+            "query latency p1  ",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long query p50",
+            "query latency p50 ",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long query p99",
+            "query latency p99 ",
+            "ms",
+            "ms",
+        ),
+        try benchmark_metric(
+            benchmark_result,
+            "long query p100",
+            "query latency p100",
+            "ms",
+            "ms",
+        ),
+    };
+}
+
 pub fn benchmark_metric(
     benchmark_stdout: []const u8,
     comptime name: []const u8,
