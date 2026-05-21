@@ -449,6 +449,7 @@ pub fn exec_stdout_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
+        timeout: stdx.Duration = .minutes(10),
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -460,6 +461,7 @@ pub fn exec_stdout_options(
     try exec_inner(shell, argv.slice(), .{
         .stdin_slice = options.stdin_slice,
         .capture_stdout = &captured_stdout,
+        .timeout = options.timeout,
     });
     return captured_stdout;
 }

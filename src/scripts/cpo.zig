@@ -32,79 +32,65 @@ const assert = std.debug.assert;
 
 const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
+const devhub_common = @import("./devhub_common.zig");
 const Release = @import("../multiversion.zig").Release;
+
+const Metric = devhub_common.Metric;
+const MetricBatch = devhub_common.MetricBatch;
 
 const log = std.log;
 
 pub const CLIArgs = struct {
     sha: ?[]const u8 = null,
     skip_kcov: bool = false,
+    benchmark_long_timeout: stdx.Duration = .minutes(120),
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     const sha = cli_args.sha orelse try shell.exec_stdout("git rev-parse HEAD", .{});
-    try cpo_metrics(shell, sha);
+    try metrics_collect(shell, sha, .{
+        .long_benchmark_timeout = cli_args.benchmark_long_timeout,
+    });
 
     if (!cli_args.skip_kcov) {
-        try devhub_coverage(shell);
+        try devhub_common.devhub_coverage(shell);
     } else {
         log.info("--skip-kcov enabled, not computing coverage.", .{});
     }
 }
 
-fn devhub_coverage(shell: *Shell) !void {
-    var section = try shell.open_section("coverage");
-    defer section.close();
+const Commit = struct {
+    sha: [40]u8,
+    timestamp: u64,
+};
 
-    const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
-        return error.NoKcov;
-    };
-    log.info("kcov version {s}", .{kcov_version});
-
-    try shell.exec_zig("build test:unit:build", .{});
-    try shell.exec_zig("build vopr:build", .{});
-    try shell.exec_zig("build fuzz:build", .{});
-
-    // Put results into src/devhub, as that folder is deployed as GitHub pages.
-    try shell.project_root.deleteTree("./src/devhub/coverage");
-    try shell.project_root.makePath("./src/devhub/coverage");
-
-    const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
-    inline for (.{
-        "{kcov} ./zig-out/bin/test-unit",
-        "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_tree 92",
-        "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_forest 92",
-        "{kcov} ./zig-out/bin/vopr 92",
-    }) |command| {
-        try shell.exec(command, .{ .kcov = kcov });
-    }
-
-    var coverage_dir = try shell.cwd.openDir("./src/devhub/coverage", .{ .iterate = true });
-    defer coverage_dir.close();
-
-    // kcov adds some symlinks to the output, which prevents upload to GitHub actions from working.
-    var it = coverage_dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind == .sym_link) {
-            try coverage_dir.deleteFile(entry.name);
-        }
-    }
+fn commit_info(shell: *Shell, sha: []const u8) !Commit {
+    assert(sha.len == 40);
+    const commit_sha = sha[0..40].*;
+    const commit_timestamp = try shell.git_commit_timestamp(&commit_sha);
+    return .{ .sha = commit_sha, .timestamp = commit_timestamp.to_seconds() };
 }
 
-fn cpo_metrics(shell: *Shell, sha: []const u8) !void {
+fn metrics_collect(
+    shell: *Shell,
+    sha: []const u8,
+    options: struct {
+        benchmark_long_timeout: stdx.Duration,
+    },
+) !void {
     var section = try shell.open_section("metrics");
     defer section.close();
 
-    const commit_timestamp_str =
-        try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
-    const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
+    const commit = try commit_info(shell, sha);
 
-    // try cpo_short_benchmark(shell, sha, commit_timestamp);
+    try benchmark_short(shell, commit);
 
-    try cpo_long_benchmark(shell, sha, commit_timestamp);
+    try benchmark_long(shell, commit, .{
+        .timeout = options.benchmark_long_timeout,
+    });
 }
 
-fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !void {
+fn benchmark_short(shell: *Shell, commit: Commit) !void {
 
     // Only build the TigerBeetle binary to test build speed and build size. Keep the release build
     // to run both cpo benchmarks.
@@ -114,7 +100,7 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
         try shell.exec_zig("build install", .{});
         defer shell.project_root.deleteFile("tigerbeetle") catch unreachable;
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        break :blk devhub_common.timer_ms(&timer);
     };
 
     const build_time_ms, const executable_size_bytes = blk: {
@@ -123,7 +109,7 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
         try shell.exec_zig("build -Drelease install", .{});
 
         break :blk .{
-            timer.lap() / std.time.ns_per_ms,
+            devhub_common.timer_ms(&timer),
             (try shell.cwd.statFile("tigerbeetle")).size,
         };
     };
@@ -145,19 +131,23 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
             .{},
         );
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        break :blk devhub_common.timer_ms(&timer);
     };
 
     shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
     const replica_log_lines = std.mem.count(u8, benchmark_stderr, "\n");
-    const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
-    const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
-    const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
-    const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
-    const datafile_bytes = try get_measurement(benchmark_result, "datafile", "bytes");
-    const datafile_empty_bytes = try get_measurement(benchmark_result, "datafile empty", "bytes");
-    const checksum_message_size_max_us = try get_measurement(
+    const tps = try devhub_common.get_measurement(benchmark_result, "load accepted", "tx/s");
+    const batch_p100_ms =
+        try devhub_common.get_measurement(benchmark_result, "batch latency p100", "ms");
+    const query_p100_ms =
+        try devhub_common.get_measurement(benchmark_result, "query latency p100", "ms");
+    const rss_bytes = try devhub_common.get_measurement(benchmark_result, "rss", "bytes");
+    const datafile_bytes =
+        try devhub_common.get_measurement(benchmark_result, "datafile", "bytes");
+    const datafile_empty_bytes =
+        try devhub_common.get_measurement(benchmark_result, "datafile empty", "bytes");
+    const checksum_message_size_max_us = try devhub_common.get_measurement(
         benchmark_result,
         "checksum message size max",
         "us",
@@ -170,7 +160,7 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
             .{},
         );
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        break :blk devhub_common.timer_ms(&timer);
     };
     defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
@@ -252,7 +242,7 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
         assert(eviction.valid_checksum());
         assert(eviction.valid_checksum_body(&[0]u8{}));
 
-        const startup_time_ms = timer.read() / std.time.ns_per_ms;
+        const startup_time_ms = devhub_common.timer_ms(&timer);
 
         // While there's a running instance, check how long the repl takes to connect and run a
         // command.
@@ -263,16 +253,16 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
             .{ .port = port, .command = "create_accounts id=1 ledger=1 code=1" },
         );
 
-        const repl_single_command_ms = timer.read() / std.time.ns_per_ms;
+        const repl_single_command_ms = devhub_common.timer_ms(&timer);
 
         break :blk .{ startup_time_ms, repl_single_command_ms };
     };
 
     const batch = MetricBatch{
-        .timestamp = commit_timestamp,
+        .timestamp = commit.timestamp,
         .attributes = .{
             .git_repo = "https://github.com/tigerbeetle/tigerbeetle",
-            .git_commit = sha,
+            .git_commit = commit.sha[0..],
             .branch = "main",
         },
         .metrics = &[_]Metric{
@@ -299,16 +289,23 @@ fn cpo_short_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !v
         },
     };
 
-    for (batch.metrics) |metric| {
-        log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
-    }
+    devhub_common.log_metrics(&batch);
 
-    upload_run(shell, &batch, "./short/data.json") catch |err| {
+    devhub_common.upload_run(shell, &batch, .{
+        .repo = "devhubdb-cpo",
+        .data_file = "./short/data.json",
+    }) catch |err| {
         log.err("failed to upload devhubdb metrics: {}", .{err});
     };
 }
 
-fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !void {
+fn benchmark_long(
+    shell: *Shell,
+    commit: Commit,
+    options: struct {
+        timeout: stdx.Duration,
+    },
+) !void {
     var section = try shell.open_section("long benchmark");
     defer section.close();
 
@@ -324,7 +321,8 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
     try shell.exec_zig("build -Drelease install", .{});
     defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-    const benchmark_result = try shell.exec_stdout(
+    const benchmark_result = try shell.exec_stdout_options(
+        .{ .timeout = options.timeout },
         "./tigerbeetle benchmark --transfer-count={transfer_count} " ++
             "--file={block_device} --cache-grid=32GiB --query-count=100",
         .{
@@ -333,123 +331,87 @@ fn cpo_long_benchmark(shell: *Shell, sha: []const u8, commit_timestamp: u64) !vo
         },
     );
 
-    const batch_p1_ms = try get_measurement(benchmark_result, "batch latency p1  ", "ms");
-    const batch_p50_ms = try get_measurement(benchmark_result, "batch latency p50 ", "ms");
-    const batch_p99_ms = try get_measurement(benchmark_result, "batch latency p99 ", "ms");
-    const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
-
-    const query_p1_ms = try get_measurement(benchmark_result, "query latency p1  ", "ms");
-    const query_p50_ms = try get_measurement(benchmark_result, "query latency p50 ", "ms");
-    const query_p99_ms = try get_measurement(benchmark_result, "query latency p99 ", "ms");
-    const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
-    const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
-
     const batch = MetricBatch{
-        .timestamp = commit_timestamp,
+        .timestamp = commit.timestamp,
         .attributes = .{
             .git_repo = "https://github.com/tigerbeetle/tigerbeetle",
-            .git_commit = sha,
+            .git_commit = commit.sha[0..],
             .branch = "main",
         },
         .metrics = &[_]Metric{
-            .{ .name = "long TPS", .value = tps, .unit = "count" },
-            .{ .name = "long batch p1", .value = batch_p1_ms, .unit = "ms" },
-            .{ .name = "long batch p50", .value = batch_p50_ms, .unit = "ms" },
-            .{ .name = "long batch p99", .value = batch_p99_ms, .unit = "ms" },
-            .{ .name = "long batch p100", .value = batch_p100_ms, .unit = "ms" },
-            .{ .name = "long query p1", .value = query_p1_ms, .unit = "ms" },
-            .{ .name = "long query p50", .value = query_p50_ms, .unit = "ms" },
-            .{ .name = "long query p99", .value = query_p99_ms, .unit = "ms" },
-            .{ .name = "long query p100", .value = query_p100_ms, .unit = "ms" },
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long TPS",
+                "load accepted",
+                "tx/s",
+                "count",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long batch p1",
+                "batch latency p1  ",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long batch p50",
+                "batch latency p50 ",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long batch p99",
+                "batch latency p99 ",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long batch p100",
+                "batch latency p100",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long query p1",
+                "query latency p1  ",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long query p50",
+                "query latency p50 ",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long query p99",
+                "query latency p99 ",
+                "ms",
+                "ms",
+            ),
+            try devhub_common.benchmark_metric(
+                benchmark_result,
+                "long query p100",
+                "query latency p100",
+                "ms",
+                "ms",
+            ),
             .{ .name = "transfer count", .value = transfer_count, .unit = "count" },
         },
     };
 
-    for (batch.metrics) |metric| {
-        log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
-    }
+    devhub_common.log_metrics(&batch);
 
-    upload_run(shell, &batch, "./long/data.json") catch |err| {
+    devhub_common.upload_run(shell, &batch, .{
+        .repo = "devhubdb-cpo",
+        .data_file = "./long/data.json",
+    }) catch |err| {
         log.err("failed to upload long benchmark devhubdb metrics: {}", .{err});
     };
 }
-
-fn get_measurement(
-    benchmark_stdout: []const u8,
-    comptime label: []const u8,
-    comptime unit: []const u8,
-) !u64 {
-    errdefer {
-        std.log.err("can't extract '" ++ label ++ "' measurement", .{});
-    }
-
-    _, const rest = stdx.cut(benchmark_stdout, label ++ " = ") orelse
-        return error.BadMeasurement;
-    const value_string, _ = stdx.cut(rest, " " ++ unit) orelse return error.BadMeasurement;
-
-    return try std.fmt.parseInt(u64, value_string, 10);
-}
-
-fn upload_run(shell: *Shell, batch: *const MetricBatch, data_file: []const u8) !void {
-    const token = shell.env_get_option("DEVHUBDB_PAT");
-    try shell.cwd.deleteTree("./devhubdb");
-    try shell.exec(
-        \\git clone --single-branch --depth 1
-        \\  https://oauth2:{token}@github.com/tigerbeetle/devhubdb-cpo.git
-        \\  devhubdb
-    , .{
-        .token = token orelse "",
-    });
-
-    try shell.pushd("./devhubdb");
-    defer shell.popd();
-
-    for (0..32) |_| {
-        try shell.exec("git fetch origin main", .{});
-        try shell.exec("git reset --hard origin/main", .{});
-
-        {
-            const file = try shell.cwd.openFile(data_file, .{
-                .mode = .write_only,
-            });
-            defer file.close();
-
-            try file.seekFromEnd(0);
-            try std.json.stringify(batch, .{}, file.writer());
-            try file.writeAll("\n");
-        }
-
-        try shell.exec("git add {data_file}", .{ .data_file = data_file });
-        try shell.git_env_setup(.{ .use_hostname = false });
-        try shell.exec("git commit -m 📈", .{});
-        if (token) |_| {
-            if (shell.exec("git push", .{})) {
-                log.info("metrics uploaded", .{});
-                break;
-            } else |_| {
-                log.info("conflict, retrying", .{});
-            }
-        } else {
-            return error.NoToken;
-        }
-    } else {
-        log.err("can't push new data to devhub", .{});
-        return error.CanNotPush;
-    }
-}
-
-const Metric = struct {
-    name: []const u8,
-    unit: []const u8,
-    value: u64,
-};
-
-const MetricBatch = struct {
-    timestamp: u64,
-    metrics: []const Metric,
-    attributes: struct {
-        git_repo: []const u8,
-        branch: []const u8,
-        git_commit: []const u8,
-    },
-};

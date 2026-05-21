@@ -34,9 +34,12 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 const changelog = @import("./changelog.zig");
+const devhub_common = @import("./devhub_common.zig");
 const Release = @import("../multiversion.zig").Release;
 
 const MiB = stdx.MiB;
+const Metric = devhub_common.Metric;
+const MetricBatch = devhub_common.MetricBatch;
 
 const log = std.log;
 
@@ -49,48 +52,9 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     try devhub_metrics(shell, cli_args);
 
     if (!cli_args.skip_kcov) {
-        try devhub_coverage(shell);
+        try devhub_common.devhub_coverage(shell);
     } else {
         log.info("--skip-kcov enabled, not computing coverage.", .{});
-    }
-}
-
-fn devhub_coverage(shell: *Shell) !void {
-    var section = try shell.open_section("coverage");
-    defer section.close();
-
-    const kcov_version = shell.exec_stdout("kcov --version", .{}) catch {
-        return error.NoKcov;
-    };
-    log.info("kcov version {s}", .{kcov_version});
-
-    try shell.exec_zig("build test:unit:build", .{});
-    try shell.exec_zig("build vopr:build", .{});
-    try shell.exec_zig("build fuzz:build", .{});
-
-    // Put results into src/devhub, as that folder is deployed as GitHub pages.
-    try shell.project_root.deleteTree("./src/devhub/coverage");
-    try shell.project_root.makePath("./src/devhub/coverage");
-
-    const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
-    inline for (.{
-        "{kcov} ./zig-out/bin/test-unit",
-        "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_tree 92",
-        "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_forest 92",
-        "{kcov} ./zig-out/bin/vopr 92",
-    }) |command| {
-        try shell.exec(command, .{ .kcov = kcov });
-    }
-
-    var coverage_dir = try shell.cwd.openDir("./src/devhub/coverage", .{ .iterate = true });
-    defer coverage_dir.close();
-
-    // kcov adds some symlinks to the output, which prevents upload to GitHub actions from working.
-    var it = coverage_dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind == .sym_link) {
-            try coverage_dir.deleteFile(entry.name);
-        }
     }
 }
 
@@ -111,7 +75,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         try shell.exec_zig("build install", .{});
         defer shell.project_root.deleteFile("tigerbeetle") catch unreachable;
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        break :blk devhub_common.timer_ms(&timer);
     };
 
     const build_time_ms, const executable_size_bytes = blk: {
@@ -121,7 +85,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         defer shell.project_root.deleteFile("tigerbeetle") catch unreachable;
 
         break :blk .{
-            timer.lap() / std.time.ns_per_ms,
+            devhub_common.timer_ms(&timer),
             (try shell.cwd.statFile("tigerbeetle")).size,
         };
     };
@@ -185,19 +149,23 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{},
         );
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        break :blk devhub_common.timer_ms(&timer);
     };
 
     shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
     const replica_log_lines = std.mem.count(u8, benchmark_stderr, "\n");
-    const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
-    const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
-    const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
-    const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
-    const datafile_bytes = try get_measurement(benchmark_result, "datafile", "bytes");
-    const datafile_empty_bytes = try get_measurement(benchmark_result, "datafile empty", "bytes");
-    const checksum_message_size_max_us = try get_measurement(
+    const tps = try devhub_common.get_measurement(benchmark_result, "load accepted", "tx/s");
+    const batch_p100_ms =
+        try devhub_common.get_measurement(benchmark_result, "batch latency p100", "ms");
+    const query_p100_ms =
+        try devhub_common.get_measurement(benchmark_result, "query latency p100", "ms");
+    const rss_bytes = try devhub_common.get_measurement(benchmark_result, "rss", "bytes");
+    const datafile_bytes =
+        try devhub_common.get_measurement(benchmark_result, "datafile", "bytes");
+    const datafile_empty_bytes =
+        try devhub_common.get_measurement(benchmark_result, "datafile empty", "bytes");
+    const checksum_message_size_max_us = try devhub_common.get_measurement(
         benchmark_result,
         "checksum message size max",
         "us",
@@ -210,7 +178,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{},
         );
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        break :blk devhub_common.timer_ms(&timer);
     };
     defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
@@ -292,7 +260,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         assert(eviction.valid_checksum());
         assert(eviction.valid_checksum_body(&[0]u8{}));
 
-        const startup_time_ms = timer.read() / std.time.ns_per_ms;
+        const startup_time_ms = devhub_common.timer_ms(&timer);
 
         // While there's a running instance, check how long the repl takes to connect and run a
         // command.
@@ -303,7 +271,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .port = port, .command = "create_accounts id=1 ledger=1 code=1" },
         );
 
-        const repl_single_command_ms = timer.read() / std.time.ns_per_ms;
+        const repl_single_command_ms = devhub_common.timer_ms(&timer);
 
         break :blk .{ startup_time_ms, repl_single_command_ms };
     };
@@ -366,11 +334,12 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         },
     };
 
-    for (batch.metrics) |metric| {
-        log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
-    }
+    devhub_common.log_metrics(&batch);
 
-    upload_run(shell, &batch) catch |err| {
+    devhub_common.upload_run(shell, &batch, .{
+        .repo = "devhubdb",
+        .data_file = "./devhub/data.json",
+    }) catch |err| {
         log.err("failed to upload devhubdb metrics: {}", .{err});
     };
 
@@ -378,85 +347,6 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         log.err("failed to upload Nyrkiö metrics: {}", .{err});
     };
 }
-
-fn get_measurement(
-    benchmark_stdout: []const u8,
-    comptime label: []const u8,
-    comptime unit: []const u8,
-) !u64 {
-    errdefer {
-        std.log.err("can't extract '" ++ label ++ "' measurement", .{});
-    }
-
-    _, const rest = stdx.cut(benchmark_stdout, label ++ " = ") orelse
-        return error.BadMeasurement;
-    const value_string, _ = stdx.cut(rest, " " ++ unit) orelse return error.BadMeasurement;
-
-    return try std.fmt.parseInt(u64, value_string, 10);
-}
-
-fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
-    const token = shell.env_get_option("DEVHUBDB_PAT");
-    try shell.exec(
-        \\git clone --single-branch --depth 1
-        \\  https://oauth2:{token}@github.com/tigerbeetle/devhubdb.git
-        \\  devhubdb
-    , .{
-        .token = token orelse "",
-    });
-
-    try shell.pushd("./devhubdb");
-    defer shell.popd();
-
-    for (0..32) |_| {
-        try shell.exec("git fetch origin main", .{});
-        try shell.exec("git reset --hard origin/main", .{});
-
-        {
-            const file = try shell.cwd.openFile("./devhub/data.json", .{
-                .mode = .write_only,
-            });
-            defer file.close();
-
-            try file.seekFromEnd(0);
-            try std.json.stringify(batch, .{}, file.writer());
-            try file.writeAll("\n");
-        }
-
-        try shell.exec("git add ./devhub/data.json", .{});
-        try shell.git_env_setup(.{ .use_hostname = false });
-        try shell.exec("git commit -m 📈", .{});
-        if (token) |_| {
-            if (shell.exec("git push", .{})) {
-                log.info("metrics uploaded", .{});
-                break;
-            } else |_| {
-                log.info("conflict, retrying", .{});
-            }
-        } else {
-            return error.NoToken;
-        }
-    } else {
-        log.err("can't push new data to devhub", .{});
-        return error.CanNotPush;
-    }
-}
-
-const Metric = struct {
-    name: []const u8,
-    unit: []const u8,
-    value: u64,
-};
-
-const MetricBatch = struct {
-    timestamp: u64,
-    metrics: []const Metric,
-    attributes: struct {
-        git_repo: []const u8,
-        branch: []const u8,
-        git_commit: []const u8,
-    },
-};
 
 fn upload_nyrkio(shell: *Shell, batch: *const MetricBatch) !void {
     const url = "https://nyrkio.com/api/v0/result/devhub";
