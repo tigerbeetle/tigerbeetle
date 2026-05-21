@@ -68,11 +68,10 @@ test "benchmark: k-way-merge" {
     var duration_element = duration_streams;
     duration_element.ns /= (streams_count * stream_length * streams.len);
 
-    bench.report("{} total", .{
-        duration_streams,
-    });
-    bench.report("{} per element", .{
-        duration_element,
+    bench.report("{} total", .{duration_streams});
+    bench.report("{} per element", .{duration_element});
+    bench.report_ratchet(@src(), params, .{
+        .element_ns = duration_element.ns
     });
 }
 

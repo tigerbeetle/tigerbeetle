@@ -35,16 +35,20 @@ test "benchmark: API tutorial" { // `benchmark:` in the name is important!
     bench.start(); // Built-in timer.
     const c = a + b;
     const elapsed = bench.stop();
-
     // Always print a "hash" of the run:
     // - to prevent compiler from optimizing the code away,
     // - to prevent YOU from "optimizing" the code by changing semantics.
     bench.report("hash: {}", .{c});
     // Print the time, and any other metrics you find important.
     bench.report("elapsed: {}", .{elapsed});
-
     // NB: print as little as possible, because humans read slowly.
     // It's the job of benchmark author to optimize for conciseness.
+
+    // If CI should ratchet performance for this benchmark, also report
+    // its parameters and regressible outputs in a standardized format.
+    bench.report_ratchet(@src(), .{ .a = a, .b = b }, .{
+        .elapsed_ns = elapsed.ns,
+        .checksum = c });
 
     // You can compile individual benchmark  via
     //   ./zig/zig build test:unit:build -- "benchmark: binary search"
