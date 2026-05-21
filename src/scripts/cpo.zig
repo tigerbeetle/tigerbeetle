@@ -1,4 +1,5 @@
-//! Runs a set of macro-benchmarks whose result is displayed at <https://devhub.tigerbeetle.com/>.
+//! Runs a set of continously macro-benchmarks whose result is displayed at
+//! <https://devhub.tigerbeetle.com/>. The goal is to have a short and long benchmark.
 //!
 //! Specifically:
 //!
@@ -91,6 +92,9 @@ fn metrics_collect(
 }
 
 fn benchmark_short(shell: *Shell, commit: Commit) !void {
+    var section = try shell.open_section("short benchmark");
+    defer section.close();
+
     // Only build the TigerBeetle binary to test build speed and build size. Keep the release build
     // to run both cpo benchmarks.
     var timer = try std.time.Timer.start();
