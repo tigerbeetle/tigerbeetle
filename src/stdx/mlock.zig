@@ -11,7 +11,7 @@ const log = std.log.scoped(.mlock);
 const MemoryLockError = error{memory_not_locked} || std.posix.UnexpectedError;
 
 const mlockall_error = "Unable to lock pages in memory ({s})" ++
-    " - kernel swap would otherwise bypass TigerBeetle's storage fault tolerance. ";
+    " - kernel swap would otherwise bypass TigerBeetle's storage fault tolerance.";
 
 /// Pin virtual memory pages allocated so far to physical pages in RAM, preventing the pages from
 /// being swapped out and introducing storage error into memory, bypassing ECC RAM.

@@ -551,11 +551,13 @@ fn exec_inner(
             assert(poller.?.fifo(stream).head == 0);
         };
 
-        const deadline: i128 = std.time.nanoTimestamp() + options.timeout.ns;
+        var timer = try std.time.Timer.start();
         for (0..1_000_000) |_| {
-            const timeout: i128 = deadline - std.time.nanoTimestamp();
-            if (timeout <= 0) return error.ExecTimeout;
-            if (!try poller.?.pollTimeout(@intCast(timeout))) break;
+            const timeout_remaining = options.timeout.ns -| timer.read();
+            if (timeout_remaining == 0) {
+                return error.ExecTimeout;
+            }
+            if (!try poller.?.pollTimeout(@intCast(timeout_remaining))) break;
             inline for (comptime std.enums.values(Streams)) |stream| {
                 if (poller.?.fifo(stream).count > options.output_limit_bytes) {
                     return error.StdoutStreamTooLong;

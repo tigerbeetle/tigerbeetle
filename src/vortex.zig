@@ -122,8 +122,8 @@ pub fn main() !void {
         .{ .transfer_count = std.math.maxInt(u32) },
     );
 
-    const test_deadline = std.time.nanoTimestamp() + args.test_duration.ns;
-    while (std.time.nanoTimestamp() < test_deadline) {
+    var timer = try std.time.Timer.start();
+    while (timer.read() < args.test_duration.ns) {
         try supervisor.tick();
     }
 
