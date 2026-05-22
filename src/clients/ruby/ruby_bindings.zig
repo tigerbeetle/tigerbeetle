@@ -128,10 +128,10 @@ fn c_uint_type(comptime bits: comptime_int) []const u8 {
     };
 }
 
-fn field_hidden(comptime field_name: []const u8, comptime FieldType: type) bool {
+fn field_reserved(comptime field_name: []const u8) bool {
     if (comptime std.mem.eql(u8, field_name, "reserved")) return true;
     if (comptime std.mem.eql(u8, field_name, "padding")) return true;
-    return @typeInfo(FieldType) == .array;
+    return false;
 }
 
 fn emit_flags_module(
@@ -524,10 +524,18 @@ fn emit_c_serialize_struct(buffer: *Buffer, comptime operation: tb.Operation) vo
     buffer.print("    for (long i = 0; i < count; i++) {{\n", .{});
     buffer.print("        VALUE item_rb = RARRAY_AREF(items_rb, i);\n", .{});
     buffer.print("        {s} *item = &items[i];\n", .{c_name});
-    buffer.print("        memset(item, 0, sizeof({s}));\n", .{c_name});
 
     inline for (@typeInfo(Type).@"struct".fields) |field| {
-        if (comptime field_hidden(field.name, field.type)) continue;
+        if (comptime field_reserved(field.name)) {
+            switch (@typeInfo(field.type)) {
+                .array => buffer.print(
+                    "        memset(item->{s}, 0, sizeof(item->{s}));\n",
+                    .{ field.name, field.name },
+                ),
+                else => buffer.print("        item->{s} = 0;\n", .{field.name}),
+            }
+            continue;
+        }
         const value_expr = "rb_ivar_get(item_rb, rb_intern(\"@" ++ field.name ++ "\"))";
         switch (@typeInfo(field.type)) {
             .int => |info| if (info.bits == 128) {
@@ -573,7 +581,16 @@ fn emit_c_deserialize_struct(buffer: *Buffer, comptime operation: tb.Operation) 
     buffer.print("        VALUE obj = rb_obj_alloc(klass);\n", .{});
 
     inline for (@typeInfo(Type).@"struct".fields) |field| {
-        if (comptime field_hidden(field.name, field.type)) continue;
+        if (comptime field_reserved(field.name)) {
+            switch (@typeInfo(field.type)) {
+                .array => buffer.print(
+                    "        uint8_t zero[sizeof(item->{s})] = {{0}};\n        tb_assert(memcmp(item->{s}, zero, sizeof(item->{s})) == 0);\n",
+                    .{ field.name, field.name, field.name },
+                ),
+                else => buffer.print("        tb_assert(item->{s} == 0);\n", .{field.name}),
+            }
+            continue;
+        }
         const field_expr = "item->" ++ field.name;
         buffer.print("        rb_ivar_set(obj, rb_intern(\"@{s}\"), ", .{field.name});
         emit_c_value_from_field(buffer, field.type, field_expr);
