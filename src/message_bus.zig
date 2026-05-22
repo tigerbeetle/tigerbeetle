@@ -184,6 +184,33 @@ pub fn MessageBusType(comptime IO: type) type {
             }
         }
 
+        /// Begin a graceful shutdown of every active connection.
+        ///
+        /// After this is called, the caller must continue to drive `io.run_for_ns()` until
+        /// `shutdown_complete()` returns true. Only then is it safe to call `deinit()` or
+        /// to tear down the underlying IO.
+        ///
+        /// Idempotent: connections already terminating are left alone.
+        pub fn shutdown(bus: *MessageBus) void {
+            for (bus.connections) |*connection| {
+                switch (connection.state) {
+                    .free, .terminating => {},
+                    // `.accepting` would need different handling (no fd yet); only client-side
+                    // bus shutdown is supported today, and clients never accept.
+                    .accepting => assert(bus.process == .replica),
+                    .connecting, .connected => {
+                        bus.terminate(connection, .shutdown);
+                    },
+                }
+            }
+        }
+
+        /// True when every connection initiated by `shutdown()` has fully closed, so no
+        /// outstanding kernel operation references this bus's memory.
+        pub fn shutdown_complete(bus: *const MessageBus) bool {
+            return bus.connections_used == 0;
+        }
+
         pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
             bus.clients.deinit(allocator);
 
