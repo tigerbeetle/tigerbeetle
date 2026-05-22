@@ -361,6 +361,7 @@ SUIDSGID
 superblocks
 SV's
 SVCs
+Swival
 swappable
 swcsc
 swsc
