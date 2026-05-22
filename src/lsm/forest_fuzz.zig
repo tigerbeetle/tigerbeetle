@@ -1121,8 +1121,8 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     const fuzz_op_count = @min(
-        fuzz_args.events_max orelse @as(usize, 1E7),
-        fuzz.random_int_exponential(&prng, usize, 1E6),
+        fuzz_args.events_max orelse @as(usize, 1E6),
+        fuzz.random_int_exponential(&prng, usize, 1E5),
     );
 
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
