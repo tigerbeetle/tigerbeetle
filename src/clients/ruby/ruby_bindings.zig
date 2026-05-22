@@ -584,7 +584,10 @@ fn emit_c_deserialize_struct(buffer: *Buffer, comptime operation: tb.Operation) 
         if (comptime field_reserved(field.name)) {
             switch (@typeInfo(field.type)) {
                 .array => buffer.print(
-                    "        uint8_t zero[sizeof(item->{s})] = {{0}};\n        tb_assert(memcmp(item->{s}, zero, sizeof(item->{s})) == 0);\n",
+                    \\        uint8_t zero[sizeof(item->{s})] = {{0}};
+                    \\        tb_assert(memcmp(item->{s}, zero, sizeof(item->{s})) == 0);
+                    \\
+                ,
                     .{ field.name, field.name, field.name },
                 ),
                 else => buffer.print("        tb_assert(item->{s} == 0);\n", .{field.name}),
