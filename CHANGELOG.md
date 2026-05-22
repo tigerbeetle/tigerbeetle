@@ -5,7 +5,7 @@ to receive notifications about breaking changes!
 
 ## TigerBeetle 0.17.5
 
-Released: 2026-05-15
+Released: 2026-05-22
 
 ### Safety And Performance
 
@@ -25,6 +25,27 @@ Released: 2026-05-15
 
   Replace Java's assert keyword with `AssertionError.assertTrue` to prevent silent failures.
 
+- [#3686](https://github.com/tigerbeetle/tigerbeetle/pull/3686)
+
+  Refactor the grid to own all blocks through reference counting.
+
+- [#3730](https://github.com/tigerbeetle/tigerbeetle/pull/3730)
+
+  Inject stalls on the primary more accurately by observing a backup's `op - commit_min`, improving
+  throughput.
+
+- [#3704](https://github.com/tigerbeetle/tigerbeetle/pull/3704)
+
+  Fan out VSR prepare timeout retries.
+
+- [#3729](https://github.com/tigerbeetle/tigerbeetle/pull/3729)
+
+  Explicitly fail on invalid enum values in AMQP parsing per Swival security audit recommendation.
+
+- [#3726](https://github.com/tigerbeetle/tigerbeetle/pull/3726)
+
+  Add an assertion to `CheckpointTrailer.open` as per Swival security audit recommendation.
+
 ### Features
 
 - [#3702](https://github.com/tigerbeetle/tigerbeetle/pull/3702)
@@ -41,11 +62,34 @@ Released: 2026-05-15
 
 - [#3721](https://github.com/tigerbeetle/tigerbeetle/pull/3721)
 
-  Raise the clock-skew warning threshold from 1ms to 50ms.
+  Raise the clock-skew warning threshold from 1ms to 50ms to prevent CI flake.
+
+- [#3703](https://github.com/tigerbeetle/tigerbeetle/pull/3703)
+
+  Introduce configurable primary keys and multiple unique keys to LSM Forests.
+  This enables querying two-phase transfers by `pending_id`.
+
+- [#3711](https://github.com/tigerbeetle/tigerbeetle/pull/3711)
+
+  Fix various tb_client issues, enable Rust client CI on Windows.
+
+- [#3734](https://github.com/tigerbeetle/tigerbeetle/pull/3734)
+
+  Remove the `cancel_all` feature used to shutdown tb_client on Linux, instead terminate message bus
+  connections explicitly.
+
+- [#3724](https://github.com/tigerbeetle/tigerbeetle/pull/3724)
+
+  Dial up concurrency in the Node.js client test to reliably race `destroy` against `create`.
+
+- [#3736](https://github.com/tigerbeetle/tigerbeetle/pull/3736),
+  [#3738](https://github.com/tigerbeetle/tigerbeetle/pull/3738)
+
+  Fix flaky Vörtex and Windows cache CI failures.
 
 ### TigerTracks 🎧
 
-- [Sonne Scheint Nicht](https://www.youtube.com/watch?v=DxTs-pY7XB4)
+- [Ya Mama (Push The Tempo)](https://www.youtube.com/watch?v=JEq10L7u3SM)
 
 ## TigerBeetle 0.17.4
 
