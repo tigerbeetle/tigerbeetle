@@ -244,6 +244,11 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
 
     if (count > 0) {
         size_t event_size = rb_tb_event_size(operation);
+        long max_count = (long)(UINT32_MAX / event_size);
+        if (count > max_count) {
+            free(req);
+            rb_raise(rb_eArgError, "batch size exceeds maximum request size");
+        }
         size_t send_size = event_size * (size_t)count;
         req->send_buf = malloc(send_size);
         if (!req->send_buf) {
