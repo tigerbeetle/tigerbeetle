@@ -3,9 +3,14 @@ require "minitest/test_task"
 EXT_DIR = File.expand_path("src/ext/tigerbeetle", __dir__)
 PROJECT_ROOT = File.expand_path("../../..", __dir__)
 
+task(:generate) do
+  zig = ENV.fetch("ZIG_EXE") { File.join(PROJECT_ROOT, "zig", "zig") }
+  sh(zig, "build", "clients:ruby", chdir: PROJECT_ROOT)
+end
+
 desc("Build the C extension")
 task(:ext_compile) do
-  sh("zig build clients:ruby", chdir: PROJECT_ROOT)
+  Rake::Task[:generate].invoke unless ENV.key?("CI")
   sh("ruby extconf.rb && make", chdir: EXT_DIR)
 end
 
