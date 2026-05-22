@@ -157,8 +157,9 @@ pub fn report(_: *const Bench, comptime fmt: []const u8, args: anytype) void {
 pub fn report_ratchet(
     _: *const Bench,
     comptime src: std.builtin.SourceLocation,
+    comptime params_format: []const u8,
     params: anytype,
-    metrics: anytype,
+    metrics: []const ratchet.RatchetSpec,
 ) void {
     assert(std.meta.fields(@TypeOf(metrics)).len > 0);
     switch (mode) {
@@ -168,8 +169,9 @@ pub fn report_ratchet(
             var output_buffer: [4096]u8 = undefined;
             var output = std.io.fixedBufferStream(&output_buffer);
             ratchet.ratchet_write(
-                src.fn_name,
                 output.writer(),
+                src.fn_name,
+                params_format,
                 params,
                 metrics,
             ) catch unreachable;

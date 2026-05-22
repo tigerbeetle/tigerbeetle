@@ -5,25 +5,28 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 
-
 pub const RatchetDirection = union(enum) {
+    // exactly the same value (e.g., for checksums)
+    exact,
+    // above, below, equal with global epsilon value
     above,
     below,
-    exact,
+    equal,
+    // above, below, equal with custom epsilon value
     above_epsilon: f64,
     below_epsilon: f64,
-    exact_epsilon: f64,
+    equal_epsilon: f64,
 
-    fn as_string(direction: RatchetDirection) []const u8 {
-        return switch(direction)  {
-            .above => ">",
-            .below => "<",
-            .exact => "=",
-            // TODO
-            .above_epsilon => ">",
-            .below_epsilon => "<",
-            .exact_epsilon => "=",
-        };
+    fn print(direction: RatchetDirection, writer: anytype) !void {
+        switch(direction)  { 
+            .exact => try writer.print("==", .{}),
+            .above => try writer.print(">", .{}),
+            .below => try writer.print("<", .{}),
+            .equal => try writer.print("=", .{}),
+            .above_epsilon => |epsilon| try writer.print("[>{d}]", .{ epsilon }),
+            .below_epsilon => |epsilon| try writer.print("[<{d}]", .{ epsilon }),
+            .equal_epsilon => |epsilon| try writer.print("[={d}]", .{ epsilon }),
+        }
     }
 };
 
@@ -33,43 +36,44 @@ pub const RatchetSpec = struct {
     f64,
 };
 
-
 pub fn ratchet_write(
     writer: anytype,
     comptime ratchet_name: []const u8,
     comptime fmt: []const u8,
     params: anytype, 
-    ratchet_specs: []RatchetSpec
+    ratchet_specs: []const RatchetSpec
 ) !void {
-    assert(std.meta.fields(@TypeOf(ratchet_specs)).len > 0);
+    const SortContext = struct {
+        fn less_than(_: void, lhs: RatchetSpec, rhs: RatchetSpec) bool {
+            return std.mem.order(u8, lhs[0], rhs[0]) != .gt;
+        }
+    };
+    assert(ratchet_specs.len > 0);
+    assert(std.sort.isSorted(RatchetSpec, ratchet_specs, {}, SortContext.less_than));
     maybe(std.meta.fields(@TypeOf(params)).len == 0);
     // we use a custom format (instead of json/zon) to reduce
     // noise in the output and improve readability for humans
-    try writer.print("{s} //" ++ fmt ++ " // ", .{ratchet_name} ++ params);
-    const SortContext = struct {
-        fn less_than(_: @This(), lhs: *const RatchetSpec, rhs: *const RatchetSpec) bool {
-            return std.mem.order(lhs[0], rhs[1]) != .gt;
-        }
-    };
-    std.mem.sort(RatchetSpec, ratchet_specs, .{}, SortContext.less_than);
-    for (&ratchet_specs) |ratchet| {
-        try writer.print(" {s}{s}{d:.2}\n", .{ ratchet[0], ratchet[1].as_string(), ratchet[2] });
+    const separator = if (fmt.len == 0) "//" else " //";
+    try writer.print("{s} // " ++ fmt ++ separator, .{ratchet_name} ++ params);
+    for (ratchet_specs) |ratchet| {
+        try writer.print(" {s}", .{ ratchet[0] });
+        try ratchet[1].print(writer);
+        try writer.print("{d}", .{ ratchet[2] });
     }
+    try writer.print("\n", .{});
 }
 
 test "ratchet_write accepts empty parameters" {
     var output_buffer: [4096]u8 = undefined;
     var output = std.io.fixedBufferStream(&output_buffer);
 
-    ratchet_write(
-        @src().fn_name,
-        output.writer(),
-        .{},
-        .{ .time_ms = 10, .checksum = 1.61 },
-    ) catch unreachable;
+    try ratchet_write(output.writer(), @src().fn_name, "", .{}, &.{
+        .{ "checksum", .exact, 100 },
+        .{ "time_ms", .below, 5.5 },
+    });
 
     try std.testing.expectEqualStrings(
-        "test.ratchet_write accepts empty parameters // // checksum=1.61 time_ms=10 \n",
+        "test.ratchet_write accepts empty parameters // // checksum==100 time_ms<5.5\n",
         output.getWritten(),
     );
 }
@@ -79,74 +83,17 @@ test "ratchet_write prints parameters" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     try ratchet_write(
-        @src().fn_name,
         output.writer(),
-        .{ .factor = 50.3, .strategy = "random" },
-        .{ .time_s = 3.9 },
-    );
+        @src().fn_name,
+        "{s} factor={d}",
+        .{ "random", 3.14 },
+        &.{ .{ "time_s", .{ .below_epsilon = 0.03 },  3.9 } });
 
     try std.testing.expectEqualStrings(
         "test.ratchet_write prints parameters " ++
-            "// factor=50.30 strategy=random // time_s=3.90 \n",
+            "// random factor=3.14 // time_s[<0.03]3.9\n",
         output.getWritten(),
     );
-}
-
-fn lexicographic_fields(comptime T: type) [std.meta.fields(T).len]StructField {
-    return comptime blk: {
-        assert(@typeInfo(T) == .@"struct");
-        var fields = std.meta.fields(T)[0..].*;
-        if (fields.len == 0) break :blk fields;
-        for (1..fields.len) |i| {
-            var j = i;
-            while (j > 0) : (j -= 1) {
-                const left = &fields[j - 1];
-                const right = &fields[j];
-                if (std.mem.order(u8, left.name, right.name) != .gt) break;
-                std.mem.swap(StructField, left, right);
-            }
-        }
-        break :blk fields;
-    };
-}
-
-test lexicographic_fields {
-    // structs
-    const StructType = struct { ba: u8, aa: u8, zz: u128, a: i16 };
-    const expected_struct = [_][]const u8{ "a", "aa", "ba", "zz" };
-    inline for (comptime lexicographic_fields(StructType), 0..) |field, i| {
-        try std.testing.expectEqualStrings(expected_struct[i], field.name);
-    }
-    // tuples
-    const expected_tuple = [_][]const u8{ "0", "1", "2" };
-    const TupleType = @TypeOf(.{ 'a', 'b', 'c' });
-    inline for (comptime lexicographic_fields(TupleType), 0..) |field, i| {
-        try std.testing.expectEqualStrings(expected_tuple[i], field.name);
-    }
-    // empty
-    const empty_fields = comptime lexicographic_fields(@TypeOf(.{}));
-    try std.testing.expectEqual(empty_fields.len, 0);
-}
-
-fn format_string_from_type(comptime T: type) []const u8 {
-    const info = @typeInfo(T);
-    return switch (info) {
-        .array => |value| {
-            assert(value.child == u8);
-            return "{s}";
-        },
-        .pointer => |value| {
-            assert(value.child == u8 or (@typeInfo(value.child) == .array and
-                @typeInfo(value.child).array.child == u8));
-            return "{s}";
-        },
-        .bool => "{}",
-        .int, .comptime_int => "{d}",
-        .float, .comptime_float => "{d:.2}",
-        else => {
-            @panic("invalid ratchet type");
-        },
-    };
 }
 
 const RatchetLine = struct {
@@ -350,13 +297,13 @@ fn find_metric(metrics: []const u8, name: []const u8) ?Metric {
 
 test "report_regressions reports regressions" {
     const baseline =
-        \\RATCHET bench_a // size=10 // checksum=1 elapsed_ns=100 
+        \\RATCHET bench_a // size=10 // checksum=1.00 elapsed_ns=100.00
         \\RATCHET bench_b // // elapsed_ns=200 
         \\
     ;
     const worktree =
         \\noise before
-        \\RATCHET bench_a // size=10 // checksum=1 elapsed_ns=104 
+        \\RATCHET bench_a // size=10 // checksum=1.00 elapsed_ns=104.00
         \\RATCHET bench_b // // elapsed_ns=206 
         \\
     ;
