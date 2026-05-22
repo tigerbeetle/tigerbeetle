@@ -73,6 +73,20 @@ const Environment = struct {
                     try env.model.upsert(&value);
                 },
                 .remove => |key| {
+                    const model_value = env.model.get(key);
+                    if (env.cache_map.get(key)) |cache_map_value| {
+                        assert(model_value != null);
+                        assert(std.meta.eql(cache_map_value.*, model_value.?.value));
+                    } else {
+                        if (model_value == null) continue; // The key doesn't exist.
+
+                        // If the entry has an op from one or more compactions ago, it
+                        // may have been evicted from the cache.
+                        // It must be loaded into the cache before removal, though.
+                        assert(env.model.compacts > model_value.?.op);
+                        env.cache_map.upsert(&model_value.?.value);
+                    }
+
                     env.cache_map.remove(key);
                     try env.model.remove(key);
                 },

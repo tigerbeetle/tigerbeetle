@@ -257,6 +257,8 @@ pub fn CacheMapType(
                 null;
         }
 
+        /// Removes a key from cache, adding a tombstone to record the action.
+        /// Invariant: The key must be present in cache.
         pub fn remove(self: *CacheMap, key: Key) void {
             // The only thing that tests this in any depth is the cache_map fuzz itself.
             // Make sure we aren't being called in regular code without another once over.
@@ -271,11 +273,15 @@ pub fn CacheMapType(
             // since both can have different versions with the same key.
             const stash_removed: ?Value = self.stash_remove(key);
 
+            // Does not allow removing a key that is not in the cache.
+            assert(cache_removed != null or stash_removed != null);
+            maybe(cache_removed != null and stash_removed != null);
+
             if (self.scope_is_active) {
                 // TODO: Actually, does the fuzz catch this...
                 self.scope_rollback_log.appendAssumeCapacity(
                     cache_removed orelse
-                        stash_removed orelse return,
+                        stash_removed orelse unreachable,
                 );
             }
         }
