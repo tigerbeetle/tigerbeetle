@@ -433,6 +433,7 @@ fn emit_c_header_preamble(buffer: *Buffer) void {
         \\#include "ruby.h"
         \\#include "tb_client.h"
         \\#include <stdint.h>
+        \\#include <stdio.h>
         \\#include <stdlib.h>
         \\#include <string.h>
         \\
@@ -444,6 +445,22 @@ fn emit_c_header_preamble(buffer: *Buffer) void {
         \\    return rb_integer_unpack(src, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
         \\}
         \\
+        \\static inline void tb_assert_fail(
+        \\    const char *condition,
+        \\    int line,
+        \\    const char *function
+        \\) {
+        \\    fprintf(stderr, "tb_assert failed: %s at line %d in %s\n", condition, line, function);
+        \\    abort();
+        \\}
+        \\
+        \\// A version of `assert` macro that's always on regardless of NDEBUG macro.
+        \\#define tb_assert(condition) \
+        \\    do { \
+        \\        if (!(condition)) { \
+        \\            tb_assert_fail(#condition, __LINE__, __func__); \
+        \\        } \
+        \\    } while (0)
         \\
     );
 }
@@ -547,6 +564,7 @@ fn emit_c_deserialize_struct(buffer: *Buffer, comptime operation: tb.Operation) 
     buffer.print("    VALUE klass = rb_path2class(\"TigerBeetle::{s}\");\n", .{
         comptime ruby_type_name(Type),
     });
+    buffer.print("    tb_assert(buf_size % sizeof({s}) == 0);\n", .{c_name});
     buffer.print("    long count = (long)(buf_size / sizeof({s}));\n", .{c_name});
     buffer.print("    VALUE results = rb_ary_new_capa(count);\n", .{});
     buffer.print("    const {s} *items = (const {s} *)buf;\n", .{ c_name, c_name });

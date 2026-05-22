@@ -49,26 +49,6 @@ void Init_tigerbeetle(void) {
     rb_tb_init_native_client(rb_mTigerBeetle);
 }
 
-static inline void tb_assert_fail(
-    const char *condition,
-    const char *file,
-    int line,
-    const char *function
-) {
-    fprintf(stderr, "tb_assert failed: %s at %s:%d in %s\n", condition, file, line, function);
-    abort();
-}
-
-// Macro inspired by PostgreSQL.
-// See: https://github.com/postgres/postgres/blob/REL_18_4/src/include/c.h#L852-L856
-// do { ... } while (0) makes it safe in braceless if/else constructs.
-#define tb_assert(condition) \
-    do { \
-        if (!(condition)) { \
-            tb_assert_fail(#condition, __FILE__, __LINE__, __func__); \
-        } \
-    } while (0)
-
 static void rb_tb_request_free(void *ptr) {
     rb_tb_request_t *req = (rb_tb_request_t *)ptr;
     rb_tb_request_state_t expected = REQ_PENDING;

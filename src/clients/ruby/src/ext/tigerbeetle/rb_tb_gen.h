@@ -9,6 +9,7 @@
 #include "ruby.h"
 #include "tb_client.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +21,22 @@ static inline VALUE rb_tb_unpack_u128(const void *src) {
     return rb_integer_unpack(src, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
 }
 
+static inline void tb_assert_fail(
+    const char *condition,
+    int line,
+    const char *function
+) {
+    fprintf(stderr, "tb_assert failed: %s at line %d in %s\n", condition, line, function);
+    abort();
+}
+
+// A version of `assert` macro that's always on regardless of NDEBUG macro.
+#define tb_assert(condition) \
+    do { \
+        if (!(condition)) { \
+            tb_assert_fail(#condition, __LINE__, __func__); \
+        } \
+    } while (0)
 static const char *rb_tb_init_error_message(TB_INIT_STATUS status) {
     switch (status) {
     case TB_INIT_SUCCESS:
@@ -43,6 +60,7 @@ static const char *rb_tb_init_error_message(TB_INIT_STATUS status) {
 
 static VALUE rb_tb_deserialize_lookup_accounts(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::Account");
+    tb_assert(buf_size % sizeof(tb_account_t) == 0);
     long count = (long)(buf_size / sizeof(tb_account_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_account_t *items = (const tb_account_t *)buf;
@@ -68,6 +86,7 @@ static VALUE rb_tb_deserialize_lookup_accounts(const uint8_t *buf, uint32_t buf_
 
 static VALUE rb_tb_deserialize_lookup_transfers(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::Transfer");
+    tb_assert(buf_size % sizeof(tb_transfer_t) == 0);
     long count = (long)(buf_size / sizeof(tb_transfer_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_transfer_t *items = (const tb_transfer_t *)buf;
@@ -112,6 +131,7 @@ static void rb_tb_serialize_get_account_transfers(VALUE items_rb, uint8_t *buf, 
 
 static VALUE rb_tb_deserialize_get_account_transfers(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::Transfer");
+    tb_assert(buf_size % sizeof(tb_transfer_t) == 0);
     long count = (long)(buf_size / sizeof(tb_transfer_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_transfer_t *items = (const tb_transfer_t *)buf;
@@ -156,6 +176,7 @@ static void rb_tb_serialize_get_account_balances(VALUE items_rb, uint8_t *buf, l
 
 static VALUE rb_tb_deserialize_get_account_balances(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::AccountBalance");
+    tb_assert(buf_size % sizeof(tb_account_balance_t) == 0);
     long count = (long)(buf_size / sizeof(tb_account_balance_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_account_balance_t *items = (const tb_account_balance_t *)buf;
@@ -192,6 +213,7 @@ static void rb_tb_serialize_query_accounts(VALUE items_rb, uint8_t *buf, long co
 
 static VALUE rb_tb_deserialize_query_accounts(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::Account");
+    tb_assert(buf_size % sizeof(tb_account_t) == 0);
     long count = (long)(buf_size / sizeof(tb_account_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_account_t *items = (const tb_account_t *)buf;
@@ -235,6 +257,7 @@ static void rb_tb_serialize_query_transfers(VALUE items_rb, uint8_t *buf, long c
 
 static VALUE rb_tb_deserialize_query_transfers(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::Transfer");
+    tb_assert(buf_size % sizeof(tb_transfer_t) == 0);
     long count = (long)(buf_size / sizeof(tb_transfer_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_transfer_t *items = (const tb_transfer_t *)buf;
@@ -282,6 +305,7 @@ static void rb_tb_serialize_create_accounts(VALUE items_rb, uint8_t *buf, long c
 
 static VALUE rb_tb_deserialize_create_accounts(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::CreateAccountResult");
+    tb_assert(buf_size % sizeof(tb_create_account_result_t) == 0);
     long count = (long)(buf_size / sizeof(tb_create_account_result_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_create_account_result_t *items = (const tb_create_account_result_t *)buf;
@@ -319,6 +343,7 @@ static void rb_tb_serialize_create_transfers(VALUE items_rb, uint8_t *buf, long 
 
 static VALUE rb_tb_deserialize_create_transfers(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::CreateTransferResult");
+    tb_assert(buf_size % sizeof(tb_create_transfer_result_t) == 0);
     long count = (long)(buf_size / sizeof(tb_create_transfer_result_t));
     VALUE results = rb_ary_new_capa(count);
     const tb_create_transfer_result_t *items = (const tb_create_transfer_result_t *)buf;
