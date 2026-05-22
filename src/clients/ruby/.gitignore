@@ -1,5 +1,4 @@
 *.gem
-src/ext/tigerbeetle/tb_client.h
 src/ext/tigerbeetle/lib/
 src/ext/tigerbeetle/Makefile
 src/ext/tigerbeetle/*.o
