@@ -3,7 +3,7 @@ const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
 
-const Shell = @import("../../../shell.zig");
+const Shell = @import("stdx").Shell;
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;

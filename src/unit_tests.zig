@@ -38,7 +38,6 @@ comptime {
     _ = @import("repl/terminal.zig");
     _ = @import("scripts/cfo.zig");
     _ = @import("scripts/changelog.zig");
-    _ = @import("shell.zig");
     _ = @import("stack.zig");
     _ = @import("state_machine.zig");
     _ = @import("state_machine_fuzz.zig");

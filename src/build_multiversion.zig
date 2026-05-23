@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 
 const multiversion = @import("./multiversion.zig");
 const stdx = @import("stdx");
-const Shell = @import("shell.zig");
+const Shell = stdx.Shell;
 
 const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
 const MultiversionHeader = multiversion.MultiversionHeader;

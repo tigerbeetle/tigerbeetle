@@ -11,7 +11,7 @@ const log = std.log;
 
 const stdx = @import("stdx");
 const MiB = stdx.MiB;
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 const Docs = @import("../clients/docs_types.zig").Docs;
 const Sample = @import("../clients/docs_types.zig").Sample;
 const samples = @import("../clients/docs_samples.zig").samples;
