@@ -32,7 +32,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 const changelog = @import("./changelog.zig");
 const Release = @import("../multiversion.zig").Release;
 

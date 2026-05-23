@@ -15,11 +15,11 @@
 //!     the right defaults.
 
 const std = @import("std");
+const stdx = @import("stdx.zig");
 const log = std.log;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const stdx = @import("stdx");
 const Shell = @This();
 
 const MiB = stdx.MiB;
@@ -901,7 +901,7 @@ fn discover_project_root() !std.fs.Dir {
     errdefer current.close(); // Caller is responsible for closing on success.
 
     for (0..16) |_| {
-        if (current.statFile("src/shell.zig")) |_| {
+        if (current.statFile("src/stdx/shell.zig")) |_| {
             return current;
         } else |err| switch (err) {
             error.FileNotFound => {

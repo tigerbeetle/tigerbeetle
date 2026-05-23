@@ -11,7 +11,7 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
-const Shell = @import("./shell.zig");
+const Shell = stdx.Shell;
 const Snap = stdx.Snap;
 const snap = Snap.snap_fn("src");
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");

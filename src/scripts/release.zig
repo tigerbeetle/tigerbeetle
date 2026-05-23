@@ -21,7 +21,7 @@ const stdx = @import("stdx");
 const log = std.log;
 const assert = std.debug.assert;
 
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 const multiversion = @import("../multiversion.zig");
 const changelog = @import("./changelog.zig");
 

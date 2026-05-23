@@ -8,7 +8,7 @@ const mem = std.mem;
 const Ast = std.zig.Ast;
 
 const stdx = @import("stdx");
-const Shell = @import("./shell.zig");
+const Shell = stdx.Shell;
 
 const Snap = stdx.Snap;
 const module_path = "src";
