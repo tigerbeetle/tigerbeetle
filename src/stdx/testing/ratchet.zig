@@ -59,8 +59,6 @@ pub const Metric = struct {
     }
 };
 
-pub const RatchetSpec = Metric;
-
 pub fn ratchet_write(
     writer: anytype,
     comptime ratchet_name: []const u8,
@@ -296,54 +294,109 @@ fn next_ratchet_line(
     return ratchet;
 }
 
-fn next_metric(tail: *[]const u8) ?Metric {
-    tail.* = std.mem.trimLeft(u8, tail.*, " ");
-    if (tail.*.len == 0) return null;
-
-    const token_end = std.mem.indexOfAny(u8, tail.*, " \n") orelse tail.*.len;
-    const token = tail.*[0..token_end];
-    tail.* = if (token_end < tail.*.len) tail.*[token_end + 1..] else tail.*[token_end..];
-    return parse_metric(token);
-}
-
-fn parse_metric(token: []const u8) Metric {
-    assert(token.len > 0);
-
-    const operator_index = std.mem.indexOfAny(u8, token, "<>=") orelse unreachable;
-    assert(operator_index > 0);
-    assert(operator_index + 1 < token.len);
-    assert(std.ascii.isAlphabetic(token[0]));
-
-    const value_text = token[operator_index + 1..];
-    var bound_text = value_text;
-    var epsilon: ?f64 = null;
-
-    if (value_text[0] == '[') {
-        const epsilon_text, const value_tail = stdx.cut(value_text[1..], "]") orelse unreachable;
-        assert(epsilon_text.len > 0);
-        assert(value_tail.len > 0);
-        epsilon = std.fmt.parseFloat(f64, epsilon_text) catch unreachable;
-        bound_text = value_tail;
-    } else {
-        assert(std.ascii.isDigit(value_text[0]));
-    }
-
-    assert(bound_text.len > 0);
-    assert(std.ascii.isDigit(bound_text[0]));
-    return .{
-        .name = token[0..operator_index],
-        .direction = RatchetDirection.from_char(token[operator_index]),
-        .bound = std.fmt.parseFloat(f64, bound_text) catch unreachable,
-        .epsilon = epsilon,
-    };
-}
-
 fn find_metric(metrics: []const u8, name: []const u8) ?Metric {
     var tail = metrics;
     while (next_metric(&tail)) |metric| {
         if (std.mem.eql(u8, metric.name, name)) return metric;
     }
     return null;
+}
+
+fn next_metric(tail: *[]const u8) ?Metric {
+    tail.* = std.mem.trimLeft(u8, tail.*, " ");
+    if (tail.*.len == 0) return null;
+
+    const token, tail.* = stdx.cut(tail.*, " ") orelse .{ tail.*, "" };
+    return parse_metric(token) catch unreachable;
+}
+
+fn parse_metric(token: []const u8) !Metric {
+    assert(token.len > 0);
+    assert(std.ascii.isAlphabetic(token[0]));
+
+    const operator_index = std.mem.indexOfAny(u8, token, "<>=") orelse return error.InvalidMetric;
+    assert(operator_index > 0);
+    assert(operator_index + 1 < token.len);
+
+    var text_value = token[operator_index + 1..];
+    var epsilon: ?f64 = null;
+
+    if (text_value[0] == '[') {
+        const text_epsilon, text_value = stdx.cut(text_value[1..], "]")
+            orelse return error.InvalidMetric;
+        assert(text_epsilon.len > 0);
+        assert(text_value.len > 0);
+        epsilon = try std.fmt.parseFloat(f64, text_epsilon);
+    }
+
+    assert(text_value.len > 0);
+    assert(std.ascii.isDigit(text_value[0]));
+    return .{
+        .name = token[0..operator_index],
+        .direction = RatchetDirection.from_char(token[operator_index]),
+        .bound = try std.fmt.parseFloat(f64, text_value),
+        .epsilon = epsilon,
+    };
+}
+
+test "next_metric: fuzz" {
+    const names = [_][]const u8{
+        "checksum",
+        "elapsed_ns",
+        "iops",
+        "latency_ms",
+        "latency_p100",
+        "p50",
+        "time_s",
+    };
+    const directions = std.enums.values(RatchetDirection);
+
+    var prng = stdx.PRNG.from_seed_testing();
+    var metrics: [16]Metric = undefined;
+    var text_buffer: [4096]u8 = undefined;
+
+    for (0..1000) |_| {
+        const metrics_count = prng.range_inclusive(usize, 1, metrics.len);
+        var text = std.io.fixedBufferStream(&text_buffer);
+
+        for (metrics[0..metrics_count]) |*metric| {
+            metric.* = .{
+                .name = names[prng.index(&names)],
+                .direction = directions[prng.index(directions)],
+                .bound = @floatFromInt(prng.range_inclusive(u64, 1, 1_000_000)),
+                .epsilon = null,
+            };
+            if (prng.boolean()) {
+                const epsilon_bps = prng.range_inclusive(u64, 1, 10_000);
+                metric.epsilon = @as(f64, @floatFromInt(epsilon_bps)) / 10_000.0;
+            }
+
+            try metric.print(text.writer());
+            const spaces = prng.range_inclusive(usize, 1, 3);
+            for (0..spaces) |_| try text.writer().writeByte(' ');
+        }
+
+        const metrics_text = text.getWritten();
+        var tail: []const u8 = metrics_text;
+        for (metrics[0..metrics_count]) |expected| {
+            const parsed = next_metric(&tail).?;
+            try expect_metric_equal(expected, parsed);
+        }
+        try std.testing.expect(next_metric(&tail) == null);
+    }
+}
+
+fn expect_metric_equal(expected: Metric, actual: Metric) !void {
+    try std.testing.expectEqualStrings(expected.name, actual.name);
+    try std.testing.expectEqual(expected.direction, actual.direction);
+    try std.testing.expectEqual(expected.bound, actual.bound);
+
+    if (expected.epsilon) |expected_epsilon| {
+        try std.testing.expect(actual.epsilon != null);
+        try std.testing.expectEqual(expected_epsilon, actual.epsilon.?);
+    } else {
+        try std.testing.expect(actual.epsilon == null);
+    }
 }
 
 test "report_regressions reports regressions" {

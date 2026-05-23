@@ -158,7 +158,7 @@ pub fn report_ratchet(
     comptime src: std.builtin.SourceLocation,
     comptime params_format: []const u8,
     params: anytype,
-    metrics: []const ratchet.RatchetSpec,
+    metrics: []const ratchet.Metric,
 ) void {
     assert(std.meta.fields(@TypeOf(metrics)).len > 0);
     switch (mode) {
