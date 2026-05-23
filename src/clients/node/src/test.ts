@@ -153,6 +153,17 @@ test('batch max size', async (): Promise<void> => {
   })
 })
 
+test('batch invalid size', async (): Promise<void> => {
+  const transfers: Transfer[] = [];
+  transfers.length = 0xffffffff;
+
+  assert.rejects(async() => await client.createTransfers(transfers), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
+})
+
 test('can lookup accounts', async (): Promise<void> => {
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
 
