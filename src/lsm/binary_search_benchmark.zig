@@ -146,12 +146,14 @@ fn run_benchmark(
         result,
     });
 
-    bench.report_ratchet(
-        src,
-        "{s} K={:_>2}B V={:_>3}B N={:_>5}",
-        .{scenario.name, layout.key_size, layout.value_size, layout.values_count},
-        &.{ .{ "element_ns", .below, @as(f64, @floatFromInt(result.ns)) } },
-    );
+    bench.report_ratchet(src, "{s} K={:_>2}B V={:_>3}B N={:_>5}", .{
+        scenario.name,
+        layout.key_size,
+        layout.value_size,
+        layout.values_count,
+        }, &.{
+        .below("element_ns", @as(f64, @floatFromInt(result.ns)))
+    });
 
     return checksum;
 }

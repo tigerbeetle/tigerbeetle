@@ -1,4 +1,5 @@
 const std = @import("std");
+const StructField = std.builtin.Type.StructField;
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
@@ -9,67 +10,58 @@ pub const RatchetDirection = enum {
     below,
     equal,
 
-    fn operator_char(direction: RatchetDirection) u8 {
+    fn operator(direction: RatchetDirection) u8 {
         return switch(direction)  {
-            .above => '>',
-            .below => '<',
-            .equal => '=',
-        };
-    }
-
-    fn from_char(char: u8) RatchetDirection {
-        return switch (char) {
-            '>' => .above,
-            '<' => .below,
-            '=' => .equal,
-            else => @panic("unknown ratchet direction operator")
+            .above => ">",
+            .below => "<",
+            .equal => "=",
         };
     }
 };
 
-pub const Metric = struct {
+pub const RatchetSpec = struct {
     name: []const u8,
     direction: RatchetDirection,
-    bound: f64,
+    metric: f64,
     epsilon: ?f64 = null,
 
-    pub fn below(name: []const u8, metric: f64) Metric {
-        return .{.name = name, .direction = .below, .bound = metric};
+    pub fn below(name: []const u8, metric: f64) RatchetSpec {
+        return .{.name = name, .direction = .below, .metric = metric};
     }
 
-    pub fn above(name: []const u8, metric: f64) Metric {
-        return .{.name = name, .direction = .above, .bound = metric};
+    pub fn above(name: []const u8, metric: f64) RatchetSpec {
+        return .{.name = name, .direction = .above, .metric = metric};
     }
 
-    pub fn equal(name: []const u8, metric: f64) Metric {
-        return .{.name = name, .direction = .equal, .bound = metric};
+    pub fn equal(name: []const u8, metric: f64) RatchetSpec {
+        return .{.name = name, .direction = .equal, .metric = metric};
     }
 
-    fn print(spec: *const Metric, writer: anytype) !void {
-        const operator = spec.direction.operator_char();
+    fn print(spec: *const RatchetSpec, writer: anytype) !void {
+        const operator = spec.direction.operator();
         if (spec.epsilon) |epsilon| {
-            try writer.print("{s}{c}[{d}]{d}", . { spec.name, operator, epsilon, spec.bound });
+            try writer.print("{s}{s}[{d}]{d}", .uspec.name, operator, epsilon, spec.metricu);
         } else {
-            try writer.print("{s}{c}{d}", .{ spec.name, operator, spec.bound });
+            try writer.print("{s}{s}{d}", .{ spec.name, operator, spec.metric });
         }
     }
 
-    fn sorted_by_name(_: void, lhs: Metric, rhs: Metric) bool {
+    fn sorted_by_name(_: void, lhs: RatchetSpec, rhs: RatchetSpec) bool {
         return std.mem.order(u8, lhs.name, rhs.name) != .gt;
     }
 };
-
-pub const RatchetSpec = Metric;
 
 pub fn ratchet_write(
     writer: anytype,
     comptime ratchet_name: []const u8,
     comptime fmt: []const u8,
     params: anytype, 
-    ratchet_specs: []const Metric
+    ratchet_specs: []const RatchetSpec
 ) !void {
+    const SortContext = struct {
+    };
     assert(ratchet_specs.len > 0);
-    assert(std.sort.isSorted(Metric, ratchet_specs, {}, Metric.sorted_by_name));
+    assert(std.sort.isSorted(RatchetSpec, ratchet_specs, {}, RatchetSpec.less_than));
     maybe(std.meta.fields(@TypeOf(params)).len == 0);
     // we use a custom format (instead of json/zon) to reduce
     // noise in the output and improve readability for humans
@@ -92,7 +84,7 @@ test "ratchet_write accepts empty parameters" {
     });
 
     try std.testing.expectEqualStrings(
-        "test.ratchet_write accepts empty parameters // // checksum=100 time_ms<5.5\n",
+        "test.ratchet_write accepts empty parameters // // checksum==100 time_ms<5.5\n",
         output.getWritten(),
     );
 }
@@ -106,11 +98,11 @@ test "ratchet_write prints parameters" {
         @src().fn_name,
         "{s} factor={d}",
         .{ "random", 3.14 },
-        &.{ .{ .name = "time_s", .direction = .below, .bound = 3.9, .epsilon = 0.03 } });
+        &.{ .{ .name = "time_s", .direction = .below, .metric = 3.9, .epsilon = 0.03 } });
 
     try std.testing.expectEqualStrings(
         "test.ratchet_write prints parameters " ++
-            "// random factor=3.14 // time_s<[0.03]3.9\n",
+            "// random factor=3.14 // time_s[<0.03]3.9\n",
         output.getWritten(),
     );
 }
@@ -190,6 +182,7 @@ pub fn report_regressions(
         epsilon_percent: f64 = 3.0,
     },
 ) u32 {
+    const epsilon_factor = (1.0 + options.epsilon_percent / 100.0);
     const Map = std.HashMap(
         RatchetLine.RatchetKey,
         RatchetLine.RatchetMetricData,
@@ -252,17 +245,10 @@ pub fn report_regressions(
                 continue;
             };
 
-            if (baseline_metric.direction == .equal) continue;
-
-            const epsilon_percent = if (worktree_metric.epsilon) |epsilon|
-                epsilon * 100.0
-            else
-                options.epsilon_percent;
-            const metric_epsilon_factor = 1.0 + epsilon_percent / 100.0;
-            const max_allowed = baseline_metric.bound * metric_epsilon_factor;
-            if (worktree_metric.bound > max_allowed) {
+            const max_allowed = baseline_metric.value * epsilon_factor;
+            if (worktree_metric.value > max_allowed) {
                 const worse_percent = 100.0 * (
-                    worktree_metric.bound / baseline_metric.bound - 1
+                    worktree_metric.value / baseline_metric.value - 1
                 ); 
                 failing_writer.print(
                     "regression: {s} // {s} // {s}: " ++
@@ -272,9 +258,9 @@ pub fn report_regressions(
                         baseline.bench_name,
                         baseline.params,
                         baseline_metric.name,
-                        baseline_metric.bound,
-                        worktree_metric.bound,
-                        epsilon_percent,
+                        baseline_metric.value,
+                        worktree_metric.value,
+                        options.epsilon_percent,
                         worse_percent,
                     },
                 ) catch unreachable;
@@ -296,46 +282,20 @@ fn next_ratchet_line(
     return ratchet;
 }
 
+const Metric = struct {
+    name: []const u8,
+    value: f64,
+};
+
 fn next_metric(tail: *[]const u8) ?Metric {
-    tail.* = std.mem.trimLeft(u8, tail.*, " ");
-    if (tail.*.len == 0) return null;
-
-    const token_end = std.mem.indexOfAny(u8, tail.*, " \n") orelse tail.*.len;
-    const token = tail.*[0..token_end];
-    tail.* = if (token_end < tail.*.len) tail.*[token_end + 1..] else tail.*[token_end..];
-    return parse_metric(token);
-}
-
-fn parse_metric(token: []const u8) Metric {
-    assert(token.len > 0);
-
-    const operator_index = std.mem.indexOfAny(u8, token, "<>=") orelse unreachable;
-    assert(operator_index > 0);
-    assert(operator_index + 1 < token.len);
-    assert(std.ascii.isAlphabetic(token[0]));
-
-    const value_text = token[operator_index + 1..];
-    var bound_text = value_text;
-    var epsilon: ?f64 = null;
-
-    if (value_text[0] == '[') {
-        const epsilon_text, const value_tail = stdx.cut(value_text[1..], "]") orelse unreachable;
-        assert(epsilon_text.len > 0);
-        assert(value_tail.len > 0);
-        epsilon = std.fmt.parseFloat(f64, epsilon_text) catch unreachable;
-        bound_text = value_tail;
-    } else {
-        assert(std.ascii.isDigit(value_text[0]));
+    while (tail.len > 0) {
+        const token, tail.* = stdx.cut(tail.*, " ") orelse .{ tail.*, "" };
+        if (token.len == 0) continue;
+        const name, const value_text = stdx.cut(token, "=") orelse continue;
+        const value = std.fmt.parseFloat(f64, value_text) catch continue;
+        return .{ .name = name, .value = value };
     }
-
-    assert(bound_text.len > 0);
-    assert(std.ascii.isDigit(bound_text[0]));
-    return .{
-        .name = token[0..operator_index],
-        .direction = RatchetDirection.from_char(token[operator_index]),
-        .bound = std.fmt.parseFloat(f64, bound_text) catch unreachable,
-        .epsilon = epsilon,
-    };
+    return null;
 }
 
 fn find_metric(metrics: []const u8, name: []const u8) ?Metric {
@@ -348,13 +308,13 @@ fn find_metric(metrics: []const u8, name: []const u8) ?Metric {
 
 test "report_regressions reports regressions" {
     const baseline =
-        \\RATCHET bench_a // size=10 // checksum=1 elapsed_ns<100.00
+        \\RATCHET bench_a // size=10 // checksum=1.00 elapsed_ns=100.00
         \\RATCHET bench_b // // elapsed_ns=200 
         \\
     ;
     const worktree =
         \\noise before
-        \\RATCHET bench_a // size=10 // checksum=2 elapsed_ns<[0.05]110.00
+        \\RATCHET bench_a // size=10 // checksum=1.00 elapsed_ns=104.00
         \\RATCHET bench_b // // elapsed_ns=206 
         \\
     ;
@@ -363,7 +323,6 @@ test "report_regressions reports regressions" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     const failures = report_regressions(
-        "RATCHET",
         std.testing.allocator,
         baseline,
         worktree,
@@ -374,19 +333,19 @@ test "report_regressions reports regressions" {
     try std.testing.expectEqual(@as(u32, 1), failures);
     try std.testing.expectEqualStrings(
         "regression: bench_a // size=10 // elapsed_ns: " ++
-            "baseline=100.00 worktree=110.00 epsilon=5.00% worse_by=10.00%\n",
+            "baseline=100.00 worktree=104.00 epsilon=3.00% worse_by=4.00%\n",
         output.getWritten(),
     );
 }
 
 test "report_regressions gone ratchets and gone metrics" {
     const baseline =
-        \\RATCHET bench_a // mode=fast // elapsed_ns<100 iops<1000 
-        \\RATCHET bench_b // mode=slow // elapsed_ns<200 
+        \\RATCHET bench_a // mode=fast // elapsed_ns=100 iops=1000 
+        \\RATCHET bench_b // mode=slow // elapsed_ns=200 
         \\
     ;
     const worktree =
-        \\RATCHET bench_a // mode=fast // elapsed_ns<99 
+        \\RATCHET bench_a // mode=fast // elapsed_ns=99 
         \\
     ;
 
@@ -394,7 +353,6 @@ test "report_regressions gone ratchets and gone metrics" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     const failures = report_regressions(
-        "RATCHET",
         std.testing.allocator,
         baseline,
         worktree,
@@ -412,12 +370,12 @@ test "report_regressions gone ratchets and gone metrics" {
 
 test "report_regressions reports duplicate baselines" {
     const baseline =
-        \\RATCHET bench // mode=fast // elapsed_ns<100 
-        \\RATCHET bench // mode=fast // elapsed_ns<100 
+        \\RATCHET bench // mode=fast // elapsed_ns=100 
+        \\RATCHET bench // mode=fast // elapsed_ns=100 
         \\
     ;
     const worktree =
-        \\RATCHET bench // mode=fast // elapsed_ns<100 
+        \\RATCHET bench // mode=fast // elapsed_ns=100 
         \\
     ;
 
@@ -425,7 +383,6 @@ test "report_regressions reports duplicate baselines" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     const failures = report_regressions(
-        "RATCHET",
         std.testing.allocator,
         baseline,
         worktree,
@@ -442,12 +399,12 @@ test "report_regressions reports duplicate baselines" {
 
 test "report_regressions can ignore removals" {
     const baseline =
-        \\RATCHET bench // // elapsed_ns<100 iops>[0.05]1000 
-        \\RATCHET removed // // elapsed_ns<1 
+        \\RATCHET bench // // elapsed_ns=100 iops=1000 
+        \\RATCHET removed // // elapsed_ns=1 
         \\
     ;
     const worktree =
-        \\RATCHET bench // // elapsed_ns<102 
+        \\RATCHET bench // // elapsed_ns=102 
         \\
     ;
 
@@ -455,7 +412,6 @@ test "report_regressions can ignore removals" {
     var output = std.io.fixedBufferStream(&output_buffer);
 
     const failures = report_regressions(
-        "RATCHET",
         std.testing.allocator,
         baseline,
         worktree,

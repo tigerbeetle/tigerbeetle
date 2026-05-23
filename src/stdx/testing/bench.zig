@@ -77,7 +77,6 @@ seed: u64,
 time: Time = .{},
 timer: ?Instant = null,
 
-
 pub fn init() Bench {
     return .{
         // Benchmarks require a fixed seed for reproducibility; smoke mode uses a random seed.
