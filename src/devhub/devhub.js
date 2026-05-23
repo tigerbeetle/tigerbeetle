@@ -238,13 +238,27 @@ async function main_metrics() {
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
   const data = await (await fetch(data_url)).text();
   const max_batches = 200;
-  const batches = data.split("\n")
+  const all_batches = data.split("\n")
     .filter((it) => it.length > 0)
     .map((it) => JSON.parse(it))
-    .slice(-1 * max_batches)
     .reverse();
 
-  const series = batches_to_series(batches);
+  const query = new URLSearchParams(document.location.search);
+  const query_metric = query.get("metric");
+
+  render_performance_results(all_batches, query_metric);
+
+  let batches = all_batches;
+  if (query_metric) {
+    batches = batches.filter((batch) =>
+      batch.metrics.some((metric) => metric.name === query_metric)
+    );
+  }
+  batches = batches.slice(0, max_batches);
+
+  let series = batches_to_series(batches);
+  if (query_metric) series = series.filter((it) => it.name === query_metric);
+  document.querySelector("#metrics-show-all").hidden = !query_metric;
   plot_series(series, document.querySelector("#charts"), batches.length);
 }
 
@@ -357,6 +371,58 @@ function batches_to_series(batches) {
   }
 
   return Array.from(results.values());
+}
+
+function render_performance_results(batches, query_metric) {
+  const performance_tests = [
+    {
+      title: "CSO",
+      metric: "Cluster TPS",
+    },
+  ];
+  const freshness_threshold_ms = 24 * 60 * 60 * 1000;
+  const table_dom = document.querySelector("#performance-results>tbody");
+
+  for (const test of performance_tests) {
+    const batch = batches.find((batch) =>
+      batch.metrics.some((metric) => metric.name === test.metric)
+    );
+    const row_dom = document.createElement("tr");
+
+    if (batch) {
+      const metric = batch.metrics.find((metric) => metric.name === test.metric);
+      const freshness_ms = Date.now() - batch.timestamp * 1000;
+      const date = new Date(batch.timestamp * 1000);
+
+      if (freshness_ms <= freshness_threshold_ms) {
+        row_dom.classList.add("success");
+      }
+      if (query_metric === test.metric) {
+        row_dom.classList.add("selected");
+      }
+
+      row_dom.innerHTML = `
+        <td><a href="?metric=${encodeURIComponent(test.metric)}">${test.title}</a></td>
+        <td>
+          <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${batch.attributes.git_commit}">
+            ${format_date_day_time(date)}
+          </a>
+        </td>
+        <td>
+          <time>${format_duration(freshness_ms)} ago</time>
+          <span>${format_count(metric.value)} TPS</span>
+        </td>
+      `;
+    } else {
+      row_dom.innerHTML = `
+        <td><a href="?metric=${encodeURIComponent(test.metric)}">${test.title}</a></td>
+        <td>N/A</td>
+        <td>N/A</td>
+      `;
+    }
+
+    table_dom.appendChild(row_dom);
+  }
 }
 
 function plot_series(series_list, root_node, batch_count) {

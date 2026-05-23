@@ -122,6 +122,17 @@ section#top {
         border-spacing: 0;
     }
 
+    th {
+        text-align: left;
+        font-weight: normal;
+        color: var(--gray-11);
+    }
+
+    th,
+    td {
+        padding-right: 16px;
+    }
+
     #release table {
         color: var(--gray-11);
 
@@ -136,6 +147,28 @@ section#top {
 
         p {
             line-height: 24px;
+        }
+    }
+
+    #performance-results {
+        tr {
+            &:not(.success) :not(th) {
+                color: var(--red-10);
+            }
+
+            &.success {
+                color: var(--lime-10);
+            }
+
+            &.selected {
+                background-color: var(--gray-4);
+            }
+        }
+
+        td:last-child {
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
         }
     }
 }
