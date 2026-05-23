@@ -11,7 +11,6 @@ comptime {
     _ = @import("ewah.zig");
     _ = @import("ewah_benchmark.zig");
     _ = @import("io/test.zig");
-    _ = @import("list.zig");
     _ = @import("lsm/binary_search.zig");
     _ = @import("lsm/binary_search_benchmark.zig");
     _ = @import("lsm/cache_map.zig");
@@ -39,7 +38,6 @@ comptime {
     _ = @import("repl/terminal.zig");
     _ = @import("scripts/cfo.zig");
     _ = @import("scripts/changelog.zig");
-    _ = @import("shell.zig");
     _ = @import("stack.zig");
     _ = @import("state_machine.zig");
     _ = @import("state_machine_fuzz.zig");

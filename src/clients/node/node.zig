@@ -278,7 +278,10 @@ fn request(
             // Avoid allocating memory for requests that are known to be too large.
             // However, the final validation happens in `tb_client` against the runtime-known
             // maximum size.
-            if (array_length * @sizeOf(Event) > constants.message_body_size_max) {
+            const event_max: u32 = comptime operation_comptime.event_max(
+                constants.message_body_size_max,
+            );
+            if (array_length > event_max) {
                 return request_error(env, .ERR_TOO_MUCH_DATA);
             }
 

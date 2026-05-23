@@ -53,7 +53,7 @@ The releases page lists all past and current releases:
 
 <https://github.com/tigerbeetle/tigerbeetle/releases>
 
-TigerBeetle can be upgraded without downtime, this is documented in [Upgrading](./upgrading.md).
+TigerBeetle can be upgraded with a few seconds of downtime, this is documented in [Upgrading](./upgrading.md).
 
 ## Building from Source
 

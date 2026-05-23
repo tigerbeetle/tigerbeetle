@@ -52,7 +52,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const stdx = @import("stdx");
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 
 const MiB = stdx.MiB;
 const log_size_max = 4 * stdx.MiB;

@@ -62,6 +62,12 @@ pub fn EchoClientType(comptime MessageBus: type) type {
             if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
         }
 
+        /// EchoClient has no real IO to drain.
+        pub fn shutdown(_: *EchoClient) void {}
+        pub fn shutdown_complete(_: *const EchoClient) bool {
+            return true;
+        }
+
         pub fn tick(self: *EchoClient) void {
             const inflight = self.request_inflight orelse return;
             self.request_inflight = null;

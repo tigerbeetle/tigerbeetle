@@ -495,8 +495,8 @@ fn command_start(
         };
 
         if (replica.cluster == 0) {
-            log.warn("a cluster id of 0 is reserved for testing and benchmarking, " ++
-                "do not use in production", .{});
+            log.warn("A cluster id of 0 is reserved for testing and benchmarking, " ++
+                "do not use in production.", .{});
         }
     }
 

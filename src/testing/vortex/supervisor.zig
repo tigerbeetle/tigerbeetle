@@ -43,7 +43,7 @@ const RingBufferType = stdx.RingBufferType;
 const Network = @import("./faulty_network.zig").Network;
 const constants = @import("constants.zig");
 const ratio = stdx.PRNG.ratio;
-const Shell = @import("../../shell.zig");
+const Shell = stdx.Shell;
 
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -281,6 +281,17 @@ pub const Supervisor = struct {
                         fatal(.replica_exit_result, "replica exited with: {}", .{term});
                     }
                 }
+            }
+        }
+
+        if (supervisor.workload) |workload| {
+            // Driver subprocess should never exit on its own.
+            const result = std.posix.waitpid(workload.driver.id, std.posix.W.NOHANG);
+            if (result.pid != 0) {
+                assert(result.pid == workload.driver.id);
+
+                const term = stdx.term_from_status(result.status);
+                fatal(.workload_exit_early, "workload exited with: {}", .{term});
             }
         }
     }

@@ -4,13 +4,12 @@
 //! - Building and link-checking docs.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
-const builtin = @import("builtin");
 
 const stdx = @import("stdx");
-
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 const client_readmes = @import("./client_readmes.zig");
 
 pub const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));

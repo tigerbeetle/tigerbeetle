@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 
 const MiB = stdx.MiB;
 
