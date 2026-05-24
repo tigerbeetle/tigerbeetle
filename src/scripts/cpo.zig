@@ -44,7 +44,7 @@ const log = std.log;
 pub const CLIArgs = struct {
     sha: ?[]const u8 = null,
     skip_kcov: bool = false,
-    benchmark_long_timeout: stdx.Duration = .minutes(120),
+    benchmark_long_timeout: stdx.Duration = .minutes(60 * 24),
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
