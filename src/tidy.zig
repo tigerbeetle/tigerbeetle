@@ -1244,6 +1244,7 @@ const DeadFilesDetector = struct {
             "vopr.zig",
             "vortex.zig",
             "zig_driver.zig",
+            "ruby_bindings.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -1368,7 +1369,7 @@ test "tidy extensions" {
         .{".json"}, .{".md"},      .{".mod"},    .{".props"}, .{".py"},
         .{".rs"},   .{".service"}, .{".sln"},    .{".sum"},   .{".svg"},
         .{".toml"}, .{".ts"},      .{".txt"},    .{".xml"},   .{".yml"},
-        .{".zig"},  .{".zon"},
+        .{".zig"},  .{".zon"},     .{".rb"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
@@ -1396,6 +1397,10 @@ test "tidy extensions" {
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
         .{"src/clients/python/src/tigerbeetle/py.typed"},
+        .{".clang-format"},
+        .{"Rakefile"},
+        .{"src/clients/ruby/tigerbeetle.gemspec"},
+        .{"src/clients/ruby/sig/tigerbeetle.rbs"},
     });
 
     const allocator = std.testing.allocator;

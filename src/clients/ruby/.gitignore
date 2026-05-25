@@ -1,0 +1,8 @@
+*.gem
+src/ext/tigerbeetle/lib/
+src/ext/tigerbeetle/Makefile
+src/ext/tigerbeetle/*.o
+src/ext/tigerbeetle/*.so
+src/ext/tigerbeetle/*.bundle
+src/ext/tigerbeetle/mkmf.log
+src/ext/tigerbeetle/compile_flags.txt
