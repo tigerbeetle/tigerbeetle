@@ -7,6 +7,8 @@ const constants = vsr.constants;
 const stdx = vsr.stdx;
 const maybe = stdx.maybe;
 
+pub const amount_max: u128 = std.math.maxInt(u128);
+
 pub const Account = extern struct {
     id: u128,
     debits_pending: u128,
