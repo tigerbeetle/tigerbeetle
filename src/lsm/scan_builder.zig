@@ -35,16 +35,26 @@ const Pending = error{Pending};
 /// timestamps produced by the scan can be used for lookups in any of those
 /// Grooves.
 pub fn ScanBuilderConfigType(comptime Forest: type) type {
+    const FieldEnum = std.meta.FieldEnum(Forest.Grooves);
+    // TODO(zig): Special case for Forests with a single groove,
+    // as the FieldEnum type is zero-sized.
+    // Compiler error "value stored in comptime field does not match
+    // the default value of the field".
+    if (@sizeOf(FieldEnum) == 0) return struct {
+        comptime object: FieldEnum = @enumFromInt(0),
+        comptime indexes: []const FieldEnum = &.{@enumFromInt(0)},
+    };
+
     return struct {
         /// Indicates which Groove the ObjectTree comes from.
         /// Used for queries by `timestamp`.
-        object: std.meta.FieldEnum(Forest.Grooves),
+        object: FieldEnum,
 
         /// Array of Grooves whose secondary indexes can be queried together,
         /// meaning the `timestamp` of related objects is the same across all Grooves.
         /// Index names must not conflict.
         /// There is no support for aliasing or fully qualified names.
-        indexes: []const std.meta.FieldEnum(Forest.Grooves),
+        indexes: []const FieldEnum,
     };
 }
 

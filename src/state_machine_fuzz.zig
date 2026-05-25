@@ -129,6 +129,7 @@ fn build_batch(
         => 0,
         .deprecated_create_accounts_unbatched,
         .deprecated_create_transfers_unbatched,
+        .query_two_phase_transfers,
         => 0,
 
         .lookup_accounts, .lookup_transfers => build_lookup(prng, buffer),
