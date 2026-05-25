@@ -715,7 +715,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.ChangeEvent, reply_body),
                 ),
                 //Not handled by the client.
-                .pulse => unreachable,
+                .query_two_phase_transfers,
+                .pulse,
+                => unreachable,
             }
         }
 
