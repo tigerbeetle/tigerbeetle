@@ -92,6 +92,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
+                .query_two_phase_transfers,
                 => |operation| {
                     const state_machine_operation = operation.state_machine_op();
                     try repl.send(
@@ -823,7 +824,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_accounts, .create_transfers => "create",
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
-                .query_accounts, .query_transfers => "query",
+                .query_accounts, .query_transfers, .query_two_phase_transfers => "query",
                 else => unreachable,
             };
             const object_type = switch (operation) {
@@ -831,6 +832,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
+                .query_two_phase_transfers => "two phase transfers",
                 else => unreachable,
             };
 
@@ -869,6 +871,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn display_object(repl: *Repl, object: anytype) !void {
             comptime assert(@TypeOf(object.*) == tb.Account or
                 @TypeOf(object.*) == tb.Transfer or
+                @TypeOf(object.*) == tb.TwoPhaseResult or
                 @TypeOf(object.*) == tb.AccountBalance or
                 @TypeOf(object.*) == tb.CreateAccountResult or
                 @TypeOf(object.*) == tb.CreateTransferResult);
@@ -884,29 +887,50 @@ pub fn ReplType(comptime MessageBus: type) type {
                     try repl.terminal.print(",\n", .{});
                 }
 
-                if (comptime std.mem.eql(u8, object_field.name, "flags")) {
+                const object_field_info = @typeInfo(object_field.type);
+                const is_flags = switch (object_field_info) {
+                    .@"struct" => |info| info.layout == .@"packed",
+                    else => false,
+                };
+                if (comptime is_flags) {
                     try repl.terminal.print("  \"" ++ object_field.name ++ "\": [", .{});
                     var needs_comma = false;
 
-                    inline for (@typeInfo(object_field.type).@"struct".fields) |flag_field| {
-                        if (comptime !std.mem.eql(u8, flag_field.name, "padding")) {
-                            if (@field(@field(object, "flags"), flag_field.name)) {
-                                if (needs_comma) {
-                                    try repl.terminal.print(",", .{});
-                                    needs_comma = false;
-                                }
+                    inline for (std.meta.fields(object_field.type)) |flag_field| {
+                        if (comptime std.mem.eql(
+                            u8,
+                            flag_field.name,
+                            "padding",
+                        )) comptime continue;
 
-                                try repl.terminal.print("\"{s}\"", .{flag_field.name});
-                                needs_comma = true;
+                        const flags = &@field(object, object_field.name);
+                        if (@field(flags, flag_field.name)) {
+                            if (needs_comma) {
+                                try repl.terminal.print(",", .{});
+                                needs_comma = false;
                             }
+
+                            try repl.terminal.print("\"{s}\"", .{flag_field.name});
+                            needs_comma = true;
                         }
                     }
 
                     try repl.terminal.print("]", .{});
+                } else if (object_field_info == .@"enum") {
+                    try repl.terminal.print(
+                        "  \"{[name]s}\": \"{[value]s}\"",
+                        .{
+                            .name = object_field.name,
+                            .value = @tagName(@field(object, object_field.name)),
+                        },
+                    );
                 } else {
                     try repl.terminal.print(
-                        "  \"{s}\": \"{}\"",
-                        .{ object_field.name, @field(object, object_field.name) },
+                        "  \"{[name]s}\": \"{[value]}\"",
+                        .{
+                            .name = object_field.name,
+                            .value = @field(object, object_field.name),
+                        },
                     );
                 }
             }
@@ -987,6 +1011,21 @@ pub fn ReplType(comptime MessageBus: type) type {
                         try repl.fail("No transfers were found.\n", .{});
                     } else {
                         for (transfer_results) |*transfer| {
+                            try repl.display_object(transfer);
+                        }
+                    }
+                },
+                .query_two_phase_transfers,
+                => {
+                    const results = stdx.bytes_as_slice(
+                        .exact,
+                        tb.TwoPhaseResult,
+                        result,
+                    );
+                    if (results.len == 0) {
+                        try repl.fail("No transfers were found.\n", .{});
+                    } else {
+                        for (results) |*transfer| {
                             try repl.display_object(transfer);
                         }
                     }
