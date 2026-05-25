@@ -302,7 +302,7 @@ fn request(
             try decode_array(Event, env, array, buffer);
             break :blk .{ packet, std.mem.sliceAsBytes(buffer) };
         },
-        .pulse, .get_change_events => unreachable,
+        .pulse, .get_change_events, .query_two_phase_transfers => unreachable,
     };
 
     packet.* = .{
@@ -455,7 +455,7 @@ fn on_completion_js(
                 else => unreachable, // all other packet status' handled in previous callback.
             }
         },
-        .pulse, .get_change_events => unreachable,
+        .pulse, .get_change_events, .query_two_phase_transfers => unreachable,
     };
 
     // Parse Result array out of packet data, freeing it in the process.

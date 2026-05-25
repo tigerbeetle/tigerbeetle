@@ -34,6 +34,7 @@ class Operation(enum.IntEnum):
     QUERY_TRANSFERS = 145
     CREATE_ACCOUNTS = 146
     CREATE_TRANSFERS = 147
+    QUERY_TWO_PHASE_TRANSFERS = 148
 
 
 class PacketStatus(enum.IntEnum):

@@ -920,5 +920,6 @@ export enum Operation {
   query_transfers = 145,
   create_accounts = 146,
   create_transfers = 147,
+  query_two_phase_transfers = 148,
 }
 

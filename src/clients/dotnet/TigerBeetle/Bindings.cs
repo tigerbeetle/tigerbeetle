@@ -1226,6 +1226,8 @@ internal enum TBOperation : byte
 
     CreateTransfers = 147,
 
+    QueryTwoPhaseTransfers = 148,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
