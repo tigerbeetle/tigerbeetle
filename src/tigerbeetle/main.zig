@@ -60,6 +60,35 @@ pub const std_options: std.Options = .{
     .logFn = log_runtime,
 };
 
+const build_options: struct {
+    verify: bool,
+    git_commit: [40]u8,
+    release: []const u8,
+    release_client_min: []const u8,
+} = @import("build_options");
+
+pub const tigerbeetle_config: vsr.config.Config = b: {
+    var override = vsr.config.configs.default_production;
+    if (build_options.verify) override.verify = true;
+    assert(build_options.verify == override.verify);
+    break :b override;
+};
+comptime {
+    assert(std.meta.eql(tigerbeetle_config, vsr.constants.config));
+}
+
+const meta: struct {
+    release: vsr.Release,
+    release_client_min: vsr.Release,
+    commit: [40]u8,
+} = .{
+    .release = vsr.Release.parse(build_options.release) catch
+        @compileError("invalid release"),
+    .release_client_min = vsr.Release.parse(build_options.release_client_min) catch
+        @compileError("invalid release_client_min"),
+    .commit = build_options.git_commit,
+};
+
 pub fn main() !void {
     if (builtin.os.tag == .windows) try vsr.multiversion.wait_for_parent_to_exit();
 
@@ -181,16 +210,6 @@ pub fn main() !void {
         .amqp => |*args| try command_amqp(gpa, time, meta.release, args),
     }
 }
-
-const meta: struct {
-    release: vsr.Release,
-    release_client_min: vsr.Release,
-    commit: [40]u8,
-} = .{
-    .release = .{ .value = 92 }, // FIXME
-    .release_client_min = .{ .value = 92 }, // FIXME
-    .commit = @splat(6),
-};
 
 // What we print as our version. Use SemVer here to include commit shorthash, if available.
 const version_display: std.SemanticVersion = .{

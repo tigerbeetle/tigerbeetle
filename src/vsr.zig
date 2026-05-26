@@ -9,6 +9,7 @@ const log = std.log.scoped(.vsr);
 // Note that we don't promise any stability of these interfaces yet.
 pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
+pub const config = @import("config.zig");
 pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");
 pub const stack = @import("stack.zig");

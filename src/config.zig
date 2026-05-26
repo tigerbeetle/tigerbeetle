@@ -18,49 +18,6 @@ const MiB = stdx.MiB;
 const GiB = stdx.GiB;
 const TiB = stdx.TiB;
 
-const BuildOptions = struct {
-    config_verify: bool,
-    git_commit: ?[40]u8,
-    release: []const u8,
-    release_client_min: []const u8,
-};
-
-// Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
-// file.
-const build_options: BuildOptions = blk: {
-    const vsr_options =
-        if (@hasDecl(root, "vsr_options"))
-            root.vsr_options
-        else
-            @import("vsr_options");
-
-    // Both the root file and Zig's `addOptions` expose the struct as identical structurally,
-    // but a different type from a nominal typing perspective.
-    var result: BuildOptions = undefined;
-    for (std.meta.fields(BuildOptions)) |field| {
-        @field(result, field.name) = launder_type(
-            field.type,
-            @field(vsr_options, field.name),
-        );
-    }
-    break :blk result;
-};
-
-fn launder_type(comptime T: type, comptime value: anytype) T {
-    if (T == bool or
-        T == []const u8 or
-        T == ?[]const u8 or
-        T == ?[40]u8)
-    {
-        return value;
-    }
-    if (@typeInfo(T) == .@"enum") {
-        assert(@typeInfo(@TypeOf(value)) == .@"enum" or @typeInfo(@TypeOf(value)) == .enum_literal);
-        return @field(T, @tagName(value));
-    }
-    unreachable;
-}
-
 const vsr = @import("vsr.zig");
 const sector_size = @import("constants.zig").sector_size;
 
@@ -269,29 +226,10 @@ pub const configs = struct {
         },
     };
 
-    pub const current = current: {
-        var base = if (@hasDecl(root, "tigerbeetle_config"))
-            root.tigerbeetle_config
-        else if (builtin.is_test)
-            test_min
-        else
-            default_production;
-
-        // const release = vsr.ReleaseTriple.parse(build_options.release) catch {
-        //     @compileError("invalid release version");
-        // };
-
-        // const release_client_min = vsr.ReleaseTriple.parse(build_options.release_client_min) catch {
-        //     @compileError("invalid release_client_min version");
-        // };
-
-        // base.process.release = vsr.Release.from(release);
-        // base.process.release_client_min = vsr.Release.from(release_client_min);
-        // base.process.git_commit = build_options.git_commit;
-        base.process.verify = build_options.config_verify;
-
-        // assert(base.process.release.value >= base.process.release_client_min.value);
-
-        break :current base;
-    };
+    pub const current = if (@hasDecl(root, "tigerbeetle_config"))
+        root.tigerbeetle_config
+    else if (builtin.is_test)
+        test_min
+    else
+        default_production;
 };
