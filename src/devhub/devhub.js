@@ -392,7 +392,6 @@ function render_performance_results(batches, query_metric) {
     if (batch) {
       const metric = batch.metrics.find((metric) => metric.name === test.metric);
       const freshness_ms = Date.now() - batch.timestamp * 1000;
-      const date = new Date(batch.timestamp * 1000);
 
       if (freshness_ms <= freshness_threshold_ms) {
         row_dom.classList.add("success");
@@ -405,17 +404,18 @@ function render_performance_results(batches, query_metric) {
         <td><a href="?metric=${encodeURIComponent(test.metric)}">${test.title}</a></td>
         <td>
           <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${batch.attributes.git_commit}">
-            ${format_date_day_time(date)}
+            <code>${batch.attributes.git_commit.substring(0, 7)}</code>
           </a>
         </td>
+        <td><time>${format_duration(freshness_ms)} ago</time></td>
         <td>
-          <time>${format_duration(freshness_ms)} ago</time>
           <span>${format_count(metric.value)} TPS</span>
         </td>
       `;
     } else {
       row_dom.innerHTML = `
         <td><a href="?metric=${encodeURIComponent(test.metric)}">${test.title}</a></td>
+        <td>N/A</td>
         <td>N/A</td>
         <td>N/A</td>
       `;
