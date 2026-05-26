@@ -66,13 +66,15 @@ async function main_seeds() {
   const logs_base =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/";
   const flakes_url =
-    `https://api.github.com/repos/tigerbeetle/tigerbeetle/actions/runs?${new URLSearchParams({
-      branch: 'main',
-      per_page: 100,
-      created: `>=${earlier.toISOString().split('T')[0]}`,
-      status: 'failure',
-      exclude_pull_requests: 'true',
-    })}`;
+    `https://api.github.com/repos/tigerbeetle/tigerbeetle/actions/runs?${new URLSearchParams(
+      {
+        branch: "main",
+        per_page: 100,
+        created: `>=${earlier.toISOString().split("T")[0]}`,
+        status: "failure",
+        exclude_pull_requests: "true",
+      },
+    )}`;
 
   const [records, issues, flakes] = await Promise.all([
     fetch_json(data_url),
@@ -185,7 +187,9 @@ async function main_seeds() {
     } else if (is_release(record)) {
       commit_extra = "(release)";
     }
-    const log_link = record.log ? ` <a href="${logs_base + record.log}">(log)</a>` : "";
+    const log_link = record.log
+      ? ` <a href="${logs_base + record.log}">(log)</a>`
+      : "";
     row_dom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${
@@ -390,7 +394,9 @@ function render_performance_results(batches, query_metric) {
     const row_dom = document.createElement("tr");
 
     if (batch) {
-      const metric = batch.metrics.find((metric) => metric.name === test.metric);
+      const metric = batch.metrics.find((metric) =>
+        metric.name === test.metric
+      );
       const freshness_ms = Date.now() - batch.timestamp * 1000;
 
       if (freshness_ms <= freshness_threshold_ms) {
@@ -401,7 +407,9 @@ function render_performance_results(batches, query_metric) {
       }
 
       row_dom.innerHTML = `
-        <td><a href="?metric=${encodeURIComponent(test.metric)}">${test.title}</a></td>
+        <td><a href="?metric=${
+        encodeURIComponent(test.metric)
+      }">${test.title}</a></td>
         <td>
           <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${batch.attributes.git_commit}">
             <code>${batch.attributes.git_commit.substring(0, 7)}</code>
@@ -414,7 +422,9 @@ function render_performance_results(batches, query_metric) {
       `;
     } else {
       row_dom.innerHTML = `
-        <td><a href="?metric=${encodeURIComponent(test.metric)}">${test.title}</a></td>
+        <td><a href="?metric=${
+        encodeURIComponent(test.metric)
+      }">${test.title}</a></td>
         <td>N/A</td>
         <td>N/A</td>
         <td>N/A</td>
