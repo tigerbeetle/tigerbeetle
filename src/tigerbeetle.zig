@@ -998,7 +998,7 @@ pub const Operation = enum(u8) {
             .batch_count = 1,
         });
         assert(reply_trailer_size_min > 0);
-        assert(reply_trailer_size_min < batch_size_limit);
+        assert(reply_trailer_size_min < constants.message_body_size_max);
 
         if (event_size_bytes == 0) {
             return @divFloor(
@@ -1011,7 +1011,7 @@ pub const Operation = enum(u8) {
                 .batch_count = 1,
             });
             assert(request_trailer_size_min > 0);
-            assert(request_trailer_size_min < constants.message_body_size_max);
+            assert(request_trailer_size_min < batch_size_limit);
 
             return @min(
                 @divFloor(batch_size_limit - request_trailer_size_min, event_size_bytes),
