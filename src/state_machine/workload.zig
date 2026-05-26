@@ -187,6 +187,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         query_accounts = @intFromEnum(Operation.query_accounts),
         query_transfers = @intFromEnum(Operation.query_transfers),
         get_change_events = @intFromEnum(Operation.get_change_events),
+        query_two_phase_transfers = @intFromEnum(Operation.query_two_phase_transfers),
 
         deprecated_create_accounts_sparse = @intFromEnum(
             Operation.deprecated_create_accounts_sparse,
@@ -524,6 +525,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                             client_index,
                             batchable,
                         ),
+                        .query_two_phase_transfers => self.build_two_phase_filter(
+                            client_index,
+                            action_comptime,
+                            batchable,
+                        ),
                     };
                     assert(count <= batchable.len);
                     assert(count <= batch_limit);
@@ -595,6 +601,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         .query_accounts => 0,
                         .query_transfers => 0,
                         .get_change_events => 0,
+                        .query_two_phase_transfers => 0,
                         else => unreachable,
                     };
                 }
@@ -714,8 +721,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.ChangeEventsFilter, request_body),
                     stdx.bytes_as_slice(.exact, tb.ChangeEvent, reply_body),
                 ),
+                .query_two_phase_transfers => self.on_query_two_phase_transfers(
+                    timestamp,
+                    stdx.bytes_as_slice(.exact, tb.TwoPhaseFilter, request_body),
+                    stdx.bytes_as_slice(.exact, tb.TwoPhaseResult, reply_body),
+                ),
                 //Not handled by the client.
-                .query_two_phase_transfers,
                 .pulse,
                 => unreachable,
             }
@@ -1175,6 +1186,112 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return 1;
         }
 
+        fn build_two_phase_filter(
+            self: *const Workload,
+            client_index: usize,
+            comptime action: Action,
+            body: []tb.TwoPhaseFilter,
+        ) usize {
+            _ = client_index;
+            comptime assert(action == .query_two_phase_transfers);
+            assert(body.len == 1);
+            const query_filter = &body[0];
+
+            const operation = comptime std.enums.nameCast(Operation, action);
+            const batch_result_max = operation.result_max(self.options.batch_size_limit);
+            const limit: u32 = switch (self.prng.enum_uniform(enum {
+                zero,
+                one,
+                random,
+                batch_max,
+            })) {
+                .zero => 0,
+                .one => 1,
+                .random => self.prng.int_inclusive(u32, batch_result_max),
+                .batch_max => batch_result_max,
+            };
+
+            const target: tb.TwoPhaseTarget = self.prng.enum_uniform(tb.TwoPhaseTarget);
+            const pending_status: tb.TransferPendingStatus = switch (target) {
+                .pending => self.prng.enum_uniform(tb.TransferPendingStatus),
+                .outcome => self.prng.enum_weighted(tb.TransferPendingStatus, .{
+                    // Don't leave the filter empty.
+                    // Mixing expired and posted/voided transfers would
+                    // return objects from multiple query intersections.
+                    .none = 0,
+                    // Maybe test the invalid state.
+                    .pending = 1,
+                    // Equal weights for valid outcomes.
+                    .posted = 10,
+                    .voided = 10,
+                    .expired = 10,
+                }),
+            };
+
+            if (self.prng.chance(self.options.query_filter_not_found_probability)) {
+                query_filter.* = .{
+                    .user_data_128 = 0,
+                    .user_data_64 = 0,
+                    .user_data_32 = 0,
+                    .code = 0,
+                    .ledger = 999, // Non-existent ledger
+                    .limit = limit,
+                    .pending_status = pending_status,
+                    .flags = .{
+                        .target = target,
+                        .reversed = false,
+                    },
+                    .timestamp_min = 0,
+                    .timestamp_max = 0,
+                };
+            } else {
+                const query_intersection_index = self.prng.index(self.auditor.query_intersections);
+                const query_intersection =
+                    self.auditor.query_intersections[query_intersection_index];
+
+                query_filter.* = .{
+                    .user_data_128 = 0,
+                    .user_data_64 = query_intersection.user_data_64,
+                    .user_data_32 = query_intersection.user_data_32,
+                    .code = query_intersection.code,
+                    .ledger = 0,
+                    .limit = limit,
+                    .pending_status = pending_status,
+                    .flags = .{
+                        .target = target,
+                        .reversed = self.prng.boolean(),
+                    },
+                    .timestamp_min = 0,
+                    .timestamp_max = 0,
+                };
+
+                const state = switch (target) {
+                    .pending => &query_intersection.transfers.two_phase.pending,
+                    .outcome => &query_intersection.transfers.two_phase.outcome,
+                };
+
+                // Maybe filter by timestamp:
+                if (target == .pending and
+                    state.count > 1 and state.count <= batch_result_max and
+                    self.prng.chance(self.options.query_filter_timestamp_range_probability))
+                {
+                    // Excluding the first or last object:
+                    if (query_filter.flags.reversed) {
+                        query_filter.timestamp_min = state.timestamp_min;
+                        query_filter.timestamp_max = state.timestamp_max - 1;
+                    } else {
+                        query_filter.timestamp_min = state.timestamp_min + 1;
+                        query_filter.timestamp_max = state.timestamp_max;
+                    }
+                    // Later we can assert that results.len == count - 1:
+                    query_filter.limit = state.count;
+                    query_filter.pending_status = .none;
+                }
+            }
+
+            return 1;
+        }
+
         /// The transfer built is guaranteed to match the TransferPlan's outcome.
         /// The transfer built is _not_ guaranteed to match the TransferPlan's method.
         ///
@@ -1342,6 +1459,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .deprecated_query_accounts_unbatched,
                 .deprecated_query_transfers_unbatched,
                 .get_change_events,
+                .query_two_phase_transfers,
                 => 1,
             };
             const batch_span = switch (action) {
@@ -1366,6 +1484,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .deprecated_query_accounts_unbatched,
                 .deprecated_query_transfers_unbatched,
                 .get_change_events,
+                .query_two_phase_transfers,
                 => 0,
             };
 
@@ -1972,6 +2091,177 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
+        fn on_query_two_phase_transfers(
+            self: *Workload,
+            timestamp: u64,
+            body: []const tb.TwoPhaseFilter,
+            results: []const tb.TwoPhaseResult,
+        ) void {
+            _ = timestamp;
+            assert(body.len == 1);
+
+            const batch_result_max: u32 = tb.Operation.query_two_phase_transfers.result_max(
+                self.options.batch_size_limit,
+            );
+            const filter = &body[0];
+
+            if (filter.ledger != 0) {
+                // No results expected.
+                assert(results.len == 0);
+                return;
+            }
+
+            assert(filter.user_data_64 != 0);
+            assert(filter.user_data_32 != 0);
+            assert(filter.code != 0);
+            assert(filter.user_data_128 == 0);
+            assert(filter.ledger == 0);
+            maybe(filter.limit == 0);
+            maybe(filter.timestamp_min == 0);
+            maybe(filter.timestamp_max == 0);
+
+            const query_intersection_index = filter.code - 1;
+            const query_intersection = self.auditor.query_intersections[query_intersection_index];
+            const state = switch (filter.flags.target) {
+                .pending => &query_intersection.transfers.two_phase.pending,
+                .outcome => switch (filter.pending_status) {
+                    .none => unreachable,
+                    .pending => {
+                        assert(results.len == 0);
+                        return;
+                    },
+                    .posted, .voided => &query_intersection.transfers.two_phase.outcome,
+                    .expired => &query_intersection.transfers.two_phase.pending,
+                },
+            };
+            assert(results.len <= filter.limit);
+            assert(results.len <= batch_result_max);
+
+            const expected: u32 = expected: {
+                if (filter.timestamp_min > 0 or filter.timestamp_max > 0) {
+                    assert(filter.pending_status == .none);
+                    assert(filter.limit <= state.count);
+                    assert(filter.timestamp_min > 0);
+                    assert(filter.timestamp_max > 0);
+                    assert(filter.timestamp_min <= filter.timestamp_max);
+
+                    // Filtering by timestamp always exclude one single result.
+                    break :expected filter.limit - 1;
+                }
+                break :expected @min(
+                    filter.limit,
+                    batch_result_max,
+                    state.count,
+                );
+            };
+            if (filter.pending_status == .none)
+                assert(results.len == expected)
+            else
+                assert(results.len <= expected);
+
+            var timestamp_previous: u64 = if (filter.flags.reversed)
+                std.math.maxInt(u64)
+            else
+                0;
+
+            for (results) |*result| {
+                assert(result.pending_timestamp > 0);
+                assert(result.pending_flags.pending);
+
+                switch (result.pending_status) {
+                    .none => unreachable,
+                    .pending => {
+                        assert(result.outcome_timestamp == 0);
+                        assert(result.outcome_id == 0);
+                        assert(result.outcome_code == 0);
+                        assert(result.outcome_user_data_32 == 0);
+                        assert(result.outcome_user_data_32 == 0);
+                    },
+                    .posted => {
+                        assert(result.outcome_timestamp > 0);
+                        assert(result.pending_timestamp < result.outcome_timestamp);
+                        assert(result.outcome_id != 0);
+                        assert(result.outcome_code == result.pending_code);
+                        assert(result.outcome_flags.post_pending_transfer);
+                    },
+                    .voided => {
+                        assert(result.outcome_timestamp > 0);
+                        assert(result.pending_timestamp < result.outcome_timestamp);
+                        assert(result.outcome_id != 0);
+                        assert(result.outcome_code == result.pending_code);
+                        assert(result.outcome_flags.void_pending_transfer);
+                    },
+                    .expired => {
+                        assert(result.outcome_timestamp > 0);
+                        assert(result.pending_timestamp < result.outcome_timestamp);
+                        assert(result.outcome_id == 0);
+                        assert(result.outcome_code == 0);
+                        assert(result.outcome_user_data_32 == 0);
+                        assert(result.outcome_user_data_32 == 0);
+                        assert(result.outcome_flags == tb.TransferFlags{});
+                    },
+                }
+                assert(result.pending_status == filter.pending_status or
+                    filter.pending_status == .none);
+
+                switch (filter.flags.target) {
+                    .pending => {
+                        if (filter.flags.reversed) {
+                            assert(result.pending_timestamp < timestamp_previous);
+                        } else {
+                            assert(result.pending_timestamp > timestamp_previous);
+                        }
+                        timestamp_previous = result.pending_timestamp;
+
+                        if (filter.timestamp_min > 0) {
+                            assert(result.pending_timestamp >= filter.timestamp_min);
+                        }
+                        if (filter.timestamp_max > 0) {
+                            assert(result.pending_timestamp <= filter.timestamp_max);
+                        }
+
+                        assert(result.pending_user_data_64 == filter.user_data_64);
+                        assert(result.pending_user_data_32 == filter.user_data_32);
+                        assert(result.pending_code == filter.code);
+                    },
+                    .outcome => {
+                        if (filter.flags.reversed) {
+                            assert(result.outcome_timestamp < timestamp_previous);
+                        } else {
+                            assert(result.outcome_timestamp > timestamp_previous);
+                        }
+                        timestamp_previous = result.outcome_timestamp;
+
+                        if (filter.timestamp_min > 0) {
+                            assert(result.outcome_timestamp >= filter.timestamp_min);
+                        }
+                        if (filter.timestamp_max > 0) {
+                            assert(result.outcome_timestamp <= filter.timestamp_max);
+                        }
+
+                        switch (result.pending_status) {
+                            .none, .pending => unreachable,
+                            .voided, .posted => {
+                                assert(result.outcome_code == filter.code);
+                                assert(result.outcome_user_data_64 == filter.user_data_64);
+                                assert(result.outcome_user_data_32 == filter.user_data_32);
+
+                                maybe(result.outcome_user_data_64 == result.pending_user_data_64);
+                                maybe(result.outcome_user_data_32 == result.pending_user_data_32);
+                            },
+                            .expired => {
+                                assert(result.pending_code == filter.code);
+                                assert(result.pending_user_data_64 == filter.user_data_64);
+                                assert(result.pending_user_data_32 == filter.user_data_32);
+                            },
+                        }
+                    },
+                }
+
+                validate_two_phase_transfer_checksum(result);
+            }
+        }
+
         /// Verify the transfer's integrity.
         fn validate_transfer_checksum(transfer: *const tb.Transfer) void {
             const checksum_actual = transfer.user_data_128;
@@ -1980,6 +2270,46 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             check.timestamp = 0;
             const checksum_expect = vsr.checksum(std.mem.asBytes(&check));
             assert(checksum_expect == checksum_actual);
+        }
+
+        /// Verify the two-phase transfer's integrity.
+        fn validate_two_phase_transfer_checksum(result: *const tb.TwoPhaseResult) void {
+            const pending: tb.Transfer = .{
+                .id = result.pending_id,
+                .debit_account_id = result.debit_account_id,
+                .credit_account_id = result.credit_account_id,
+                .amount = result.pending_amount,
+                .pending_id = 0,
+                .user_data_128 = result.pending_user_data_128,
+                .user_data_64 = result.pending_user_data_64,
+                .user_data_32 = result.pending_user_data_32,
+                .timeout = result.pending_timeout,
+                .ledger = result.ledger,
+                .code = result.pending_code,
+                .flags = result.pending_flags,
+                .timestamp = result.pending_timestamp,
+            };
+            validate_transfer_checksum(&pending);
+
+            if (result.outcome_id != 0) {
+                assert(result.pending_status == .posted or result.pending_status == .voided);
+                const outcome: tb.Transfer = .{
+                    .id = result.outcome_id,
+                    .debit_account_id = result.debit_account_id,
+                    .credit_account_id = result.credit_account_id,
+                    .amount = result.outcome_amount,
+                    .pending_id = result.pending_id,
+                    .user_data_128 = result.outcome_user_data_128,
+                    .user_data_64 = result.outcome_user_data_64,
+                    .user_data_32 = result.outcome_user_data_32,
+                    .timeout = 0,
+                    .ledger = result.ledger,
+                    .code = result.outcome_code,
+                    .flags = result.outcome_flags,
+                    .timestamp = result.outcome_timestamp,
+                };
+                validate_transfer_checksum(&outcome);
+            }
         }
 
         fn validate_get_event_checksum(event: *const tb.ChangeEvent) void {
@@ -2123,6 +2453,7 @@ fn OptionsType(
                     .query_accounts = prng.range_inclusive(u64, 1, 20),
                     .query_transfers = prng.range_inclusive(u64, 1, 20),
                     .get_change_events = prng.range_inclusive(u64, 1, 20),
+                    .query_two_phase_transfers = prng.range_inclusive(u64, 1, 20),
 
                     .deprecated_create_accounts_sparse = prng.range_inclusive(u64, 1, 10),
                     .deprecated_create_transfers_sparse = prng.range_inclusive(u64, 1, 100),
