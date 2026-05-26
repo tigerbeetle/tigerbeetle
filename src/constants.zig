@@ -12,13 +12,13 @@ const MiB = stdx.MiB;
 
 pub const config = @import("config.zig").configs.current;
 
-pub const semver = std.SemanticVersion{
-    .major = config.process.release.triple().major,
-    .minor = config.process.release.triple().minor,
-    .patch = config.process.release.triple().patch,
-    .pre = null,
-    .build = if (config.process.git_commit) |sha_full| sha_full[0..7] else null,
-};
+// pub const semver = std.SemanticVersion{
+//     .major = config.process.release.triple().major,
+//     .minor = config.process.release.triple().minor,
+//     .patch = config.process.release.triple().patch,
+//     .pre = null,
+//     .build = if (config.process.git_commit) |sha_full| sha_full[0..7] else null,
+// };
 
 /// The maximum number of replicas allowed in a cluster.
 pub const replicas_max = 6;

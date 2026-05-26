@@ -166,26 +166,47 @@ pub fn main() !void {
             }
         },
         .repl => |*args| try command_repl(gpa, &io, time, args),
-        .benchmark => |*args| try benchmark_driver.command_benchmark(gpa, &io, time, args),
-        .inspect => |*args| try inspect.command_inspect(gpa, &io, &tracer, args),
+        .benchmark => |*args| {
+            try benchmark_driver.command_benchmark(gpa, &io, time, meta.release, args);
+        },
+        .inspect => |*args| try inspect.command_inspect(gpa, &io, &tracer, meta.release, args),
         .multiversion => |*args| {
             var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
             var stdout_writer = stdout_buffer.writer();
             const stdout = stdout_writer.any();
 
-            try vsr.multiversion.print_information(gpa, args.path, stdout);
+            try vsr.multiversion.print_information(gpa, args.path, meta.release, stdout);
             try stdout_buffer.flush();
         },
-        .amqp => |*args| try command_amqp(gpa, time, args),
+        .amqp => |*args| try command_amqp(gpa, time, meta.release, args),
     }
 }
+
+const meta: struct {
+    release: vsr.Release,
+    release_client_min: vsr.Release,
+    commit: [40]u8,
+} = .{
+    .release = .{ .value = 92 }, // FIXME
+    .release_client_min = .{ .value = 92 }, // FIXME
+    .commit = @splat(6),
+};
+
+// What we print as our version. Use SemVer here to include commit shorthash, if available.
+const version_display: std.SemanticVersion = .{
+    .major = meta.release.triple().major,
+    .minor = meta.release.triple().minor,
+    .patch = meta.release.triple().patch,
+    .pre = null,
+    .build = meta.commit[0..7],
+};
 
 fn command_version(gpa: mem.Allocator, verbose: bool) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
     const stdout = stdout_writer.any();
 
-    try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
+    try std.fmt.format(stdout, "TigerBeetle version {}\n", .{version_display});
 
     if (verbose) {
         try stdout.writeAll("\n");
@@ -216,7 +237,7 @@ fn command_version(gpa: mem.Allocator, verbose: bool) !void {
         const self_exe_path = try vsr.multiversion.self_exe_path(gpa);
         defer gpa.free(self_exe_path);
 
-        vsr.multiversion.print_information(gpa, self_exe_path, stdout) catch {};
+        vsr.multiversion.print_information(gpa, self_exe_path, meta.release, stdout) catch {};
     }
     try stdout_buffer.flush();
 }
@@ -230,7 +251,7 @@ fn command_format(
         .cluster = args.cluster,
         .replica = args.replica,
         .replica_count = args.replica_count,
-        .release = config.process.release,
+        .release = meta.release,
         .view = null,
     });
 
@@ -252,7 +273,7 @@ fn command_start(
     var counting_allocator = vsr.CountingAllocator.init(base_allocator);
     const gpa = counting_allocator.allocator();
 
-    // TODO Panic if the data file's size is larger that args.storage_size_limit.
+    // TODO Panic if the mp file's size is larger that args.storage_size_limit.
     // (Here or in Replica.open()?).
 
     var message_pool = try MessagePool.init(gpa, .{ .replica = .{
@@ -302,31 +323,28 @@ fn command_start(
     defer if (multiversion_os != null) multiversion_os.?.deinit(gpa);
 
     const multiversion: vsr.multiversion.Multiversion = blk: {
-        if (constants.config.process.release.value ==
-            vsr.multiversion.Release.minimum.value)
-        {
+        if (meta.release.value == vsr.multiversion.Release.minimum.value) {
             log.info("multiversioning: upgrades disabled for development ({}) release.", .{
-                constants.config.process.release,
+                meta.release,
             });
-            break :blk .single_release(constants.config.process.release);
+            break :blk .single_release(meta.release);
         }
         if (args.aof_recovery) {
             log.info("multiversioning: upgrades disabled due to aof_recovery.", .{});
-            break :blk .single_release(constants.config.process.release);
+            break :blk .single_release(meta.release);
         }
 
         if (args.addresses_zero) {
             log.info("multiversioning: upgrades disabled due to --addresses=0", .{});
-            break :blk .single_release(constants.config.process.release);
+            break :blk .single_release(meta.release);
         }
 
         self_exe_path = try vsr.multiversion.self_exe_path(gpa);
-        multiversion_os = try vsr.multiversion.MultiversionOS.init(
-            gpa,
-            io,
-            self_exe_path.?,
-            .native,
-        );
+        multiversion_os = try vsr.multiversion.MultiversionOS.init(gpa, io, .{
+            .release_current = meta.release,
+            .exe_path = self_exe_path.?,
+            .exe_path_format = .native,
+        });
         // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
         // enabled even if the first version fails to load.
         multiversion_os.?.open_sync() catch {};
@@ -334,10 +352,10 @@ fn command_start(
         break :blk multiversion_os.?.multiversion();
     };
 
-    log.info("release={}", .{config.process.release});
-    log.info("release_client_min={}", .{config.process.release_client_min});
+    log.info("release={}", .{meta.release});
+    log.info("release_client_min={}", .{meta.release_client_min});
     log.info("releases_bundled={any}", .{multiversion.releases_bundled().slice()});
-    log.info("git_commit={?s}", .{config.process.git_commit});
+    log.info("git_commit={?s}", .{meta.commit});
 
     const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
@@ -349,8 +367,8 @@ fn command_start(
         &message_pool,
         .{
             .node_count = args.addresses.count_as(u8),
-            .release = config.process.release,
-            .release_client_min = config.process.release_client_min,
+            .release = meta.release,
+            .release_client_min = meta.release_client_min,
             .multiversion = multiversion,
             .pipeline_requests_limit = args.pipeline_requests_limit,
             .storage_size_limit = args.storage_size_limit,
@@ -500,7 +518,7 @@ fn command_start(
         }
     }
 
-    if (config.process.release.testing()) {
+    if (meta.release.testing()) {
         if (replica.cluster != 0) {
             // Guard against running test/dev binaries against production clusters.
             @panic("This is a test binary, but the cluster id is non-zero.");
@@ -532,6 +550,7 @@ fn command_reformat(
         time,
         &message_pool,
         .{
+            .release = meta.release,
             .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
@@ -552,7 +571,7 @@ fn command_reformat(
         .cluster = args.cluster,
         .replica = args.replica,
         .replica_count = args.replica_count,
-        .release = config.process.release,
+        .release = meta.release,
         .view = null,
     });
     defer reformatter.deinit(gpa);
@@ -587,6 +606,8 @@ fn command_repl(
     const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusType(IO));
 
     var repl_instance = try Repl.init(gpa, io, time, .{
+        .release = meta.release,
+        .version_display = version_display,
         .cluster_id = args.cluster,
         .addresses = args.addresses.const_slice(),
         .verbose = args.verbose,
@@ -596,12 +617,18 @@ fn command_repl(
     try repl_instance.run(args.statements);
 }
 
-fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
+fn command_amqp(
+    gpa: mem.Allocator,
+    time: Time,
+    release: vsr.Release,
+    args: *const cli.Command.AMQP,
+) !void {
     var runner: vsr.cdc.Runner = undefined;
     try runner.init(
         gpa,
         time,
         .{
+            .release = release,
             .cluster_id = args.cluster,
             .addresses = args.addresses.const_slice(),
             .host = args.host,

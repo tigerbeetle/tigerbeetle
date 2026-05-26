@@ -37,6 +37,8 @@ pub fn ReplType(comptime MessageBus: type) type {
         interactive: bool,
         debug_logs: bool,
 
+        version_display: std.SemanticVersion,
+
         client: Client,
         terminal: Terminal,
         completion: Completion,
@@ -640,7 +642,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 \\  get_account_balances account_id=1 flags=debits|credits;
                 \\
                 \\
-            , .{constants.semver});
+            , .{repl.version_display});
         }
 
         pub fn init(
@@ -648,6 +650,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             io: *IO,
             time: Time,
             options: struct {
+                release: vsr.Release,
+                version_display: std.SemanticVersion,
                 addresses: []const std.net.Address,
                 cluster_id: u128,
                 verbose: bool,
@@ -674,6 +678,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 time,
                 message_pool,
                 .{
+                    .release = options.release,
                     .id = client_id,
                     .cluster = options.cluster_id,
                     .replica_count = @intCast(options.addresses.len),
@@ -691,6 +696,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             static_allocator.transition_from_init_to_static();
 
             return .{
+                .version_display = options.version_display,
                 .client = client,
                 .debug_logs = options.verbose,
                 .request_done = true,

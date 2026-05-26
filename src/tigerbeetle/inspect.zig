@@ -21,7 +21,6 @@ const IO = vsr.io.IO;
 const Tracer = vsr.trace.Tracer;
 const Storage = @import("main.zig").Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
-const SuperBlockVersion = vsr.superblock.SuperBlockVersion;
 const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = @import("main.zig").StateMachine;
 const BlockPtr = vsr.grid.BlockPtr;
@@ -38,12 +37,14 @@ pub fn command_inspect(
     allocator: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
+    release: vsr.Release,
     cli_args: *const cli.Command.Inspect,
 ) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
 
-    const inspect_result = run_inspect(allocator, io, tracer, cli_args, stdout_writer.any());
+    const inspect_result =
+        run_inspect(allocator, io, tracer, release, cli_args, stdout_writer.any());
     const flush_result = stdout_buffer.flush();
 
     inline for (.{ inspect_result, flush_result }) |result| {
@@ -59,6 +60,7 @@ fn run_inspect(
     allocator: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
+    release: vsr.Release,
     cli_args: *const cli.Command.Inspect,
     stdout: std.io.AnyWriter,
 ) !void {
@@ -70,7 +72,10 @@ fn run_inspect(
         .data_file => |data_file| data_file,
     };
 
-    const inspector = try Inspector.create(allocator, io, tracer, data_file.path);
+    const inspector = try Inspector.create(allocator, io, tracer, .{
+        .release = release,
+        .path = cli_args.data_file.path,
+    });
     defer inspector.destroy();
 
     switch (data_file.query) {
@@ -436,7 +441,10 @@ const Inspector = struct {
         allocator: std.mem.Allocator,
         io: *IO,
         tracer: *Tracer,
-        path: []const u8,
+        options: struct {
+            release: vsr.Release,
+            path: []const u8,
+        },
     ) !*Inspector {
         var inspector = try allocator.create(Inspector);
         errdefer allocator.destroy(inspector);
@@ -450,7 +458,7 @@ const Inspector = struct {
         };
 
         inspector.storage = try Storage.init(io, tracer, .{
-            .path = path,
+            .path = options.path,
             .size_min = vsr.superblock.data_file_size_min,
             .purpose = .inspect,
             .direct_io = .direct_io_optional,
@@ -475,13 +483,14 @@ const Inspector = struct {
         }
 
         const superblock = try inspector.read_superblock(null);
+        const SuperBlockVersion = vsr.superblock.version(options.release);
         if (superblock.version != SuperBlockVersion) {
             return vsr.fatal(
                 .cli,
                 "invalid superblock version; inspector supports version={}, version in {s}={}",
                 .{
                     SuperBlockVersion,
-                    path,
+                    options.path,
                     superblock.version,
                 },
             );

@@ -90,9 +90,9 @@ pub const Config = struct {
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
     verify: bool,
-    release: vsr.Release = vsr.Release.minimum,
-    release_client_min: vsr.Release = vsr.Release.minimum,
-    git_commit: ?[40]u8 = null,
+    // release: vsr.Release = vsr.Release.minimum,
+    // release_client_min: vsr.Release = vsr.Release.minimum,
+    // git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
     storage_size_limit_default: u64 = 16 * TiB,
@@ -277,20 +277,20 @@ pub const configs = struct {
         else
             default_production;
 
-        const release = vsr.ReleaseTriple.parse(build_options.release) catch {
-            @compileError("invalid release version");
-        };
+        // const release = vsr.ReleaseTriple.parse(build_options.release) catch {
+        //     @compileError("invalid release version");
+        // };
 
-        const release_client_min = vsr.ReleaseTriple.parse(build_options.release_client_min) catch {
-            @compileError("invalid release_client_min version");
-        };
+        // const release_client_min = vsr.ReleaseTriple.parse(build_options.release_client_min) catch {
+        //     @compileError("invalid release_client_min version");
+        // };
 
-        base.process.release = vsr.Release.from(release);
-        base.process.release_client_min = vsr.Release.from(release_client_min);
-        base.process.git_commit = build_options.git_commit;
+        // base.process.release = vsr.Release.from(release);
+        // base.process.release_client_min = vsr.Release.from(release_client_min);
+        // base.process.git_commit = build_options.git_commit;
         base.process.verify = build_options.config_verify;
 
-        assert(base.process.release.value >= base.process.release_client_min.value);
+        // assert(base.process.release.value >= base.process.release_client_min.value);
 
         break :current base;
     };

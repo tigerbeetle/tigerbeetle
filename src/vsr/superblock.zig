@@ -42,9 +42,14 @@ pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
 });
 
-pub const SuperBlockVersion: u16 =
+pub fn version(release: vsr.Release) u16 {
     // Make sure that data files created by development builds are distinguished through version.
-    if (constants.config.process.release.value == vsr.Release.minimum.value) 0 else 2;
+    if (release.value == vsr.Release.minimum.value) return 0;
+
+    return 2;
+}
+
+pub const SuperBlockVersion: u16 = 0; // FIXME
 
 const view_headers_reserved_size = constants.sector_size -
     ((constants.view_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
@@ -785,7 +790,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             // We therefore use zero values to make this parent checksum as stable as possible.
             superblock.working.* = .{
                 .copy = 0,
-                .version = SuperBlockVersion,
+                .version = vsr.superblock.version(options.release),
                 .sequence = 0,
                 .release_format = options.release,
                 .cluster = options.cluster,

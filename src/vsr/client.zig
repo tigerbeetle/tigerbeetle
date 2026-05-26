@@ -65,8 +65,7 @@ pub fn ClientType(
 
         aof_recovery: bool,
 
-        /// Only tests should ever override the release.
-        release: vsr.Release = constants.config.process.release,
+        release: vsr.Release,
 
         /// The total number of ticks elapsed since the client was initialized.
         ticks: u64 = 0,
@@ -132,6 +131,7 @@ pub fn ClientType(
             time: Time,
             message_pool: *MessagePool,
             options: struct {
+                release: vsr.Release,
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
@@ -160,6 +160,7 @@ pub fn ClientType(
             errdefer message_bus.deinit(allocator);
 
             var self = Client{
+                .release = options.release,
                 .message_bus = message_bus,
                 .time = time,
                 .id = options.id,

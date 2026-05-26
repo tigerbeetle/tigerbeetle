@@ -26,6 +26,7 @@ pub fn command_benchmark(
     allocator: Allocator,
     io: *vsr.io.IO,
     time: vsr.time.Time,
+    release: vsr.Release,
     args: *const cli.Command.Benchmark,
 ) !void {
     // Note: we intentionally don't use a temporary directory for this data file, and instead just
@@ -88,7 +89,7 @@ pub fn command_benchmark(
         addresses.const_slice()
     else
         &.{tigerbeetle_process.?.address};
-    try benchmark_load.main(allocator, io, time, addresses, args);
+    try benchmark_load.main(allocator, io, time, release, addresses, args);
 
     if (tigerbeetle_process) |*p| {
         const rusage = p.deinit();

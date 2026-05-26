@@ -113,6 +113,7 @@ pub const Runner = struct {
         allocator: std.mem.Allocator,
         time: Time,
         options: struct {
+            release: vsr.Release,
             /// TigerBeetle cluster ID.
             cluster_id: u128,
             /// TigerBeetle cluster addresses.
@@ -255,6 +256,7 @@ pub const Runner = struct {
             time,
             &self.message_pool,
             .{
+                .release = options.release,
                 .id = stdx.unique_u128(),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
@@ -523,13 +525,13 @@ pub const Runner = struct {
                                         assert(TimestampRange.valid(progress_tracker.timestamp));
 
                                         // Downgrading the CDC job is not allowed.
-                                        if (vsr.constants.config.process.release.value <
+                                        if (runner.vsr_client.release.value <
                                             progress_tracker.release.value)
                                         {
                                             fatal("The last event was published using a newer " ++
                                                 "release (event={} current={}).", .{
                                                 progress_tracker.release,
-                                                vsr.constants.config.process.release,
+                                                runner.vsr_client.release,
                                             });
                                         }
 
@@ -904,7 +906,7 @@ pub const Runner = struct {
                     assert(events.len > 0);
                     break :progress .{
                         .timestamp = events[events.len - 1].timestamp,
-                        .release = vsr.constants.config.process.release,
+                        .release = self.vsr_client.release,
                     };
                 };
                 self.amqp_client.publish_enqueue(.{

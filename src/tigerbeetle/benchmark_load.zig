@@ -39,6 +39,7 @@ pub fn main(
     allocator: std.mem.Allocator,
     io: *IO,
     time: Time,
+    release: vsr.Release,
     addresses: []const std.net.Address,
     cli_args: *const cli.Command.Benchmark,
 ) !void {
@@ -104,6 +105,7 @@ pub fn main(
             time,
             &message_pools.slice()[i],
             .{
+                .release = release,
                 .id = stdx.unique_u128(),
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),

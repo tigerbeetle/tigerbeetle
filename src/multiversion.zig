@@ -681,6 +681,8 @@ pub const MultiversionOS = struct {
     /// This list only contains the advertisable releases, which are a subset of the actual
     /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
     releases_bundled: ReleaseList = .empty,
+    // In-memory release (what is actually running).
+    release_current: Release,
 
     completion: IO.Completion = undefined,
 
@@ -702,14 +704,17 @@ pub const MultiversionOS = struct {
     } = .init,
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         io: *IO,
-        exe_path: [:0]const u8,
-        exe_path_format: enum { detect, native },
+        options: struct {
+            release_current: Release,
+            exe_path: [:0]const u8,
+            exe_path_format: enum { detect, native },
+        },
     ) !MultiversionOS {
-        assert(std.fs.path.isAbsolute(exe_path));
+        assert(std.fs.path.isAbsolute(options.exe_path));
 
-        const multiversion_binary_size_max_by_format = switch (exe_path_format) {
+        const multiversion_binary_size_max_by_format = switch (options.exe_path_format) {
             .detect => constants.multiversion_binary_size_max,
             .native => constants.multiversion_binary_platform_size_max(.{
                 .macos = builtin.target.os.tag == .macos,
@@ -722,33 +727,33 @@ pub const MultiversionOS = struct {
         // * source_buffer is where the in-progress data lives,
         // * target_fd is where the advertised data lives.
         // This does impact memory usage.
-        const source_buffer = try allocator.alignedAlloc(
+        const source_buffer = try gpa.alignedAlloc(
             u8,
             8,
             multiversion_binary_size_max_by_format,
         );
-        errdefer allocator.free(source_buffer);
+        errdefer gpa.free(source_buffer);
 
         const nonce = stdx.unique_u128();
 
         const target_path: [:0]const u8 = switch (builtin.target.os.tag) {
-            .linux => try allocator.dupeZ(u8, multiversion_uuid),
+            .linux => try gpa.dupeZ(u8, multiversion_uuid),
             .macos, .windows => blk: {
                 const suffix = if (builtin.target.os.tag == .windows) ".exe" else "";
-                const temporary_directory = try system_temporary_directory(allocator);
-                defer allocator.free(temporary_directory);
+                const temporary_directory = try system_temporary_directory(gpa);
+                defer gpa.free(temporary_directory);
 
-                const filename = try std.fmt.allocPrint(allocator, "{s}-{}" ++ suffix, .{
+                const filename = try std.fmt.allocPrint(gpa, "{s}-{}" ++ suffix, .{
                     multiversion_uuid,
                     nonce,
                 });
-                defer allocator.free(filename);
+                defer gpa.free(filename);
 
-                break :blk try std.fs.path.joinZ(allocator, &.{ temporary_directory, filename });
+                break :blk try std.fs.path.joinZ(gpa, &.{ temporary_directory, filename });
             },
             else => @panic("unsupported platform"),
         };
-        errdefer allocator.free(target_path);
+        errdefer gpa.free(target_path);
 
         // Only Linux has a nice API for executing from an in-memory file. For macOS and Windows,
         // a standard named temporary file will be used instead.
@@ -788,11 +793,11 @@ pub const MultiversionOS = struct {
                 //
                 // For args, modify them so that argv[0] is exe_path. This allows our memfd executed
                 // binary to find its way back to the real file on disk.
-                const args = try allocator.allocSentinel(?[*:0]const u8, os.argv.len, null);
-                errdefer allocator.free(args);
+                const args = try gpa.allocSentinel(?[*:0]const u8, os.argv.len, null);
+                errdefer gpa.free(args);
 
-                args[0] = try allocator.dupeZ(u8, exe_path);
-                errdefer allocator.free(args[0]);
+                args[0] = try gpa.dupeZ(u8, options.exe_path);
+                errdefer gpa.free(args[0]);
 
                 for (1..os.argv.len) |i| args[i] = os.argv[i];
 
@@ -803,8 +808,8 @@ pub const MultiversionOS = struct {
             },
 
             .windows => .{
-                .target_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, target_path),
-                .exe_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, exe_path),
+                .target_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(gpa, target_path),
+                .exe_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(gpa, options.exe_path),
             },
 
             else => comptime unreachable,
@@ -813,8 +818,8 @@ pub const MultiversionOS = struct {
         return .{
             .io = io,
 
-            .exe_path = exe_path,
-            .exe_path_format = switch (exe_path_format) {
+            .exe_path = options.exe_path,
+            .exe_path_format = switch (options.exe_path_format) {
                 .native => switch (builtin.target.os.tag) {
                     .linux => .elf,
                     .windows => .pe,
@@ -831,6 +836,8 @@ pub const MultiversionOS = struct {
             .target_fd = target_fd,
             .target_path = target_path,
 
+            .release_current = options.release_current,
+
             .timeout = Timeout{
                 .name = "multiversioning_timeout",
                 .id = 0, // id for logging is set by timeout_enable after opening the superblock.
@@ -839,19 +846,19 @@ pub const MultiversionOS = struct {
         };
     }
 
-    pub fn deinit(self: *MultiversionOS, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *MultiversionOS, gpa: std.mem.Allocator) void {
         posix.close(self.target_fd);
         self.target_fd = IO.INVALID_FILE;
-        allocator.free(self.target_path);
+        gpa.free(self.target_path);
 
-        allocator.free(self.source_buffer);
+        gpa.free(self.source_buffer);
 
         if (builtin.target.os.tag == .windows) {
-            allocator.free(self.args_envp.target_path_w);
-            allocator.free(self.args_envp.exe_path_w);
+            gpa.free(self.args_envp.target_path_w);
+            gpa.free(self.args_envp.exe_path_w);
         } else {
-            allocator.free(std.mem.span(self.args_envp.args[0].?));
-            allocator.free(self.args_envp.args);
+            gpa.free(std.mem.span(self.args_envp.args[0].?));
+            gpa.free(self.args_envp.args);
         }
         self.* = undefined;
     }
@@ -901,7 +908,7 @@ pub const MultiversionOS = struct {
             // If there's been an error starting up multiversioning, don't disable it, but
             // advertise only the current version in memory.
             self.releases_bundled = .empty;
-            self.releases_bundled.push(constants.config.process.release);
+            self.releases_bundled.push(self.release_current);
 
             return self.stage.err;
         }
@@ -1179,14 +1186,14 @@ pub const MultiversionOS = struct {
         // 1. The release on disk includes the release we're running.
         // 2. The existing releases_bundled, of any versions newer than current, is a subset
         //    of the new advertisable releases.
-        const advertisable = header.advertisable(constants.config.process.release);
-        if (!advertisable.contains(constants.config.process.release)) {
+        const advertisable = header.advertisable(self.release_current);
+        if (!advertisable.contains(self.release_current)) {
             return error.RunningVersionNotIncluded;
         }
 
         for (self.releases_bundled.slice()) |existing_release| {
             // It doesn't matter if older releases don't overlap.
-            if (existing_release.value < constants.config.process.release.value) continue;
+            if (existing_release.value < self.release_current.value) continue;
 
             if (!advertisable.contains(existing_release)) return error.NotSuperset;
         }
@@ -1233,7 +1240,7 @@ pub const MultiversionOS = struct {
     }
 
     fn replica_release_execute(self: *MultiversionOS, release: Release) noreturn {
-        assert(release.value != constants.config.process.release.value);
+        assert(release.value != self.release_current.value);
         assert(release.value != Release.zero.value);
         assert(release.value != Release.minimum.value);
 
@@ -1248,7 +1255,7 @@ pub const MultiversionOS = struct {
         // We have two paths here, depending on if we're upgrading or downgrading. If we're
         // downgrading the invariant is that this code is running _before_ we've finished opening,
         // that is, release_transition is called in open().
-        if (release.value < constants.config.process.release.value) {
+        if (release.value < self.release_current.value) {
             self.exec_release(
                 release,
             ) catch |err| {
@@ -1321,10 +1328,10 @@ pub const MultiversionOS = struct {
 
         const header = &self.target_header.?;
 
-        if (header.current_release == constants.config.process.release.value) {
+        if (header.current_release == self.release_current.value) {
             // Normally if we are downgrading, it means that we are running the newest release
             // in the list of bundled releases.
-            assert(constants.config.process.release.value == self.releases_bundled.last().value);
+            assert(self.release_current.value == self.releases_bundled.last().value);
         } else {
             // Scenario:
             // 1. Replica starts on release A.
@@ -1336,11 +1343,11 @@ pub const MultiversionOS = struct {
             // 6. During open, replica reads the binary's header from disk.
             // But that's C's binary/header, so B is unexpectedly not the latest release in it.
             log.warn("binary changed unexpectedly (expected={} found={})", .{
-                constants.config.process.release,
+                self.release_current,
                 Release{ .value = header.current_release },
             });
 
-            assert(constants.config.process.release.value != self.releases_bundled.last().value);
+            assert(self.release_current.value != self.releases_bundled.last().value);
         }
 
         // It should never happen that index is null: the caller must (and does, in the case of
@@ -2065,6 +2072,7 @@ test parse_elf {
 pub fn print_information(
     gpa: std.mem.Allocator,
     exe_path: []const u8,
+    release_current: Release,
     output: std.io.AnyWriter,
 ) !void {
     var io = try IO.init(32, 0);
@@ -2076,12 +2084,11 @@ pub fn print_information(
     const absolute_exe_path_z = try gpa.dupeZ(u8, absolute_exe_path);
     defer gpa.free(absolute_exe_path_z);
 
-    var multiversion = try MultiversionOS.init(
-        gpa,
-        &io,
-        absolute_exe_path_z,
-        .detect,
-    );
+    var multiversion = try MultiversionOS.init(gpa, &io, .{
+        .release_current = release_current,
+        .exe_path = absolute_exe_path_z,
+        .exe_path_format = .detect,
+    });
     defer multiversion.deinit(gpa);
 
     multiversion.open_sync() catch |err| {
