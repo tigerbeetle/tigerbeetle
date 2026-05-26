@@ -128,11 +128,6 @@ section#top {
         color: var(--gray-11);
     }
 
-    th,
-    td {
-        padding-right: 16px;
-    }
-
     #release table {
         color: var(--gray-11);
 
@@ -151,6 +146,12 @@ section#top {
     }
 
     #performance-results {
+        padding: 8px 8px;
+
+        th, td {
+            padding: 0 8px;
+        }
+
         tr {
             &:not(.success) :not(th) {
                 color: var(--red-10);
@@ -163,12 +164,6 @@ section#top {
             &.selected {
                 background-color: var(--gray-4);
             }
-        }
-
-        td:last-child {
-            display: flex;
-            gap: 8px;
-            justify-content: space-between;
         }
     }
 }
