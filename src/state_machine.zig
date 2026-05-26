@@ -1789,6 +1789,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .get_account_balances or
                 self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup == .null);
+
+            // It runs before the scan; there must be no ongoing scan lookup.
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
@@ -2452,12 +2454,12 @@ pub fn StateMachineType(comptime Storage: type) type {
 
                 // Clients err `too_much_data`
                 // for queries with limit too high.
-                const limit = self.prefetch_operation.?.result_max(
+                const limit_max: u32 = self.prefetch_operation.?.result_max(
                     self.batch_size_limit,
                 );
-                assert(scan_buffer.len >= limit);
+                assert(scan_buffer.len >= limit_max);
                 assert(filter.limit > 0);
-                assert(filter.limit <= limit);
+                assert(filter.limit <= limit_max);
                 scan_lookup.read(
                     scan_buffer[0..filter.limit],
                     &prefetch_query_two_phase_transfers_target_pending_scan_callback,
@@ -2482,7 +2484,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_two_phase_transfers);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
-            assert(self.scan_lookup_results.items.len == 0);
+            maybe(self.scan_lookup_results.items.len > 0);
 
             self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(TransferPending));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
@@ -2490,8 +2492,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup = .null;
             self.scan_builder = .null;
             self.forest.scan_buffer_pool.reset();
-
-            if (results.len == 0) return self.prefetch_finish();
 
             const transfers: *TransfersGroove = &self.forest.grooves.transfers;
             for (results) |result| {
@@ -2586,7 +2586,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             assert(self.prefetch_context == .account_events);
             self.prefetch_context = .null;
-            self.prefetch_finish();
+            self.prefetch_scan_resume();
         }
 
         /// Scans two-phase transfers targeting the outcome event (posting/voiding/expiry).
@@ -2619,15 +2619,15 @@ pub fn StateMachineType(comptime Storage: type) type {
 
                 // Clients err `too_much_data`
                 // for queries with limit too high.
-                const limit = self.prefetch_operation.?.result_max(
+                const limit_max: u32 = self.prefetch_operation.?.result_max(
                     self.batch_size_limit,
                 );
-                assert(scan_buffer.len >= limit);
+                assert(scan_buffer.len >= limit_max);
                 assert(filter.limit > 0);
-                assert(filter.limit <= limit);
+                assert(filter.limit <= limit_max);
 
                 scan_lookup.read(
-                    scan_buffer[0..limit],
+                    scan_buffer[0..filter.limit],
                     &prefetch_query_two_phase_transfers_target_outcome_scan_callback,
                 );
                 return;
@@ -2650,7 +2650,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_two_phase_transfers);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
-            assert(self.scan_lookup_results.items.len == 0);
+            maybe(self.scan_lookup_results.items.len > 0);
 
             self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(AccountEvent));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
@@ -2658,8 +2658,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup = .null;
             self.scan_builder = .null;
             self.forest.scan_buffer_pool.reset();
-
-            if (results.len == 0) return self.prefetch_finish();
 
             const transfers: *TransfersGroove = &self.forest.grooves.transfers;
             for (results) |result| {
@@ -2695,7 +2693,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .query_two_phase_transfers);
 
             self.prefetch_context = .null;
-            self.prefetch_finish();
+            self.prefetch_scan_resume();
         }
 
         fn get_scan_from_two_phase_filter(
@@ -3089,6 +3087,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+
+            // Operations not encoded as multi-batch
+            // must have only a single filter.
             assert(self.scan_lookup_results.items.len == 0);
 
             self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(AccountEvent));
@@ -3706,7 +3707,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                                 break :size self.execute_query_two_phase_transfers_target_pending(
                                     filter,
                                     self.scan_lookup_buffer[offset..][0..scan_size],
-                                    output_buffer,
+                                    encoder_output_buffer,
                                 );
                             },
                             .outcome => {
@@ -3719,7 +3720,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                                 break :size self.execute_query_two_phase_transfers_target_outcome(
                                     filter,
                                     self.scan_lookup_buffer[offset..][0..scan_size],
-                                    output_buffer,
+                                    encoder_output_buffer,
                                 );
                             },
                         }
@@ -4246,19 +4247,42 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const pending: Transfer = transfers.indirect_lookup(.{
                     .timestamp = result.timestamp,
                 }).?;
+                assert(pending.flags.pending);
+
                 const outcome: union(enum) {
                     none,
                     transfer: Transfer,
-                    account_event: AccountEvent,
+                    expiry: AccountEvent,
                 } = switch (result.pending_status) {
                     .none => unreachable,
                     .pending => .none,
-                    .posted, .voided => .{ .transfer = transfers.indirect_lookup(.{
-                        .pending_id = pending.id,
-                    }).? },
-                    .expired => .{ .account_event = account_events.indirect_lookup(.{
-                        .expired_transfer_id = pending.id,
-                    }).? },
+                    .posted => blk: {
+                        const transfer = transfers.indirect_lookup(.{
+                            .pending_id = pending.id,
+                        }).?;
+                        assert(transfer.pending_id == pending.id);
+                        assert(pending.timestamp < transfer.timestamp);
+                        assert(transfer.flags.post_pending_transfer);
+                        break :blk .{ .transfer = transfer };
+                    },
+                    .voided => blk: {
+                        const transfer = transfers.indirect_lookup(.{
+                            .pending_id = pending.id,
+                        }).?;
+                        assert(transfer.pending_id == pending.id);
+                        assert(pending.timestamp < transfer.timestamp);
+                        assert(transfer.flags.void_pending_transfer);
+                        break :blk .{ .transfer = transfer };
+                    },
+                    .expired => blk: {
+                        const expiry = account_events.indirect_lookup(.{
+                            .expired_transfer_id = pending.id,
+                        }).?;
+                        assert(expiry.event_pending_status == .expired);
+                        assert(expiry.transfer_pending_id == pending.id);
+                        assert(pending.timestamp + pending.timeout_ns() <= expiry.timestamp);
+                        break :blk .{ .expiry = expiry };
+                    },
                 };
 
                 output_slice[output_count] = .{
@@ -4291,7 +4315,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .outcome_timestamp = switch (result.pending_status) {
                         .none => unreachable,
                         .pending => 0,
-                        .expired => outcome.account_event.timestamp,
+                        .expired => outcome.expiry.timestamp,
                         .posted, .voided => outcome.transfer.timestamp,
                     },
                     .pending_status = result.pending_status,
@@ -4328,15 +4352,35 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .found_object => |transfer| transfer,
                     .not_found, .found_orphaned => unreachable,
                 };
+                assert(pending.flags.pending);
 
                 const outcome: ?Transfer = switch (result.event_pending_status) {
                     .none, .pending => unreachable,
-                    .posted, .voided => transfers.indirect_lookup(.{
-                        .timestamp = result.timestamp,
-                    }).?,
-                    .expired => null,
+                    .posted => blk: {
+                        const transfer = transfers.indirect_lookup(.{
+                            .timestamp = result.timestamp,
+                        }).?;
+                        assert(transfer.pending_id == pending.id);
+                        assert(transfer.flags.post_pending_transfer);
+                        assert(pending.timestamp < transfer.timestamp);
+
+                        break :blk transfer;
+                    },
+                    .voided => blk: {
+                        const transfer = transfers.indirect_lookup(.{
+                            .timestamp = result.timestamp,
+                        }).?;
+                        assert(transfer.pending_id == pending.id);
+                        assert(transfer.flags.void_pending_transfer);
+                        assert(pending.timestamp < transfer.timestamp);
+
+                        break :blk transfer;
+                    },
+                    .expired => blk: {
+                        assert(pending.timestamp + pending.timeout_ns() <= result.timestamp);
+                        break :blk null;
+                    },
                 };
-                if (outcome) |t| assert(t.timestamp == result.timestamp);
 
                 output_slice[output_count] = .{
                     .debit_account_id = pending.debit_account_id,
@@ -5117,7 +5161,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .expired => {
                     assert(p.timeout > 0);
                     assert(!p.flags.imported);
-                    assert(timestamp_event >= p.timestamp + p.timeout_ns());
+                    assert(p.timestamp + p.timeout_ns() <= timestamp_event);
                     return .pending_transfer_expired;
                 },
             }

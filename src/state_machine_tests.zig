@@ -564,7 +564,7 @@ const TestTwoPhaseResult = struct {
                 .pending => assert(event.outcome_timestamp == 0),
                 .expired => {
                     assert(pending.timeout > 0);
-                    assert(pending.timeout_ns() <= event.outcome_timestamp);
+                    assert(pending.timeout + pending.timeout_ns() <= event.outcome_timestamp);
                 },
                 .posted, .voided => unreachable,
             }
