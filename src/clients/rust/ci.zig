@@ -37,7 +37,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
 }
 
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
@@ -50,19 +50,19 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.exec("cargo init --name test_tigerbeetle", .{});
 
     for (0..9) |_| {
-        if (shell.exec("cargo add tigerbeetle@{version}", .{
-            .version = options.version,
+        if (shell.exec("cargo add tigerbeetle@{release}", .{
+            .release = options.release,
         })) {
             break;
         } else |_| {
             log.warn("waiting for 5 minutes for the {s} version to appear on crates.io", .{
-                options.version,
+                options.release,
             });
             std.time.sleep(5 * std.time.ns_per_min);
         }
     } else {
-        shell.exec("cargo add tigerbeetle@{version}", .{
-            .version = options.version,
+        shell.exec("cargo add tigerbeetle@{release}", .{
+            .release = options.release,
         }) catch |err| {
             log.err("package is not available on crates.io", .{});
             return err;

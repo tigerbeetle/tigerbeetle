@@ -209,7 +209,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
             // Test if the published package works with TigerBeetle.
             try ci.validate_release(shell, gpa, .{
                 .tigerbeetle = tigerbeetle_absolute_path,
-                .version = tag,
+                .release = tag,
             });
         }
     }
