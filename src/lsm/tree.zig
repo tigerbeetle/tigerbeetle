@@ -230,6 +230,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// exists for fuzzing, due to the performance overhead it carries. Real
         /// code must rely on the Groove cache for lookups.
         /// The returned Value pointer is only valid synchronously.
+        /// May return a tombstone.
         pub fn lookup_from_memory(tree: *Tree, key: Key) ?*const Value {
             comptime assert(constants.verify);
 
@@ -238,10 +239,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         }
 
         /// Returns:
-        /// - .negative if the key does not exist in the Manifest.
+        /// - .negative if the key does not exist in the Manifest or a tombstone was found.
         /// - .positive if the key exists in the Manifest, along with the associated value.
         /// - .possible if the key may exist in the Manifest but its existence cannot be
-        ///  ascertained without IO, along with the level number at which IO must be performed.
+        ///    ascertained without IO, along with the level number at which IO must be
+        ///    performed.
         ///
         /// This function attempts to fetch the index & value blocks for the tables that
         /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
@@ -250,7 +252,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// The returned `.positive` Value pointer is only valid synchronously.
         pub fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
             if (tree.table_immutable.get(key)) |value| {
-                return .{ .positive = value };
+                return if (Table.tombstone(value))
+                    .negative
+                else
+                    .{ .positive = value };
             }
 
             var iterator = tree.manifest.lookup(snapshot, key, 0);
@@ -271,9 +276,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     key_blocks.value_block_checksum,
                     key,
                 )) {
-                    .negative => {},
-                    // Key present in the value block.
-                    .positive => |value| return .{ .positive = value },
+                    .not_found => {},
+                    // Key present in the value block,
+                    // but it may be a tombstone.
+                    .found => |value| {
+                        return if (Table.tombstone(value))
+                            .negative
+                        else
+                            .{ .positive = value };
+                    },
                     // Value block was not found in the grid cache. We cannot rule out
                     // the existence of the key without I/O, and therefore bail out.
                     .block_not_in_cache => return .{ .possible = iterator.level - 1 },
@@ -287,14 +298,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             return Table.layout.block_value_count_max;
         }
 
+        /// Returns:
+        /// - .not_found if the grid block is in cache, but the key was not found.
+        /// - .found if the grid block is in cache and contains the key, along with the
+        ///    associated value, which may be a tombstone.
+        /// - .block_not_in_cache if the grid block that might contain the key is not in cache.
         fn cached_value_block_search(
             tree: *Tree,
             address: u64,
             checksum: u128,
             key: Key,
         ) union(enum) {
-            positive: *const Value,
-            negative,
+            not_found,
+            found: *const Value,
             block_not_in_cache,
         } {
             if (tree.grid.read_block_from_cache(
@@ -303,9 +319,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .{ .coherent = true },
             )) |value_block| {
                 if (Table.value_block_search(value_block, key)) |value| {
-                    return .{ .positive = value };
+                    return .{ .found = value };
                 } else {
-                    return .negative;
+                    return .not_found;
                 }
             } else {
                 return .block_not_in_cache;

@@ -1176,10 +1176,7 @@ pub fn GrooveType(
                             entry.value_ptr.* = .not_found;
                         },
                         .positive => |tree_value| {
-                            if (Tree.Value.tombstone(tree_value)) {
-                                entry.value_ptr.* = .not_found;
-                                return;
-                            }
+                            assert(!Tree.Value.tombstone(tree_value));
 
                             if (tree_value.timestamp == 0) {
                                 if (!groove_options.primary_key_orphaned) unreachable;
@@ -1264,11 +1261,6 @@ pub fn GrooveType(
                     options.entry.value_ptr.* = .not_found;
                 },
                 .positive => |object| {
-                    if (ObjectTreeHelper.tombstone(object)) {
-                        assert(ObjectTreeHelper.key_from_value(object) == options.timestamp_hint);
-                        options.entry.value_ptr.* = .not_found;
-                        return;
-                    }
                     assert(!ObjectTreeHelper.tombstone(object));
                     assert(object.timestamp == options.timestamp_hint);
 
@@ -1671,6 +1663,7 @@ pub fn GrooveType(
                             worker.lookup_start_next();
                             return;
                         }
+                        assert(!tree_value.tombstone());
                         assert(TimestampRange.valid(tree_value.timestamp));
 
                         if (!is_primary_key(std.meta.activeTag(entry.key_ptr.*))) {
@@ -1721,7 +1714,9 @@ pub fn GrooveType(
                         lookup_object_callback(worker.lookup_context(.object), null);
                     },
                     .positive => |value| {
+                        assert(!ObjectTree.Table.tombstone(value));
                         assert(value.timestamp == timestamp);
+
                         lookup_object_callback(worker.lookup_context(.object), value);
                     },
                     .possible => |level_min| {

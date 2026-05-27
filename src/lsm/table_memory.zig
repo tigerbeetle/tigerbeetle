@@ -386,6 +386,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         /// This must be called on sorted tables (single run from 0..count).
+        /// May return a tombstone.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
             assert(table.count() <= table.values.len);
             assert(table.sorted());
