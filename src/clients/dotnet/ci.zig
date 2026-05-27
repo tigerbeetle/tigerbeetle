@@ -177,16 +177,19 @@ fn nuget_install(shell: *Shell, options: struct {
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
     const DotnetSearch = struct {
         const SearchResult = struct {
-            const Packages = struct {
+            const Package = struct {
                 id: []const u8,
-                latestVersion: []const u8,
+                version: []const u8,
             };
-            packages: []Packages,
+            packages: []Package,
         };
         searchResult: []SearchResult,
     };
 
-    const output = try shell.exec_stdout("dotnet package search tigerbeetle --format json", .{});
+    const output = try shell.exec_stdout(
+        "dotnet package search tigerbeetle --exact-match --format json",
+        .{},
+    );
     const dotnet_search_results = try std.json.parseFromSliceLeaky(
         DotnetSearch,
         shell.arena.allocator(),
@@ -195,9 +198,11 @@ pub fn release_published_latest(shell: *Shell) ![]const u8 {
     );
 
     assert(dotnet_search_results.searchResult.len == 1);
-    assert(dotnet_search_results.searchResult[0].packages.len == 1);
+    assert(dotnet_search_results.searchResult[0].packages.len >= 1);
+    const package_count = dotnet_search_results.searchResult[0].packages.len;
+    const package_last = dotnet_search_results.searchResult[0].packages[package_count - 1];
 
-    assert(std.mem.eql(u8, dotnet_search_results.searchResult[0].packages[0].id, "tigerbeetle"));
+    assert(std.mem.eql(u8, package_last.id, "tigerbeetle"));
 
-    return dotnet_search_results.searchResult[0].packages[0].latestVersion;
+    return package_last.version;
 }
