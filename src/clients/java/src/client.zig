@@ -283,7 +283,7 @@ const ReflectionHelper = struct {
     var request_class: jni.JClass = null;
     var request_send_buffer_field_id: jni.JFieldID = null;
     var request_send_buffer_len_field_id: jni.JFieldID = null;
-    var request_reply_buffer_field_id: jni.JFieldID = null;
+    var reply_buffer_field_id: jni.JFieldID = null;
     var request_operation_method_id: jni.JMethodID = null;
     var request_end_request_method_id: jni.JMethodID = null;
 
@@ -296,7 +296,7 @@ const ReflectionHelper = struct {
         assert(request_class == null);
         assert(request_send_buffer_field_id == null);
         assert(request_send_buffer_len_field_id == null);
-        assert(request_reply_buffer_field_id == null);
+        assert(reply_buffer_field_id == null);
         assert(request_operation_method_id == null);
         assert(request_end_request_method_id == null);
 
@@ -337,7 +337,7 @@ const ReflectionHelper = struct {
             "sendBufferLen",
             "J",
         );
-        request_reply_buffer_field_id = JNIHelper.find_field(
+        reply_buffer_field_id = JNIHelper.find_field(
             env,
             request_class,
             "replyBuffer",
@@ -364,7 +364,7 @@ const ReflectionHelper = struct {
         assert(request_class != null);
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
-        assert(request_reply_buffer_field_id != null);
+        assert(reply_buffer_field_id != null);
         assert(request_operation_method_id != null);
         assert(request_end_request_method_id != null);
     }
@@ -382,7 +382,7 @@ const ReflectionHelper = struct {
         request_class = null;
         request_send_buffer_field_id = null;
         request_send_buffer_len_field_id = null;
-        request_reply_buffer_field_id = null;
+        reply_buffer_field_id = null;
         request_operation_method_id = null;
         request_end_request_method_id = null;
     }
@@ -492,7 +492,7 @@ const ReflectionHelper = struct {
         reply: []const u8,
     ) void {
         assert(this_obj != null);
-        assert(request_reply_buffer_field_id != null);
+        assert(reply_buffer_field_id != null);
         assert(reply.len > 0);
 
         const reply_buffer_obj = env.new_byte_array(
@@ -527,7 +527,7 @@ const ReflectionHelper = struct {
         // Setting the request with the reply.
         env.set_object_field(
             this_obj,
-            request_reply_buffer_field_id,
+            reply_buffer_field_id,
             reply_buffer_obj,
         );
     }
