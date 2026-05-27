@@ -67,7 +67,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
 }
 
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
@@ -80,8 +80,8 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     try shell.exec("go mod init tbtest", .{});
-    try shell.exec("go get github.com/tigerbeetle/tigerbeetle-go@v{version}", .{
-        .version = options.version,
+    try shell.exec("go get github.com/tigerbeetle/tigerbeetle-go@v{release}", .{
+        .release = options.release,
     });
 
     try Shell.copy_path(

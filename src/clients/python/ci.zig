@@ -116,7 +116,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
 }
 
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
@@ -125,21 +125,21 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.exec("python3 -m venv {tmp_dir}", .{ .tmp_dir = tmp_dir });
 
     for (0..9) |_| {
-        if (shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
+        if (shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={release}", .{
             .tmp_dir = tmp_dir,
-            .version = options.version,
+            .release = options.release,
         })) {
             break;
         } else |_| {
             log.warn("waiting for 5 minutes for the {s} version to appear in PyPi", .{
-                options.version,
+                options.release,
             });
             std.time.sleep(5 * std.time.ns_per_min);
         }
     } else {
-        shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
+        shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={release}", .{
             .tmp_dir = tmp_dir,
-            .version = options.version,
+            .release = options.release,
         }) catch |err| {
             log.err("package is not available in PyPi", .{});
             return err;
