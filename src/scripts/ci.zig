@@ -130,10 +130,11 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         assert(shell.file_exists(artifact));
     }
 
-    const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    // Use the SHA of the release tag commit, not HEAD (which may be ahead of the release).
+    const tag_sha = try shell.exec_stdout("git rev-list -n 1 {tag}", .{ .tag = tag });
     try shell.exec_zig_options(.{ .timeout = .minutes(20) }, "build scripts -- release --build " ++
-        "--sha={git_sha} --language=zig", .{
-        .git_sha = git_sha,
+        "--sha={tag_sha} --language=zig", .{
+        .tag_sha = tag_sha,
     });
     for (artifacts) |artifact| {
         // Zig only guarantees release builds to be deterministic.
@@ -189,6 +190,16 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
             language != .ruby) // The published tigerbeetle gem is not ours.
         {
             const ci = @field(LanguageCI, @tagName(language));
+
+            // Before we run the published package we verify that it is identical to a local build.
+            log.info("building {s} client", .{@tagName(language)});
+            try shell.exec_zig(
+                "build scripts -- release --build --sha={tag_sha} --language={language}",
+                .{ .tag_sha = tag_sha, .language = @tagName(language) },
+            );
+            try ci.validate_release_package(shell, gpa, .{ .release = tag });
+
+            // Test if the published package works with TigerBeetle.
             try ci.validate_release(shell, gpa, .{
                 .tigerbeetle = tigerbeetle_absolute_path,
                 .version = tag,

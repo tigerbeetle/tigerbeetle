@@ -174,6 +174,14 @@ fn nuget_install(shell: *Shell, options: struct {
     }
 }
 
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
+}) !void {
+    _ = shell;
+    _ = gpa;
+    _ = options;
+}
+
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
     const DotnetSearch = struct {
         const SearchResult = struct {
