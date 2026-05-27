@@ -901,7 +901,7 @@ fn discover_project_root() !std.fs.Dir {
     errdefer current.close(); // Caller is responsible for closing on success.
 
     for (0..16) |_| {
-        if (current.statFile("src/stdx/shell.zig")) |_| {
+        if (detect_project_root(current)) |_| {
             return current;
         } else |err| switch (err) {
             error.FileNotFound => {
@@ -909,11 +909,16 @@ fn discover_project_root() !std.fs.Dir {
                 current.close();
                 current = parent;
             },
-            else => return err,
+            else => return err
         }
     }
 
     return error.DiscoverProjectRootDepthExceeded;
+}
+
+fn detect_project_root(dir: std.fs.Dir) !void {
+    try dir.access("build.zig", .{});
+    try dir.access("src", .{});
 }
 
 pub const HttpOptions = struct {
