@@ -227,6 +227,10 @@ pub fn ContextType(
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason = null,
         thread: std.Thread,
+        /// On eviction the io thread itself initiates shutdown and frees the shared context,
+        /// after which the user thread never gets to join the io thread. In this case
+        /// the io thread must detach the thread to free its stack etc.
+        detach_self: bool = false,
 
         request_timer: stdx.Instant,
         request_latency: ?stdx.Duration = null,
@@ -475,7 +479,14 @@ pub fn ContextType(
                 };
             }
 
+            // After eviction we need to detach the thread instead of the user thread joining.
+            // Copy the needed state out of the heap allocation for use after deinit.
+            const detach_self = self.detach_self;
+            const thread = self.thread;
+
             self.deinit();
+
+            if (detach_self) thread.detach();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
@@ -840,10 +851,17 @@ pub fn ContextType(
             // requests can be submitted.
             // In-flight requests fail with the eviction reason; subsequent ones fail
             // with "shutdown".
-            self.interface.locker.lock();
-            defer self.interface.locker.unlock();
+            {
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
 
-            self.interface.context = .{ .ptr = null };
+                // Whoever nulls `context` first owns reaping the IO thread.
+                // Decide if that's us.
+                if (self.interface.context.ptr != null) {
+                    self.interface.context = .{ .ptr = null };
+                    self.detach_self = true;
+                }
+            }
 
             // Stops the IO thread, which then deinitializes the client before
             // it exits (see `io_thread`).
