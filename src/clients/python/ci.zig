@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
+const stdx = @import("stdx");
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
@@ -76,9 +77,42 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     release: []const u8,
 }) !void {
-    _ = shell;
-    _ = gpa;
-    _ = options;
+    const PyPIPackage = struct {
+        urls: []const struct {
+            filename: []const u8,
+            url: []const u8,
+        },
+    };
+
+    const response_body = try shell.http_get(try shell.fmt(
+        "https://pypi.org/pypi/tigerbeetle/{s}/json",
+        .{options.release},
+    ), .{});
+    const pypi_package = try std.json.parseFromSliceLeaky(
+        PyPIPackage,
+        shell.arena.allocator(),
+        response_body,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    assert(pypi_package.urls.len == 1);
+
+    const whl_size_max = 8 * stdx.MiB;
+    const whl_filename = try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{options.release});
+    assert(std.mem.eql(u8, pypi_package.urls[0].filename, whl_filename));
+    const whl_url = pypi_package.urls[0].url;
+
+    const whl_published = try shell.http_get(whl_url, .{ .response_body_size_max = whl_size_max });
+    const whl_local = try shell.project_root.readFileAlloc(
+        gpa,
+        try shell.fmt("zig-out/dist/python/{s}", .{whl_filename}),
+        whl_size_max,
+    );
+    defer gpa.free(whl_local);
+
+    if (!std.mem.eql(u8, whl_published, whl_local)) {
+        std.debug.panic("tigerbeetle python package doesn't match local build", .{});
+    }
 }
 
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
