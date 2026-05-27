@@ -97,7 +97,7 @@ pub const write_ahead_log_zone_size = headers_size + prepares_size;
 
 /// Limit on the number of repair reads.
 /// This keeps some reads available for commit path, so that an asymmetrically
-/// partitioned replica cannot starve the cluster with request_prepare messages.
+/// partitioned replica cannot starve the cluster with get_prepare messages.
 const reads_repair_count_max: u6 = constants.journal_iops_read_max - reads_commit_count_max;
 /// We need at most two reads on commit path: one for commit_journal, and one for
 /// primary_repair_pipeline_read.
@@ -280,7 +280,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         faulty: BitSet,
 
         /// The checksum of the prepare in the corresponding slot.
-        /// This is used to respond to `request_prepare` messages even when the slot is faulty.
+        /// This is used to respond to `get_prepare` messages even when the slot is faulty.
         /// For example, the slot may be faulty because the redundant header is faulty.
         ///
         /// The checksum will missing (`prepare_checksums[i]=0`, `prepare_inhabited[i]=false`) when:
@@ -886,8 +886,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // * The prepare was rewritten since the read began.
                     // * Misdirected read/write.
                     // * The combination of:
-                    //   * The primary is responding to a `request_prepare`.
-                    //   * The `request_prepare` did not include a checksum.
+                    //   * The primary is responding to a `get_prepare`.
+                    //   * The `get_prepare` did not include a checksum.
                     //   * The requested op's slot is faulty, but the prepare is valid. Since the
                     //     prepare is valid, WAL recovery set `prepare_checksums[slot]`. But on
                     //     reading this entry it turns out not to have the right op.
@@ -1229,7 +1229,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///  eql  The header and prepare are identical; no repair necessary.
         ///  nil  Reserved; dirty/faulty are clear, no repair necessary.
         ///  fix  Repair header using local intact prepare.
-        ///  vsr  Repair with VSR `request_prepare`.
+        ///  vsr  Repair with VSR `get_prepare`.
         ///
         /// A "valid" header/prepare:
         /// 1. has a valid checksum
@@ -1264,7 +1264,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     .op_checkpoint = replica.op_checkpoint(),
                 });
 
-                // `prepare_checksums` improves the availability of `request_prepare` by being more
+                // `prepare_checksums` improves the availability of `get_prepare` by being more
                 // flexible than `headers` regarding the prepares it references. It may hold a
                 // prepare whose redundant header is broken, as long as the prepare itself is valid.
                 if (prepare != null and prepare.?.operation != .reserved) {
@@ -2358,7 +2358,7 @@ const RecoveryDecision = enum {
     nil,
     /// Use intact prepare to repair redundant header. Dirty/faulty are clear.
     fix,
-    /// If replica_count>1  or  standby: Repair with VSR `request_prepare`. Mark dirty, mark faulty.
+    /// If replica_count>1  or  standby: Repair with VSR `get_prepare`. Mark dirty, mark faulty.
     /// If replica_count=1 and !standby: Fail; cannot recover safely.
     vsr,
     /// The prepare is from the next checkpoint. Truncate, set to reserved, clear dirty/faulty.

@@ -246,16 +246,17 @@ pub const Command = enum(u8) {
 
     exit_view = 10,
     join_view = 11,
+    get_view = 13,
 
-    request_view = 13,
-    request_headers = 14,
-    request_prepare = 15,
-    request_reply = 16,
+    get_headers = 14,
+    get_prepare = 15,
+    get_reply = 16,
+    get_blocks = 19,
+
     headers = 17,
 
     eviction = 18,
 
-    request_blocks = 19,
     block = 20,
 
     view = 24,

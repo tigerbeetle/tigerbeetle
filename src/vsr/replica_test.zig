@@ -1054,7 +1054,7 @@ test "Cluster: view-change: primary with dirty log" {
 
     // B2 tries to become primary. (Don't let B1 become primary – it would not realize its
     // checkpoint entry is corrupt, which would defeat the purpose of this test).
-    // B2 tries to repair (request_prepare) this corrupt op, even though it is before its
+    // B2 tries to repair (get_prepare) this corrupt op, even though it is before its
     // checkpoint. B1 discovers that this op is corrupt, and marks it as faulty.
     b1.corrupt(.{ .wal_prepare = checkpoint_2 % slot_count });
     t.run();
@@ -1325,8 +1325,8 @@ test "Cluster: sync: using View from durable checkpoint" {
     try c.request(checkpoint_1_prepare_max - 1, checkpoint_1_prepare_max - 1);
 
     // Ensure b2 can't repair its WAL, commit & transition to checkpoint_1.
-    a0.drop(.R_, .incoming, .request_prepare);
-    b1.drop(.R_, .incoming, .request_prepare);
+    a0.drop(.R_, .incoming, .get_prepare);
+    b1.drop(.R_, .incoming, .get_prepare);
 
     try b2.open();
 
@@ -2021,7 +2021,7 @@ test "Cluster: broken hash chain within the same view does not stall commit via 
             return header.op == constants.pipeline_prepare_queue_max + 1;
         }
     }.drop_message);
-    b2.drop(.R_, .outgoing, .request_headers);
+    b2.drop(.R_, .outgoing, .get_headers);
     b2.drop(.R_, .incoming, .view);
 
     var c = t.clients(.{});
