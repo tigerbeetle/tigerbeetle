@@ -47,7 +47,7 @@ pub const RepairBudgetJournal = struct {
     // increasing the repair latency on expiry.
     duration_expiry_max: stdx.Duration = .ms(500),
 
-    // Maximum inflight `request_prepare` messages per remote replica, at any point of time.
+    // Maximum inflight `get_prepare` messages per remote replica, at any point of time.
     //
     // This is kept small to ensure that even if the budget to a remote replica is saturated
     // by multiple replicas, overflowing the egress `send_queue` (which leads to dropped messages)
@@ -281,7 +281,7 @@ pub const RepairBudgetGrid = struct {
     // remote replica is saturated by multiple replicas, overflowing
     // the egress `send_queue` (which leads to dropped messages, and
     // wasted network & storage IO) on the remote replica is unlikely.
-    // The +1 allows us to send a full `request_blocks` even when
+    // The +1 allows us to send a full `get_blocks` even when
     // all but one request has been responded to.
     const replica_blocks_requested_max = constants.grid_repair_request_max + 1;
 

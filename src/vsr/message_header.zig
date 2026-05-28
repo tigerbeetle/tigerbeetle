@@ -89,13 +89,13 @@ pub const Header = extern struct {
             .exit_view => ExitView,
             .join_view => JoinView,
             .view => View,
-            .request_view => RequestView,
-            .request_headers => RequestHeaders,
-            .request_prepare => RequestPrepare,
-            .request_reply => RequestReply,
+            .get_view => GetView,
+            .get_headers => GetHeaders,
+            .get_prepare => GetPrepare,
+            .get_reply => GetReply,
             .headers => Headers,
             .eviction => Eviction,
-            .request_blocks => RequestBlocks,
+            .get_blocks => GetBlocks,
             .block => Block,
             .deprecated_12 => Deprecated,
             .deprecated_21 => Deprecated,
@@ -221,13 +221,13 @@ pub const Header = extern struct {
             .exit_view,
             .join_view,
             .view,
-            .request_view,
-            .request_headers,
-            .request_prepare,
-            .request_reply,
+            .get_view,
+            .get_headers,
+            .get_prepare,
+            .get_reply,
             .headers,
             .eviction,
-            .request_blocks,
+            .get_blocks,
             => .{ .replica = self.replica },
 
             .deprecated_12,
@@ -1239,7 +1239,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const RequestView = extern struct {
+    pub const GetView = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1270,7 +1270,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_view);
+            assert(self.command == .get_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.release.value != 0) return "release != 0";
@@ -1280,7 +1280,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const RequestHeaders = extern struct {
+    pub const GetHeaders = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1314,7 +1314,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_headers);
+            assert(self.command == .get_headers);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view == 0";
@@ -1325,7 +1325,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const RequestPrepare = extern struct {
+    pub const GetPrepare = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1358,7 +1358,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_prepare);
+            assert(self.command == .get_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0 and self.prepare_checksum != 0) return "view != 0 and checksum != 0";
@@ -1369,7 +1369,7 @@ pub const Header = extern struct {
         }
     };
 
-    pub const RequestReply = extern struct {
+    pub const GetReply = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1403,7 +1403,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_reply);
+            assert(self.command == .get_reply);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.release.value != 0) return "release != 0";
@@ -1522,7 +1522,7 @@ pub const Header = extern struct {
         };
     };
 
-    pub const RequestBlocks = extern struct {
+    pub const GetBlocks = extern struct {
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1552,7 +1552,7 @@ pub const Header = extern struct {
         pub const format = HeaderFunctionsType(@This()).format;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_blocks);
+            assert(self.command == .get_blocks);
             if (self.view != 0) return "view != 0";
             if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
             if ((self.size - @sizeOf(Header)) % @sizeOf(vsr.BlockRequest) != 0) {

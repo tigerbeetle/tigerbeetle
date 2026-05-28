@@ -106,7 +106,7 @@ State sync is triggered when a replica receives a `view` message with a more adv
 checkpoint.
 
 If a replica isn't making progress committing because a grid block or a prepare can't be repaired
-for some time, the replica proactively sends `request_view` to initiate the sync (see
+for some time, the replica proactively sends `get_view` to initiate the sync (see
 `repair_sync_timeout`).
 
 ### 5: Conclusion

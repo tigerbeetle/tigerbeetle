@@ -480,7 +480,7 @@ pub fn ReplicaType(
 
         /// When "log_view < view": The JV headers.
         /// When "log_view = view": The View headers. (Just as a cache,
-        /// since they are regenerated for every request_view).
+        /// since they are regenerated for every get_view).
         ///
         /// Invariants:
         /// - view_headers.len     > 0
@@ -564,9 +564,9 @@ pub fn ReplicaType(
         /// (status=view-change)
         join_view_message_timeout: Timeout,
 
-        /// The number of ticks before resending a `request_view` message.
+        /// The number of ticks before resending a `get_view` message.
         /// (status=view-change backup)
-        request_view_message_timeout: Timeout,
+        get_view_message_timeout: Timeout,
 
         /// The number of ticks before repairing missing/disconnected headers, dirty/missing
         /// prepares, and replenishing the repair budget.
@@ -1402,8 +1402,8 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 500 / constants.tick_ms,
                 },
-                .request_view_message_timeout = Timeout{
-                    .name = "request_view_message_timeout",
+                .get_view_message_timeout = Timeout{
+                    .name = "get_view_message_timeout",
                     .id = replica_index,
                     .after = 1_000 / constants.tick_ms,
                 },
@@ -1561,10 +1561,7 @@ pub fn ReplicaType(
                 .{ &self.exit_view_message_timeout, on_exit_view_message_timeout },
                 .{ &self.view_change_status_timeout, on_view_change_status_timeout },
                 .{ &self.join_view_message_timeout, on_join_view_message_timeout },
-                .{
-                    &self.request_view_message_timeout,
-                    on_request_view_message_timeout,
-                },
+                .{ &self.get_view_message_timeout, on_get_view_message_timeout },
                 .{ &self.journal_repair_timeout, on_journal_repair_timeout },
 
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },
@@ -1810,12 +1807,12 @@ pub fn ReplicaType(
                 .exit_view => |m| self.on_exit_view(m),
                 .join_view => |m| self.on_join_view(m),
                 .view => |m| self.on_view(m),
-                .request_view => |m| self.on_request_view(m),
-                .request_prepare => |m| self.on_request_prepare(m),
-                .request_headers => |m| self.on_request_headers(m),
-                .request_reply => |m| self.on_request_reply(m),
+                .get_view => |m| self.on_get_view(m),
+                .get_prepare => |m| self.on_get_prepare(m),
+                .get_headers => |m| self.on_get_headers(m),
+                .get_reply => |m| self.on_get_reply(m),
                 .headers => |m| self.on_headers(m),
-                .request_blocks => |m| self.on_request_blocks(m),
+                .get_blocks => |m| self.on_get_blocks(m),
                 .block => |m| self.on_block(m),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
@@ -2541,7 +2538,7 @@ pub fn ReplicaType(
                     self.commit_journal();
                 }
 
-                // Initiate repair so `repair_header`/`request_prepare` network messages can be
+                // Initiate repair so `repair_header`/`get_prepare` network messages can be
                 // sent concurrently while writing this prepare.
                 self.repair();
             }
@@ -3020,11 +3017,11 @@ pub fn ReplicaType(
             if (self.syncing == .idle) self.repair();
         }
 
-        fn on_request_view(
+        fn on_get_view(
             self: *Replica,
-            message: *const Message.RequestView,
+            message: *const Message.GetView,
         ) void {
-            assert(message.header.command == .request_view);
+            assert(message.header.command == .get_view);
             if (self.ignore_repair_message(message.base_const())) return;
 
             assert(self.status == .normal);
@@ -3054,8 +3051,8 @@ pub fn ReplicaType(
         /// to the cluster. The cluster sees the replica as an underwriter of a guaranteed
         /// prepare. If a guaranteed prepare is found to by faulty, the replica must repair it
         /// to restore durability.
-        fn on_request_prepare(self: *Replica, message: *const Message.RequestPrepare) void {
-            assert(message.header.command == .request_prepare);
+        fn on_get_prepare(self: *Replica, message: *const Message.GetPrepare) void {
+            assert(message.header.command == .get_prepare);
             if (self.ignore_repair_message(message.base_const())) return;
 
             assert(self.node_count > 1);
@@ -3071,7 +3068,7 @@ pub fn ReplicaType(
                 if (self.journal.header_with_op(message.header.prepare_op)) |header| {
                     break :blk header.checksum;
                 } else {
-                    log.debug("{}: on_request_prepare: op={} missing", .{
+                    log.debug("{}: on_get_prepare: op={} missing", .{
                         self.log_prefix(),
                         message.header.prepare_op,
                     });
@@ -3086,7 +3083,7 @@ pub fn ReplicaType(
                 message.header.prepare_op,
                 checksum,
             )) |prepare| {
-                log.debug("{}: on_request_prepare: op={} checksum={x:0>32} reply from pipeline", .{
+                log.debug("{}: on_get_prepare: op={} checksum={x:0>32} reply from pipeline", .{
                     self.log_prefix(),
                     message.header.prepare_op,
                     checksum,
@@ -3109,7 +3106,7 @@ pub fn ReplicaType(
                 // TODO Do not reissue the read if we are already reading in order to send to
                 // this particular destination replica.
                 self.journal.read_prepare_with_op_and_checksum(
-                    on_request_prepare_read,
+                    on_get_prepare_read,
                     .{
                         .op = message.header.prepare_op,
                         .checksum = checksum,
@@ -3117,7 +3114,7 @@ pub fn ReplicaType(
                     },
                 );
             } else {
-                log.debug("{}: on_request_prepare: op={} checksum={x:0>32} missing", .{
+                log.debug("{}: on_get_prepare: op={} checksum={x:0>32} missing", .{
                     self.log_prefix(),
                     message.header.prepare_op,
                     checksum,
@@ -3125,13 +3122,13 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_prepare_read(
+        fn on_get_prepare_read(
             self: *Replica,
             prepare: ?*Message.Prepare,
             options: Journal.Read.Options,
         ) void {
             const message = prepare orelse {
-                log.debug("{}: on_request_prepare_read: " ++
+                log.debug("{}: on_get_prepare_read: " ++
                     "op={} checksum={x:0>32} prepare=null", .{
                     self.log_prefix(),
                     options.op,
@@ -3146,7 +3143,7 @@ pub fn ReplicaType(
             assert(options.op == message.header.op);
             assert(options.checksum == message.header.checksum);
 
-            log.debug("{}: on_request_prepare_read: " ++
+            log.debug("{}: on_get_prepare_read: " ++
                 "op={} checksum={x:0>32} sending to replica={}", .{
                 self.log_prefix(),
                 message.header.op,
@@ -3157,8 +3154,8 @@ pub fn ReplicaType(
             self.send_message_to_replica(destination_replica, message);
         }
 
-        fn on_request_headers(self: *Replica, message: *const Message.RequestHeaders) void {
-            assert(message.header.command == .request_headers);
+        fn on_get_headers(self: *Replica, message: *const Message.GetHeaders) void {
+            assert(message.header.command == .get_headers);
             if (self.ignore_repair_message(message.base_const())) return;
 
             maybe(self.status == .recovering_head);
@@ -3179,7 +3176,7 @@ pub fn ReplicaType(
             assert(op_max >= op_min);
 
             // We must add 1 because op_max and op_min are both inclusive:
-            const count_max: usize = @min(constants.request_headers_max, op_max - op_min + 1);
+            const count_max: usize = @min(constants.get_headers_max, op_max - op_min + 1);
             assert(count_max * @sizeOf(vsr.Header) <= constants.message_body_size_max);
 
             const count = self.journal.copy_latest_headers_between(
@@ -3193,7 +3190,7 @@ pub fn ReplicaType(
             assert(count <= count_max);
 
             if (count == 0) {
-                log.debug("{}: on_request_headers: ignoring (op={}..{}, no headers)", .{
+                log.debug("{}: on_get_headers: ignoring (op={}..{}, no headers)", .{
                     self.log_prefix(),
                     op_min,
                     op_max,
@@ -3211,15 +3208,15 @@ pub fn ReplicaType(
             self.send_message_to_replica(message.header.replica, response);
         }
 
-        fn on_request_reply(self: *Replica, message: *const Message.RequestReply) void {
-            assert(message.header.command == .request_reply);
+        fn on_get_reply(self: *Replica, message: *const Message.GetReply) void {
+            assert(message.header.command == .get_reply);
             assert(message.header.reply_client != 0);
 
             if (self.ignore_repair_message(message.base_const())) return;
             assert(message.header.replica != self.replica);
 
             const entry = self.client_sessions.get(message.header.reply_client) orelse {
-                log.debug("{}: on_request_reply: ignoring, client not in table", .{
+                log.debug("{}: on_get_reply: ignoring, client not in table", .{
                     self.log_prefix(),
                 });
                 return;
@@ -3227,7 +3224,7 @@ pub fn ReplicaType(
             assert(entry.header.client == message.header.reply_client);
 
             if (entry.header.checksum != message.header.reply_checksum) {
-                log.debug("{}: on_request_reply: ignoring, reply not in table " ++
+                log.debug("{}: on_get_reply: ignoring, reply not in table " ++
                     "(requested={x:0>32} stored={x:0>32})", .{
                     self.log_prefix(),
                     message.header.reply_checksum,
@@ -3240,7 +3237,7 @@ pub fn ReplicaType(
 
             const slot = self.client_sessions.get_slot_for_header(&entry.header).?;
             if (self.client_replies.read_reply_sync(slot, entry)) |reply| {
-                on_request_reply_read_callback(
+                on_get_reply_read_callback(
                     &self.client_replies,
                     &entry.header,
                     reply,
@@ -3250,11 +3247,11 @@ pub fn ReplicaType(
                 self.client_replies.read_reply(
                     slot,
                     entry,
-                    on_request_reply_read_callback,
+                    on_get_reply_read_callback,
                     message.header.replica,
                 ) catch |err| switch (err) {
                     error.Busy => {
-                        log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
+                        log.debug("{}: on_get_reply: ignoring, client_replies busy", .{
                             self.log_prefix(),
                         });
                     },
@@ -3262,7 +3259,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_reply_read_callback(
+        fn on_get_reply_read_callback(
             client_replies: *ClientReplies,
             reply_header: *const Header.Reply,
             reply_: ?*Message.Reply,
@@ -3270,7 +3267,7 @@ pub fn ReplicaType(
         ) void {
             const self: *Replica = @alignCast(@fieldParentPtr("client_replies", client_replies));
             const reply = reply_ orelse {
-                log.debug("{}: on_request_reply: reply not found for replica={} " ++
+                log.debug("{}: on_get_reply: reply not found for replica={} " ++
                     "(op={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     destination_replica.?,
@@ -3287,7 +3284,7 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.checksum == reply_header.checksum);
 
-            log.debug("{}: on_request_reply: sending reply to replica={} " ++
+            log.debug("{}: on_get_reply: sending reply to replica={} " ++
                 "(op={} checksum={x:0>32})", .{
                 self.log_prefix(),
                 destination_replica.?,
@@ -3322,25 +3319,25 @@ pub fn ReplicaType(
             self.repair();
         }
 
-        fn on_request_blocks(self: *Replica, message: *const Message.RequestBlocks) void {
-            assert(message.header.command == .request_blocks);
+        fn on_get_blocks(self: *Replica, message: *const Message.GetBlocks) void {
+            assert(message.header.command == .get_blocks);
 
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_request_blocks: ignoring; misdirected message (self)", .{
+                log.warn("{}: on_get_blocks: ignoring; misdirected message (self)", .{
                     self.log_prefix(),
                 });
                 return;
             }
 
             if (self.standby()) {
-                log.warn("{}: on_request_blocks: ignoring; misdirected message (standby)", .{
+                log.warn("{}: on_get_blocks: ignoring; misdirected message (standby)", .{
                     self.log_prefix(),
                 });
                 return;
             }
 
             if (self.grid.callback == .cancel) {
-                log.debug("{}: on_request_blocks: ignoring; canceling grid", .{self.log_prefix()});
+                log.debug("{}: on_get_blocks: ignoring; canceling grid", .{self.log_prefix()});
                 return;
             }
 
@@ -3358,7 +3355,7 @@ pub fn ReplicaType(
                         read.read.checksum == request.block_checksum and
                         read.destination == message.header.replica)
                     {
-                        log.debug("{}: on_request_blocks: ignoring block request;" ++
+                        log.debug("{}: on_get_blocks: ignoring block request;" ++
                             " already reading (destination={} address={} checksum={x:0>32})", .{
                             self.log_prefix(),
                             message.header.replica,
@@ -3370,7 +3367,7 @@ pub fn ReplicaType(
                 }
 
                 const read = self.grid_reads.acquire() orelse {
-                    log.debug("{}: on_request_blocks: ignoring remaining blocks; busy " ++
+                    log.debug("{}: on_get_blocks: ignoring remaining blocks; busy " ++
                         "(replica={} ignored={}/{})", .{
                         self.log_prefix(),
                         message.header.replica,
@@ -3380,7 +3377,7 @@ pub fn ReplicaType(
                     return;
                 };
 
-                log.debug("{}: on_request_blocks: reading block " ++
+                log.debug("{}: on_get_blocks: reading block " ++
                     "(replica={} address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.replica,
@@ -3399,7 +3396,7 @@ pub fn ReplicaType(
                 };
 
                 self.grid.read_block(
-                    .{ .from_local_storage = on_request_blocks_read_block },
+                    .{ .from_local_storage = on_get_blocks_read_block },
                     &read.read,
                     request.block_address,
                     request.block_checksum,
@@ -3408,7 +3405,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_blocks_read_block(
+        fn on_get_blocks_read_block(
             grid_read: *Grid.Read,
             result: Grid.ReadBlockResult,
         ) void {
@@ -3422,7 +3419,7 @@ pub fn ReplicaType(
             assert(read.destination != self.replica);
 
             if (result != .valid) {
-                log.debug("{}: on_request_blocks: error: {s}: " ++
+                log.debug("{}: on_get_blocks: error: {s}: " ++
                     "(destination={} address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     @tagName(result),
@@ -3433,7 +3430,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            log.debug("{}: on_request_blocks: success: " ++
+            log.debug("{}: on_get_blocks: success: " ++
                 "(destination={} address={} checksum={x:0>32})", .{
                 self.log_prefix(),
                 read.destination,
@@ -3534,7 +3531,7 @@ pub fn ReplicaType(
                 });
 
                 if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
-                    self.send_request_blocks(replica_index);
+                    self.send_get_blocks(replica_index);
                 }
             } else {
                 log.debug("{}: on_block: ignoring; block not needed " ++
@@ -3748,19 +3745,19 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_view_message_timeout(self: *Replica) void {
+        fn on_get_view_message_timeout(self: *Replica) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) != self.replica);
-            self.request_view_message_timeout.reset();
+            self.get_view_message_timeout.reset();
 
-            log.debug("{}: on_request_view_message_timeout: view={}", .{
+            log.debug("{}: on_get_view_message_timeout: view={}", .{
                 self.log_prefix(),
                 self.view,
             });
             self.send_header_to_replica(
                 self.primary_index(self.view),
-                @bitCast(Header.RequestView{
-                    .command = .request_view,
+                @bitCast(Header.GetView{
+                    .command = .get_view,
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = self.view,
@@ -3802,8 +3799,8 @@ pub fn ReplicaType(
                 });
                 self.send_header_to_replica(
                     self.primary_index(self.view),
-                    @bitCast(Header.RequestView{
-                        .command = .request_view,
+                    @bitCast(Header.GetView{
+                        .command = .get_view,
                         .cluster = self.cluster,
                         .replica = self.replica,
                         .view = self.view,
@@ -3822,7 +3819,7 @@ pub fn ReplicaType(
 
             if (self.grid.callback != .cancel) {
                 if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
-                    self.send_request_blocks(replica_index);
+                    self.send_get_blocks(replica_index);
                 }
             }
         }
@@ -5950,10 +5947,10 @@ pub fn ReplicaType(
                 header.view == self.view or
                     header.command == .pong_client or
                     header.command == .eviction or
-                    header.command == .request_view or
-                    header.command == .request_headers or
-                    header.command == .request_prepare or
-                    header.command == .request_reply or
+                    header.command == .get_view or
+                    header.command == .get_headers or
+                    header.command == .get_prepare or
+                    header.command == .get_reply or
                     header.command == .reply or
                     header.command == .ping or header.command == .pong,
             );
@@ -6087,10 +6084,10 @@ pub fn ReplicaType(
         }
 
         fn ignore_repair_message(self: *Replica, message: *const Message) bool {
-            assert(message.header.command == .request_view or
-                message.header.command == .request_headers or
-                message.header.command == .request_prepare or
-                message.header.command == .request_reply or
+            assert(message.header.command == .get_view or
+                message.header.command == .get_headers or
+                message.header.command == .get_prepare or
+                message.header.command == .get_reply or
                 message.header.command == .headers);
             switch (message.header.command) {
                 .headers => assert(message.header.replica < self.replica_count),
@@ -6099,9 +6096,9 @@ pub fn ReplicaType(
 
             const command: []const u8 = @tagName(message.header.command);
 
-            if (message.header.command == .request_headers or
-                message.header.command == .request_prepare or
-                message.header.command == .request_reply)
+            if (message.header.command == .get_headers or
+                message.header.command == .get_prepare or
+                message.header.command == .get_reply)
             {
                 // A recovering_head/syncing replica can still assist others with WAL/Reply-repair,
                 // but does not itself install headers, since its head is unknown.
@@ -6116,14 +6113,14 @@ pub fn ReplicaType(
                 }
             }
 
-            if (message.header.command == .request_headers or
-                message.header.command == .request_prepare or
-                message.header.command == .request_reply or
+            if (message.header.command == .get_headers or
+                message.header.command == .get_prepare or
+                message.header.command == .get_reply or
                 message.header.command == .headers)
             {
                 // A replica in a different view can assist WAL repair.
             } else {
-                assert(message.header.command == .request_view);
+                assert(message.header.command == .get_view);
 
                 if (message.header.view < self.view) {
                     log.debug("{}: on_{s}: ignoring (older view)", .{
@@ -6155,7 +6152,7 @@ pub fn ReplicaType(
             if (self.standby()) {
                 switch (message.header.command) {
                     .headers => {},
-                    .request_view, .request_headers, .request_prepare, .request_reply => {
+                    .get_view, .get_headers, .get_prepare, .get_reply => {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{
                             self.log_prefix(),
                             command,
@@ -6169,14 +6166,14 @@ pub fn ReplicaType(
             if (self.primary_index(self.view) != self.replica) {
                 switch (message.header.command) {
                     // Only the primary may receive these messages:
-                    .request_view => {
+                    .get_view => {
                         log.warn("{}: on_{s}: misdirected message (backup)", .{
                             self.log_prefix(),
                             command,
                         });
                         return true;
                     },
-                    .request_prepare, .headers, .request_headers, .request_reply => {},
+                    .get_prepare, .headers, .get_headers, .get_reply => {},
                     else => unreachable,
                 }
             }
@@ -6189,7 +6186,7 @@ pub fn ReplicaType(
             const command: []const u8 = @tagName(message.header.command);
 
             switch (message.header.command) {
-                .request_view => {
+                .get_view => {
                     log.debug("{}: on_{s}: ignoring (view change)", .{
                         self.log_prefix(),
                         command,
@@ -6211,7 +6208,7 @@ pub fn ReplicaType(
                         return true;
                     }
                 },
-                .request_headers, .request_prepare, .request_reply => {
+                .get_headers, .get_prepare, .get_reply => {
                     // on_headers, on_prepare, and on_reply have the appropriate logic to handle
                     // incorrect headers, prepares, and replies.
                     return false;
@@ -6959,7 +6956,7 @@ pub fn ReplicaType(
         ///
         /// Note that for our purposes here, we only care about entries that were faulty during
         /// WAL recovery, not ones that were found to be faulty after the fact (e.g. due to
-        /// `request_prepare`).
+        /// `get_prepare`).
         ///
         /// Cases (`✓`: `replica.op_checkpoint`, `✗`: faulty, `o`: `replica.op`):
         /// * ` ✓ o ✗ `: View change is unsafe.
@@ -7531,7 +7528,7 @@ pub fn ReplicaType(
 
             if (self.grid.callback != .cancel) {
                 if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
-                    self.send_request_blocks(replica_index);
+                    self.send_get_blocks(replica_index);
                 }
             }
 
@@ -7575,8 +7572,8 @@ pub fn ReplicaType(
                 );
                 self.send_header_to_replica(
                     self.primary_index(self.view),
-                    @bitCast(Header.RequestView{
-                        .command = .request_view,
+                    @bitCast(Header.GetView{
+                        .command = .get_view,
                         .cluster = self.cluster,
                         .replica = self.replica,
                         .view = self.view,
@@ -7645,8 +7642,8 @@ pub fn ReplicaType(
                     );
                     self.send_header_to_replica(
                         self.choose_any_other_replica(),
-                        @bitCast(Header.RequestHeaders{
-                            .command = .request_headers,
+                        @bitCast(Header.GetHeaders{
+                            .command = .get_headers,
                             .cluster = self.cluster,
                             .replica = self.replica,
                             // Pessimistically request extra headers. Requesting/sending extra
@@ -7693,8 +7690,8 @@ pub fn ReplicaType(
 
                 self.send_header_to_replica(
                     self.choose_any_other_replica(),
-                    @bitCast(Header.RequestReply{
-                        .command = .request_reply,
+                    @bitCast(Header.GetReply{
+                        .command = .get_reply,
                         .cluster = self.cluster,
                         .replica = self.replica,
                         .reply_client = entry.header.client,
@@ -8215,7 +8212,7 @@ pub fn ReplicaType(
             for (op_min..op_max + 1) |op| {
                 const slot_with_op_maybe = self.journal.slot_with_op(op);
                 if (slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?)) {
-                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                    // Rebroadcast outstanding `get_prepare` every `repair_timeout` tick.
                     // Continue to request prepares until our budget is depleted.
                     if (self.repair_prepare(op)) {
                         io_budget -= 1;
@@ -8253,7 +8250,7 @@ pub fn ReplicaType(
                 {
                     // In-bounds — handled by the repair_prepares_between invocations
                     // before this function is invoked. The slot is either already
-                    // repaired, or we sent a request_prepare and are waiting for a reply.
+                    // repaired, or we sent a get_prepare and are waiting for a reply.
                 } else {
                     // This op must be either:
                     // - less-than-or-equal-to `op_checkpoint` — we committed before
@@ -8325,7 +8322,7 @@ pub fn ReplicaType(
                 // - the journal already had another running write to the same slot, or
                 // - the journal had no IOPs available.
                 //
-                // Using the pipeline to repair is faster than a `request_prepare`.
+                // Using the pipeline to repair is faster than a `get_prepare`.
                 // Also, messages in the pipeline are never corrupt.
                 if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
                     assert(prepare.header.op == op);
@@ -8364,8 +8361,8 @@ pub fn ReplicaType(
                 &self.prng,
             )) |replica_index| {
                 assert(replica_index != self.replica);
-                const request_prepare = Header.RequestPrepare{
-                    .command = .request_prepare,
+                const get_prepare = Header.GetPrepare{
+                    .command = .get_prepare,
                     .cluster = self.cluster,
                     .replica = self.replica,
                     .view = if (slot_with_op_maybe == null) self.view else 0,
@@ -8403,11 +8400,11 @@ pub fn ReplicaType(
                 if (self.status == .view_change) {
                     // Only the primary is allowed to do repairs in a view change.
                     assert(self.primary_index(self.view) == self.replica);
-                    self.send_header_to_other_replicas(@bitCast(request_prepare));
+                    self.send_header_to_other_replicas(@bitCast(get_prepare));
                 } else {
                     self.send_header_to_replica(
                         replica_index,
-                        @bitCast(request_prepare),
+                        @bitCast(get_prepare),
                     );
                 }
 
@@ -8815,7 +8812,7 @@ pub fn ReplicaType(
                     }
 
                     // Presence bit: the prepare is on disk, is being written to disk, or is cached
-                    // in memory. These conditions mirror logic in `on_request_prepare` and imply
+                    // in memory. These conditions mirror logic in `on_get_prepare` and imply
                     // that we can help the new primary to repair this prepare.
                     if ((self.journal.prepare_inhabited[slot.index] and
                         self.journal.prepare_checksums[slot.index] == header.checksum) or
@@ -9041,11 +9038,11 @@ pub fn ReplicaType(
                 .pong,
                 .ping_client,
                 .commit,
-                .request_view,
-                .request_headers,
-                .request_prepare,
-                .request_reply,
-                .request_blocks,
+                .get_view,
+                .get_headers,
+                .get_prepare,
+                .get_reply,
+                .get_blocks,
                 .block,
                 => unreachable,
             }
@@ -9256,7 +9253,7 @@ pub fn ReplicaType(
                     assert(header.replica != replica);
                     assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_view => |header| {
+                .get_view => |header| {
                     maybe(self.standby());
                     assert(header.view >= self.view);
                     assert(header.replica == self.replica);
@@ -9264,24 +9261,24 @@ pub fn ReplicaType(
                     assert(self.primary_index(message.header.view) == replica);
                     assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_headers => |header| {
+                .get_headers => |header| {
                     maybe(self.standby());
                     assert(header.replica == self.replica);
                     assert(header.replica != replica);
                     assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_prepare => |header| {
+                .get_prepare => |header| {
                     maybe(self.standby());
                     assert(header.replica == self.replica);
                     assert(header.replica != replica);
                     assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_reply => |header| {
+                .get_reply => |header| {
                     assert(header.replica == self.replica);
                     assert(header.replica != replica);
                     assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_blocks => |header| {
+                .get_blocks => |header| {
                     maybe(self.standby());
                     assert(header.replica == self.replica);
                     assert(header.replica != replica);
@@ -9298,7 +9295,7 @@ pub fn ReplicaType(
             // See view_durable()/log_view_durable().
             if (replica != self.replica and message.header.replica == self.replica) {
                 if (message.header.view > self.view_durable() and
-                    message.header.command != .request_view)
+                    message.header.command != .get_view)
                 {
                     // Pings are used for syncing time, so they must not be
                     // blocked on persisting view.
@@ -9497,7 +9494,7 @@ pub fn ReplicaType(
             assert(self.replica == self.primary_index(self.view));
             assert(self.primary_journal_headers_repaired());
 
-            // Only replies to `request_view` need a nonce,
+            // Only replies to `get_view` need a nonce,
             // to guarantee freshness of the message.
             const nonce = 0;
 
@@ -9891,7 +9888,7 @@ pub fn ReplicaType(
             assert(!self.commit_message_timeout.ticking);
             assert(!self.view_change_status_timeout.ticking);
             assert(!self.join_view_message_timeout.ticking);
-            assert(!self.request_view_message_timeout.ticking);
+            assert(!self.get_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
             assert(!self.journal_repair_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
@@ -9932,7 +9929,7 @@ pub fn ReplicaType(
             assert(!self.commit_message_timeout.ticking);
             assert(!self.view_change_status_timeout.ticking);
             assert(!self.join_view_message_timeout.ticking);
-            assert(!self.request_view_message_timeout.ticking);
+            assert(!self.get_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
             assert(!self.journal_repair_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
@@ -10020,7 +10017,7 @@ pub fn ReplicaType(
             assert(!self.commit_message_timeout.ticking);
             assert(!self.view_change_status_timeout.ticking);
             assert(!self.join_view_message_timeout.ticking);
-            assert(!self.request_view_message_timeout.ticking);
+            assert(!self.get_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
             assert(!self.upgrade_timeout.ticking);
@@ -10073,7 +10070,7 @@ pub fn ReplicaType(
                 self.exit_view_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.join_view_message_timeout.stop();
-                self.request_view_message_timeout.stop();
+                self.get_view_message_timeout.stop();
                 if (!self.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
@@ -10093,7 +10090,7 @@ pub fn ReplicaType(
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
                 assert(!self.upgrade_timeout.ticking);
-                assert(self.request_view_message_timeout.ticking);
+                assert(self.get_view_message_timeout.ticking);
                 assert(self.pipeline == .cache);
 
                 if (self.log_view == view_new and self.view == view_new) {
@@ -10111,7 +10108,7 @@ pub fn ReplicaType(
                 self.exit_view_message_timeout.start();
                 self.view_change_status_timeout.stop();
                 self.join_view_message_timeout.stop();
-                self.request_view_message_timeout.stop();
+                self.get_view_message_timeout.stop();
                 self.repair_sync_timeout.start();
             }
 
@@ -10211,9 +10208,9 @@ pub fn ReplicaType(
             self.journal_repair_timeout.stop();
 
             if (self.primary_index(self.view) == self.replica) {
-                self.request_view_message_timeout.stop();
+                self.get_view_message_timeout.stop();
             } else {
-                self.request_view_message_timeout.start();
+                self.get_view_message_timeout.start();
             }
 
             // Do not reset quorum counters only on entering a view, assuming that the view will be
@@ -10559,9 +10556,9 @@ pub fn ReplicaType(
             // checkpoint header and the Journal.
             assert(self.op >= self.op_checkpoint());
 
-            // We just replaced our superblock, so many outstanding request_prepares/request_blocks
-            // are probably not useful, and we are likely to need to repair soon (and quickly) in
-            // order to start committing again.
+            // We just replaced our superblock, so many outstanding get_prepares/get_blocks are
+            // probably not useful, and we are likely to need to repair soon (and quickly) in order
+            // to start committing again.
             self.journal_repair_message_budget.refill();
             if (self.journal_repair_timeout.ticking) {
                 self.journal_repair_timeout.reset_with_jitter(&self.prng);
@@ -11108,14 +11105,14 @@ pub fn ReplicaType(
                     }
 
                     // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
-                    // (Using request_view_message_timeout).
+                    // (Using get_view_message_timeout).
                     log.debug("{}: jump_view: requesting View message", .{
                         self.log_prefix(),
                     });
                     self.send_header_to_replica(
                         self.primary_index(header.view),
-                        @bitCast(Header.RequestView{
-                            .command = .request_view,
+                        @bitCast(Header.GetView{
+                            .command = .get_view,
                             .cluster = self.cluster,
                             .replica = self.replica,
                             .view = header.view,
@@ -11206,7 +11203,7 @@ pub fn ReplicaType(
             self.flush_loopback_queue();
         }
 
-        fn send_request_blocks(self: *Replica, destination_replica_index: u8) void {
+        fn send_get_blocks(self: *Replica, destination_replica_index: u8) void {
             assert(self.grid_repair_timeout.ticking);
             assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
@@ -11221,7 +11218,7 @@ pub fn ReplicaType(
             if (self.grid.blocks_missing.faulty_blocks.count() == 0 and
                 self.grid.read_global_queue.count() == 0) return;
 
-            var message = self.message_bus.get_message(.request_blocks);
+            var message = self.message_bus.get_message(.get_blocks);
             defer self.message_bus.unref(message);
 
             const requests_buffer = std.mem.bytesAsSlice(
@@ -11300,7 +11297,7 @@ pub fn ReplicaType(
             for (requests_buffer[0..requests_count]) |*request| {
                 assert(!self.grid.free_set.is_free(request.block_address));
 
-                log.debug("{}: send_request_blocks: request address={} checksum={x:0>32}", .{
+                log.debug("{}: send_get_blocks: request address={} checksum={x:0>32}", .{
                     self.log_prefix(),
                     request.block_address,
                     request.block_checksum,
@@ -11308,7 +11305,7 @@ pub fn ReplicaType(
             }
 
             message.header.* = .{
-                .command = .request_blocks,
+                .command = .get_blocks,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
