@@ -276,15 +276,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     key_blocks.value_block_checksum,
                     key,
                 )) {
-                    .not_found => {},
-                    // Key present in the value block,
-                    // but it may be a tombstone.
+                    // Not found in this grid block.
+                    // Keep searching.
+                    .not_found => continue,
+                    // The value block is in cache.
                     .found => |value| {
-                        return if (Table.tombstone(value))
-                            .negative
-                        else
-                            .{ .positive = value };
+                        assert(!Table.tombstone(value));
+                        assert(Table.key_from_value(value) == key);
+
+                        return .{ .positive = value };
                     },
+                    // Found a tombstone indicating the key was deleted.
+                    .tombstone => return .negative,
                     // Value block was not found in the grid cache. We cannot rule out
                     // the existence of the key without I/O, and therefore bail out.
                     .block_not_in_cache => return .{ .possible = iterator.level - 1 },
@@ -301,7 +304,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// Returns:
         /// - .not_found if the grid block is in cache, but the key was not found.
         /// - .found if the grid block is in cache and contains the key, along with the
-        ///    associated value, which may be a tombstone.
+        ///    associated value.
+        /// - .tombstone if the grid block is in cache and contains a tombstone for the key.
         /// - .block_not_in_cache if the grid block that might contain the key is not in cache.
         fn cached_value_block_search(
             tree: *Tree,
@@ -311,6 +315,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         ) union(enum) {
             not_found,
             found: *const Value,
+            tombstone,
             block_not_in_cache,
         } {
             if (tree.grid.read_block_from_cache(
@@ -319,7 +324,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .{ .coherent = true },
             )) |value_block| {
                 if (Table.value_block_search(value_block, key)) |value| {
-                    return .{ .found = value };
+                    return if (Table.tombstone(value))
+                        .tombstone
+                    else
+                        .{ .found = value };
                 } else {
                     return .not_found;
                 }
