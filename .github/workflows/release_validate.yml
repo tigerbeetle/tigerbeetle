@@ -27,13 +27,6 @@ jobs:
           fetch-tags: true # Fetch full history for tidy.
           ref: main
 
-      # Run on the latest tag. The release branch is ahead of release tag over the weekend.
-      - run: |
-          TAG=$(gh release list --limit 1 | cut -f1)
-          git fetch origin $TAG && git switch --detach FETCH_HEAD
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ./zig/cache
