@@ -34,12 +34,12 @@ pub fn JournalCheckerType(comptime Replica: type) type {
                             // truncates the log, it cleans the in-memory journal without writing to
                             // the WAL.
                         } else {
-                            if (wal_header.checksum == 0) {
+                            if (wal_header.header_tag == 0) {
                                 log.err("{}: check: slot={} checksum=0", .{ replica_index, slot });
                                 wal_header_errors += 1;
                             } else {
-                                assert(wal_header.checksum == wal_prepare.header.checksum);
-                                assert(wal_header.checksum == journal_header.checksum);
+                                assert(wal_header.header_tag == wal_prepare.header.header_tag);
+                                assert(wal_header.header_tag == journal_header.header_tag);
                             }
                         }
                     }

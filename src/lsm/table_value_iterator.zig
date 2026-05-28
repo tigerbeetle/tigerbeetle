@@ -82,7 +82,7 @@ pub fn TableValueIteratorType(comptime Storage: type) type {
 
             const header = schema.header_from_block(block);
             assert(header.address == address);
-            assert(header.checksum == checksum.value);
+            assert(header.header_tag == checksum.value);
             assert(it.context.addresses.len == it.context.checksums.len);
             callback(it, block);
         }

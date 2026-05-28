@@ -1379,7 +1379,9 @@ const ViewChangeHeadersSlice = struct {
                     assert(header.view <= child.view);
                     assert(header.timestamp < child.timestamp);
                     if (header.op + 1 == child.op) {
-                        assert(header.checksum == child.parent);
+                        // Prepares will have a canonical on-disk representation that will be
+                        // used here.
+                        assert(header.header_tag == child.parent);
                     }
                 },
             }
@@ -1447,7 +1449,7 @@ const ViewChangeHeadersSlice = struct {
 test "Headers.ViewChangeSlice.view_for_op" {
     var headers_array = [_]Header.Prepare{
         std.mem.zeroInit(Header.Prepare, .{
-            .checksum = undefined,
+            .header_tag = undefined,
             .client = 6,
             .request = 7,
             .command = .prepare,
@@ -1460,7 +1462,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
         Headers.jv_blank(8),
         Headers.jv_blank(7),
         std.mem.zeroInit(Header.Prepare, .{
-            .checksum = undefined,
+            .header_tag = undefined,
             .client = 3,
             .request = 4,
             .command = .prepare,

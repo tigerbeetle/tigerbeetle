@@ -1703,7 +1703,7 @@ pub fn ReplicaType(
                         self.log_prefix(),
                         header_prepare.op,
                         header_prepare.view,
-                        header_prepare.checksum,
+                        header_prepare.header_tag,
                     });
                     return true;
                 },
@@ -1715,7 +1715,7 @@ pub fn ReplicaType(
                             "address={} checksum={x:0>32}", .{
                             self.log_prefix(),
                             header_block.address,
-                            header_block.checksum,
+                            header_block.header_tag,
                         });
                         return true;
                     }
@@ -2233,7 +2233,7 @@ pub fn ReplicaType(
                 self.op,
                 message.header.op,
                 message.header.parent,
-                message.header.checksum,
+                message.header.header_tag,
             });
             assert(message.header.op == self.op + 1);
             assert(message.header.op <= self.op_prepare_max() or
@@ -2281,7 +2281,7 @@ pub fn ReplicaType(
                 return;
             };
 
-            assert(prepare.message.header.checksum == message.header.prepare_checksum);
+            assert(prepare.message.header.header_tag == message.header.prepare_checksum);
             assert(prepare.message.header.op >= self.commit_max + 1);
             assert(prepare.message.header.op <= self.commit_max +
                 self.pipeline.queue.prepare_queue.count);
@@ -2321,7 +2321,7 @@ pub fn ReplicaType(
 
             log.debug("{}: on_prepare_ok: quorum received, prepare_checksum={x:0>32}", .{
                 self.log_prefix(),
-                prepare.message.header.checksum,
+                prepare.message.header.header_tag,
             });
 
             assert(self.prepare_timeout.ticking);
@@ -2353,7 +2353,7 @@ pub fn ReplicaType(
                 return;
             };
 
-            if (message.header.checksum != entry.header.checksum) {
+            if (message.header.header_tag != entry.header.header_tag) {
                 log.debug("{}: on_reply: ignoring, reply not in table (client={} request={})", .{
                     self.log_prefix(),
                     message.header.client,
@@ -2437,7 +2437,7 @@ pub fn ReplicaType(
 
             // We may not always have the latest commit entry but if we do our checksum must match:
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
-                if (commit_entry.checksum == message.header.commit_checksum) {
+                if (commit_entry.header_tag == message.header.commit_checksum) {
                     log.debug("{}: on_commit: checksum verified", .{self.log_prefix()});
                 } else if (self.valid_hash_chain_between(message.header.commit, self.op)) {
                     @panic("commit checksum verification failed");
@@ -3069,7 +3069,7 @@ pub fn ReplicaType(
 
                 assert(message.header.prepare_checksum == 0);
                 if (self.journal.header_with_op(message.header.prepare_op)) |header| {
-                    break :blk header.checksum;
+                    break :blk header.header_tag;
                 } else {
                     log.debug("{}: on_request_prepare: op={} missing", .{
                         self.log_prefix(),
@@ -3144,13 +3144,13 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(destination_replica != self.replica);
             assert(options.op == message.header.op);
-            assert(options.checksum == message.header.checksum);
+            assert(options.checksum == message.header.header_tag);
 
             log.debug("{}: on_request_prepare_read: " ++
                 "op={} checksum={x:0>32} sending to replica={}", .{
                 self.log_prefix(),
                 message.header.op,
-                message.header.checksum,
+                message.header.header_tag,
                 destination_replica,
             });
 
@@ -3226,12 +3226,12 @@ pub fn ReplicaType(
             };
             assert(entry.header.client == message.header.reply_client);
 
-            if (entry.header.checksum != message.header.reply_checksum) {
+            if (entry.header.header_tag != message.header.reply_checksum) {
                 log.debug("{}: on_request_reply: ignoring, reply not in table " ++
                     "(requested={x:0>32} stored={x:0>32})", .{
                     self.log_prefix(),
                     message.header.reply_checksum,
-                    entry.header.checksum,
+                    entry.header.header_tag,
                 });
                 return;
             }
@@ -3275,7 +3275,7 @@ pub fn ReplicaType(
                     self.log_prefix(),
                     destination_replica.?,
                     reply_header.op,
-                    reply_header.checksum,
+                    reply_header.header_tag,
                 });
 
                 if (self.client_sessions.get_slot_for_header(reply_header)) |slot| {
@@ -3285,14 +3285,14 @@ pub fn ReplicaType(
             };
 
             assert(reply.header.command == .reply);
-            assert(reply.header.checksum == reply_header.checksum);
+            assert(reply.header.header_tag == reply_header.header_tag);
 
             log.debug("{}: on_request_reply: sending reply to replica={} " ++
                 "(op={} checksum={x:0>32})", .{
                 self.log_prefix(),
                 destination_replica.?,
                 reply_header.op,
-                reply_header.checksum,
+                reply_header.header_tag,
             });
 
             self.send_message_to_replica(destination_replica.?, reply);
@@ -3445,7 +3445,7 @@ pub fn ReplicaType(
 
             assert(read.message.header.command == .block);
             assert(read.message.header.address == grid_read.address);
-            assert(read.message.header.checksum == grid_read.checksum);
+            assert(read.message.header.header_tag == grid_read.checksum);
             assert(read.message.header.size <= constants.block_size);
 
             self.send_message_to_replica(read.destination, read.message);
@@ -3465,7 +3465,7 @@ pub fn ReplicaType(
                     self.log_prefix(),
                     message.header.release,
                     message.header.address,
-                    message.header.checksum,
+                    message.header.header_tag,
                 });
                 return;
             }
@@ -3477,7 +3477,7 @@ pub fn ReplicaType(
                     "(address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.address,
-                    message.header.checksum,
+                    message.header.header_tag,
                 });
                 return;
             }
@@ -3501,20 +3501,20 @@ pub fn ReplicaType(
                 log.debug("{}: on_block: fulfilled address={} checksum={x:0>32} {s}", .{
                     self.log_prefix(),
                     message.header.address,
-                    message.header.checksum,
+                    message.header.header_tag,
                     @tagName(message.header.block_type),
                 });
             }
 
             const grid_repair =
-                self.grid.repair_block_waiting(message.header.address, message.header.checksum);
+                self.grid.repair_block_waiting(message.header.address, message.header.header_tag);
             if (grid_repair) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
                 log.debug("{}: on_block: repairing address={} checksum={x:0>32} {s}", .{
                     self.log_prefix(),
                     message.header.address,
-                    message.header.checksum,
+                    message.header.header_tag,
                     @tagName(message.header.block_type),
                 });
 
@@ -3530,7 +3530,7 @@ pub fn ReplicaType(
             if (grid_fulfill or grid_repair) {
                 self.grid_repair_message_budget.increment(.{
                     .address = message.header.address,
-                    .checksum = message.header.checksum,
+                    .checksum = message.header.header_tag,
                 });
 
                 if (self.grid_repair_message_budget.next_destination(&self.prng)) |replica_index| {
@@ -3541,7 +3541,7 @@ pub fn ReplicaType(
                     "(address={} checksum={x:0>32})", .{
                     self.log_prefix(),
                     message.header.address,
-                    message.header.checksum,
+                    message.header.header_tag,
                 });
             }
         }
@@ -4064,7 +4064,7 @@ pub fn ReplicaType(
                 assert(m.header.replica == message.header.replica);
                 assert(m.header.view == message.header.view);
                 assert(m.header.op == message.header.op);
-                assert(m.header.checksum_body == message.header.checksum_body);
+                assert(m.header.body_tag == message.header.body_tag);
 
                 // Replicas don't resend `join_view` messages to themselves.
                 assert(message.header.replica != self.replica);
@@ -4101,7 +4101,7 @@ pub fn ReplicaType(
                         message.header.replica,
                     });
                 } else {
-                    assert(m.header.checksum == message.header.checksum);
+                    assert(m.header.header_tag == message.header.header_tag);
                 }
 
                 log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
@@ -4633,12 +4633,12 @@ pub fn ReplicaType(
                     return .ready;
                 }
 
-                if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
+                if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.header_tag)) |prepare| {
                     log.debug("{}: commit_start_journal: " ++
                         "cached prepare op={} checksum={x:0>32}", .{
                         self.log_prefix(),
                         op,
-                        header.checksum,
+                        header.header_tag,
                     });
                     self.commit_prepare = prepare.ref();
                     return .ready;
@@ -4647,7 +4647,7 @@ pub fn ReplicaType(
                         commit_start_journal_callback,
                         .{
                             .op = op,
-                            .checksum = header.checksum,
+                            .checksum = header.header_tag,
                         },
                     );
                     return .pending;
@@ -5367,10 +5367,10 @@ pub fn ReplicaType(
                 // op_checkpoint's slot may have been overwritten in the WAL — but we can
                 // always use the VSRState to anchor the hash chain.
                 assert(prepare.header.parent ==
-                    self.superblock.working.vsr_state.checkpoint.header.checksum);
+                    self.superblock.working.vsr_state.checkpoint.header.header_tag);
             } else {
                 if (self.journal.header_with_op(self.commit_min)) |header| {
-                    assert(prepare.header.parent == header.checksum);
+                    assert(prepare.header.parent == header.header_tag);
                 } else if (self.journal.header_for_op(self.commit_min)) |header| {
                     // self.commit_min may have been replaced by an op from the next log wrap.
                     assert(header.op == self.commit_min + constants.journal_slot_count);
@@ -5383,7 +5383,7 @@ pub fn ReplicaType(
                 self.view,
                 self.primary_index(self.view) == self.replica,
                 prepare.header.op,
-                prepare.header.checksum,
+                prepare.header.header_tag,
                 prepare.header.operation.tag_name(StateMachine.Operation),
             });
 
@@ -5452,8 +5452,8 @@ pub fn ReplicaType(
 
                 assert(pipeline_prepare.message == prepare);
                 assert(pipeline_prepare.message.header.command == .prepare);
-                assert(pipeline_prepare.message.header.checksum ==
-                    self.commit_prepare.?.header.checksum);
+                assert(pipeline_prepare.message.header.header_tag ==
+                    self.commit_prepare.?.header.header_tag);
                 assert(pipeline_prepare.message.header.op == self.commit_min + 1);
                 assert(pipeline_prepare.message.header.op == self.commit_max + 1);
                 assert(pipeline_prepare.ok_quorum_received);
@@ -6398,7 +6398,7 @@ pub fn ReplicaType(
                     });
                     self.send_message_to_replica(self.primary_index(self.view), message);
                 } else if (entry.header.request == message.header.request) {
-                    if (entry.header.request_checksum == message.header.checksum) {
+                    if (entry.header.request_checksum == message.header.header_tag) {
                         log.debug("{}: on_request: replying to duplicate request", .{
                             self.log_prefix(),
                         });
@@ -6540,7 +6540,7 @@ pub fn ReplicaType(
                     log.debug("{}: on_request: ignoring older request", .{self.log_prefix()});
                     return true;
                 } else if (entry.header.request == message.header.request) {
-                    if (message.header.checksum == entry.header.request_checksum) {
+                    if (message.header.header_tag == entry.header.request_checksum) {
                         assert(entry.header.operation == message.header.operation);
 
                         log.debug("{}: on_request: replying to duplicate request", .{
@@ -6620,7 +6620,7 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view);
             assert(message.header.session == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
-            assert(message.header.checksum == entry.header.request_checksum);
+            assert(message.header.header_tag == entry.header.request_checksum);
             assert(message.header.request == entry.header.request);
 
             if (entry.header.size == @sizeOf(Header)) {
@@ -6675,7 +6675,7 @@ pub fn ReplicaType(
                 }
                 return;
             };
-            assert(reply.header.checksum == reply_header.checksum);
+            assert(reply.header.header_tag == reply_header.header_tag);
             assert(reply.header.size > @sizeOf(Header));
 
             log.debug("{}: on_request: repeat reply (client={} request={})", .{
@@ -6703,7 +6703,7 @@ pub fn ReplicaType(
                     .request => |pipeline_message_header| {
                         assert(pipeline_message_header.client == message.header.client);
 
-                        if (pipeline_message.header.checksum == message.header.checksum) {
+                        if (pipeline_message.header.header_tag == message.header.header_tag) {
                             assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already queued)", .{
                                 self.log_prefix(),
@@ -6714,7 +6714,7 @@ pub fn ReplicaType(
                     .prepare => |pipeline_message_header| {
                         assert(pipeline_message_header.client == message.header.client);
 
-                        if (pipeline_message_header.request_checksum == message.header.checksum) {
+                        if (pipeline_message_header.request_checksum == message.header.header_tag) {
                             assert(pipeline_message_header.op > self.commit_max);
                             assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already preparing)", .{
@@ -6929,7 +6929,7 @@ pub fn ReplicaType(
                 self.log_prefix(),
                 self.op,
                 header.op - 1,
-                self.journal.header_with_op(self.op).?.checksum,
+                self.journal.header_with_op(self.op).?.header_tag,
                 header.parent,
             });
 
@@ -7245,7 +7245,7 @@ pub fn ReplicaType(
             assert(a.command == .prepare);
             assert(b.command == .prepare);
             assert(a.cluster == b.cluster);
-            if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.parent) {
+            if (a.view == b.view and a.op + 1 == b.op and a.header_tag != b.parent) {
                 assert(a.valid_checksum());
                 assert(b.valid_checksum());
                 log.err("{}: panic_if_hash_chain_would_break: a: {}", .{
@@ -7273,7 +7273,7 @@ pub fn ReplicaType(
 
             log.debug("{}: primary_pipeline_prepare: request checksum={x:0>32} client={}", .{
                 self.log_prefix(),
-                request.message.header.checksum,
+                request.message.header.header_tag,
                 request.message.header.client,
             });
 
@@ -7359,16 +7359,16 @@ pub fn ReplicaType(
 
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
-                .checksum_body = request_header.checksum_body,
+                .body_tag = request_header.body_tag,
                 .cluster = self.cluster,
                 .size = request_header.size,
                 .view = self.view,
                 .release = request_header.release,
                 .command = .prepare,
                 .replica = self.replica,
-                .parent = latest_entry.checksum,
+                .parent = latest_entry.header_tag,
                 .client = request_header.client,
-                .request_checksum = request_header.checksum,
+                .request_checksum = request_header.header_tag,
                 .checkpoint_id = checkpoint_id,
                 .op = self.op + 1,
                 .commit = self.commit_max,
@@ -7398,14 +7398,14 @@ pub fn ReplicaType(
 
             log.debug("{}: primary_pipeline_prepare: prepare checksum={x:0>32} op={}", .{
                 self.log_prefix(),
-                message.header.checksum,
+                message.header.header_tag,
                 message.header.op,
             });
 
             if (self.primary_pipeline_pending()) |_| {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
                 const previous = self.pipeline.queue.prepare_queue.tail_ptr().?;
-                assert(previous.message.header.checksum == message.header.parent);
+                assert(previous.message.header.header_tag == message.header.parent);
                 assert(self.prepare_timeout.ticking);
                 assert(self.primary_abdicate_timeout.ticking);
             } else {
@@ -7699,7 +7699,7 @@ pub fn ReplicaType(
                         .replica = self.replica,
                         .reply_client = entry.header.client,
                         .reply_op = entry.header.op,
-                        .reply_checksum = entry.header.checksum,
+                        .reply_checksum = entry.header.header_tag,
                     }),
                 );
             }
@@ -7787,7 +7787,7 @@ pub fn ReplicaType(
                 log.debug("{}: repair_header: op={} checksum={x:0>32} view={} (newer view)", .{
                     self.log_prefix(),
                     header.op,
-                    header.checksum,
+                    header.header_tag,
                     header.view,
                 });
                 return false;
@@ -7798,7 +7798,7 @@ pub fn ReplicaType(
                     "(advances hash chain head)", .{
                     self.log_prefix(),
                     header.op,
-                    header.checksum,
+                    header.header_tag,
                 });
                 return false;
             } else if (header.op == self.op and !self.journal.has_header(header)) {
@@ -7807,7 +7807,7 @@ pub fn ReplicaType(
                     "(changes hash chain head)", .{
                     self.log_prefix(),
                     header.op,
-                    header.checksum,
+                    header.header_tag,
                 });
                 return false;
             }
@@ -7816,7 +7816,7 @@ pub fn ReplicaType(
                 // Slots too far back belong to the next wrap of the log.
                 log.debug(
                     "{}: repair_header: op={} checksum={x:0>32} (precedes op_repair_min={})",
-                    .{ self.log_prefix(), header.op, header.checksum, self.op_repair_min() },
+                    .{ self.log_prefix(), header.op, header.header_tag, self.op_repair_min() },
                 );
                 return false;
             }
@@ -7826,14 +7826,14 @@ pub fn ReplicaType(
                     log.debug("{}: repair_header: op={} checksum={x:0>32} (checksum clean)", .{
                         self.log_prefix(),
                         header.op,
-                        header.checksum,
+                        header.header_tag,
                     });
                     return false;
                 } else {
                     log.debug("{}: repair_header: op={} checksum={x:0>32} (checksum dirty)", .{
                         self.log_prefix(),
                         header.op,
-                        header.checksum,
+                        header.header_tag,
                     });
                 }
             } else if (self.journal.header_for_prepare(header)) |existing| {
@@ -7846,14 +7846,14 @@ pub fn ReplicaType(
                             "(same view, newer op)", .{
                             self.log_prefix(),
                             header.op,
-                            header.checksum,
+                            header.header_tag,
                         });
                     } else {
                         log.debug("{}: repair_header: op={} checksum={x:0>32} " ++
                             "(same view, older op)", .{
                             self.log_prefix(),
                             header.op,
-                            header.checksum,
+                            header.header_tag,
                         });
                     }
                 } else {
@@ -7862,19 +7862,19 @@ pub fn ReplicaType(
                     log.debug("{}: repair_header: op={} checksum={x:0>32} (different view)", .{
                         self.log_prefix(),
                         header.op,
-                        header.checksum,
+                        header.header_tag,
                     });
                 }
             } else {
                 log.debug("{}: repair_header: op={} checksum={x:0>32} (gap)", .{
                     self.log_prefix(),
                     header.op,
-                    header.checksum,
+                    header.header_tag,
                 });
             }
 
             assert(header.op < self.op or
-                self.journal.header_with_op(self.op).?.checksum == header.checksum);
+                self.journal.header_with_op(self.op).?.header_tag == header.header_tag);
 
             if (self.journal.header_with_op(self.op).?.view == header.view) {
                 // Fast path for cases where the header being replaced is from the same view
@@ -7889,7 +7889,7 @@ pub fn ReplicaType(
                     "(disconnected from hash chain)", .{
                     self.log_prefix(),
                     header.op,
-                    header.checksum,
+                    header.header_tag,
                 });
                 return false;
             }
@@ -7930,7 +7930,7 @@ pub fn ReplicaType(
 
             while (entry.op < self.op) {
                 if (self.journal.next_entry(entry)) |next| {
-                    if (entry.checksum == next.parent) {
+                    if (entry.header_tag == next.parent) {
                         assert(entry.view <= next.view);
                         assert(entry.op + 1 == next.op);
                         entry = next;
@@ -7943,7 +7943,7 @@ pub fn ReplicaType(
             }
 
             assert(entry.op == self.op);
-            assert(entry.checksum == self.journal.header_with_op(self.op).?.checksum);
+            assert(entry.header_tag == self.journal.header_with_op(self.op).?.header_tag);
             return true;
         }
 
@@ -8029,22 +8029,22 @@ pub fn ReplicaType(
                 .pipeline_request_queue_limit = self.pipeline_request_queue_limit,
             };
             var op = self.commit_max + 1;
-            var parent = self.journal.header_with_op(self.commit_max).?.checksum;
+            var parent = self.journal.header_with_op(self.commit_max).?.header_tag;
             while (op <= self.op) : (op += 1) {
                 const journal_header = self.journal.header_with_op(op).?;
                 assert(journal_header.op == op);
                 assert(journal_header.parent == parent);
 
                 const prepare =
-                    self.pipeline.cache.prepare_by_op_and_checksum(op, journal_header.checksum).?;
+                    self.pipeline.cache.prepare_by_op_and_checksum(op, journal_header.header_tag).?;
                 assert(prepare.header.op == op);
                 assert(prepare.header.op <= self.op);
-                assert(prepare.header.checksum == journal_header.checksum);
+                assert(prepare.header.header_tag == journal_header.header_tag);
                 assert(prepare.header.parent == parent);
                 assert(self.journal.has_header(prepare.header));
 
                 pipeline_queue.push_prepare(prepare);
-                parent = prepare.header.checksum;
+                parent = prepare.header.header_tag;
             }
             assert(self.commit_max + pipeline_queue.prepare_queue.count == self.op);
 
@@ -8082,7 +8082,7 @@ pub fn ReplicaType(
             assert(self.pipeline_repairing);
 
             const op = self.primary_repair_pipeline_op().?;
-            const op_checksum = self.journal.header_with_op(op).?.checksum;
+            const op_checksum = self.journal.header_with_op(op).?.header_tag;
             log.debug("{}: primary_repair_pipeline_read: op={} checksum={x:0>32}", .{
                 self.log_prefix(),
                 op,
@@ -8170,7 +8170,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
+            if (prepare.?.header.header_tag != self.journal.header_with_op(op).?.header_tag) {
                 log.debug("{}: repair_pipeline_read_callback: checksum changed", .{
                     self.log_prefix(),
                 });
@@ -8180,7 +8180,7 @@ pub fn ReplicaType(
             log.debug("{}: repair_pipeline_read_callback: op={} checksum={x:0>32}", .{
                 self.log_prefix(),
                 prepare.?.header.op,
-                prepare.?.header.checksum,
+                prepare.?.header.header_tag,
             });
 
             const prepare_evicted = self.pipeline.cache.insert(prepare.?.ref());
@@ -8293,7 +8293,7 @@ pub fn ReplicaType(
             const checksum = if (slot_with_op_maybe == null)
                 0
             else
-                self.journal.header_with_op(op).?.checksum;
+                self.journal.header_with_op(op).?.header_tag;
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
@@ -8329,7 +8329,7 @@ pub fn ReplicaType(
                 // Also, messages in the pipeline are never corrupt.
                 if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
                     assert(prepare.header.op == op);
-                    assert(prepare.header.checksum == checksum);
+                    assert(prepare.header.header_tag == checksum);
 
                     if (self.solo()) {
                         // Solo replicas don't change views and rewrite prepares.
@@ -8487,7 +8487,7 @@ pub fn ReplicaType(
 
             if (header.op == self.op_checkpoint() + 1) {
                 assert(
-                    header.parent == self.superblock.working.vsr_state.checkpoint.header.checksum,
+                    header.parent == self.superblock.working.vsr_state.checkpoint.header.header_tag,
                 );
             }
 
@@ -8646,7 +8646,7 @@ pub fn ReplicaType(
                 log.debug("{}: send_prepare_ok: op={} checksum={x:0>32}", .{
                     self.log_prefix(),
                     header.op,
-                    header.checksum,
+                    header.header_tag,
                 });
 
                 if (self.standby()) return;
@@ -8674,7 +8674,7 @@ pub fn ReplicaType(
                         .checkpoint_id = checkpoint_id,
                         .parent = header.parent,
                         .client = header.client,
-                        .prepare_checksum = header.checksum,
+                        .prepare_checksum = header.header_tag,
                         .request = header.request,
                         .cluster = self.cluster,
                         .replica = self.replica,
@@ -8799,18 +8799,18 @@ pub fn ReplicaType(
                     nacks.set(i);
                 }
 
-                // We should only access header.checksum if the JV header is valid.
+                // We should only access header.header_tag if the JV header is valid.
                 if (vsr.Headers.jv_header_type(header) == .valid) {
                     // Nack bit case 2: We have this header in memory, but haven't persisted it to
                     // disk yet.
-                    if (journal_header != null and journal_header.?.checksum == header.checksum and
+                    if (journal_header != null and journal_header.?.header_tag == header.header_tag and
                         dirty and !faulty)
                     {
                         nacks.set(i);
                     }
                     // Nack bit case 3: We have a _different_ prepare — safe to nack even if it is
                     // faulty.
-                    if (journal_header != null and journal_header.?.checksum != header.checksum) {
+                    if (journal_header != null and journal_header.?.header_tag != header.header_tag) {
                         nacks.set(i);
                     }
 
@@ -8818,15 +8818,15 @@ pub fn ReplicaType(
                     // in memory. These conditions mirror logic in `on_request_prepare` and imply
                     // that we can help the new primary to repair this prepare.
                     if ((self.journal.prepare_inhabited[slot.index] and
-                        self.journal.prepare_checksums[slot.index] == header.checksum) or
+                        self.journal.prepare_checksums[slot.index] == header.header_tag) or
                         self.journal.writing(header) == .exact or
                         self.pipeline_prepare_by_op_and_checksum(
                             header.op,
-                            header.checksum,
+                            header.header_tag,
                         ) != null)
                     {
                         if (journal_header != null) {
-                            assert(journal_header.?.checksum == header.checksum);
+                            assert(journal_header.?.header_tag == header.header_tag);
                         }
                         maybe(nacks.is_set(i));
                         present.set(i);
@@ -9765,7 +9765,7 @@ pub fn ReplicaType(
                                 self.log_prefix(),
                                 message.header.replica,
                                 header.op,
-                                header.checksum,
+                                header.header_tag,
                             },
                         );
                         self.replace_header(header);
@@ -9810,7 +9810,7 @@ pub fn ReplicaType(
                         context,
                         jv.header.replica,
                         header.op,
-                        header.checksum,
+                        header.header_tag,
                         jv_nacks.is_set(i),
                         jv_present.is_set(i),
                         @tagName(vsr.Headers.jv_header_type(header)),
@@ -9852,7 +9852,7 @@ pub fn ReplicaType(
                         "(op={} checksum={x:0>32} parent={x:0>32})", .{
                         self.log_prefix(),
                         prepare.message.header.op,
-                        prepare.message.header.checksum,
+                        prepare.message.header.header_tag,
                         prepare.message.header.parent,
                     });
                 }
@@ -10289,7 +10289,7 @@ pub fn ReplicaType(
                 if (header_journal != null and header_view != null) {
                     assert(header_journal.?.op == header_view.?.op);
                     assert(header_journal.?.view == header_view.?.view);
-                    assert(header_journal.?.checksum == header_view.?.checksum);
+                    assert(header_journal.?.header_tag == header_view.?.header_tag);
                 }
 
                 if (header_journal == null and header_view == null) {
@@ -10512,10 +10512,10 @@ pub fn ReplicaType(
 
             const checkpoint_state: *const vsr.CheckpointState = &self.syncing.updating_checkpoint;
 
-            assert(self.superblock.working.vsr_state.checkpoint.header.checksum ==
-                checkpoint_state.header.checksum);
-            assert(self.superblock.staging.vsr_state.checkpoint.header.checksum ==
-                checkpoint_state.header.checksum);
+            assert(self.superblock.working.vsr_state.checkpoint.header.header_tag ==
+                checkpoint_state.header.header_tag);
+            assert(self.superblock.staging.vsr_state.checkpoint.header.header_tag ==
+                checkpoint_state.header.header_tag);
             assert(stdx.equal_bytes(
                 vsr.CheckpointState,
                 &self.superblock.working.vsr_state.checkpoint,
@@ -10996,7 +10996,9 @@ pub fn ReplicaType(
 
                 if (self.journal.header_with_op(op)) |a| {
                     assert(a.op + 1 == b.op);
-                    if (a.checksum == b.parent) {
+                    // NOTE: We are not going to do zero-copy from client -> replica to -> replica,
+                    // hence, we can just use the header_tag here.
+                    if (a.header_tag == b.parent) {
                         assert(ascending_viewstamps(a, b));
                         b = a;
                     } else {
@@ -11024,7 +11026,7 @@ pub fn ReplicaType(
             if (op_min <= self.op_checkpoint() + 1 and op_max > self.op_checkpoint()) {
                 assert(self.superblock.working.vsr_state.checkpoint.header.op ==
                     self.op_checkpoint());
-                assert(self.superblock.working.vsr_state.checkpoint.header.checksum ==
+                assert(self.superblock.working.vsr_state.checkpoint.header.header_tag ==
                     self.journal.header_with_op(self.op_checkpoint() + 1).?.parent);
             }
 
@@ -11170,7 +11172,7 @@ pub fn ReplicaType(
                 log.debug("{}: write_prepare: ignoring op={} checksum={x:0>32} (header changed)", .{
                     self.log_prefix(),
                     message.header.op,
-                    message.header.checksum,
+                    message.header.header_tag,
                 });
                 return false;
             }
@@ -11183,7 +11185,7 @@ pub fn ReplicaType(
                         .{
                             self.log_prefix(),
                             message.header.op,
-                            message.header.checksum,
+                            message.header.header_tag,
                             @tagName(reason),
                         },
                     );
@@ -11341,9 +11343,9 @@ pub fn ReplicaType(
 
             const latest_committed_entry = checksum: {
                 if (self.commit_max == self.superblock.working.vsr_state.checkpoint.header.op) {
-                    break :checksum self.superblock.working.vsr_state.checkpoint.header.checksum;
+                    break :checksum self.superblock.working.vsr_state.checkpoint.header.header_tag;
                 } else {
-                    break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
+                    break :checksum self.journal.header_with_op(self.commit_max).?.header_tag;
                 }
             };
 
@@ -11612,7 +11614,7 @@ const JVQuorum = struct {
                     if (vsr.Headers.jv_header_type(header_a) == .valid and
                         vsr.Headers.jv_header_type(header_b) == .valid)
                     {
-                        assert(header_a.checksum == header_b.checksum);
+                        assert(header_a.header_tag == header_b.header_tag);
                     }
                 }
             }
@@ -11863,7 +11865,7 @@ const JVQuorum = struct {
 
                 if (vsr.Headers.jv_header_type(header) == .valid and
                     header_present.is_set(header_index) and
-                    header_canonical != null and header_canonical.?.checksum == header.checksum)
+                    header_canonical != null and header_canonical.?.header_tag == header.header_tag)
                 {
                     copies += 1;
                 }
@@ -11873,7 +11875,7 @@ const JVQuorum = struct {
                     nacks += 1;
                 } else if (vsr.Headers.jv_header_type(header) == .valid) {
                     if (header_canonical != null and
-                        header_canonical.?.checksum != header.checksum)
+                        header_canonical.?.header_tag != header.header_tag)
                     {
                         assert(jv.header.log_view < log_view_canonical);
                         // The op is nacked implicitly, because the replica has a different header.
@@ -11953,7 +11955,7 @@ const JVQuorum = struct {
                 const jv_header = &jv_headers.slice[jv_header_index];
                 if (vsr.Headers.jv_header_type(jv_header) == .valid) {
                     if (header) |h| {
-                        assert(h.checksum == jv_header.checksum);
+                        assert(h.header_tag == jv_header.header_tag);
                     } else {
                         header = jv_header;
                     }
@@ -11961,7 +11963,7 @@ const JVQuorum = struct {
             }
 
             if (iterator.child_parent) |parent| {
-                assert(header.?.checksum == parent);
+                assert(header.?.header_tag == parent);
             }
 
             iterator.child_op = op;
@@ -12140,7 +12142,7 @@ const PipelineQueue = struct {
                     assert(!upgrade);
                 }
 
-                parent = prepare.message.header.checksum;
+                parent = prepare.message.header.header_tag;
                 op += 1;
             }
         }
@@ -12187,7 +12189,7 @@ const PipelineQueue = struct {
         const prepare = pipeline.prepare_queue.get_ptr(op - head_op).?;
         assert(prepare.message.header.op == op);
 
-        if (checksum == prepare.message.header.checksum) return prepare;
+        if (checksum == prepare.message.header.header_tag) return prepare;
         return null;
     }
 
@@ -12290,7 +12292,7 @@ const PipelineQueue = struct {
         assert(message.header.operation != .reserved);
         if (pipeline.prepare_queue.tail()) |tail| {
             assert(message.header.op == tail.message.header.op + 1);
-            assert(message.header.parent == tail.message.header.checksum);
+            assert(message.header.parent == tail.message.header.header_tag);
             assert(message.header.view >= tail.message.header.view);
         } else {
             assert(pipeline.request_queue.empty());
@@ -12363,7 +12365,7 @@ const PipelineCache = struct {
 
         const slot = header.op % pipeline.capacity;
         const prepare = pipeline.prepares[slot] orelse return false;
-        return prepare.header.op == header.op and prepare.header.checksum == header.checksum;
+        return prepare.header.op == header.op and prepare.header.header_tag == header.header_tag;
     }
 
     /// Unlike the PipelineQueue, cached messages may not belong to the current view.
@@ -12376,7 +12378,7 @@ const PipelineCache = struct {
         const slot = op % pipeline.capacity;
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
-        if (prepare.header.checksum != checksum) return null;
+        if (prepare.header.header_tag != checksum) return null;
         return prepare;
     }
 

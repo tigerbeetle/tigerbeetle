@@ -342,7 +342,7 @@ fn check_wal(integrity: *Integrity) !u64 {
 
         assert(wal_header.valid_checksum());
         assert(wal_prepare_body_valid);
-        assert(wal_header.checksum == wal_prepare.checksum);
+        assert(wal_header.header_tag == wal_prepare.header_tag);
         checked_bytes += bytes_read;
     }
 
@@ -371,7 +371,8 @@ fn check_client_replies(integrity: *Integrity) !u64 {
             integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
         );
 
-        const reply_empty = reply.checksum == 0 and reply.checksum_body == 0;
+        // TODO: Replace physical check with logical check via SuperBlock.
+        const reply_empty = reply.header_tag == 0 and reply.body_tag == 0;
         const reply_valid = reply.valid_checksum() and
             reply.valid_checksum_body(integrity.buffer_prepare[@sizeOf(vsr.Header)..reply.size]);
         assert(reply_empty or reply_valid);

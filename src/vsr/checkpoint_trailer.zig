@@ -437,7 +437,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             header.set_checksum();
             schema.TrailerNode.assert_valid_header(block.*);
 
-            trailer.block_checksums[block_index] = header.checksum;
+            trailer.block_checksums[block_index] = header.header_tag;
             // create_block swaps out the `blocks` BlockPtr, so our reference to it will be invalid.
             trailer.block_bodies[block_index] = undefined;
             trailer.grid.?.create_block(checkpoint_write_next_callback, &trailer.write, block);

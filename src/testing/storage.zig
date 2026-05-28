@@ -541,7 +541,7 @@ pub const Storage = struct {
                 // prepare.
                 const wal_header = &storage.wal_headers()[header_slot];
                 const wal_prepare = &storage.wal_prepares()[header_slot];
-                if (wal_header.checksum != wal_prepare.header.checksum) {
+                if (wal_header.header_tag != wal_prepare.header.header_tag) {
                     return .corrupt;
                 }
 

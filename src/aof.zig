@@ -76,7 +76,7 @@ pub const AOFEntry = extern struct {
         log.debug("from_message: parent {x:0>32} (should == {x:0>32}) our checksum {x:0>32}", .{
             message.header.parent,
             last_checksum.* orelse 0,
-            message.header.checksum,
+            message.header.header_tag,
         });
         if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
             log.info("from_message: parent {x:0>32}, expected {x:0>32} instead", .{
@@ -84,7 +84,7 @@ pub const AOFEntry = extern struct {
                 last_checksum.* orelse 0,
             });
         }
-        last_checksum.* = message.header.checksum;
+        last_checksum.* = message.header.header_tag;
 
         // The cluster identifier is in the VSR header so we don't need to store it explicitly.
         // The replica that this was logged on will be the replica with this file. If uploaded to
@@ -305,17 +305,17 @@ pub fn AOFType(comptime IO: type) type {
                     stdx.maybe(validation_checksums.get(header.parent) == null);
                 }
 
-                try validation_checksums.put(header.checksum, {});
+                try validation_checksums.put(header.header_tag, {});
 
                 last_entry = entry;
             }
 
             if (last_checksum) |checksum| {
-                if (last_entry.?.header().checksum != checksum) {
+                if (last_entry.?.header().header_tag != checksum) {
                     return error.ChecksumMismatch;
                 }
                 log.info("validated all aof entries. last entry checksum {x:0>32} matches " ++
-                    " supplied {x:0>32}", .{ last_entry.?.header().checksum, checksum });
+                    " supplied {x:0>32}", .{ last_entry.?.header().header_tag, checksum });
             } else {
                 log.info("validated present aof entries.", .{});
             }
@@ -546,7 +546,7 @@ pub fn AOFType(comptime IO: type) type {
                     }
                 }
 
-                it.last_checksum = header.checksum;
+                it.last_checksum = header.header_tag;
 
                 it.offset += target.size_disk();
 
@@ -687,7 +687,7 @@ pub fn AOFType(comptime IO: type) type {
                     }
 
                     const header = entry.?.header();
-                    const checksum = header.checksum;
+                    const checksum = header.header_tag;
                     const parent = header.parent;
 
                     if (current_parent == null) {
@@ -772,10 +772,10 @@ pub fn AOFType(comptime IO: type) type {
             while (try it.next(target)) |entry| {
                 const header = entry.header();
                 if (first_checksum == null) {
-                    first_checksum = header.checksum;
+                    first_checksum = header.header_tag;
                 }
 
-                last_checksum = header.checksum;
+                last_checksum = header.header_tag;
             }
 
             try stdout.print(
@@ -982,7 +982,7 @@ pub fn main() !void {
 
                 // The body isn't the only important information, there's also the operation
                 // and the timestamp which are in the header. Include those in our hash too.
-                blake3.update(std.mem.asBytes(&header.checksum_body));
+                blake3.update(std.mem.asBytes(&header.body_tag));
                 blake3.update(std.mem.asBytes(&header.timestamp));
                 blake3.update(std.mem.asBytes(&header.operation));
             }

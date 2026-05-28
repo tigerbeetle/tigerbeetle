@@ -164,7 +164,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             maybe(write_latest == null);
 
             if (write_latest == null or
-                write_latest.?.message.header.checksum != session.header.checksum)
+                write_latest.?.message.header.header_tag != session.header.header_tag)
             {
                 // We are writing a reply, but that's a wrong reply according to `client_sessions`.
                 // This happens after state sync, where we update `client_sessions` without
@@ -197,7 +197,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 log.debug("{}: read_reply: busy (client={} reply={x:0>32})", .{
                     client_replies.replica,
                     session.header.client,
-                    session.header.checksum,
+                    session.header.header_tag,
                 });
 
                 return error.Busy;
@@ -206,7 +206,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             log.debug("{}: read_reply: start (client={} reply={x:0>32})", .{
                 client_replies.replica,
                 session.header.client,
-                session.header.checksum,
+                session.header.header_tag,
             });
 
             const message = client_replies.message_pool.get_message(.reply);
@@ -246,7 +246,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 log.debug("{}: read_reply: already resolved (client={} reply={x:0>32})", .{
                     client_replies.replica,
                     header.client,
-                    header.checksum,
+                    header.header_tag,
                 });
                 return;
             };
@@ -257,7 +257,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 log.warn("{}: read_reply: corrupt reply (client={} reply={x:0>32})", .{
                     client_replies.replica,
                     header.client,
-                    header.checksum,
+                    header.header_tag,
                 });
 
                 callback(client_replies, &header, null, destination_replica);
@@ -268,13 +268,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // - The read targets an older reply.
             // - The read targets a newer reply (that we haven't seen/written yet).
             // - The read targets a reply that we wrote, but was misdirected.
-            if (message.header.checksum != header.checksum) {
+            if (message.header.header_tag != header.header_tag) {
                 log.warn("{}: read_reply: unexpected header " ++
                     "(client={} reply={x:0>32} found={x:0>32})", .{
                     client_replies.replica,
                     header.client,
-                    header.checksum,
-                    message.header.checksum,
+                    header.header_tag,
+                    message.header.header_tag,
                 });
 
                 callback(client_replies, &header, null, destination_replica);
@@ -287,7 +287,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             log.debug("{}: read_reply: done (client={} reply={x:0>32})", .{
                 client_replies.replica,
                 header.client,
-                header.checksum,
+                header.header_tag,
             });
 
             callback(client_replies, &header, message, destination_replica);
@@ -361,7 +361,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             var reads = client_replies.reads.iterate();
             while (reads.next()) |read| {
                 if (read.callback == null) continue; // Already resolved.
-                if (read.header.checksum == message.header.checksum) {
+                if (read.header.header_tag == message.header.header_tag) {
                     defer read.callback = null;
 
                     read.callback.?(
@@ -438,7 +438,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             var reads = client_replies.reads.iterate();
             while (reads.next()) |read| {
                 if (read.slot.index == write.slot.index) {
-                    if (read.header.checksum == message.header.checksum) {
+                    if (read.header.header_tag == message.header.header_tag) {
                         assert(read.callback == null);
                     } else {
                         // A read and a write can race on the slot if:

@@ -551,7 +551,7 @@ pub fn ClientType(
             }
 
             assert(reply.header.request == inflight.message.header.request);
-            assert(reply.header.request_checksum == inflight.message.header.checksum);
+            assert(reply.header.request_checksum == inflight.message.header.header_tag);
             const inflight_vsr_operation = inflight.message.header.operation;
             const inflight_request = inflight.message.header.request;
 
@@ -655,13 +655,13 @@ pub fn ClientType(
             const message = self.request_inflight.?.message;
             assert(message.header.command == .request);
             assert(message.header.request < self.request_number);
-            assert(message.header.checksum == self.parent);
+            assert(message.header.header_tag == self.parent);
             assert(message.header.session == self.session);
 
             log.debug("{}: on_request_timeout: resending request={} checksum={x:0>32}", .{
                 self.id,
                 message.header.request,
-                message.header.checksum,
+                message.header.header_tag,
             });
 
             self.send_request_with_hedging(message);
@@ -762,12 +762,12 @@ pub fn ClientType(
             message.header.set_checksum();
 
             // The checksum of this request becomes the parent of our next reply:
-            self.parent = message.header.checksum;
+            self.parent = message.header.header_tag;
 
             log.debug("{}: send_request_for_the_first_time: request={} checksum={x:0>32}", .{
                 self.id,
                 message.header.request,
-                message.header.checksum,
+                message.header.header_tag,
             });
 
             assert(!self.request_timeout.ticking);
