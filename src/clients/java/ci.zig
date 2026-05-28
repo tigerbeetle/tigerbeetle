@@ -40,8 +40,16 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
+}) !void {
+    _ = shell;
+    _ = gpa;
+    _ = options;
+}
+
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
@@ -98,7 +106,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         \\    </dependency>
         \\  </dependencies>
         \\</project>
-    , .{options.version}) });
+    , .{options.release}) });
 
     try Shell.copy_path(
         shell.project_root,
@@ -121,7 +129,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
             break;
         } else |_| {
             log.warn("waiting for 5 minutes for the {s} version to appear in maven cental", .{
-                options.version,
+                options.release,
             });
             std.time.sleep(5 * std.time.ns_per_min);
         }
