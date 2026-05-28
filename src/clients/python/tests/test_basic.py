@@ -51,6 +51,22 @@ account_b = tb.Account(
     timestamp=0
 )
 
+def test_range_check_u128_cannot_exceed(client):
+    account = tb.Account(**{ **asdict(account_a), "id": 9999999999999999999999999999999999999999 })
+
+    try:
+        error = client.create_accounts([account])
+    except tb.IntegerOverflowError:
+        pass
+
+def test_range_check_u128_cannot_be_negative(client):
+    account = tb.Account(**{ **asdict(account_a), "id": -1 })
+
+    try:
+        error = client.create_accounts([account])
+    except tb.IntegerOverflowError:
+        pass
+
 def test_range_check_code_on_account_to_be_u16(client):
     account = tb.Account(**{ **asdict(account_a), "id": 0, "code": 65535 + 1 })
 
