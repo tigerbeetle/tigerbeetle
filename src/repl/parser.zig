@@ -1099,78 +1099,22 @@ test "parser.zig: Parser odd but correct formatting" {
         // Space between key-value pair and equality
         .{
             .string = "create_transfers id = 1",
-            .result = tb.Transfer{
-                .id = 1,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{.id = 1 }),
         },
         // Space only before equals sign
         .{
             .string = "create_transfers id =1",
-            .result = tb.Transfer{
-                .id = 1,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
         },
         // Whitespace before command
         .{
             .string = "  \t  \n  create_transfers id=1",
-            .result = tb.Transfer{
-                .id = 1,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
         },
         // Trailing semicolon
         .{
             .string = "create_transfers id=1;",
-            .result = tb.Transfer{
-                .id = 1,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
         },
         // Spaces everywhere
         .{
@@ -1185,21 +1129,12 @@ test "parser.zig: Parser odd but correct formatting" {
             \\
             \\
             ,
-            .result = tb.Transfer{
+            .result = std.mem.zeroInit(tb.Transfer, .{
                 .id = 1,
                 .debit_account_id = 1,
                 .credit_account_id = 10,
-                .amount = 0,
-                .pending_id = 0,
                 .user_data_128 = 12,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            }),
         },
     };
 
