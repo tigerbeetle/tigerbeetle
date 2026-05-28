@@ -920,8 +920,9 @@ pub fn generate_fuzz_ops(
         .compact = if (prng.boolean()) 0 else 1,
         // Always do puts.
         .put = constants.lsm_compaction_ops * 2,
-        // Do some removes.
-        .remove = constants.lsm_compaction_ops / 4,
+        // Sometimes do many removes, so we can stress tombstones still in cache.
+        // Sometimes do it rarely, so we can reach tombstones in deeper levels.
+        .remove = if (prng.boolean()) 1 else constants.lsm_compaction_ops,
         // Maybe do some gets.
         .get_by_id = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         .get_by_timestamp = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
