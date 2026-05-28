@@ -1561,10 +1561,7 @@ pub fn ReplicaType(
                 .{ &self.exit_view_message_timeout, on_exit_view_message_timeout },
                 .{ &self.view_change_status_timeout, on_view_change_status_timeout },
                 .{ &self.join_view_message_timeout, on_join_view_message_timeout },
-                .{
-                    &self.get_view_message_timeout,
-                    on_get_view_message_timeout,
-                },
+                .{ &self.get_view_message_timeout, on_get_view_message_timeout },
                 .{ &self.journal_repair_timeout, on_journal_repair_timeout },
 
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },

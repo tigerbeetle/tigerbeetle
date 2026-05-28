@@ -212,7 +212,7 @@ During repair, missing/damaged prepares are requested & repaired chronologically
 
 In response to a `get_prepare`:
 
-- Reply with the `command=prepare` message with the requested prepare, if available and valid.
+- Respond with the `command=prepare` message with the requested prepare, if available and valid.
 - Otherwise do not reply. (e.g. the corresponding slot in the WAL is corrupt)
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
@@ -228,7 +228,7 @@ During repair, corrupt client replies are requested & repaired.
 
 In response to a `get_reply`:
 
-- Reply with the `command=reply` message (the requested reply), if available and valid.
+- Respond with the `command=reply` message (the requested reply), if available and valid.
 - Otherwise do not reply.
 
 ### Protocol: Client
