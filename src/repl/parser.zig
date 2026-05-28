@@ -1094,27 +1094,27 @@ test "parser.zig: Parser multiple accounts successfully" {
 test "parser.zig: Parser odd but correct formatting" {
     const vectors = [_]struct {
         string: []const u8 = "",
-        result: tb.Transfer,
+        result: []const tb.Transfer,
     }{
         // Space between key-value pair and equality
         .{
             .string = "create_transfers id = 1",
-            .result = std.mem.zeroInit(tb.Transfer, .{.id = 1 }),
+            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
         },
         // Space only before equals sign
         .{
             .string = "create_transfers id =1",
-            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
+            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
         },
         // Whitespace before command
         .{
             .string = "  \t  \n  create_transfers id=1",
-            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
+            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
         },
         // Trailing semicolon
         .{
             .string = "create_transfers id=1;",
-            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
+            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
         },
         // Spaces everywhere
         .{
@@ -1129,12 +1129,14 @@ test "parser.zig: Parser odd but correct formatting" {
             \\
             \\
             ,
-            .result = std.mem.zeroInit(tb.Transfer, .{
-                .id = 1,
-                .debit_account_id = 1,
-                .credit_account_id = 10,
-                .user_data_128 = 12,
-            }),
+            .result = &.{
+                std.mem.zeroInit(tb.Transfer, .{
+                    .id = 1,
+                    .debit_account_id = 1,
+                    .credit_account_id = 10,
+                    .user_data_128 = 12,
+                }),
+            },
         },
     };
 
@@ -1160,7 +1162,7 @@ test "parser.zig: Parser odd but correct formatting" {
         try std.testing.expectEqualSlices(
             u8,
             statement.arguments.items,
-            std.mem.asBytes(&vector.result),
+            std.mem.sliceAsBytes(vector.result),
         );
     }
 }
