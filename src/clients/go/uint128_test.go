@@ -101,6 +101,22 @@ func Test_BigIntToUint128_Negative(t *testing.T) {
 	t.Errorf("Expected panic, but execution continued")
 }
 
+func Test_BigIntToUint128_ExceedU128(t *testing.T) {
+	tooBig := new(big.Int).Lsh(big.NewInt(1), 128)
+	testFunc := func() {
+		BigIntToUint128(tooBig)
+	}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("Expected panic")
+		}
+	}()
+
+	testFunc()
+	t.Errorf("Expected panic, but execution continued")
+}
+
 func Test_ID(t *testing.T) {
 	verifier := func() {
 		idA := ID()
