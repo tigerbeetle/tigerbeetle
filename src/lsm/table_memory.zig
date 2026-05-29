@@ -300,14 +300,15 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             pub fn probe(iterator: *ImmutableTableIterator, probe_key: Key) void {
-                while (true) {
+                const remaining = iterator.count_remaining();
+                for (0..remaining) |_| {
                     const key_peek = iterator.peek() orelse break;
                     switch (iterator.direction) {
                         .ascending => if (key_peek >= probe_key) break,
                         .descending => if (key_peek <= probe_key) break,
                     }
-                    _ = iterator.pop();
-                }
+                    assert(iterator.pop() != null);
+                } else assert(iterator.count_remaining() == 0);
             }
 
             fn load_tree(iterator: *ImmutableTableIterator) void {
@@ -358,6 +359,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 if (iterator.maybe_value_next != null) return;
                 if (iterator.end_reached) return;
 
+                // A bounded-loop implementation similar to `probe` would
+                // be preferable, but it currently performs worse, so we keep this version.
                 while (true) {
                     const maybe_value = iterator.pop_from_tree();
 
