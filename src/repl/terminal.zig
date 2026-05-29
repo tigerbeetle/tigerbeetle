@@ -69,6 +69,15 @@ pub const Terminal = struct {
         }
     }
 
+    pub fn print_string(
+        self: *const Terminal,
+        string: []const u8,
+    ) !void {
+        if (self.stdout) |stdout| {
+            try stdout.writeAll(string);
+        }
+    }
+
     pub fn print_error(
         self: *const Terminal,
         comptime format: []const u8,
