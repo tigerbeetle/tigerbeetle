@@ -184,7 +184,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(replica.view >= state_checker.replica_head_max[replica_index].view);
 
             const commit_root_op = replica.superblock.working.vsr_state.checkpoint.header.op;
-            const commit_root = replica.superblock.working.vsr_state.checkpoint.header.header_tag;
+            const commit_root = replica.superblock.working.vsr_state.checkpoint.header.checksum();
 
             const commit_a = state_checker.commit_mins[replica_index];
             const commit_b = replica.commit_min;
@@ -202,14 +202,14 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             if (header_b != null) assert(header_b.?.op == commit_b);
 
-            const checksum_a = state_checker.commits.items[commit_a].header.header_tag;
+            const checksum_a = state_checker.commits.items[commit_a].header.checksum();
             // Even if we have header_b, if its op is commit_root_op, we can't trust it.
             // If we just finished state sync, the header in our log might not have been
             // committed (it might be left over from before sync).
             const checksum_b = if (commit_b == commit_root_op)
                 commit_root
             else
-                header_b.?.header_tag;
+                header_b.?.checksum();
 
             assert(checksum_b != commit_root or
                 replica.commit_min == replica.superblock.working.vsr_state.checkpoint.header.op);
@@ -232,7 +232,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     assert(replica.op_checkpoint() == replica.commit_min);
                 }
 
-                assert(checksum_b == commit.header.header_tag);
+                assert(checksum_b == commit.header.checksum());
                 commit.replicas.set(replica_index);
 
                 assert(replica.commit_min < state_checker.commits.items.len);
@@ -244,7 +244,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
 
             if (header_b == null) return;
-            assert(header_b.?.header_tag == checksum_b);
+            assert(header_b.?.checksum() == checksum_b);
             assert(header_b.?.parent == checksum_a);
             assert(header_b.?.op > 0);
             assert(header_b.?.command == .prepare);
@@ -268,7 +268,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
                     const request = client.request_inflight.?.message;
                     assert(request.header.client == header_b.?.client);
-                    assert(request.header.header_tag == header_b.?.request_checksum);
+                    assert(request.header.checksum() == header_b.?.request_checksum);
                     assert(request.header.request == header_b.?.request);
                     assert(request.header.command == .request);
                     assert(request.header.operation == header_b.?.operation);
@@ -317,7 +317,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 assert(commit.header.op == i);
                 if (i > 0) {
                     const previous = state_checker.commits.items[i - 1].header;
-                    assert(commit.header.parent == previous.header_tag);
+                    assert(commit.header.parent == previous.checksum());
                     assert(commit.header.view >= previous.view);
                 }
             }

@@ -1385,7 +1385,7 @@ const ViewChangeHeadersSlice = struct {
                     if (header.op + 1 == child.op) {
                         // Prepares will have a canonical on-disk representation that will be
                         // used here.
-                        assert(header.header_tag == child.parent);
+                        assert(header.checksum() == child.parent);
                     }
                 },
             }

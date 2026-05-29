@@ -216,7 +216,7 @@ pub const ClientSessions = struct {
     ) ?ReplySlot {
         if (client_sessions.entries_by_client.get(header.client)) |entry_index| {
             const entry = &client_sessions.entries[entry_index];
-            if (entry.header.header_tag == header.header_tag) {
+            if (entry.header.checksum() == header.checksum()) {
                 return ReplySlot{ .index = entry_index };
             }
         }

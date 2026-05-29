@@ -274,7 +274,7 @@ pub const MessageBuffer = struct {
         defer buffer.iterator_state = .after_consume_suspend;
 
         if (buffer.process_size == 0 and buffer.receive_size == header.size) {
-            assert(buffer.message.header.header_tag == header.header_tag);
+            assert(buffer.message.header.checksum() == header.checksum());
 
             assert(buffer.suspend_size == 0);
             buffer.process_size = 0;
@@ -301,7 +301,7 @@ pub const MessageBuffer = struct {
         assert(buffer.process_size <= buffer.receive_size);
         buffer.advance();
 
-        assert(message.header.header_tag == header.header_tag);
+        assert(message.header.checksum() == header.checksum());
         return message.ref();
     }
 

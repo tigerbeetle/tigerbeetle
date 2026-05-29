@@ -604,7 +604,7 @@ const Inspector = struct {
                 try label_stream.writer().print("{:_>4}: ", .{slot});
 
                 try print_struct(output, label_stream.getWritten(), &.{
-                    "header_tag=", header.header_tag,
+                    "header_tag=", header.checksum(),
                     "release=",    header.release,
                     "view=",       header.view,
                     "op=",         header.op,
@@ -1106,7 +1106,7 @@ const Inspector = struct {
             log.err(
                 "read_block: invalid block address={} checksum_expect={?x:0>32} " ++
                     "checksum_actual={x:0>32} (bad checksum)",
-                .{ address, checksum, header.header_tag },
+                .{ address, checksum, header.checksum() },
             );
             return error.InvalidChecksum;
         }
@@ -1115,17 +1115,17 @@ const Inspector = struct {
             log.err(
                 "read_block: invalid block address={} checksum_expect={?x:0>32} " ++
                     "checksum_actual={x:0>32} (bad checksum_body)",
-                .{ address, checksum, header.header_tag },
+                .{ address, checksum, header.checksum() },
             );
             return error.InvalidChecksumBody;
         }
 
         if (checksum) |checksum_| {
-            if (header.header_tag != checksum_) {
+            if (header.checksum() != checksum_) {
                 log.err(
                     "read_block: invalid block address={} checksum_expect={?x:0>32} " ++
                         "checksum_actual={x:0>32} (wrong block)",
-                    .{ address, checksum, header.header_tag },
+                    .{ address, checksum, header.checksum() },
                 );
                 return error.WrongBlock;
             }
@@ -1174,7 +1174,7 @@ const Inspector = struct {
                     block_reference.checksum,
                 );
 
-                assert(schema.header_from_block(block).header_tag == block_reference.checksum);
+                assert(schema.header_from_block(block).checksum() == block_reference.checksum);
 
                 const encoded_words = schema.TrailerNode.body(block);
                 free_set_cursor -= encoded_words.len;

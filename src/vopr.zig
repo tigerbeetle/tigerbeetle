@@ -351,7 +351,7 @@ pub fn main() !void {
             }
         } else {
             const commits = simulator.cluster.state_checker.commits.items;
-            const last_checksum = commits[commits.len - 1].header.header_tag;
+            const last_checksum = commits[commits.len - 1].header.checksum();
             for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
                 if (simulator.core.is_set(replica_index)) {
                     try aof.validate(gpa, last_checksum);
@@ -1068,7 +1068,7 @@ pub const Simulator = struct {
                         if (uncommitted_headers[op % pipeline_max]) |header_existing| {
                             assert(header_existing.op == header.op);
                             assert(header_existing.view == header.view);
-                            assert(header_existing.header_tag == header.header_tag);
+                            assert(header_existing.checksum() == header.checksum());
                         } else {
                             uncommitted_headers[op % pipeline_max] = header.*;
                         }
@@ -1251,7 +1251,7 @@ pub const Simulator = struct {
 
                 const block = storage.grid_block(block_missing.address) orelse continue;
                 const block_header = schema.header_from_block(block);
-                if (block_header.header_tag == block_missing.checksum) {
+                if (block_header.checksum() == block_missing.checksum) {
                     log.err("{}: core_missing_blocks: found address={} checksum={x:0>32}", .{
                         replica.replica,
                         block_missing.address,
@@ -1281,7 +1281,7 @@ pub const Simulator = struct {
                 const storage_replies = storage.client_replies();
                 if (simulator.core.is_set(replica.replica) and !replica.standby()) {
                     for (storage_replies, 0..) |storage_reply, reply_slot| {
-                        if (storage_reply.header.header_tag == reply.header_tag and
+                        if (storage_reply.header.checksum() == reply.checksum() and
                             !storage.area_faulty(.{ .client_replies = .{ .slot = reply_slot } }))
                         {
                             break :reply_in_core true;
@@ -1363,7 +1363,7 @@ pub const Simulator = struct {
                 assert(commit.reply.header.request == commit.prepare.header.request);
                 assert(commit.reply.header.operation == commit.prepare.header.operation);
                 assert(commit.prepare.references == 1);
-                assert(commit.prepare.header.header_tag == prepare_header.header_tag);
+                assert(commit.prepare.header.checksum() == prepare_header.checksum());
                 assert(commit.prepare.header.command == .prepare);
 
                 log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
@@ -1621,7 +1621,7 @@ pub const Simulator = struct {
                 mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
                 replica_storage.wal_prepares(),
             ) |*wal_header, *wal_prepare| {
-                if (wal_header.header_tag == 0) {
+                if (wal_header.checksum() == 0) {
                     wal_header.* = wal_prepare.header;
                 } else {
                     if (wal_header.view != wal_prepare.header.view) {

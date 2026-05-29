@@ -284,7 +284,7 @@ pub const StorageChecker = struct {
             while (true) {
                 const block =
                     superblock.storage.grid_block(client_sessions_block.address).?;
-                assert(schema.header_from_block(block).header_tag ==
+                assert(schema.header_from_block(block).checksum() ==
                     client_sessions_block.checksum);
 
                 const block_body = schema.TrailerNode.body(block);
@@ -324,7 +324,7 @@ pub const StorageChecker = struct {
                     const reply_header =
                         std.mem.bytesAsValue(vsr.Header, reply[0..@sizeOf(vsr.Header)]);
 
-                    assert(reply_header.header_tag == client_session.header.header_tag);
+                    assert(reply_header.checksum() == client_session.header.checksum());
                     checksum.add(reply);
                 }
             }
@@ -360,7 +360,7 @@ pub const StorageChecker = struct {
             var free_set_cursor: usize = free_set_size;
             for (0..free_set_block_count) |_| {
                 const block = superblock.storage.grid_block(free_set_block.?.address).?;
-                assert(schema.header_from_block(block).header_tag == free_set_block.?.checksum);
+                assert(schema.header_from_block(block).checksum() == free_set_block.?.checksum);
 
                 const encoded_words = schema.TrailerNode.body(block);
                 free_set_cursor -= encoded_words.len;

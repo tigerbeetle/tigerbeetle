@@ -614,7 +614,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             log.debug("{}: write_block: checksum={x:0>32} address={} entries={}", .{
                 manifest_log.superblock.replica_index.?,
-                header.header_tag,
+                header.checksum(),
                 header.address,
                 block_schema.entry_count,
             });
@@ -941,12 +941,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
             header.set_checksum();
             verify_block(block, null, null);
 
-            manifest_log.log_block_checksums.push_assume_capacity(header.header_tag);
+            manifest_log.log_block_checksums.push_assume_capacity(header.checksum());
             manifest_log.log_block_addresses.push_assume_capacity(header.address);
 
             log.debug("{}: close_block: checksum={x:0>32} address={} entries={}/{}", .{
                 manifest_log.superblock.replica_index.?,
-                header.header_tag,
+                header.checksum(),
                 header.address,
                 entry_count,
                 schema.ManifestNode.entry_count_max,
@@ -968,7 +968,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(header.block_type == .manifest);
 
             assert(address == null or header.address == address.?);
-            assert(checksum == null or header.header_tag == checksum.?);
+            assert(checksum == null or header.checksum() == checksum.?);
 
             const block_schema = schema.ManifestNode.from(block);
             assert(block_schema.entry_count > 0);

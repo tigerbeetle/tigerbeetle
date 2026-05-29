@@ -994,7 +994,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 const block = forest.grid.superblock.storage.grid_block(block_address).?;
                 const block_header = schema.header_from_block(block);
                 assert(block_header.address == block_address);
-                assert(block_header.header_tag == block_checksum);
+                assert(block_header.checksum() == block_checksum);
                 assert(block_header.block_type == .manifest);
 
                 const block_schema = schema.ManifestNode.from(block);

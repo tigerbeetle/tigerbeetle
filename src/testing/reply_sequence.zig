@@ -114,7 +114,7 @@ pub const ReplySequence = struct {
         var pending_replies = sequence.stalled_queue.iterator();
         while (pending_replies.next()) |pending| {
             if (reply.header.op == pending.reply.header.op) {
-                assert(reply.header.header_tag == pending.reply.header.header_tag);
+                assert(reply.header.checksum() == pending.reply.header.checksum());
                 return true;
             }
         }

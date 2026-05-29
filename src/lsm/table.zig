@@ -357,7 +357,7 @@ pub fn TableType(
                     index_value_keys(builder.index_block, .key_max)[current] = key_max;
                     index.value_addresses(builder.index_block)[current] = options.address;
                     index.value_checksums(builder.index_block)[current] =
-                        .{ .value = header.header_tag };
+                        .{ .value = header.checksum() };
                 }
 
                 if (current == 0) builder.key_min = key_min;
@@ -440,7 +440,7 @@ pub fn TableType(
                 header.set_checksum();
 
                 const info: TreeTableInfo = .{
-                    .checksum = header.header_tag,
+                    .checksum = header.checksum(),
                     .address = options.address,
                     .snapshot_min = options.snapshot_min,
                     .key_min = builder.key_min,
@@ -566,7 +566,7 @@ pub fn TableType(
                 const value_block = storage.grid_block(value_block_address).?;
                 const value_block_header = schema.header_from_block(value_block);
                 assert(value_block_header.address == value_block_address);
-                assert(value_block_header.header_tag == value_block_checksum.value);
+                assert(value_block_header.checksum() == value_block_checksum.value);
 
                 const values = value_block_values_used(value_block);
                 if (values.len > 0) {
