@@ -136,14 +136,14 @@ pub const MultiBatchDecoder = struct {
 
     pub fn init(
         /// The message body used, including the trailer.
-        body: []const u8,
+        body: []align(16) const u8,
         options: Options,
     ) Error!MultiBatchDecoder {
         // Supports zero-sized elements, or any power of two, including 2^0.
         assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
         const Parser = struct {
-            buffer: []const u8,
+            buffer: []align(16) const u8,
             buffer_parsed: u32 = 0,
 
             fn parse_suffix(parser: *@This(), comptime T: type, count: u32) Error![]const T {
@@ -480,8 +480,9 @@ pub const MultiBatchEncoder = struct {
         assert(self.options.element_size == 0 or
             bytes_written % self.options.element_size == 0);
 
-        if (constants.verify) {
-            _ = MultiBatchDecoder.init(buffer[0..bytes_written], .{
+        if (constants.verify and std.mem.isAligned(@intFromPtr(buffer.ptr), 16)) {
+            const buffer_aligned: []align(16) u8 = @alignCast(buffer[0..bytes_written]);
+            _ = MultiBatchDecoder.init(@alignCast(buffer_aligned), .{
                 .element_size = self.options.element_size,
             }) catch |err| switch (err) {
                 error.MultiBatchInvalid => unreachable,

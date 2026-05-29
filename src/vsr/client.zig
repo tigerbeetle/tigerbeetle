@@ -28,7 +28,7 @@ pub fn ClientType(
                 user_data: u128,
                 operation: vsr.Operation,
                 timestamp: u64,
-                results: []u8,
+                results: []align(16) u8,
             ) void;
 
             pub const RegisterCallback = *const fn (

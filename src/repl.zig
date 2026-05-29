@@ -1013,7 +1013,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             user_data: u128,
             operation_vsr: vsr.Operation,
             timestamp: u64,
-            result: []u8,
+            result: []align(16) u8,
         ) void {
             const operation = operation_vsr.cast(tb.Operation);
             const reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(result, .{
