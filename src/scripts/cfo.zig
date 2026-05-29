@@ -1189,6 +1189,7 @@ const SeedRecord = struct {
     }
 
     fn order_by_seed_timestamp_start(a: SeedRecord, b: SeedRecord) ?std.math.Order {
+        assert(std.mem.eql(u8, a.fuzzer, b.fuzzer));
         // For canaries, prefer newer seeds to show that the canary is alive.
         // For other fuzzers, prefer older seeds to keep them stable.
         return if (std.mem.eql(u8, a.fuzzer, "canary"))
@@ -1199,6 +1200,11 @@ const SeedRecord = struct {
 
     fn order_by_seed_duration(a: SeedRecord, b: SeedRecord) ?std.math.Order {
         assert(a.ok == b.ok);
+        assert(std.mem.eql(u8, a.fuzzer, b.fuzzer));
+
+        // Duration is irrelevant for canaries, and it can obscure timestamp_start.
+        if (std.mem.eql(u8, a.fuzzer, "canary")) return null;
+
         if (a.ok) {
             // Passing seeds: prefer long durations -- near-timeouts might be interesting, and it
             // gives us a p100 for the fuzzer's runtime.
