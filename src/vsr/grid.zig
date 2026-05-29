@@ -884,7 +884,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
             assert(grid.writing(block_header.address, block.*) == .not_writing);
-            assert(grid.blocks_missing.block_waiting(block_header.address, block_header.header_tag));
+            assert(grid.blocks_missing.block_waiting(
+                block_header.address,
+                block_header.header_tag,
+            ));
             assert(!grid.free_set.is_free(block_header.address));
 
             grid.blocks_missing.write_commence(block_header.address, block_header.header_tag);

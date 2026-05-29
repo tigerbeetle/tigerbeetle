@@ -26,6 +26,7 @@ const Time = @import("../time.zig").Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
+const Encryption = @import("../encryption.zig").Encryption;
 
 const marks = @import("../testing/marks.zig");
 
@@ -4633,7 +4634,10 @@ pub fn ReplicaType(
                     return .ready;
                 }
 
-                if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.header_tag)) |prepare| {
+                if (self.pipeline.cache.prepare_by_op_and_checksum(
+                    op,
+                    header.header_tag,
+                )) |prepare| {
                     log.debug("{}: commit_start_journal: " ++
                         "cached prepare op={} checksum={x:0>32}", .{
                         self.log_prefix(),
@@ -5842,8 +5846,10 @@ pub fn ReplicaType(
                 message.body_used()[@sizeOf(vsr.CheckpointState)..],
                 std.mem.sliceAsBytes(self.view_headers.array.const_slice()),
             );
-            message.header.set_checksum_body(message.body_used());
-            message.header.set_checksum();
+
+            Encryption.encrypt_test(message.header.frame());
+            // message.header.set_checksum_body(message.body_used());
+            // message.header.set_checksum();
 
             assert(message.header.invalid() == null);
             return message.ref();
@@ -8803,14 +8809,17 @@ pub fn ReplicaType(
                 if (vsr.Headers.jv_header_type(header) == .valid) {
                     // Nack bit case 2: We have this header in memory, but haven't persisted it to
                     // disk yet.
-                    if (journal_header != null and journal_header.?.header_tag == header.header_tag and
+                    if (journal_header != null and
+                        journal_header.?.header_tag == header.header_tag and
                         dirty and !faulty)
                     {
                         nacks.set(i);
                     }
                     // Nack bit case 3: We have a _different_ prepare — safe to nack even if it is
                     // faulty.
-                    if (journal_header != null and journal_header.?.header_tag != header.header_tag) {
+                    if (journal_header != null and
+                        journal_header.?.header_tag != header.header_tag)
+                    {
                         nacks.set(i);
                     }
 

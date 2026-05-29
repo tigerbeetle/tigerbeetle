@@ -42,6 +42,7 @@ pub const testing = .{
 };
 pub const ewah = @import("ewah.zig").ewah;
 pub const checkpoint_trailer = @import("vsr/checkpoint_trailer.zig");
+pub const Encryption = @import("encryption.zig").Encryption;
 
 pub const multi_batch = @import("vsr/multi_batch.zig");
 
@@ -1314,6 +1315,9 @@ pub const Headers = struct {
         assert(header.valid_checksum());
         assert(header.command == .prepare);
         assert(header.operation != .reserved);
+        if (header.invalid()) |reason| {
+            std.log.err("INVALID: {s}", .{reason});
+        }
         assert(header.invalid() == null);
         return .valid;
     }
@@ -1475,8 +1479,8 @@ test "Headers.ViewChangeSlice.view_for_op" {
         Headers.jv_blank(5),
     };
 
-    headers_array[0].set_checksum();
-    headers_array[3].set_checksum();
+    Encryption.encrypt_test(headers_array[0].frame());
+    Encryption.encrypt_test(headers_array[3].frame());
 
     const headers = Headers.ViewChangeSlice.init(.join_view, &headers_array);
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));

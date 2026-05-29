@@ -1512,9 +1512,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.?.operation == .reserved);
                     assert(prepare.?.operation == .reserved);
                     assert(header.?.header_tag == prepare.?.header_tag);
-                    assert(
-                        header.?.header_tag == Header.Prepare.reserve(cluster, slot.index).header_tag,
-                    );
+                    assert(header.?.header_tag ==
+                        Header.Prepare.reserve(cluster, slot.index).header_tag);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
                     journal.headers[slot.index] = header.?;
@@ -1677,9 +1676,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.status = .recovered;
 
             if (journal.headers[0].op == 0 and journal.headers[0].operation != .reserved) {
-                assert(
-                    journal.headers[0].header_tag == Header.Prepare.root(replica.cluster).header_tag,
-                );
+                assert(journal.headers[0].header_tag ==
+                    Header.Prepare.root(replica.cluster).header_tag);
                 assert(!journal.faulty.bit(Slot{ .index = 0 }));
             }
 
@@ -1813,7 +1811,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(!journal.faulty.bit(slot));
                 assert(journal.prepare_inhabited[slot.index]);
                 assert(journal.prepare_checksums[slot.index] == message.header.header_tag);
-                assert(journal.headers_redundant[slot.index].header_tag == message.header.header_tag);
+                assert(journal.headers_redundant[slot.index].header_tag ==
+                    message.header.header_tag);
                 journal.write_prepare_debug(message.header, "skipping (clean)");
                 callback(replica, message);
                 return;

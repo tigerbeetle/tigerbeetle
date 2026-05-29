@@ -1518,6 +1518,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn log_context(superblock: *const SuperBlock, context: *const Context) void {
+            const staging = superblock.staging;
             log.debug("{[replica]?}: {[caller]s}: " ++
                 "commit_min={[commit_min_old]}..{[commit_min_new]} " ++
                 "commit_max={[commit_max_old]}..{[commit_max_new]} " ++
@@ -1529,22 +1530,22 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .replica = superblock.replica_index,
                 .caller = @tagName(context.caller),
 
-                .commit_min_old = superblock.staging.vsr_state.checkpoint.header.op,
+                .commit_min_old = staging.vsr_state.checkpoint.header.op,
                 .commit_min_new = context.vsr_state.?.checkpoint.header.op,
 
-                .commit_max_old = superblock.staging.vsr_state.commit_max,
+                .commit_max_old = staging.vsr_state.commit_max,
                 .commit_max_new = context.vsr_state.?.commit_max,
 
-                .commit_min_checksum_old = superblock.staging.vsr_state.checkpoint.header.header_tag,
+                .commit_min_checksum_old = staging.vsr_state.checkpoint.header.header_tag,
                 .commit_min_checksum_new = context.vsr_state.?.checkpoint.header.header_tag,
 
-                .log_view_old = superblock.staging.vsr_state.log_view,
+                .log_view_old = staging.vsr_state.log_view,
                 .log_view_new = context.vsr_state.?.log_view,
 
-                .view_old = superblock.staging.vsr_state.view,
+                .view_old = staging.vsr_state.view,
                 .view_new = context.vsr_state.?.view,
 
-                .head_old = superblock.staging.view_headers().slice[0].header_tag,
+                .head_old = staging.view_headers().slice[0].header_tag,
                 .head_new = if (context.view_headers) |*headers|
                     headers.array.get(0).header_tag
                 else

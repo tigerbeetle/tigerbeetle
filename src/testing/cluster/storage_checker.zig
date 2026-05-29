@@ -284,7 +284,8 @@ pub const StorageChecker = struct {
             while (true) {
                 const block =
                     superblock.storage.grid_block(client_sessions_block.address).?;
-                assert(schema.header_from_block(block).header_tag == client_sessions_block.checksum);
+                assert(schema.header_from_block(block).header_tag ==
+                    client_sessions_block.checksum);
 
                 const block_body = schema.TrailerNode.body(block);
                 client_sessions_cursor -= block_body.len;
