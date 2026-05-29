@@ -1546,16 +1546,11 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             const values_source_a, const values_source_b = compaction.merge_inputs_immutable();
             assert(values_source_a != null or values_source_b != null);
 
-            // The immutable table iterator may span several sorted runs; bound how much of it
-            // a single beat may consume.
-            const budget_immutable: u32 = budget: {
-                if (values_source_a) |iterator| {
-                    break :budget @min(
-                        Table.data.value_count_max,
-                        iterator.count_remaining(),
-                    );
-                } else break :budget 0;
-            };
+            // Bound how much of the multi-run immutable iterator one beat may consume.
+            const budget_immutable = if (values_source_a) |iterator|
+                @min(Table.data.value_count_max, iterator.count_remaining())
+            else
+                0;
 
             const values_target = compaction.table_builder
                 .value_block_values()[compaction.table_builder.value_count..];
