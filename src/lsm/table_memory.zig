@@ -377,14 +377,14 @@ pub fn TableMemoryType(comptime Table: type) type {
                         return;
                     }
 
-                    const value = maybe_value.?;
-                    const key = key_from_value(&value);
+                    const value_next = maybe_value.?;
+                    const value_key = key_from_value(&value_next);
 
                     if (iterator.pending) |pending_value| {
                         const pending_key = key_from_value(&pending_value);
 
-                        if (key == pending_key) {
-                            const dedup_result = dedup_pending(pending_value, value);
+                        if (value_key == pending_key) {
+                            const dedup_result = dedup_pending(pending_value, value_next);
                             iterator.pending = dedup_result.next_pending;
                             iterator.counters.dropped += dedup_result.dropped_count;
                             continue;
@@ -392,21 +392,21 @@ pub fn TableMemoryType(comptime Table: type) type {
 
                         iterator.maybe_value_next = pending_value;
 
-                        if (!iterator.within_range(key)) {
+                        if (!iterator.within_range(value_key)) {
                             iterator.pending = null;
                             iterator.end_reached = true;
                             return;
                         }
 
-                        iterator.pending = value;
+                        iterator.pending = value_next;
                         return;
                     } else {
-                        if (!iterator.within_range(key)) {
+                        if (!iterator.within_range(value_key)) {
                             iterator.end_reached = true;
                             return;
                         }
 
-                        iterator.pending = value;
+                        iterator.pending = value_next;
                     }
                 }
             }
