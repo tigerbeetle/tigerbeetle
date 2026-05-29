@@ -587,10 +587,11 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
             assert(table.count() <= table.values.len);
-            const run_count = table.value_context.run_tracker.count();
-            if (run_count == 0) return null;
 
+            const run_count = table.value_context.run_tracker.count();
             assert(run_count <= sorted_runs_max);
+
+            if (run_count == 0) return null;
 
             // Iterate runs backwards i.e. newest first so the most recent version of a key wins.
             var run_index = run_count;
