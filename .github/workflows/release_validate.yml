@@ -13,6 +13,8 @@ on:
     # in systems we do not control.
     - cron: 0 */6 * * *
 
+  pull_request:
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 2nd, 2026).
 
@@ -25,7 +27,6 @@ jobs:
         with:
           fetch-depth: 2147483647
           fetch-tags: true # Fetch full history for tidy.
-          ref: main
 
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
