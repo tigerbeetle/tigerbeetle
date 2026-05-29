@@ -229,6 +229,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 maybe_key_end: ?Key,
                 direction: Direction,
             ) void {
+                maybe(merge_context.streams_count == 0);
+
                 var count_input: usize = 0;
                 for (merge_context.streams[0..merge_context.streams_count]) |stream| {
                     count_input += stream.len;
