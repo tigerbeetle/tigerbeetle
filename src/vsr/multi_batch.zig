@@ -147,8 +147,8 @@ pub const MultiBatchDecoder = struct {
             buffer_parsed: u32 = 0,
 
             fn parse_suffix(parser: *@This(), comptime T: type, count: u32) Error![]const T {
+                if (count *| @sizeOf(T) > parser.buffer.len) return error.MultiBatchInvalid;
                 const suffix_size = count * @sizeOf(T);
-                if (parser.buffer.len < suffix_size) return error.MultiBatchInvalid;
 
                 const suffix = parser.buffer[parser.buffer.len - suffix_size ..];
                 const suffix_aligned = std.mem.isAligned(@intFromPtr(suffix.ptr), @alignOf(T));
@@ -156,7 +156,11 @@ pub const MultiBatchDecoder = struct {
 
                 parser.buffer = parser.buffer[0 .. parser.buffer.len - suffix_size];
                 parser.buffer_parsed += suffix_size;
-                return stdx.bytes_as_slice(.exact, T, suffix);
+                const result = stdx.bytes_as_slice(.exact, T, suffix);
+
+                assert(result.len == count);
+
+                return result;
             }
         };
 
