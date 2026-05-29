@@ -257,6 +257,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                     iterator.streams[0..iterator.streams_count],
                     merge_context.streams[0..merge_context.streams_count],
                 );
+
+                iterator.load_tree();
             }
 
             pub fn count_max(iterator: *const ImmutableTableIterator) u32 {
