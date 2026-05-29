@@ -644,6 +644,7 @@ pub fn ClientType(
                 .release = self.release,
                 .client = self.id,
                 .ping_timestamp_monotonic = self.time.monotonic().ns,
+                .session = self.session,
             };
 
             self.send_header_to_replicas(ping.frame_const());

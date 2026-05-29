@@ -6007,6 +6007,22 @@ pub fn ReplicaType(
                 return true;
             }
 
+            // NB: Introduced in 0.17.6, `session` was implicitly 0 before that.
+            if (self.client_sessions.get(message.header.client) == null and
+                message.header.session != 0)
+            {
+                if (self.status == .normal and self.primary() and
+                    self.commit_min >= message.header.session)
+                {
+                    log.mark.warn("{}: on_ping_client: no session (client={})", .{
+                        self.log_prefix(),
+                        message.header.client,
+                    });
+                    self.send_eviction_message_to_client(message.header.client, .no_session);
+                    return true;
+                }
+            }
+
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_ping_client: ignoring unsupported client version; too low" ++
                     " (client={} version={}<{})", .{
@@ -6015,7 +6031,7 @@ pub fn ReplicaType(
                     message.header.release,
                     self.release_client_min,
                 });
-                if (self.primary()) {
+                if (self.status == .normal and self.primary()) {
                     self.send_eviction_message_to_client(
                         message.header.client,
                         .client_release_too_low,
@@ -6033,7 +6049,7 @@ pub fn ReplicaType(
                     message.header.release,
                     self.release,
                 });
-                if (self.primary()) {
+                if (self.status == .normal and self.primary()) {
                     self.send_eviction_message_to_client(
                         message.header.client,
                         .client_release_too_high,
@@ -6598,7 +6614,10 @@ pub fn ReplicaType(
                     // primary) if we are partitioned and don't yet know about a session. We solve
                     // this by having clients include the view number and rejecting messages from
                     // clients with newer views.
-                    log.warn("{}: on_request: no session", .{self.log_prefix()});
+                    log.mark.warn("{}: on_request: no session (client={})", .{
+                        self.log_prefix(),
+                        message.header.client,
+                    });
                     self.send_eviction_message_to_client(message.header.client, .no_session);
                     return true;
                 }

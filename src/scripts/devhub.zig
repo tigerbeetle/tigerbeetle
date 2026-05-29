@@ -268,6 +268,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .release = Release.minimum,
             .client = 1,
             .ping_timestamp_monotonic = 0,
+            .session = 0,
         };
         ping.set_checksum_body(&[0]u8{});
         ping.set_checksum();
