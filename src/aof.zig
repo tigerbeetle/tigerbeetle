@@ -15,6 +15,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusType(vsr.io.IO);
 const Header = vsr.Header;
+const Encryption = @import("encryption.zig").Encryption;
 
 const MiB = stdx.MiB;
 
@@ -837,8 +838,8 @@ test "aof write / read" {
     };
 
     stdx.copy_disjoint(.exact, u8, demo_message.body_used(), demo_payload);
-    demo_message.header.set_checksum_body(demo_payload);
-    demo_message.header.set_checksum();
+
+    Encryption.encrypt_test(demo_message.header.frame());
 
     try aof.write(demo_message);
     aof.close();

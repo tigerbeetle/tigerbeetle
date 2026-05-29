@@ -7,7 +7,7 @@ const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Command = vsr.Command;
 const Operation = vsr.Operation;
-pub const Encryption = @import("../encryption.zig").Encryption;
+const Encryption = @import("../encryption.zig").Encryption;
 const schema = @import("../lsm/schema.zig");
 
 const checksum_body_empty = vsr.checksum(&.{});
@@ -16,21 +16,27 @@ const checksum_body_empty = vsr.checksum(&.{});
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
-    /// A checksum covering only the remainder of this header.
+    /// An AEAD tag covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
-    /// This checksum is enough to uniquely identify a network message or prepare.
+    /// This tag is enough to uniquely identify a network message or prepare.
     header_tag: u128,
 
-    // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum`.
+    /// The header_key_id is the ID of the key to use for decryption. It is cryptographically
+    /// derived from the encryption protocol version and the peers involved in the message.
+    ///
+    /// This field was previously checksum_padding. A value of all zeros is only valid to indicate
+    /// backwards compatibility.
     header_key_id: u128,
 
-    /// A checksum covering only the associated body after this header.
+    /// The nonce for header encryption.
     header_nonce: u128,
 
-    // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum_body`.
+    // Everything below this point is transmitted or stored encrypted.
+
+    // An AEAD tag covering only the message body.
     body_tag: u128,
 
-    /// Reserved for future use by AEAD.
+    /// The nonce for body encryption.
     body_nonce: u128,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
@@ -103,6 +109,22 @@ pub const Header = extern struct {
             .deprecated_22 => Deprecated,
             .deprecated_23 => Deprecated,
         };
+    }
+
+    comptime {
+        assert(@offsetOf(Header, "header_key_id") == 16);
+        assert(@offsetOf(Header, "body_tag") == 48);
+        assert(@sizeOf(Header) - @offsetOf(Header, "body_tag") == 256 - 48);
+    }
+
+    pub fn slice_associated_data(self: *Header) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "header_key_id")..@offsetOf(Header, "body_tag")];
+    }
+
+    pub fn slice_encrypted(self: *Header) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "body_tag")..];
     }
 
     pub fn calculate_checksum(self: *const Header) u128 {
