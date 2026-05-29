@@ -77,7 +77,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     });
 
     try Shell.copy_path(
-        shell.project_root,
+        shell.cwd,
         "src/clients/go/samples/basic/main.go",
         shell.cwd,
         "main.go",
