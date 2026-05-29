@@ -141,7 +141,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     }
 
     try Shell.copy_path(
-        shell.project_root,
+        shell.cwd,
         "src/clients/dotnet/samples/basic/Program.cs",
         shell.cwd,
         "Program.cs",
