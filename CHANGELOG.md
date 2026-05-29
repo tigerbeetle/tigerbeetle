@@ -3,11 +3,15 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## TigerBeetle (unreleased)
+## TigerBeetle 0.17.5
 
-Released: 2026-05-22
+Released: 2026-05-29
 
 ### Safety And Performance
+
+- [#3744](https://github.com/tigerbeetle/tigerbeetle/pull/3744)
+
+  Fix a possible Node.js integer overflow panic.
 
 - [#3717](https://github.com/tigerbeetle/tigerbeetle/pull/3717)
 
@@ -48,12 +52,46 @@ Released: 2026-05-22
 
 ### Features
 
+- [#3733](https://github.com/tigerbeetle/tigerbeetle/pull/3733)
+
+  Add a Ruby client. Thanks @citizen428!
+
+- [#3750](https://github.com/tigerbeetle/tigerbeetle/pull/3750)
+
+  Switch from ArenaAllocator to DebugAllocator to fix ArenaAllocator rounding up allocations by
+  large amounts.
+
 - [#3702](https://github.com/tigerbeetle/tigerbeetle/pull/3702)
 
   Track the highest `commit_min` observed from all backups on the primary,
   and use it to decide when to inject commit stalls for lagging replicas.
 
 ### Internals
+
+- [#3753](https://github.com/tigerbeetle/tigerbeetle/pull/3753)
+
+  Improve the names of some VSR commands.
+
+- [#3763](https://github.com/tigerbeetle/tigerbeetle/pull/3763)
+
+  Make release validation run from `main`, making it easier to fix when release validation fails.
+
+- [#3751](https://github.com/tigerbeetle/tigerbeetle/pull/3751)
+
+  Improve how we search for the TigerBeetle .NET package in CI.
+
+- [#3746](https://github.com/tigerbeetle/tigerbeetle/pull/3746)
+  [#3752](https://github.com/tigerbeetle/tigerbeetle/pull/3752)
+
+  Move `shell.zig` into `stdx`, making it more robust for different zig project setups.
+
+- [#3745](https://github.com/tigerbeetle/tigerbeetle/pull/3745)
+
+  Show the freshness of performance results in DevHub.
+
+- [#3761](https://github.com/tigerbeetle/tigerbeetle/pull/3761)
+
+  Fix the lagging canary test results in the CFO.
 
 - [#3716](https://github.com/tigerbeetle/tigerbeetle/pull/3716),
   [#3710](https://github.com/tigerbeetle/tigerbeetle/pull/3710)
@@ -89,7 +127,7 @@ Released: 2026-05-22
 
 ### TigerTracks 🎧
 
-- [Ya Mama (Push The Tempo)](https://www.youtube.com/watch?v=JEq10L7u3SM)
+- [Weird Fishes](https://open.spotify.com/track/5ygk8Hkp4WCCk7GXWEUP9V)
 
 ## TigerBeetle 0.17.4
 
