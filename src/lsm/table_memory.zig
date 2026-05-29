@@ -278,6 +278,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             pub inline fn peek(iterator: *ImmutableTableIterator) ?Key {
+                // Early exit to avoid invoking the more expensive `ensure_next`.
                 if (iterator.maybe_value_next) |value| return key_from_value(&value);
                 iterator.ensure_next();
                 const value = iterator.maybe_value_next orelse return null;
@@ -285,6 +286,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             pub inline fn pop(iterator: *ImmutableTableIterator) ?Value {
+                // Early exit to avoid invoking the more expensive `ensure_next`.
                 if (iterator.maybe_value_next) |value| {
                     iterator.counters.out += 1;
                     iterator.maybe_value_next = null;
@@ -870,7 +872,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn key_min(table: *const TableMemory) Key {
             assert(table.mutability == .immutable);
 
-            // we could go one time through the runs and find min.
             const run_count = table.value_context.run_tracker.count();
             assert(run_count > 0);
 
@@ -886,7 +887,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn key_max(table: *const TableMemory) Key {
             assert(table.mutability == .immutable);
 
-            // we could go one time through the runs and find min.
             const run_count = table.value_context.run_tracker.count();
             assert(run_count > 0);
 
