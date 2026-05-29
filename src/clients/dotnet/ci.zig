@@ -125,7 +125,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const root = shell.cwd;
+    const base_dir = shell.cwd;
     try shell.pushd_dir(tmp_dir.dir);
     defer shell.popd();
 
@@ -149,7 +149,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     }
 
     try Shell.copy_path(
-        root,
+        base_dir,
         "src/clients/dotnet/samples/basic/Program.cs",
         shell.cwd,
         "Program.cs",
