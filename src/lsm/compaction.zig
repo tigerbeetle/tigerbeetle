@@ -1541,6 +1541,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         }
 
         fn merge_immutable(compaction: *Compaction) MergeResult {
+            assert(compaction.table_info_a.? == .immutable);
+
             const values_source_a, const values_source_b = compaction.merge_inputs_immutable();
             assert(values_source_a != null or values_source_b != null);
 
@@ -1612,13 +1614,14 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         }
 
         fn merge_disk(compaction: *Compaction) MergeResult {
+            assert(compaction.table_info_a.? == .disk);
+
             const values_source_a, const values_source_b = compaction.merge_inputs_disk();
             assert(values_source_a != null or values_source_b != null);
 
             const values_target = compaction.table_builder
                 .value_block_values()[compaction.table_builder.value_count..];
 
-            // This check is fine.
             inline for ([_]?[]const Value{
                 values_source_a,
                 values_source_b,
