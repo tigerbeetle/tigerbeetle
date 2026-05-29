@@ -33,10 +33,11 @@ Released: 2026-05-29
 
   Refactor the grid to own all blocks through reference counting.
 
-- [#3730](https://github.com/tigerbeetle/tigerbeetle/pull/3730)
+- [#3702](https://github.com/tigerbeetle/tigerbeetle/pull/3702),
+  [#3730](https://github.com/tigerbeetle/tigerbeetle/pull/3730)
 
-  Inject stalls on the primary more accurately by observing a backup's `op - commit_min`, improving
-  throughput.
+  Inject stalls on the primary more accurately by observing a backup's
+  `op - commit_min`, improving throughput.
 
 - [#3704](https://github.com/tigerbeetle/tigerbeetle/pull/3704)
 
@@ -58,13 +59,8 @@ Released: 2026-05-29
 
 - [#3750](https://github.com/tigerbeetle/tigerbeetle/pull/3750)
 
-  Switch from ArenaAllocator to DebugAllocator to fix ArenaAllocator rounding up allocations by
-  large amounts.
-
-- [#3702](https://github.com/tigerbeetle/tigerbeetle/pull/3702)
-
-  Track the highest `commit_min` observed from all backups on the primary,
-  and use it to decide when to inject commit stalls for lagging replicas.
+  Switch from `ArenaAllocator` to `DebugAllocator` to fix `ArenaAllocator`
+  rounding up allocations by large amounts.
 
 ### Internals
 
@@ -76,11 +72,7 @@ Released: 2026-05-29
 
   Make release validation run from `main`, making it easier to fix when release validation fails.
 
-- [#3751](https://github.com/tigerbeetle/tigerbeetle/pull/3751)
-
-  Improve how we search for the TigerBeetle .NET package in CI.
-
-- [#3746](https://github.com/tigerbeetle/tigerbeetle/pull/3746)
+- [#3746](https://github.com/tigerbeetle/tigerbeetle/pull/3746),
   [#3752](https://github.com/tigerbeetle/tigerbeetle/pull/3752)
 
   Move `shell.zig` into `stdx`, making it more robust for different zig project setups.
@@ -88,10 +80,6 @@ Released: 2026-05-29
 - [#3745](https://github.com/tigerbeetle/tigerbeetle/pull/3745)
 
   Show the freshness of performance results in DevHub.
-
-- [#3761](https://github.com/tigerbeetle/tigerbeetle/pull/3761)
-
-  Fix the lagging canary test results in the CFO.
 
 - [#3716](https://github.com/tigerbeetle/tigerbeetle/pull/3716),
   [#3710](https://github.com/tigerbeetle/tigerbeetle/pull/3710)
