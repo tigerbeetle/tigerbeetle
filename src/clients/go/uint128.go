@@ -94,18 +94,13 @@ func BigIntToUint128(value *big.Int) Uint128 {
 		panic("cannot convert negative big.Int to Uint128")
 	}
 
+	// FillBytes can panic if the value does not fit in 16 bytes.
+	bytes := value.FillBytes(make([]byte, 16))
+
 	// big.Int bytes are big-endian so convert them to little-endian for Uint128 bytes.
-	bytes := value.Bytes()
 	swapEndian(bytes[:])
 
-	// Only cast slice to bytes when there's enough.
-	if len(bytes) >= 16 {
-		return BytesToUint128(*(*[16]byte)(bytes))
-	}
-
-	var zeroPadded [16]byte
-	copy(zeroPadded[:], bytes)
-	return BytesToUint128(zeroPadded)
+	return BytesToUint128(*(*[16]byte)(bytes))
 }
 
 // ToUint128 converts a integer to a Uint128.

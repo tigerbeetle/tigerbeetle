@@ -30,6 +30,7 @@ public class UInt128Test {
                 (byte) 0xe2, (byte) 0xe1, (byte) 0xd2, (byte) 0xd1, (byte) 0xc2, (byte) 0xc1,
                 (byte) 0xb2, (byte) 0xb1, (byte) 0xa4, (byte) 0xa3, (byte) 0xa2, (byte) 0xa1};
         final var bytes = UInt128.asBytes(lower, upper);
+        assertArrayEquals(bytes, UInt128.asBytes(u128));
         assertArrayEquals(binary, bytes);
 
         // UUID representation:
@@ -84,6 +85,63 @@ public class UInt128Test {
     }
 
     @Test
+    public void testAsBytesBigInteger() {
+        {
+            final var expected = UInt128.asBytes(0);
+            final var actual = UInt128.asBytes(BigInteger.ZERO);
+            assertArrayEquals(expected, actual);
+        }
+
+        {
+            final var expected = UInt128.asBytes(1);
+            final var actual = UInt128.asBytes(BigInteger.ONE);
+            assertArrayEquals(expected, actual);
+        }
+
+        {
+            final var expected = UInt128.asBytes(2);
+            final var actual = UInt128.asBytes(BigInteger.TWO);
+            assertArrayEquals(expected, actual);
+        }
+
+        {
+            final var expected = UInt128.asBytes(10);
+            final var actual = UInt128.asBytes(BigInteger.TEN);
+            assertArrayEquals(expected, actual);
+        }
+
+        {
+            final var expected = UInt128.asBytes(-1L, -1L);
+            final var actual = UInt128.asBytes(UInt128.INT_MAX);
+            assertArrayEquals(expected, actual);
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testAsBytesBigIntegerNegative() {
+        BigInteger bigint = BigInteger.valueOf(-1);
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBytes(bigint);
+        fail();
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testAsBytesBigIntegerExceedU128() {
+        final var bigint = new BigInteger("9999999999999999999999999999999999999999", 10);
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBytes(bigint);
+        fail();
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testAsBytesBigIntegerNull() {
+        BigInteger bigint = null;
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBytes(bigint);
+        fail();
+    }
+
+    @Test
     public void testAsBytesZero() {
 
         byte[] reverse = UInt128.asBytes(0, 0);
@@ -126,23 +184,6 @@ public class UInt128Test {
         byte[] bytes = new byte[] {1, 2, 3, 4, 5, 6};
         @SuppressWarnings("unused")
         var nop = UInt128.asUUID(bytes);
-        fail();
-    }
-
-    @Test(expected = NullPointerException.class)
-    public void testAsBytesBigIntegerNull() {
-
-        BigInteger bigint = null;
-        @SuppressWarnings("unused")
-        var nop = UInt128.asBytes(bigint);
-        fail();
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testAsBytesBigIntegerNegative() {
-        BigInteger bigint = BigInteger.valueOf(-1);
-        @SuppressWarnings("unused")
-        var nop = UInt128.asBytes(bigint);
         fail();
     }
 
