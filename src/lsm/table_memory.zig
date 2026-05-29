@@ -415,6 +415,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 next_pending: ?Value,
                 dropped_count: u32,
             } {
+                if (constants.verify) assert(key_from_value(&pending) == key_from_value(&value));
+
                 if (Table.usage == .secondary_index) {
                     assert(Table.tombstone(&pending) != Table.tombstone(&value));
                     return .{ .next_pending = null, .dropped_count = 2 };
