@@ -388,9 +388,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                         const candidate_key = key_from_value(&candidate);
 
                         if (value_key == candidate_key) {
-                            const dedup_result = dedup_candidate(candidate, value_next);
-                            iterator.candidate = dedup_result.next_candidate;
-                            iterator.counters.dropped += dedup_result.dropped_count;
+                            iterator.candidate = dedup_values(candidate, value_next);
+                            iterator.counters.dropped += if (iterator.candidate == null) 2 else 1;
                             continue;
                         }
 
@@ -415,19 +414,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                 }
             }
 
-            inline fn dedup_candidate(candidate: Value, value: Value) struct {
-                next_candidate: ?Value,
-                dropped_count: u32,
-            } {
-                if (constants.verify) assert(key_from_value(&candidate) == key_from_value(&value));
-
-                if (Table.usage == .secondary_index) {
-                    assert(Table.tombstone(&candidate) != Table.tombstone(&value));
-                    return .{ .next_candidate = null, .dropped_count = 2 };
-                }
-                return .{ .next_candidate = value, .dropped_count = 1 };
-            }
-
             inline fn within_range(iterator: *const ImmutableTableIterator, key: Key) bool {
                 const key_end = iterator.end_key orelse return true;
 
@@ -437,6 +423,25 @@ pub fn TableMemoryType(comptime Table: type) type {
                 };
             }
         };
+
+        inline fn dedup_values(candidate: Value, value: Value) ?Value {
+            if (constants.verify) assert(key_from_value(&candidate) == key_from_value(&value));
+
+            if (Table.usage == .secondary_index) {
+                // Secondary index optimization: cancel matching put/remove pairs.
+                // NB: while this prevents redundant tombstones from getting to disk, we
+                // still spend some extra CPU work to sort the entries in memory. Ideally,
+                // we annihilate tombstones immediately, before sorting, but that's tricky
+                // to do with scopes.
+                assert(Table.tombstone(&candidate) != Table.tombstone(&value));
+                // Effect: consume both and produce nothing for this key.
+                return null;
+            }
+
+            // The last value in a run of duplicates needs to be the one that ends up
+            // in target.
+            return value;
+        }
 
         // Merge values with identical keys (last one wins) and collapse tombstones for
         // secondary indexes in a streaming fashion.
@@ -462,21 +467,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.
                 if (key_from_value(&candidate) == key_from_value(&value)) {
-                    if (Table.usage == .secondary_index) {
-                        // Secondary index optimization: cancel matching put/remove pairs.
-                        // NB: while this prevents redundant tombstones from getting to disk, we
-                        // still spend some extra CPU work to sort the entries in memory. Ideally,
-                        // we annihilate tombstones immediately, before sorting, but that's tricky
-                        // to do with scopes.
-                        assert(Table.tombstone(&candidate) != Table.tombstone(&value));
-                        // Effect: consume both and produce nothing for this key.
-                        self.candidate = null; // drop both
-                    } else {
-                        // The last value in a run of duplicates needs to be the one that ends up
-                        // in target.
-                        // Effect: keep the slot, overwrite winner with the newer value.
-                        self.candidate = value; // last wins
-                    }
+                    self.candidate = dedup_values(candidate, value);
                 } else {
                     // New key encountered: flush previous winner, start a new run.
                     self.values_out[self.target_index] = candidate;
