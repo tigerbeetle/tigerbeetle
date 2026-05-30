@@ -42,12 +42,12 @@ pub fn TournamentTreeType(comptime Key: type, contestants_max: comptime_int) typ
         const height_max = std.math.log2_int(u32, node_count_max);
         const sentinel_key = std.math.maxInt(Key);
 
-        const Node = struct {
+        pub const Node = struct {
             key: Key,
             id: u32,
 
             const id_sentinel = std.math.maxInt(u32);
-            const sentinel: Node = .{
+            pub const sentinel: Node = .{
                 .key = sentinel_key,
                 .id = id_sentinel,
             };

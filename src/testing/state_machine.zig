@@ -209,7 +209,8 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_callback(completion: *ThingGroove.PrefetchContext) void {
-            const state_machine: *StateMachine = @fieldParentPtr("prefetch_context", completion);
+            const state_machine: *StateMachine =
+                @alignCast(@fieldParentPtr("prefetch_context", completion));
             const callback = state_machine.callback.?;
             state_machine.callback = null;
 
