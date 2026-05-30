@@ -213,8 +213,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             tournament_tree: ?TournamentTree,
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
-            maybe_key_end: ?Key,
             candidate: ?Value,
+            end_key: ?Key,
             end_reached: bool,
 
             counters: struct {
@@ -226,14 +226,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             pub fn init(
                 iterator: *ImmutableTableIterator,
                 merge_context: MergeContext,
-                maybe_key_end: ?Key,
+                end_key: ?Key,
                 direction: Direction,
             ) void {
                 maybe(merge_context.streams_count == 0);
 
-                var count_input: usize = 0;
+                var input_count: usize = 0;
                 for (merge_context.streams[0..merge_context.streams_count]) |stream| {
-                    count_input += stream.len;
+                    input_count += stream.len;
                 }
 
                 iterator.* = .{
@@ -242,12 +242,12 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .tournament_tree = null,
                     .address = iterator,
                     .direction = direction,
-                    .maybe_key_end = maybe_key_end,
                     .candidate = null,
                     .ready = null,
+                    .end_key = end_key,
                     .end_reached = false,
                     .counters = .{
-                        .input = @intCast(count_input),
+                        .input = @intCast(input_count),
                     },
                 };
 
@@ -429,7 +429,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             inline fn within_range(iterator: *const ImmutableTableIterator, key: Key) bool {
-                const key_end = iterator.maybe_key_end orelse return true;
+                const key_end = iterator.end_key orelse return true;
 
                 return switch (iterator.direction) {
                     .ascending => key <= key_end,
@@ -441,64 +441,64 @@ pub fn TableMemoryType(comptime Table: type) type {
         // Merge values with identical keys (last one wins) and collapse tombstones for
         // secondary indexes in a streaming fashion.
         const DedupSink = struct {
-            out: []Value,
+            values_out: []Value,
             target_index: u32 = 0,
 
             // Holds the current candidate that may merge with the next item.
-            pending: ?Value = null,
+            candidate: ?Value = null,
 
-            pub fn init(out: []Value) DedupSink {
-                return .{ .out = out };
+            pub fn init(values_out: []Value) DedupSink {
+                return .{ .values_out = values_out };
             }
 
             // Streamed equivalent of `deduplicate`.
             pub fn push(self: *DedupSink, value: Value) void {
-                const pending = self.pending orelse {
+                const candidate = self.candidate orelse {
                     // Starting a new run with a pending `value`.
-                    self.pending = value;
+                    self.candidate = value;
                     return;
                 };
 
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.
-                if (key_from_value(&pending) == key_from_value(&value)) {
+                if (key_from_value(&candidate) == key_from_value(&value)) {
                     if (Table.usage == .secondary_index) {
                         // Secondary index optimization: cancel matching put/remove pairs.
                         // NB: while this prevents redundant tombstones from getting to disk, we
                         // still spend some extra CPU work to sort the entries in memory. Ideally,
                         // we annihilate tombstones immediately, before sorting, but that's tricky
                         // to do with scopes.
-                        assert(Table.tombstone(&pending) != Table.tombstone(&value));
+                        assert(Table.tombstone(&candidate) != Table.tombstone(&value));
                         // Effect: consume both and produce nothing for this key.
-                        self.pending = null; // drop both
+                        self.candidate = null; // drop both
                     } else {
                         // The last value in a run of duplicates needs to be the one that ends up
                         // in target.
                         // Effect: keep the slot, overwrite winner with the newer value.
-                        self.pending = value; // last wins
+                        self.candidate = value; // last wins
                     }
                 } else {
                     // New key encountered: flush previous winner, start a new run.
-                    self.out[self.target_index] = pending;
+                    self.values_out[self.target_index] = candidate;
                     self.target_index += 1;
-                    self.pending = value;
+                    self.candidate = value;
                 }
             }
 
             pub fn finish(self: *DedupSink) u32 {
                 // Flush the final pending value, if any.
-                if (self.pending) |p| {
-                    self.out[self.target_index] = p;
+                if (self.candidate) |candidate| {
+                    self.values_out[self.target_index] = candidate;
                     self.target_index += 1;
-                    self.pending = null;
+                    self.candidate = null;
                 }
 
                 // At this point, target_index is the number of deduplicated items written.
                 if (constants.verify) {
                     if (0 < self.target_index) {
                         for (
-                            self.out[0 .. self.target_index - 1],
-                            self.out[1..self.target_index],
+                            self.values_out[0 .. self.target_index - 1],
+                            self.values_out[1..self.target_index],
                         ) |*value, *value_next| {
                             assert(key_from_value(value) < key_from_value(value_next));
                         }
@@ -647,14 +647,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
         }
 
-        inline fn slice_run_for_range(values: []const Value, range_in: KeyRange) ?[]const Value {
+        inline fn slice_run_for_range(values: []const Value, range: KeyRange) ?[]const Value {
             const range_slice = binary_search.binary_search_values_range(
                 Key,
                 Value,
                 key_from_value,
                 values,
-                range_in.min,
-                range_in.max,
+                range.min,
+                range.max,
             );
             if (range_slice.count == 0) return null;
             return values[range_slice.start..][0..range_slice.count];
@@ -726,10 +726,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table_mutable.mutability == .mutable);
             maybe(table_mutable.sorted());
 
-            const values_count_limit = table_immutable.values.len;
-            assert(table_immutable.count() <= values_count_limit);
-            assert(table_mutable.count() <= values_count_limit);
-            assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
+            const values_count_max = table_immutable.values.len;
+            assert(table_immutable.count() <= values_count_max);
+            assert(table_mutable.count() <= values_count_max);
+            assert(table_immutable.count() + table_mutable.count() <= values_count_max);
 
             if (table_mutable.count() == 0) return;
 
@@ -758,7 +758,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 });
             }
             assert(table_immutable.sorted());
-            const tables_combined_count = table_immutable.count() + table_mutable.count();
+            const values_combined_count = table_immutable.count() + table_mutable.count();
             // Because `table_mutable` is likely to be smaller then `tabel_immutable` we:
             // 1. Copy the values from `table_mutable` into `table_immutable`.
             // 2. We swap the backing arrays so that `table_mutable` has all the values.
@@ -777,7 +777,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .origin = .immutable,
             });
 
-            table_mutable.value_context.count = tables_combined_count;
+            table_mutable.value_context.count = values_combined_count;
             table_mutable.value_context.run_tracker.assert_invariants(table_mutable.count());
 
             table_immutable.mutability.immutable.absorbed = true;
