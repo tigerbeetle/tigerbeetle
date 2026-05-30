@@ -1,25 +1,30 @@
-//! Memory tables for an LSM (log‑structured merge) stage.
+//! Memory tables for an LSM (log-structured merge) stage.
 //!
 //! Each `tree.zig` maintains two in‑memory tables:
 //! - Mutable table: accepts all updates (e.g., `Tree.put`).
-//! - Immutable table: sorted read‑only staging area for the next flush to disk.
+//! - Immutable table: read-only staging area for the next flush to disk.
 //!
-//! New puts are appended to the mutable table. When the mutable table fills up
-//! — or rather when we reach a bar boundary - the mutable table is compacted into
-//! the immutable table. Compaction sorts and deduplicates entries and prepares them for the LSM
-//! `compaction.zig` to be flushed to disk.
+//! New puts are appended to the mutable table. At the end of each beat, the new mutable suffix is
+//! sorted and deduplicated into a sorted run. At a bar boundary, the mutable table is staged as the
+//! next immutable table:
+//! - If the previous immutable table was flushed to disk, `compact()` swaps the mutable table's
+//!   backing storage and run tracker into the immutable table.
+//! - If the previous immutable table was not flushed, `absorb()` retains that immutable run,
+//!   appends the mutable runs, and re-materializes the combined table as the immutable table.
+//!
+//! The immutable table may therefore contain multiple sorted runs. Reads and disk flushes use
+//! `ImmutableTableIterator` to merge those runs and deduplicate equal keys lazily.
 //!
 //! Optimizations
-//! 1) Sorted runs on every beat:
-//!    - At the end of each beat, the mutable table’s suffix is sorted and
-//!      deduplicated, and the suffix offset advances.
-//!    - By the end of a bar, the mutable table is a sequence of sorted arrays,
-//!      which are then merged and deduplicated.
+//! 1) Sorted runs:
+//!    - Beat compaction sorts only the newly appended mutable suffix.
+//!    - The run tracker records contiguous sorted ranges and their origin so that newer mutable
+//!      runs win during lazy cross-run deduplication.
 //!
 //! 2) Deferred disk flush:
-//!    - If the immutable table is not sufficiently full, `compaction.zig` may
-//!      choose not to flush to disk. Instead, we retain the current immutable
-//!      table and absorb the mutable table into it.
+//!    - If the immutable table is not sufficiently full, `compaction.zig` may choose not to flush
+//!      it to disk. The next bar then absorbs the new mutable table into the retained immutable
+//!      table, avoiding a disk flush for a small table.
 
 const std = @import("std");
 const mem = std.mem;
