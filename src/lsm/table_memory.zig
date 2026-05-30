@@ -208,13 +208,13 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             address: *const ImmutableTableIterator,
             direction: Direction,
-            maybe_value_next: ?Value,
+            ready: ?Value,
 
             tournament_tree: ?TournamentTree,
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
             maybe_key_end: ?Key,
-            pending: ?Value,
+            candidate: ?Value,
             end_reached: bool,
 
             counters: struct {
@@ -243,8 +243,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .address = iterator,
                     .direction = direction,
                     .maybe_key_end = maybe_key_end,
-                    .pending = null,
-                    .maybe_value_next = null,
+                    .candidate = null,
+                    .ready = null,
                     .end_reached = false,
                     .counters = .{
                         .input = @intCast(count_input),
@@ -283,23 +283,23 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             pub inline fn peek(iterator: *ImmutableTableIterator) ?Key {
                 // Early exit to avoid invoking the more expensive `ensure_next`.
-                if (iterator.maybe_value_next) |value| return key_from_value(&value);
+                if (iterator.ready) |value| return key_from_value(&value);
                 iterator.ensure_next();
-                const value = iterator.maybe_value_next orelse return null;
+                const value = iterator.ready orelse return null;
                 return key_from_value(&value);
             }
 
             pub inline fn pop(iterator: *ImmutableTableIterator) ?Value {
                 // Early exit to avoid invoking the more expensive `ensure_next`.
-                if (iterator.maybe_value_next) |value| {
+                if (iterator.ready) |value| {
                     iterator.counters.out += 1;
-                    iterator.maybe_value_next = null;
+                    iterator.ready = null;
                     return value;
                 }
                 iterator.ensure_next();
-                const value = iterator.maybe_value_next orelse return null;
+                const value = iterator.ready orelse return null;
                 iterator.counters.out += 1;
-                iterator.maybe_value_next = null;
+                iterator.ready = null;
                 return value;
             }
 
@@ -360,7 +360,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             fn ensure_next(iterator: *ImmutableTableIterator) void {
                 iterator.assert_not_moved();
-                if (iterator.maybe_value_next != null) return;
+                if (iterator.ready != null) return;
                 if (iterator.end_reached) return;
 
                 // A bounded-loop implementation similar to `probe` would
@@ -369,9 +369,9 @@ pub fn TableMemoryType(comptime Table: type) type {
                     const maybe_value = iterator.pop_from_tree();
 
                     if (maybe_value == null) {
-                        if (iterator.pending) |pending_value| {
-                            iterator.maybe_value_next = pending_value;
-                            iterator.pending = null;
+                        if (iterator.candidate) |candidate| {
+                            iterator.ready = candidate;
+                            iterator.candidate = null;
                         } else {
                             const consumed = iterator.counters.out + iterator.counters.dropped;
                             assert(iterator.counters.input == consumed);
@@ -384,25 +384,25 @@ pub fn TableMemoryType(comptime Table: type) type {
                     const value_next = maybe_value.?;
                     const value_key = key_from_value(&value_next);
 
-                    if (iterator.pending) |pending_value| {
-                        const pending_key = key_from_value(&pending_value);
+                    if (iterator.candidate) |candidate| {
+                        const candidate_key = key_from_value(&candidate);
 
-                        if (value_key == pending_key) {
-                            const dedup_result = dedup_pending(pending_value, value_next);
-                            iterator.pending = dedup_result.next_pending;
+                        if (value_key == candidate_key) {
+                            const dedup_result = dedup_candidate(candidate, value_next);
+                            iterator.candidate = dedup_result.next_candidate;
                             iterator.counters.dropped += dedup_result.dropped_count;
                             continue;
                         }
 
-                        iterator.maybe_value_next = pending_value;
+                        iterator.ready = candidate;
 
                         if (!iterator.within_range(value_key)) {
-                            iterator.pending = null;
+                            iterator.candidate = null;
                             iterator.end_reached = true;
                             return;
                         }
 
-                        iterator.pending = value_next;
+                        iterator.candidate = value_next;
                         return;
                     } else {
                         if (!iterator.within_range(value_key)) {
@@ -410,22 +410,22 @@ pub fn TableMemoryType(comptime Table: type) type {
                             return;
                         }
 
-                        iterator.pending = value_next;
+                        iterator.candidate = value_next;
                     }
                 }
             }
 
-            inline fn dedup_pending(pending: Value, value: Value) struct {
-                next_pending: ?Value,
+            inline fn dedup_candidate(candidate: Value, value: Value) struct {
+                next_candidate: ?Value,
                 dropped_count: u32,
             } {
-                if (constants.verify) assert(key_from_value(&pending) == key_from_value(&value));
+                if (constants.verify) assert(key_from_value(&candidate) == key_from_value(&value));
 
                 if (Table.usage == .secondary_index) {
-                    assert(Table.tombstone(&pending) != Table.tombstone(&value));
-                    return .{ .next_pending = null, .dropped_count = 2 };
+                    assert(Table.tombstone(&candidate) != Table.tombstone(&value));
+                    return .{ .next_candidate = null, .dropped_count = 2 };
                 }
-                return .{ .next_pending = value, .dropped_count = 1 };
+                return .{ .next_candidate = value, .dropped_count = 1 };
             }
 
             inline fn within_range(iterator: *const ImmutableTableIterator, key: Key) bool {
