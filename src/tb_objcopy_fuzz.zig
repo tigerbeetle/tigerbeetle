@@ -1,0 +1,368 @@
+const std = @import("std");
+const stdx = @import("stdx");
+const fuzz = @import("./testing/fuzz.zig");
+const log = std.log.scoped(.tb_objcopy_fuzz);
+
+const CLIArgs = struct {
+    zig_exe: []const u8,
+    tb_objcopy: []const u8,
+    llvm_objcopy: ?[]const u8 = null,
+    iterations: usize = 100,
+    seed: ?u64 = null,
+    tmp: []const u8 = "/tmp",
+};
+
+// Stress N-1/N/N+1 boundaries around common alignment and page-size cutoffs.
+const boundary_lengths = [_]usize{
+    1,   2,   7,   8,    15,   16,   31,   32,   63,   64,   127,  128,  255,  256,
+    511, 512, 513, 1023, 1024, 1025, 2047, 2048, 2049, 4095, 4096, 4097, 8191,
+};
+
+pub fn main() !void {
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
+
+    const arena = arena_allocator.allocator();
+
+    var arguments = try std.process.argsWithAllocator(arena);
+
+    const command_line = stdx.flags(&arguments, CLIArgs);
+    const seed = command_line.seed orelse std.crypto.random.int(u64);
+    log.info("seed={d} iterations={d}", .{ seed, command_line.iterations });
+    var prng = stdx.PRNG.from_seed(seed);
+
+    var tmp_dir_name_buffer: [64]u8 = undefined;
+    const tmp_dir_name = try std.fmt.bufPrint(
+        &tmp_dir_name_buffer,
+        "{s}/tb_objcopy_fuzz_{d}",
+        .{ command_line.tmp, prng.int(u64) },
+    );
+    try std.fs.cwd().makePath(tmp_dir_name);
+    defer std.fs.cwd().deleteTree(tmp_dir_name) catch {};
+
+    const fixture_elf = try build_linux_fixture(arena, command_line, tmp_dir_name);
+
+    const fixture_pe = try std.fmt.allocPrint(arena, "{s}/fixture.exe", .{tmp_dir_name});
+
+    try build_windows_fixture(arena, command_line, tmp_dir_name, fixture_pe);
+
+    var fixtures = std.ArrayList([]const u8).init(arena);
+    try fixtures.append(fixture_elf);
+    try fixtures.append(fixture_pe);
+
+    for (0..command_line.iterations) |iteration| {
+        for (fixtures.items) |fixture| {
+            var case_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer case_arena.deinit();
+
+            try run_case(
+                case_arena.allocator(),
+                &prng,
+                command_line,
+                tmp_dir_name,
+                fixture,
+                iteration,
+            );
+        }
+    }
+}
+
+fn run_case(
+    arena: std.mem.Allocator,
+    prng: *stdx.PRNG,
+    command_line: CLIArgs,
+    tmp_dir: []const u8,
+    fixture: []const u8,
+    iteration: usize,
+) !void {
+    const fixture_name = std.fs.path.basename(fixture);
+    const case_dir = try std.fmt.allocPrint(
+        arena,
+        "{s}/case-{d}-{s}",
+        .{ tmp_dir, iteration, fixture_name },
+    );
+
+    try std.fs.cwd().makePath(case_dir);
+    defer std.fs.cwd().deleteTree(case_dir) catch {};
+
+    const body_data = try random_bytes_file(
+        arena,
+        prng,
+        case_dir,
+        "body.bin",
+        fuzz_length(prng, iteration * 3),
+    );
+
+    const header_data = try random_bytes_file(
+        arena,
+        prng,
+        case_dir,
+        "header.bin",
+        fuzz_length(prng, iteration * 3 + 1),
+    );
+
+    const header_replacement_data = try random_bytes_file(
+        arena,
+        prng,
+        case_dir,
+        "header_replacement.bin",
+        fuzz_length(prng, iteration * 3 + 2),
+    );
+
+    const tb_copy = try std.fmt.allocPrint(arena, "{s}/tb_copy.bin", .{case_dir});
+    const tb_working = try std.fmt.allocPrint(arena, "{s}/tb_working.bin", .{case_dir});
+    const llvm_working = try std.fmt.allocPrint(arena, "{s}/llvm_working.bin", .{case_dir});
+    const tb_removed = try std.fmt.allocPrint(arena, "{s}/tb_removed.bin", .{case_dir});
+    const llvm_removed = try std.fmt.allocPrint(arena, "{s}/llvm_removed.bin", .{case_dir});
+
+    try run_tool(arena, command_line.tb_objcopy, &.{
+        "--enable-deterministic-archives",
+        fixture,
+        tb_copy,
+    });
+    try run_tool(arena, command_line.tb_objcopy, &.{
+        "--enable-deterministic-archives",
+        tb_copy,
+        tb_working,
+    });
+
+    if (command_line.llvm_objcopy) |llvm_objcopy| {
+        try run_tool(arena, llvm_objcopy, &.{
+            "--enable-deterministic-archives",
+            fixture,
+            llvm_working,
+        });
+        try assert_equal_stage(arena, tb_copy, llvm_working, "copy", case_dir);
+    }
+
+    const add_mvb = try std.fmt.allocPrint(arena, ".tb_mvb={s}", .{body_data.path});
+    const add_mvh = try std.fmt.allocPrint(arena, ".tb_mvh={s}", .{header_data.path});
+
+    try run_tool(arena, command_line.tb_objcopy, &.{
+        "--enable-deterministic-archives",
+        "--keep-undefined",
+        "--add-section",
+        add_mvb,
+        "--set-section-flags",
+        ".tb_mvb=contents,noload,readonly",
+        "--add-section",
+        add_mvh,
+        "--set-section-flags",
+        ".tb_mvh=contents,noload,readonly",
+        tb_working,
+    });
+    if (command_line.llvm_objcopy) |llvm_objcopy| {
+        try run_tool(arena, llvm_objcopy, &.{
+            "--enable-deterministic-archives",
+            "--keep-undefined",
+            "--add-section",
+            add_mvb,
+            "--set-section-flags",
+            ".tb_mvb=contents,noload,readonly",
+            "--add-section",
+            add_mvh,
+            "--set-section-flags",
+            ".tb_mvh=contents,noload,readonly",
+            llvm_working,
+        });
+        try assert_equal_stage(arena, tb_working, llvm_working, "add", case_dir);
+    }
+
+    const add_mvh_replacement = try std.fmt.allocPrint(
+        arena,
+        ".tb_mvh={s}",
+        .{header_replacement_data.path},
+    );
+
+    try run_tool(arena, command_line.tb_objcopy, &.{
+        "--enable-deterministic-archives",
+        "--keep-undefined",
+        "--remove-section",
+        ".tb_mvh",
+        "--add-section",
+        add_mvh_replacement,
+        "--set-section-flags",
+        ".tb_mvh=contents,noload,readonly",
+        tb_working,
+    });
+    if (command_line.llvm_objcopy) |llvm_objcopy| {
+        try run_tool(arena, llvm_objcopy, &.{
+            "--enable-deterministic-archives",
+            "--keep-undefined",
+            "--remove-section",
+            ".tb_mvh",
+            "--add-section",
+            add_mvh_replacement,
+            "--set-section-flags",
+            ".tb_mvh=contents,noload,readonly",
+            llvm_working,
+        });
+        try assert_equal_stage(arena, tb_working, llvm_working, "header replace", case_dir);
+    }
+
+    try run_tool(arena, command_line.tb_objcopy, &.{
+        "--enable-deterministic-archives",
+        "--keep-undefined",
+        "--remove-section",
+        ".tb_mvb",
+        "--remove-section",
+        ".tb_mvh",
+        tb_working,
+        tb_removed,
+    });
+    if (command_line.llvm_objcopy) |llvm_objcopy| {
+        try run_tool(arena, llvm_objcopy, &.{
+            "--enable-deterministic-archives",
+            "--keep-undefined",
+            "--remove-section",
+            ".tb_mvb",
+            "--remove-section",
+            ".tb_mvh",
+            llvm_working,
+            llvm_removed,
+        });
+        try assert_equal_stage(arena, tb_removed, llvm_removed, "remove", case_dir);
+    }
+    try assert_equal_stage(arena, tb_removed, tb_copy, "roundtrip remove", case_dir);
+}
+
+const RandomBytesFile = struct {
+    path: []const u8,
+};
+
+fn random_bytes_file(
+    arena: std.mem.Allocator,
+    prng: *stdx.PRNG,
+    dir: []const u8,
+    name: []const u8,
+    length_bytes: usize,
+) !RandomBytesFile {
+    const path = try std.fmt.allocPrint(arena, "{s}/{s}", .{ dir, name });
+    const bytes = try arena.alloc(u8, length_bytes);
+
+    prng.fill(bytes);
+    try std.fs.cwd().writeFile(.{
+        .sub_path = path,
+        .data = bytes,
+    });
+    return .{ .path = path };
+}
+
+fn fuzz_length(prng: *stdx.PRNG, index: usize) usize {
+    if (index < boundary_lengths.len) return boundary_lengths[index];
+    // Keep broad coverage while biasing toward small payloads used most often in practice.
+    if (prng.boolean()) return 1 + prng.int_inclusive(usize, 8191);
+    return @min(1 + fuzz.random_int_exponential(prng, usize, 512), @as(usize, 8191));
+}
+
+fn run_tool(
+    arena: std.mem.Allocator,
+    executable_path: []const u8,
+    arguments: []const []const u8,
+) !void {
+    var argv = std.ArrayList([]const u8).init(arena);
+    defer argv.deinit();
+
+    try argv.append(executable_path);
+    for (arguments) |argument| try argv.append(argument);
+
+    var child = std.process.Child.init(argv.items, arena);
+    const term = try child.spawnAndWait();
+    if (term != .Exited or term.Exited != 0) return error.ToolFailed;
+}
+
+fn build_linux_fixture(
+    arena: std.mem.Allocator,
+    command_line: CLIArgs,
+    tmp_dir: []const u8,
+) ![]const u8 {
+    const source_path = try std.fmt.allocPrint(arena, "{s}/fixture.zig", .{tmp_dir});
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = source_path,
+        .data =
+        \\pub fn main() void {}
+        ,
+    });
+
+    const output_path = try std.fmt.allocPrint(arena, "{s}/fixture", .{tmp_dir});
+    const emit_bin_arg = try std.fmt.allocPrint(arena, "-femit-bin={s}", .{output_path});
+
+    var child = std.process.Child.init(&.{
+        command_line.zig_exe,
+        "build-exe",
+        source_path,
+        "-O",
+        "ReleaseSafe",
+        "-fstrip",
+        "--zig-lib-dir",
+        "zig/lib",
+        "--cache-dir",
+        ".zig-cache",
+        "--global-cache-dir",
+        ".zig-cache",
+        emit_bin_arg,
+    }, arena);
+    const term = try child.spawnAndWait();
+    if (term != .Exited or term.Exited != 0) return error.FixtureBuildFailed;
+    return output_path;
+}
+
+fn assert_equal_files(arena: std.mem.Allocator, a: []const u8, b: []const u8) !void {
+    const a_bytes = try std.fs.cwd().readFileAlloc(arena, a, std.math.maxInt(usize));
+
+    const b_bytes = try std.fs.cwd().readFileAlloc(arena, b, std.math.maxInt(usize));
+
+    if (!std.mem.eql(u8, a_bytes, b_bytes)) return error.BytesMismatch;
+}
+
+fn assert_equal_stage(
+    arena: std.mem.Allocator,
+    got: []const u8,
+    want: []const u8,
+    stage: []const u8,
+    case_dir: []const u8,
+) !void {
+    assert_equal_files(arena, got, want) catch |err| {
+        std.log.err("mismatch after {s} in {s}", .{ stage, case_dir });
+        return err;
+    };
+}
+
+fn build_windows_fixture(
+    arena: std.mem.Allocator,
+    command_line: CLIArgs,
+    tmp_dir: []const u8,
+    output_path: []const u8,
+) !void {
+    const source_path = try std.fmt.allocPrint(arena, "{s}/fixture.zig", .{tmp_dir});
+
+    try std.fs.cwd().writeFile(.{
+        .sub_path = source_path,
+        .data =
+        \\pub fn main() void {}
+        ,
+    });
+
+    const emit_bin_arg = try std.fmt.allocPrint(arena, "-femit-bin={s}", .{output_path});
+
+    var child = std.process.Child.init(&.{
+        command_line.zig_exe,
+        "build-exe",
+        source_path,
+        "-O",
+        "ReleaseSafe",
+        "-fstrip",
+        "-target",
+        "x86_64-windows",
+        "--zig-lib-dir",
+        "zig/lib",
+        "--cache-dir",
+        ".zig-cache",
+        "--global-cache-dir",
+        ".zig-cache",
+        emit_bin_arg,
+    }, arena);
+    const term = try child.spawnAndWait();
+    if (term != .Exited or term.Exited != 0) return error.FixtureBuildFailed;
+}
