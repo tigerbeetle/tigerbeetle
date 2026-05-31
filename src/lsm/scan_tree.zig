@@ -321,15 +321,15 @@ pub fn ScanTreeType(
 
             // Re-slicing the in-memory tables:
             const table_memory = self.table_mutable_values;
-            const slice: []const Value = self.direction.slice_lower_bound(
+            const table_memory_slice: []const Value = self.direction.slice_lower_bound(
                 Key,
                 Value,
                 key_from_value,
                 table_memory,
                 probe_key,
             );
-            assert(slice.len <= table_memory.len);
-            self.table_mutable_values = slice;
+            assert(table_memory_slice.len <= table_memory.len);
+            self.table_mutable_values = table_memory_slice;
             self.table_immutable_iterator.probe(probe_key);
 
             switch (self.state) {
