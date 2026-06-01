@@ -1853,8 +1853,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            // TODO Drop pings that were not addressed to us.
-
             self.send_header_to_replica(message.header.replica, @bitCast(Header.Pong{
                 .command = .pong,
                 .cluster = self.cluster,
