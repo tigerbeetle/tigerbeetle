@@ -151,7 +151,7 @@ pub fn ReplicaReformatType(
             user_data: u128,
             operation: vsr.Operation,
             timestamp: u64,
-            results: []u8,
+            result: []align(@alignOf(vsr.Header)) const u8,
         ) void {
             assert(operation == .noop);
             assert(timestamp > 0);
@@ -160,7 +160,7 @@ pub fn ReplicaReformatType(
             assert(reformat.requests_done > 0);
             assert(reformat.requests_done < constants.pipeline_prepare_queue_max);
             assert(reformat.safe_view == null);
-            assert(results.len == 0);
+            assert(result.len == 0);
 
             log.debug("{}: request done={}", .{
                 reformat.options.replica,

@@ -70,6 +70,7 @@ pub const Header = extern struct {
 
     comptime {
         assert(@sizeOf(Header) == 256);
+        assert(@alignOf(Header) == 16);
         assert(stdx.no_padding(Header));
         assert(@offsetOf(Header, "reserved_command") % @sizeOf(u256) == 0);
     }
