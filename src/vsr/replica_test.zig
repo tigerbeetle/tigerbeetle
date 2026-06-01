@@ -1632,7 +1632,6 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     try TestReplicas.expect_equal_grid(b1, b2);
 }
 
-// Compat(v0.15.3)
 test "Cluster: client: empty command=request operation=register body" {
     const run_test = struct {
         fn run_test(
@@ -1675,7 +1674,6 @@ test "Cluster: client: empty command=request operation=register body" {
     }.run_test;
 
     try run_test(vsr.Release.minimum, .client_release_too_low);
-    try run_test(releases[0].release_client_min, .invalid_request_body_size);
 }
 
 test "Cluster: eviction: no_session" {
