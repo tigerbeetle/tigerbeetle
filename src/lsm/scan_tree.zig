@@ -10,6 +10,7 @@ const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
 const vsr = @import("../vsr.zig");
+
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -51,6 +52,7 @@ pub fn ScanTreeType(
 
         pub const Tree = Tree_;
         const Table = Tree.Table;
+        const ImmutableTableIterator = Tree.TableMemory.ImmutableTableIterator;
         const Key = Table.Key;
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
@@ -129,7 +131,7 @@ pub fn ScanTreeType(
         snapshot: u64,
 
         table_mutable_values: []const Value,
-        table_immutable_values: []const Value,
+        table_immutable_iterator: ImmutableTableIterator,
 
         state: union(ScanState) {
             /// The scan has not been executed yet.
@@ -163,13 +165,14 @@ pub fn ScanTreeType(
         merge_iterator: ?KWayMergeIterator,
 
         pub fn init(
+            self: *ScanTree,
             tree: *Tree,
             buffer: *ScanBuffer,
             snapshot: u64,
             key_min: Key,
             key_max: Key,
             direction: Direction,
-        ) ScanTree {
+        ) void {
             assert(key_min <= key_max);
 
             const table_mutable_values: []const Value = blk: {
@@ -188,23 +191,13 @@ pub fn ScanTreeType(
                 break :blk values[range.start..][0..range.count];
             };
 
-            const table_immutable_values: []const Value = blk: {
-                if (snapshot <
-                    tree.table_immutable.mutability.immutable.snapshot_min) break :blk &.{};
+            const context = if (snapshot <
+                tree.table_immutable.mutability.immutable.snapshot_min)
+                Tree.TableMemory.MergeContext{ .streams = undefined, .streams_count = 0 }
+            else
+                tree.table_immutable.iterator_context_range(.{ .min = key_min, .max = key_max });
 
-                const values = tree.table_immutable.values_used();
-                const range = binary_search.binary_search_values_range(
-                    Key,
-                    Value,
-                    key_from_value,
-                    values,
-                    key_min,
-                    key_max,
-                );
-                break :blk values[range.start..][0..range.count];
-            };
-
-            return .{
+            self.* = .{
                 .tree = tree,
                 .buffer = buffer,
                 .state = .idle,
@@ -213,10 +206,15 @@ pub fn ScanTreeType(
                 .key_upper = direction.upper(key_min, key_max),
                 .direction = direction,
                 .table_mutable_values = table_mutable_values,
-                .table_immutable_values = table_immutable_values,
+                .table_immutable_iterator = undefined,
                 .levels = undefined,
                 .merge_iterator = null,
             };
+            self.table_immutable_iterator.init(
+                context,
+                if (direction == .ascending) key_max else key_min,
+                direction,
+            );
         }
 
         pub fn read(self: *ScanTree, context: Context, callback: Callback) void {
@@ -322,18 +320,17 @@ pub fn ScanTreeType(
             self.key_lower = probe_key;
 
             // Re-slicing the in-memory tables:
-            inline for (.{ &self.table_mutable_values, &self.table_immutable_values }) |field| {
-                const table_memory = field.*;
-                const slice: []const Value = self.direction.slice_lower_bound(
-                    Key,
-                    Value,
-                    key_from_value,
-                    table_memory,
-                    probe_key,
-                );
-                assert(slice.len <= table_memory.len);
-                field.* = slice;
-            }
+            const table_memory = self.table_mutable_values;
+            const table_memory_slice: []const Value = self.direction.slice_lower_bound(
+                Key,
+                Value,
+                key_from_value,
+                table_memory,
+                probe_key,
+            );
+            assert(table_memory_slice.len <= table_memory.len);
+            self.table_mutable_values = table_memory_slice;
+            self.table_immutable_iterator.probe(probe_key);
 
             switch (self.state) {
                 .idle => {},
@@ -395,8 +392,8 @@ pub fn ScanTreeType(
             return self.table_memory_peek(self.table_mutable_values);
         }
 
-        fn merge_table_immutable_peek(self: *const ScanTree) Pending!?Key {
-            return self.table_memory_peek(self.table_immutable_values);
+        fn merge_table_immutable_peek(self: *ScanTree) Pending!?Key {
+            return self.table_immutable_iterator.peek();
         }
 
         fn merge_table_mutable_pop(self: *ScanTree) Value {
@@ -404,7 +401,7 @@ pub fn ScanTreeType(
         }
 
         fn merge_table_immutable_pop(self: *ScanTree) Value {
-            return table_memory_pop(self, &self.table_immutable_values);
+            return self.table_immutable_iterator.pop().?;
         }
 
         inline fn table_memory_peek(

@@ -33,6 +33,8 @@ const ReplicaReformat =
     vsr.ReplicaReformatType(StateMachine, MessageBus, Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
+const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{});
+
 const KiB = stdx.KiB;
 const MiB = stdx.MiB;
 const GiB = stdx.GiB;
@@ -63,11 +65,16 @@ pub const std_options: std.Options = .{
 pub fn main() !void {
     if (builtin.os.tag == .windows) try vsr.multiversion.wait_for_parent_to_exit();
 
-    var arena_instance = std.heap.ArenaAllocator.init(stdx.huge_page_allocator);
-    defer arena_instance.deinit();
-
-    // Arena is an implementation detail, all memory must be freed.
-    const gpa = arena_instance.allocator();
+    var allocator = GeneralPurposeAllocator.init;
+    allocator.backing_allocator = stdx.huge_page_allocator;
+    const gpa = allocator.allocator();
+    defer {
+        _ = allocator.detectLeaks();
+        switch (allocator.deinit()) {
+            .ok => {},
+            .leak => @panic("memory leaked"),
+        }
+    }
 
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);

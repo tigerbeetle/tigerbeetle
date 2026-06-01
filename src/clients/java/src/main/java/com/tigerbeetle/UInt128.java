@@ -17,6 +17,9 @@ public enum UInt128 {
     private static final BigInteger MOST_SIGNIFICANT_MASK = BigInteger.ONE.shiftLeft(64);
     private static final BigInteger LEAST_SIGNIFICANT_MASK = BigInteger.valueOf(Long.MAX_VALUE);
 
+    // Maximum unsigned 128-bit integer: 2^128 - 1.
+    static final BigInteger INT_MAX = BigInteger.ONE.shiftLeft(128).add(BigInteger.ONE.negate());
+
     /**
      * Gets the partial 64-bit representation of a 128-bit unsigned integer.
      *
@@ -157,12 +160,15 @@ public enum UInt128 {
         if (value.signum() < 0)
             throw new IllegalArgumentException("Value cannot be negative");
 
+        if (value.compareTo(INT_MAX) > 0)
+            throw new IllegalArgumentException("Value larger than a 128-bit integer");
+
         if (BigInteger.ZERO.equals(value))
             return new byte[SIZE];
 
         final var parts = value.divideAndRemainder(MOST_SIGNIFICANT_MASK);
-        var bigintMsb = parts[0];
-        var bigintLsb = parts[1];
+        BigInteger bigintMsb = parts[0];
+        BigInteger bigintLsb = parts[1];
 
         if (LEAST_SIGNIFICANT_MASK.compareTo(bigintMsb) < 0) {
             bigintMsb = bigintMsb.subtract(MOST_SIGNIFICANT_MASK);

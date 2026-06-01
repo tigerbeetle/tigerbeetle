@@ -316,20 +316,20 @@ comptime {
     assert(view_headers_max > view_change_headers_suffix_max);
 }
 
-/// The maximum number of headers to include with a response to a command=request_headers message.
-pub const request_headers_max = @min(
+/// The maximum number of headers to include with a response to a command=get_headers message.
+pub const get_headers_max = @min(
     @divFloor(message_body_size_max, @sizeOf(vsr.Header)),
     64,
 );
 
 comptime {
-    assert(request_headers_max > 0);
+    assert(get_headers_max > 0);
 }
 
-/// The maximum number of block addresses/checksums requested by a single command=request_blocks.
+/// The maximum number of block addresses/checksums requested by a single command=get_blocks.
 pub const grid_repair_request_max = config.process.grid_repair_request_max;
 
-/// The number of grid reads allocated to handle incoming command=request_blocks messages.
+/// The number of grid reads allocated to handle incoming command=get_blocks messages.
 pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
 
 /// Immediately after state sync we want access to all of the grid's write bandwidth to rapidly sync

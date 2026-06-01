@@ -77,6 +77,55 @@ test.skip = (name: string, fn: () => Promise<void>) => {
   console.log(name + ': SKIPPED')
 }
 
+test('Serialization: BigInt exceeds U128', async (): Promise<void> => {
+  const transfer: Transfer = {
+      id: 9999999999999999999999999999999999999999n,
+      debit_account_id: 0n,
+      credit_account_id: 0n,
+      amount: 0n,
+      user_data_128: 0n,
+      user_data_64: 0n,
+      user_data_32: 0,
+      pending_id: 0n,
+      timeout: 0,
+      ledger: 0,
+      code: 0,
+      flags: 0,
+      timestamp: 0n,
+  };
+
+  assert.rejects(async() => await client.createTransfers([transfer]), (err) => {
+    assert.ok(err instanceof Error)
+    assert.strictEqual(err.message, "id must fit in 128 bits")
+    return true
+  })
+})
+
+test('Serialization: BigInt negative', async (): Promise<void> => {
+  const transfer: Transfer = {
+      id: -1n,
+      debit_account_id: 0n,
+      credit_account_id: 0n,
+      amount: 0n,
+      user_data_128: 0n,
+      user_data_64: 0n,
+      user_data_32: 0,
+      pending_id: 0n,
+      timeout: 0,
+      ledger: 0,
+      code: 0,
+      flags: 0,
+      timestamp: 0n,
+  };
+
+  assert.rejects(async() => await client.createTransfers([transfer]), (err) => {
+    assert.ok(err instanceof Error)
+    assert.strictEqual(err.message, "id must be positive")
+    return true
+  })
+})
+
+
 test('id() monotonically increasing', async (): Promise<void> => {
   let idA = id();
   for (let i = 0; i < 10_000_000; i++) {
@@ -146,6 +195,17 @@ test('batch max size', async (): Promise<void> => {
       timestamp: 0n,
     });
   }
+  assert.rejects(async() => await client.createTransfers(transfers), (err) => {
+    assert.ok(err instanceof RequestError)
+    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
+    return true
+  })
+})
+
+test('batch invalid size', async (): Promise<void> => {
+  const transfers: Transfer[] = [];
+  transfers.length = 0xffffffff;
+
   assert.rejects(async() => await client.createTransfers(transfers), (err) => {
     assert.ok(err instanceof RequestError)
     assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)

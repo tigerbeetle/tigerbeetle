@@ -40,14 +40,14 @@ Storage:
 |                  `commit` | primary |       backup | [Normal](#protocol-normal)                                                                                                                 |
 |               `exit_view` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                                                                           |
 |               `join_view` | replica | all replicas | [View-Change](#protocol-view-change)                                                                                                       |
-|                    `view` | primary |       backup | [Request/View](#protocol-request-view), [State Sync](./sync.md)                                                                 |
-|            `request_view` |  backup |      primary | [Request/View](#protocol-request-view)                                                                                          |
-|         `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                                                                                 |
-|         `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                                                                                         |
-|           `request_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies)                             |
+|                    `view` | primary |       backup | [Request/View](#protocol-request-view), [State Sync](./sync.md)                                                                            |
+|                `get_view` |  backup |      primary | [Request/View](#protocol-request-view)                                                                                                     |
+|             `get_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                                                                                 |
+|             `get_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                                                                                         |
+|               `get_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies)                             |
 |                 `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                                                                                 |
 |                `eviction` | primary |       client | [Client](#protocol-client)                                                                                                                 |
-|          `request_blocks` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)                                                                 |
+|              `get_blocks` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)                                                                 |
 |                   `block` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)                                                                 |
 
 ### Recovery
@@ -158,9 +158,9 @@ When the primary collects its JV quorum:
 
 ### Protocol: Request/View
 
-#### `request_view`
+#### `get_view`
 
-A backup sends a `command=request_view` to the primary of a view when any of the following occur:
+A backup sends a `command=get_view` to the primary of a view when any of the following occur:
 
 - the backup learns about a newer view via a `command=commit` message, or
 - the backup learns about a newer view via a `command=prepare` message, or
@@ -170,7 +170,7 @@ A backup sends a `command=request_view` to the primary of a view when any of the
 
 #### `view`
 
-When a `status=normal` primary receives `command=request_view`, it replies with a `command=view`.
+When a `status=normal` primary receives `command=get_view`, it replies with a `command=view`.
 `command=view` includes:
 - The view's current suffix — the headers of the latest messages in the view.
 - The current checkpoint (see [State Sync](./sync.md)).
@@ -187,7 +187,7 @@ A `view` contains the following headers (which may overlap):
 
 ### Protocol: Repair Journal
 
-`request_headers` and `headers` repair gaps or breaks in a replica's journal headers.
+`get_headers` and `headers` repair gaps or breaks in a replica's journal headers.
 Repaired headers are a prerequisite for [repairing prepares](#protocol-repair-wal).
 
 Because the headers are repaired backwards (from the head) by hash-chaining, it is safe for both backups and transitioning primaries.
@@ -210,9 +210,9 @@ During repair, missing/damaged prepares are requested & repaired chronologically
 - improves the chances that older entries will be available, i.e. not yet overwritten
 - enables better pipelining of repair and commit.
 
-In response to a `request_prepare`:
+In response to a `get_prepare`:
 
-- Reply the `command=prepare` with the requested prepare, if available and valid.
+- Respond with the `command=prepare` message with the requested prepare, if available and valid.
 - Otherwise do not reply. (e.g. the corresponding slot in the WAL is corrupt)
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
@@ -226,9 +226,9 @@ The replica stores the latest reply to each active client.
 
 During repair, corrupt client replies are requested & repaired.
 
-In response to a `request_reply`:
+In response to a `get_reply`:
 
-- Respond with the `command=reply` (the requested reply), if available and valid.
+- Respond with the `command=reply` message (the requested reply), if available and valid.
 - Otherwise do not reply.
 
 ### Protocol: Client
@@ -249,8 +249,8 @@ See also:
 
 Grid repair is triggered when a replica discovers a corrupt (or missing) grid block.
 
-1. The repairing replica sends a `command=request_blocks` to any other replica. The message body contains a list of block `address`/`checksum`s.
-2. Upon receiving a `command=request_blocks`, a replica reads its own grid to check for the requested blocks. For each matching block found, reply with the `command=block` message (the block itself).
+1. The repairing replica sends a `command=get_blocks` to any other replica. The message body contains a list of block `address`/`checksum`s.
+2. Upon receiving a `command=get_blocks`, a replica reads its own grid to check for the requested blocks. For each matching block found, reply with the `command=block` message (the block itself).
 3. Upon receiving a `command=block`, a replica writes the block to its grid, and resolves the reads that were blocked on it.
 
 Note that _both sides_ of grid repair can run while the grid is being opened during replica startup.

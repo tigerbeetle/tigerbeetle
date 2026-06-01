@@ -23,6 +23,7 @@ pub const aegis = @import("vendored/aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const Flags = @import("flags.zig");
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
+pub const Shell = @import("shell.zig");
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
 pub const windows = @import("windows.zig");
@@ -1129,4 +1130,5 @@ comptime {
     _ = @import("unshare.zig");
     _ = @import("vendored/aegis.zig");
     _ = @import("zipfian.zig");
+    _ = @import("shell.zig");
 }

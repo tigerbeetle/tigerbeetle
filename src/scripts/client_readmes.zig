@@ -11,7 +11,7 @@ const log = std.log;
 
 const stdx = @import("stdx");
 const MiB = stdx.MiB;
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 const Docs = @import("../clients/docs_types.zig").Docs;
 const Sample = @import("../clients/docs_types.zig").Sample;
 const samples = @import("../clients/docs_samples.zig").samples;
@@ -25,6 +25,7 @@ const LanguageDocs = .{
     .java = @import("../clients/java/docs.zig").JavaDocs,
     .dotnet = @import("../clients/dotnet/docs.zig").DotnetDocs,
     .python = @import("../clients/python/docs.zig").PythonDocs,
+    .ruby = @import("../clients/ruby/docs.zig").RubyDocs,
 };
 
 pub fn test_freshness(

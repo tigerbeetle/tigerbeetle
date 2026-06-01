@@ -119,13 +119,13 @@ pub const MessagePool = struct {
         pub const ExitView = CommandMessageType(.exit_view);
         pub const JoinView = CommandMessageType(.join_view);
         pub const View = CommandMessageType(.view);
-        pub const RequestView = CommandMessageType(.request_view);
-        pub const RequestHeaders = CommandMessageType(.request_headers);
-        pub const RequestPrepare = CommandMessageType(.request_prepare);
-        pub const RequestReply = CommandMessageType(.request_reply);
+        pub const GetView = CommandMessageType(.get_view);
+        pub const GetHeaders = CommandMessageType(.get_headers);
+        pub const GetPrepare = CommandMessageType(.get_prepare);
+        pub const GetReply = CommandMessageType(.get_reply);
         pub const Headers = CommandMessageType(.headers);
         pub const Eviction = CommandMessageType(.eviction);
-        pub const RequestBlocks = CommandMessageType(.request_blocks);
+        pub const GetBlocks = CommandMessageType(.get_blocks);
         pub const Block = CommandMessageType(.block);
 
         // TODO Avoid the extra level of indirection.

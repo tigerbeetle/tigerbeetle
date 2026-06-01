@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
-const Shell = @import("../shell.zig");
+const Shell = stdx.Shell;
 
 const Release = @import("../multiversion.zig").Release;
 const ReleaseTriple = @import("../multiversion.zig").ReleaseTriple;

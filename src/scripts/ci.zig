@@ -9,8 +9,7 @@ const log = std.log;
 const assert = std.debug.assert;
 
 const stdx = @import("stdx");
-const Shell = @import("../shell.zig");
-
+const Shell = stdx.Shell;
 const client_readmes = @import("./client_readmes.zig");
 
 pub const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
@@ -21,6 +20,7 @@ const LanguageCI = .{
     .java = @import("../clients/java/ci.zig"),
     .node = @import("../clients/node/ci.zig"),
     .python = @import("../clients/python/ci.zig"),
+    .ruby = @import("../clients/ruby/ci.zig"),
 };
 
 const LanguageCIVortex = .{
@@ -103,6 +103,13 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     const tag, _ = stdx.cut(release_info, "\t").?;
     log.info("validating release {s}", .{tag});
 
+    // Run release validation against the latest tag.
+    // (The release branch is ahead of release tag over the weekend.)
+    try shell.exec(
+        "git clone --branch={tag} https://github.com/tigerbeetle/tigerbeetle .",
+        .{ .tag = tag },
+    );
+    try shell.exec("./zig/download.sh", .{});
     try shell.exec(
         "gh release --repo tigerbeetle/tigerbeetle download {tag}",
         .{ .tag = tag },
@@ -131,24 +138,21 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     }
 
     const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
-    try shell.exec_zig_options(.{ .timeout = .minutes(20) }, "build scripts -- release --build " ++
-        "--sha={git_sha} --language=zig", .{
-        .git_sha = git_sha,
-    });
+    try shell.exec_options(
+        .{ .timeout = .minutes(20) },
+        "./zig/zig build scripts -- release --build --sha={git_sha} --language=zig",
+        .{ .git_sha = git_sha },
+    );
     for (artifacts) |artifact| {
         // Zig only guarantees release builds to be deterministic.
         if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
 
         const checksum_downloaded = try shell.sha256sum(artifact);
 
-        shell.popd();
         const checksum_built = try shell.sha256sum(try shell.fmt(
             "zig-out/dist/tigerbeetle/{s}",
-            .{
-                artifact,
-            },
+            .{artifact},
         ));
-        try shell.pushd_dir(tmp_dir.dir);
 
         if (checksum_downloaded != checksum_built) {
             std.debug.panic("checksum mismatch - {s}: downloaded {x}, built {x}", .{
@@ -175,6 +179,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         },
         else => std.debug.panic("unsupported os {}", .{builtin.os.tag}),
     };
+    try shell.cwd.deleteFile("tigerbeetle");
     try shell.unzip_executable(artifact_host, "tigerbeetle");
 
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
@@ -185,7 +190,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     defer gpa.free(tigerbeetle_absolute_path);
 
     inline for (comptime std.enums.values(Language)) |language| {
-        if (language_requested == language or language_requested == null) {
+        if ((language_requested == language or language_requested == null) and
+            language != .ruby) // The published tigerbeetle gem is not ours.
+        {
             const ci = @field(LanguageCI, @tagName(language));
             try ci.validate_release(shell, gpa, .{
                 .tigerbeetle = tigerbeetle_absolute_path,
@@ -197,7 +204,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     // Check all the client releases to ensure the latest published release is what it should be.
     inline for (comptime std.enums.values(Language)) |language| {
         if ((language == language_requested or language_requested == null) and
-            language != .rust) // Rust isn't published yet.
+            language != .rust and // Rust isn't published yet.
+            language != .ruby) // The published tigerbeetle gem is not ours.
         {
             const ci = @field(LanguageCI, @tagName(language));
             const release_published_latest = try ci.release_published_latest(shell);

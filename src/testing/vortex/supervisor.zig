@@ -43,7 +43,7 @@ const RingBufferType = stdx.RingBufferType;
 const Network = @import("./faulty_network.zig").Network;
 const constants = @import("constants.zig");
 const ratio = stdx.PRNG.ratio;
-const Shell = @import("../../shell.zig");
+const Shell = stdx.Shell;
 
 const assert = std.debug.assert;
 const maybe = stdx.maybe;

@@ -12,7 +12,7 @@
 const std = @import("std");
 
 const stdx = @import("stdx");
-const Shell = @import("shell.zig");
+const Shell = stdx.Shell;
 
 const cfo = @import("./scripts/cfo.zig");
 const ci = @import("./scripts/ci.zig");

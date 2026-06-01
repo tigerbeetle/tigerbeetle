@@ -15,11 +15,11 @@
 //!     the right defaults.
 
 const std = @import("std");
+const stdx = @import("stdx.zig");
 const log = std.log;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const stdx = @import("stdx");
 const Shell = @This();
 
 const MiB = stdx.MiB;
@@ -473,6 +473,8 @@ pub fn exec_zig_options(
     shell: *Shell,
     options: struct {
         timeout: stdx.Duration = .minutes(10),
+        capture_stdout: ?*[]const u8 = null,
+        capture_stderr: ?*[]const u8 = null,
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -485,6 +487,8 @@ pub fn exec_zig_options(
 
     return shell.exec_inner(argv.slice(), .{
         .timeout = options.timeout,
+        .capture_stdout = options.capture_stdout,
+        .capture_stderr = options.capture_stderr,
     });
 }
 
@@ -624,19 +628,43 @@ pub fn exec_raw(
     });
 }
 
+pub const SpawnOptions = struct {
+    stdin_behavior: std.process.Child.StdIo = .Ignore,
+    stdout_behavior: std.process.Child.StdIo = .Ignore,
+    stderr_behavior: std.process.Child.StdIo = .Ignore,
+};
+
 pub fn spawn(
     shell: *Shell,
-    options: struct {
-        stdin_behavior: std.process.Child.StdIo = .Ignore,
-        stdout_behavior: std.process.Child.StdIo = .Ignore,
-        stderr_behavior: std.process.Child.StdIo = .Ignore,
-    },
+    options: SpawnOptions,
     comptime cmd: []const u8,
     cmd_args: anytype,
 ) !std.process.Child {
     var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
     defer argv.deinit();
 
+    return shell.spawn_argv(options, &argv);
+}
+
+pub fn spawn_zig(
+    shell: *Shell,
+    options: SpawnOptions,
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) !std.process.Child {
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try argv.append_new_arg("{s}", .{shell.zig_exe.?});
+    try expand_argv(&argv, cmd, cmd_args);
+    return shell.spawn_argv(options, &argv);
+}
+
+fn spawn_argv(
+    shell: *Shell,
+    options: SpawnOptions,
+    argv: *const Argv,
+) !std.process.Child {
     var child = std.process.Child.init(argv.slice(), shell.gpa);
     child.cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
     child.env_map = &shell.env;
@@ -644,7 +672,6 @@ pub fn spawn(
     child.stdout_behavior = options.stdout_behavior;
     child.stderr_behavior = options.stderr_behavior;
     try child.spawn();
-
     return child;
 }
 
@@ -698,7 +725,7 @@ const Argv = struct {
         argv.args.deinit();
     }
 
-    fn slice(argv: *Argv) []const []const u8 {
+    fn slice(argv: *const Argv) []const []const u8 {
         return argv.args.items;
     }
 
@@ -901,7 +928,7 @@ fn discover_project_root() !std.fs.Dir {
     errdefer current.close(); // Caller is responsible for closing on success.
 
     for (0..16) |_| {
-        if (current.statFile("src/shell.zig")) |_| {
+        if (detect_project_root(current)) |_| {
             return current;
         } else |err| switch (err) {
             error.FileNotFound => {
@@ -914,6 +941,11 @@ fn discover_project_root() !std.fs.Dir {
     }
 
     return error.DiscoverProjectRootDepthExceeded;
+}
+
+fn detect_project_root(dir: std.fs.Dir) !void {
+    try dir.access("build.zig", .{});
+    try dir.access("src", .{});
 }
 
 pub const HttpOptions = struct {

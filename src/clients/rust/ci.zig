@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log;
 
-const Shell = @import("../../shell.zig");
+const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
