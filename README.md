@@ -66,3 +66,7 @@ $ ./tigerbeetle repl --cluster=0 --addresses=3000
 ```
 
 Want to learn more? See <https://docs.tigerbeetle.com>.
+
+---
+
+If you discover a security vulnerability in TigerBeetle, please send the details to `security@tigerbeetle.com`.
