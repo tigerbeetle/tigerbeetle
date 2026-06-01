@@ -369,6 +369,7 @@ pub fn AOFType(comptime IO: type) type {
                             .configuration = addresses,
                             .io = io,
                             .trace = null,
+                            .time = time,
                         },
                     },
                 );
