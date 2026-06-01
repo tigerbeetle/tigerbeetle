@@ -762,7 +762,7 @@ pub const Runner = struct {
         context: u128,
         operation_vsr: vsr.Operation,
         timestamp: u64,
-        result: []u8,
+        result: []align(@alignOf(vsr.Header)) const u8,
     ) void {
         const operation = operation_vsr.cast(tb.Operation);
         assert(operation == .get_change_events);

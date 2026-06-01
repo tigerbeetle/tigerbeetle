@@ -28,7 +28,7 @@ pub fn ClientType(
                 user_data: u128,
                 operation: vsr.Operation,
                 timestamp: u64,
-                results: []u8,
+                result: []align(@alignOf(vsr.Header)) const u8,
             ) void;
 
             pub const RegisterCallback = *const fn (

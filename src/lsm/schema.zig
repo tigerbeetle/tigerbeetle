@@ -461,7 +461,7 @@ pub const TrailerNode = struct {
         }
     }
 
-    pub fn body(block: BlockPtrConst) []align(@sizeOf(vsr.Header)) const u8 {
+    pub fn body(block: BlockPtrConst) []align(@alignOf(vsr.Header)) const u8 {
         const header = header_from_block(block);
         return block[@sizeOf(vsr.Header)..header.size];
     }
