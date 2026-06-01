@@ -1678,7 +1678,7 @@ test "Cluster: client: empty command=request operation=register body" {
     try run_test(releases[0].release_client_min, .invalid_request_body_size);
 }
 
-test "Cluster: eviction: no_session" {
+test "Cluster: eviction: no_session via request" {
     const t = try TestContext.init(.{
         .replica_count = 3,
         .client_count = constants.clients_max + 1,
@@ -1688,6 +1688,10 @@ test "Cluster: eviction: no_session" {
     var c0 = t.clients(.{ .index = 0, .count = 1 });
     var c = t.clients(.{ .index = 1, .count = constants.clients_max });
 
+    const mark = marks.check("on_request: no session");
+
+    // Drop ping_client to prevent eviction message being sent via that path.
+    t.replica(.R_).drop(.__, .incoming, .ping_client);
     // Register a single client.
     try c0.request(1, 1);
     // Register clients_max other clients.
@@ -1696,6 +1700,30 @@ test "Cluster: eviction: no_session" {
 
     // Try to send one last request -- which fails, since this client has been evicted.
     try c0.request(2, 1);
+
+    try mark.expect_hit();
+    try expectEqual(c0.eviction_reason(), .no_session);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+test "Cluster: eviction: no_session via ping" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = constants.clients_max });
+
+    const mark = marks.check("on_ping_client: no session");
+    // Register a single client.
+    try c0.request(1, 1);
+    // Register clients_max other clients.
+    // This evicts the "extra" client, though the eviction message has not been sent yet.
+    try c.request(constants.clients_max, constants.clients_max);
+
+    try mark.expect_hit();
     try expectEqual(c0.eviction_reason(), .no_session);
     try expectEqual(c.eviction_reason(), null);
 }
@@ -1736,6 +1764,9 @@ test "Cluster: eviction: session_too_low" {
 
     t.replica(.R_).record(.C0, .incoming, .request);
     try c0.request(1, 1);
+
+    // Drop ping_client to prevent eviction message being sent via that path.
+    t.replica(.R_).drop(.__, .incoming, .ping_client);
 
     // Evict C0. (C0 doesn't know this yet, though).
     try c.request(constants.clients_max, constants.clients_max);

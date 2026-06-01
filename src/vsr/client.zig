@@ -315,6 +315,10 @@ pub fn ClientType(
                 .callback = .{ .register = callback },
             };
             self.send_request_for_the_first_time(message);
+
+            // Proactively send ping to replicas so they can identify this peer
+            // (see `recv_update_peer` in MessageBus).
+            self.on_ping_timeout();
         }
 
         /// Sends a request message with the operation and events payload to the replica.
@@ -640,6 +644,7 @@ pub fn ClientType(
                 .release = self.release,
                 .client = self.id,
                 .ping_timestamp_monotonic = self.time.monotonic().ns,
+                .session = self.session,
             };
 
             self.send_header_to_replicas(ping.frame_const());
