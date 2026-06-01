@@ -167,7 +167,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn input_valid(
             state_machine: *const StateMachine,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []align(@alignOf(vsr.Header)) const u8,
         ) bool {
             _ = state_machine;
             _ = operation;
@@ -178,7 +178,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn prepare(
             state_machine: *StateMachine,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []align(@alignOf(vsr.Header)) const u8,
         ) void {
             _ = state_machine;
             _ = operation;
@@ -191,7 +191,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             op: u64,
             snapshot: u64,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []align(@alignOf(vsr.Header)) const u8,
         ) void {
             _ = operation;
             _ = input;
@@ -223,8 +223,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             op: u64,
             timestamp: u64,
             operation: Operation,
-            input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            input: []align(@alignOf(vsr.Header)) const u8,
+            output: *align(@alignOf(vsr.Header)) [constants.message_body_size_max]u8,
         ) usize {
             assert(op != 0);
 
