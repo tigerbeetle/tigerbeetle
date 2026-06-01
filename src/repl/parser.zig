@@ -36,6 +36,7 @@ pub const Parser = struct {
         get_account_balances,
         query_accounts,
         query_transfers,
+        query_two_phase_transfers,
 
         pub fn state_machine_op(operation: Operation) StateMachine.Operation {
             return switch (operation) {
@@ -48,6 +49,7 @@ pub const Parser = struct {
                 .get_account_balances => .get_account_balances,
                 .query_accounts => .query_accounts,
                 .query_transfers => .query_transfers,
+                .query_two_phase_transfers => .query_two_phase_transfers,
             };
         }
     };
@@ -62,6 +64,7 @@ pub const Parser = struct {
         id: LookupSyntaxTree,
         account_filter: tb.AccountFilter,
         query_filter: tb.QueryFilter,
+        two_phase_filter: tb.TwoPhaseFilter,
     };
 
     pub const Statement = struct {
@@ -195,16 +198,26 @@ pub const Parser = struct {
                         if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
                             !std.mem.eql(u8, active_value_field.name, "reserved")))
                         {
+                            const value = value: {
+                                if (@typeInfo(active_value_field.type) == .@"enum") {
+                                    break :value std.meta.stringToEnum(
+                                        active_value_field.type,
+                                        value_to_validate,
+                                    ) orelse return Error.ValueBad;
+                                }
+                                break :value try parse_int(
+                                    active_value_field.type,
+                                    value_to_validate,
+                                );
+                            };
+
                             @field(
                                 @field(out.*, object_syntax_tree_field.name),
                                 active_value_field.name,
-                            ) = try parse_int(
-                                active_value_field.type,
-                                value_to_validate,
-                            );
+                            ) = value;
                         }
 
-                        // Handle flags, specific to Account and Transfer fields.
+                        // Handle flags.
                         if (comptime std.mem.eql(u8, active_value_field.name, "flags") and
                             @hasField(ActiveValue, "flags"))
                         {
@@ -217,21 +230,43 @@ pub const Parser = struct {
                                     flag_to_validate,
                                     std.ascii.whitespace[0..],
                                 );
-                                inline for (@typeInfo(
-                                    active_value_field.type,
-                                ).@"struct".fields) |known_flag_field| {
-                                    if (std.mem.eql(
+                                inline for (std.meta.fields(active_value_field.type)) |flag_field| {
+                                    if (comptime std.mem.eql(
                                         u8,
-                                        known_flag_field.name,
-                                        flag_to_validate_trimmed,
-                                    )) {
-                                        if (comptime !std.mem.eql(
-                                            u8,
-                                            known_flag_field.name,
-                                            "padding",
-                                        )) {
-                                            @field(validated_flags, known_flag_field.name) = true;
-                                        }
+                                        flag_field.name,
+                                        "padding",
+                                    )) comptime continue;
+
+                                    // Bit-flags can be either bool or u1 enums.
+                                    switch (@typeInfo(flag_field.type)) {
+                                        .bool => {
+                                            if (std.mem.eql(
+                                                u8,
+                                                flag_field.name,
+                                                flag_to_validate_trimmed,
+                                            )) {
+                                                @field(
+                                                    validated_flags,
+                                                    flag_field.name,
+                                                ) = true;
+                                            }
+                                        },
+                                        .@"enum" => |info| {
+                                            comptime assert(info.tag_type == u1);
+                                            inline for (info.fields) |variant| {
+                                                if (std.mem.eql(
+                                                    u8,
+                                                    flag_field.name ++ "_" ++ variant.name,
+                                                    flag_to_validate_trimmed,
+                                                )) {
+                                                    @field(
+                                                        validated_flags,
+                                                        flag_field.name,
+                                                    ) = @enumFromInt(variant.value);
+                                                }
+                                            }
+                                        },
+                                        else => comptime unreachable,
                                     }
                                 }
                             }
@@ -310,6 +345,23 @@ pub const Parser = struct {
                     constants.message_body_size_max,
                 ),
                 .flags = .{
+                    .reversed = false,
+                },
+            } },
+            .query_two_phase_transfers => .{ .two_phase_filter = tb.TwoPhaseFilter{
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .ledger = 0,
+                .code = 0,
+                .pending_status = .none,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = StateMachine.Operation.query_two_phase_transfers.result_max(
+                    constants.message_body_size_max,
+                ),
+                .flags = .{
+                    .target = .pending,
                     .reversed = false,
                 },
             } },
@@ -1018,6 +1070,85 @@ test "parser.zig: Parser query filter successfully" {
             u8,
             statement.arguments.items,
             std.mem.asBytes(&vector.result),
+        );
+    }
+}
+
+test "parser.zig: Parser two-phase filter successfully" {
+    const vectors = [_]struct {
+        string: []const u8,
+        operation: Parser.Operation,
+        result: tb.TwoPhaseFilter,
+    }{
+        .{
+            .string = "query_two_phase_transfers user_data_128=1",
+            .operation = .query_two_phase_transfers,
+            .result = tb.TwoPhaseFilter{
+                .user_data_128 = 1,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .ledger = 0,
+                .code = 0,
+                .pending_status = .none,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = StateMachine.Operation.query_two_phase_transfers.result_max(
+                    constants.message_body_size_max,
+                ),
+                .flags = .{
+                    .target = .pending,
+                    .reversed = false,
+                },
+            },
+        },
+        .{
+            .string =
+            \\query_two_phase_transfers
+            \\user_data_128=128 user_data_64=64 user_data_32=32
+            \\ledger=1 code=2
+            \\pending_status=expired
+            \\flags=target_outcome|reversed limit=10
+            \\timestamp_min=1 timestamp_max=9999;
+            \\
+            ,
+            .operation = .query_two_phase_transfers,
+            .result = tb.TwoPhaseFilter{
+                .user_data_128 = 128,
+                .user_data_64 = 64,
+                .user_data_32 = 32,
+                .ledger = 1,
+                .code = 2,
+                .pending_status = .expired,
+                .timestamp_min = 1,
+                .timestamp_max = 9999,
+                .limit = 10,
+                .flags = .{
+                    .target = .outcome,
+                    .reversed = true,
+                },
+            },
+        },
+    };
+
+    for (vectors) |vector| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        const allocator = arena.allocator();
+
+        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            allocator,
+            constants.message_size_max,
+        );
+        errdefer arguments.deinit(allocator);
+
+        const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
+
+        try std.testing.expectEqual(statement.operation, vector.operation);
+        try std.testing.expectEqualSlices(
+            u8,
+            std.mem.asBytes(&vector.result),
+            statement.arguments.items,
         );
     }
 }

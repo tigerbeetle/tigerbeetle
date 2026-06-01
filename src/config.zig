@@ -167,10 +167,17 @@ const ConfigCluster = struct {
     lsm_table_coalescing_threshold_percent: comptime_int = 50,
     vsr_releases_max: u32 = 64,
 
-    /// Minimal value.
-    // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
-    // since each scan can read from `lsm_levels` in parallel.
-    lsm_scans_max: comptime_int = 6,
+    /// Maximum number of scans allowed in a single query.
+    /// Due to `query_two_phase_transfers`, we need to scan by the event fields
+    /// `timestamp` and `pending_status`, as well as the transfer fields `code`,
+    /// `ledger`, `user_data_128`, `user_data_64`, and `user_data_32`.
+    /// Most queries would require 2 + 5 indexes = 7 scans.
+    /// However, to find ALL two-phase transfers, including expired ones, we need
+    /// to scan the transfer fields in both the posting/voiding transfer and the
+    /// expiry event, resulting in 1 + (5 * 2) = 11 scans.
+    /// Note that queries for ALL two-phase transfers do not scan by a specific
+    /// `pending_status`, so it removes one scan.
+    lsm_scans_max: comptime_int = 11,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them
     /// all to a single torn write. A replica needs at least one valid redundant header to
