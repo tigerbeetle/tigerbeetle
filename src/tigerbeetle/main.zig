@@ -244,7 +244,7 @@ fn command_format(
 fn command_start(
     base_allocator: mem.Allocator,
     io: *IO,
-    time: vsr.time.Time,
+    time: Time,
     tracer: *Tracer,
     storage: *Storage,
     args: *const cli.Command.Start,
@@ -376,8 +376,9 @@ fn command_start(
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
                 .io = io,
-                .clients_limit = clients_limit,
                 .trace = tracer,
+                .time = time,
+                .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .tracer = tracer,
@@ -520,7 +521,7 @@ fn command_start(
 fn command_reformat(
     gpa: mem.Allocator,
     io: *IO,
-    time: vsr.time.Time,
+    time: Time,
     storage: *Storage,
     args: *const cli.Command.Recover,
 ) !void {
@@ -540,8 +541,9 @@ fn command_reformat(
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
                 .io = io,
-                .clients_limit = null,
                 .trace = null,
+                .time = time,
+                .clients_limit = null,
             },
             .eviction_callback = &reformat_client_eviction_callback,
         },

@@ -350,6 +350,7 @@ pub fn ContextType(
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,
                         .trace = null,
+                        .time = time,
                     },
                     .eviction_callback = client_eviction_callback,
                 },

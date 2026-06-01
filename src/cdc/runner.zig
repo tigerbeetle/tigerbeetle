@@ -263,6 +263,7 @@ pub const Runner = struct {
                     .configuration = options.addresses,
                     .io = &self.io,
                     .trace = null,
+                    .time = time,
                 },
             },
         );
