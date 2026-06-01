@@ -93,7 +93,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     try Shell.copy_path(
-        shell.project_root,
+        shell.cwd,
         "src/clients/ruby/samples/basic/main.rb",
         shell.cwd,
         "main.rb",
