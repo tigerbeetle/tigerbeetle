@@ -73,6 +73,20 @@ const Environment = struct {
                     try env.model.upsert(&value);
                 },
                 .remove => |key| {
+                    const model_value = env.model.get(key);
+                    if (env.cache_map.get(key)) |cache_map_value| {
+                        assert(model_value != null);
+                        assert(std.meta.eql(cache_map_value.*, model_value.?.value));
+                    } else {
+                        if (model_value == null) continue; // The key doesn't exist.
+
+                        // If the entry has an op from one or more compactions ago, it
+                        // may have been evicted from the cache.
+                        // It must be loaded into the cache before removal, though.
+                        assert(env.model.compacts > model_value.?.op);
+                        env.cache_map.upsert(&model_value.?.value);
+                    }
+
                     env.cache_map.remove(key);
                     try env.model.remove(key);
                 },
@@ -167,6 +181,11 @@ const Environment = struct {
             const model_value = env.model.get(TestTable.key_from_value(stash_value));
 
             // Even if the stash has stale values, the key must still exist in the model.
+            if (TestTable.tombstone(stash_value)) {
+                stdx.maybe(model_value == null);
+                continue;
+            }
+            assert(!TestTable.tombstone(stash_value));
             assert(model_value != null);
 
             const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
@@ -360,6 +379,8 @@ pub fn generate_fuzz_ops(
                 } };
             },
             .remove => blk: {
+                upserts_since_compact += 1; // remove() adds a tombstone to the stash.
+
                 if (scope_is_open) {
                     operations_since_scope_open += 1;
                 }

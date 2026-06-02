@@ -592,6 +592,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.value_context.count += 1;
         }
 
+        /// May return a tombstone.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
             assert(table.count() <= table.values.len);
 

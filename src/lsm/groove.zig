@@ -883,21 +883,71 @@ pub fn GrooveType(
 
         /// Gets the object from the object cache.
         pub fn get(groove: *const Groove, key: PrimaryKey) ObjectCacheResult {
-            if (groove.objects_cache.get(key)) |object| {
-                if (object.timestamp == 0) {
+            switch (groove.objects_cache.get_or_tombstone(key)) {
+                .found => |object| {
                     // Orphaned primary key.
-                    if (!groove_options.primary_key_orphaned) unreachable;
-                    if (is_primary_key(.timestamp)) unreachable;
-                    comptime assert(groove_options.primary_key_orphaned);
-                    comptime assert(!is_primary_key(.timestamp));
+                    if (object.timestamp == 0) {
+                        if (!groove_options.primary_key_orphaned) unreachable;
+                        if (is_primary_key(.timestamp)) unreachable;
+                        comptime assert(groove_options.primary_key_orphaned);
+                        comptime assert(!is_primary_key(.timestamp));
 
-                    return .found_orphaned;
-                }
+                        if (constants.verify) {
+                            const prefetch_key = groove.prefetch_keys.get(@unionInit(
+                                UniqueKey,
+                                groove_options.primary_key,
+                                key,
+                            ));
+                            assert(prefetch_key == null or
+                                prefetch_key.? == .found_orphaned or
+                                prefetch_key.? == .not_found // not found and then failed.
+                            );
+                        }
 
-                return .{ .found_object = object.* };
+                        return .found_orphaned;
+                    }
+                    assert(TimestampRange.valid(object.timestamp));
+
+                    if (constants.verify) {
+                        const prefetch_key = groove.prefetch_keys.get(@unionInit(
+                            UniqueKey,
+                            groove_options.primary_key,
+                            key,
+                        ));
+                        assert(prefetch_key == null or
+                            prefetch_key.? == .found or
+                            prefetch_key.? == .not_found // not found and then inserted.
+                        );
+                    }
+
+                    return .{ .found_object = object.* };
+                },
+                .tombstone => {
+                    if (constants.verify) {
+                        const prefetch_key = groove.prefetch_keys.get(@unionInit(
+                            UniqueKey,
+                            groove_options.primary_key,
+                            key,
+                        ));
+                        assert(prefetch_key == null or
+                            prefetch_key.? == .not_found or
+                            prefetch_key.? == .found // found and then deleted.
+                        );
+                    }
+
+                    return .not_found;
+                },
+                .not_found => {
+                    if (constants.verify) {
+                        const prefetch_key = groove.prefetch_keys.get(
+                            @unionInit(UniqueKey, groove_options.primary_key, key),
+                        );
+                        assert(prefetch_key == null or prefetch_key.? == .not_found);
+                    }
+
+                    return .not_found;
+                },
             }
-
-            return .not_found;
         }
 
         /// Indirect lookup by one of the unique keys.
@@ -995,19 +1045,27 @@ pub fn GrooveType(
                     }
 
                     if (comptime is_primary_key(field)) {
-                        if (groove.objects_cache.get(value)) |object| {
-                            if (groove_options.primary_key_orphaned) {
-                                if (object.timestamp == 0) {
-                                    entry.value_ptr.* = .found_orphaned;
-                                    return;
+                        switch (groove.objects_cache.get_or_tombstone(value)) {
+                            .found => |object| {
+                                if (groove_options.primary_key_orphaned) {
+                                    if (object.timestamp == 0) {
+                                        entry.value_ptr.* = .found_orphaned;
+                                        return;
+                                    }
                                 }
-                            }
-                            assert(TimestampRange.valid(object.timestamp));
+                                assert(TimestampRange.valid(object.timestamp));
 
-                            entry.value_ptr.* = .{
-                                .found = value,
-                            };
-                            return;
+                                entry.value_ptr.* = .{
+                                    .found = value,
+                                };
+                                return;
+                            },
+                            .tombstone => {
+                                // Tombstone found in the object cache, the key was deleted.
+                                entry.value_ptr.* = .not_found;
+                                return;
+                            },
+                            .not_found => {},
                         }
                     }
 
@@ -1118,10 +1176,7 @@ pub fn GrooveType(
                             entry.value_ptr.* = .not_found;
                         },
                         .positive => |tree_value| {
-                            if (Tree.Value.tombstone(tree_value)) {
-                                entry.value_ptr.* = .not_found;
-                                return;
-                            }
+                            assert(!Tree.Value.tombstone(tree_value));
 
                             if (tree_value.timestamp == 0) {
                                 if (!groove_options.primary_key_orphaned) unreachable;
@@ -1208,6 +1263,7 @@ pub fn GrooveType(
                 .positive => |object| {
                     assert(!ObjectTreeHelper.tombstone(object));
                     assert(object.timestamp == options.timestamp_hint);
+
                     switch (key) {
                         inline else => |value, field| {
                             const IndexHelper = IndexHelperType(@tagName(field));
@@ -1253,16 +1309,18 @@ pub fn GrooveType(
             if (groove.objects.table_mutable.get(
                 timestamp,
             )) |object| {
+                if (ObjectTreeHelper.tombstone(object)) {
+                    assert(ObjectTreeHelper.key_from_value(object) == timestamp);
+                    return .tombstone;
+                }
+                assert(!ObjectTreeHelper.tombstone(object));
                 assert(object.timestamp == timestamp);
+
                 switch (key) {
                     inline else => |value, field| {
                         const IndexHelper = IndexHelperType(@tagName(field));
                         assert(IndexHelper.get(object).? == value);
                     },
-                }
-
-                if (ObjectTreeHelper.tombstone(object)) {
-                    return .tombstone;
                 }
 
                 const primary_key: PrimaryKey = @field(
@@ -1605,6 +1663,7 @@ pub fn GrooveType(
                             worker.lookup_start_next();
                             return;
                         }
+                        assert(!tree_value.tombstone());
                         assert(TimestampRange.valid(tree_value.timestamp));
 
                         if (!is_primary_key(std.meta.activeTag(entry.key_ptr.*))) {
@@ -1655,7 +1714,9 @@ pub fn GrooveType(
                         lookup_object_callback(worker.lookup_context(.object), null);
                     },
                     .positive => |value| {
+                        assert(!ObjectTree.Table.tombstone(value));
                         assert(value.timestamp == timestamp);
+
                         lookup_object_callback(worker.lookup_context(.object), value);
                     },
                     .possible => |level_min| {
@@ -1817,34 +1878,36 @@ pub fn GrooveType(
 
             // TODO: Nothing currently calls or tests this method.
             // The forest fuzzer should be extended to cover it.
-            comptime assert(false);
+            comptime assert(constants.verify);
 
+            // The object must have been prefetched beforehand,
+            // to ensure we only delete existing keys.
             const object: *const Object = groove.objects_cache.get(key).?;
             assert(TimestampRange.valid(object.timestamp));
 
-            // TODO: should update the timestamp, primary key and and unique keys range,
+            // TODO: should update the timestamp range,
             // see `key_range_update`.
             groove.objects.remove(object);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const IndexHelper = IndexHelperType(field.name);
                 if (IndexHelper.index_from_object(object)) |value| {
-                    @field(groove.indexes, field.name).remove(&.{
+                    const IndexTree = @FieldType(IndexTrees, field.name);
+                    const tree: *IndexTree = &@field(groove.indexes, field.name);
+                    tree.remove(&.{
                         .timestamp = object.timestamp,
                         .field = value,
                     });
+
+                    if (IndexHelper.is_unique_key) {
+                        // TODO: should update the unique keys range,
+                        // see `key_range_update`.
+                    }
                 }
             }
 
             // Remove from the cache last: `object` is a pointer into the cache,
             // so removing it first would invalidate the pointer used above.
-
-            // TODO: Lookups by the primary key hit the object cache instead of
-            // the mutable table. If not found in the cache, the immutable table
-            // and lower levels of the LSM tree will be searched, where the tombstone
-            // might be found. However, if the tombstone is in the mutable table,
-            // the lookup will skip it and possibly find an outdated version of
-            // the object instead.
             groove.objects_cache.remove(key);
         }
 
