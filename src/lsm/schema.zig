@@ -461,7 +461,12 @@ pub const TrailerNode = struct {
         }
     }
 
-    pub fn body(block: BlockPtrConst) []align(@sizeOf(vsr.Header)) const u8 {
+    /// Returns the body up to the size specified in the header.
+    /// The returned slice guarantees elements aligned to the CPU cache
+    /// line size, but its length depends on the specific payload.
+    /// Callers can take advantage of this alignment to efficiently
+    /// reinterpret the bytes.
+    pub fn body(block: BlockPtrConst) []align(constants.cache_line_size) const u8 {
         const header = header_from_block(block);
         return block[@sizeOf(vsr.Header)..header.size];
     }
