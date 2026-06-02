@@ -125,7 +125,7 @@ pub const MultiBatchDecoder = struct {
     };
 
     /// The message payload, excluding the trailer.
-    payload: []const u8,
+    payload: []align(constants.cache_line_size) const u8,
     /// The batching metadata, excluding the postamble.
     trailer_items: []const TrailerItem,
 
@@ -136,17 +136,19 @@ pub const MultiBatchDecoder = struct {
 
     pub fn init(
         /// The message body used, including the trailer.
-        body: []const u8,
+        body: []align(constants.cache_line_size) const u8,
         options: Options,
     ) Error!MultiBatchDecoder {
         // Supports zero-sized elements, or any power of two, including 2^0.
         assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
         const Parser = struct {
-            buffer: []const u8,
+            buffer: []align(constants.cache_line_size) const u8,
             buffer_parsed: u32 = 0,
 
             fn parse_suffix(parser: *@This(), comptime T: type, count: u32) Error![]const T {
+                assert(count <= Postamble.batch_count_max);
+
                 const suffix_size = count * @sizeOf(T);
                 if (parser.buffer.len < suffix_size) return error.MultiBatchInvalid;
 
@@ -286,12 +288,15 @@ pub const MultiBatchEncoder = struct {
         element_size: u32,
     };
 
-    buffer: ?[]u8,
+    buffer: ?[]align(constants.cache_line_size) u8,
     batch_count: u16,
     buffer_index: u32,
     options: Options,
 
-    pub fn init(buffer: []u8, options: Options) MultiBatchEncoder {
+    pub fn init(
+        buffer: []align(constants.cache_line_size) u8,
+        options: Options,
+    ) MultiBatchEncoder {
         // Supports zero-sized elements, or any power of two, including 2^0.
         assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
@@ -424,7 +429,7 @@ pub const MultiBatchEncoder = struct {
         assert(self.batch_count > 0);
         assert(self.batch_count <= Postamble.batch_count_max);
 
-        const buffer: []u8 = self.buffer.?;
+        const buffer: []align(constants.cache_line_size) u8 = self.buffer.?;
         assert(buffer.len > self.buffer_index);
         assert(self.options.element_size > 0 or self.buffer_index == 0);
         maybe(self.buffer_index == 0);

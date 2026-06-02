@@ -44,16 +44,16 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
 fn run_fuzz(options: struct {
     prng: *stdx.PRNG,
-    buffer_expected: []u8,
-    buffer_actual: []u8,
+    buffer_expected: []align(constants.cache_line_size) u8,
+    buffer_actual: []align(constants.cache_line_size) u8,
 }) !void {
     assert(options.buffer_expected.len == options.buffer_actual.len);
     // The end of the buffer must be aligned with the postamble.
     const postamble_alignment = options.buffer_expected.len % @sizeOf(u16);
     assert(postamble_alignment < @sizeOf(u16));
-    const buffer_expected: []u8 =
+    const buffer_expected: []align(constants.cache_line_size) u8 =
         options.buffer_expected[0 .. options.buffer_expected.len - postamble_alignment];
-    const buffer_actual: []u8 =
+    const buffer_actual: []align(constants.cache_line_size) u8 =
         options.buffer_actual[0 .. options.buffer_actual.len - postamble_alignment];
 
     // Generate the batch plan with element sizes from 2^0 to 2^8.
