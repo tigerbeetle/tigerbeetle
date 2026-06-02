@@ -731,6 +731,14 @@ pub const rtt_multiple = 2;
 pub const backoff_min_ticks = config.process.backoff_min.to_ms() / tick_ms;
 pub const backoff_max_ticks = config.process.backoff_max.to_ms() / tick_ms;
 
+/// The maximum amount of time we allow a peer to remain in unknown status,
+/// after which it is terminated in favour of unconnected replicas (see
+/// `reclaim_connection` in message_bus.zig). Peers must transition from unknown
+/// to client or replica status in a reasonable amount of time using the
+/// messages exchanged (see `peer_type` in message_header.zig). Pessimistically
+/// set TTL to 45 seconds, since `ping_client` is sent by clients every 30 seconds.
+pub const message_bus_unknown_time_to_live = stdx.Duration.seconds(45);
+
 /// The maximum skew between two clocks to allow when considering them to be in agreement.
 /// The principle is that no two clocks tick exactly alike but some clocks more or less agree.
 /// The maximum skew across the cluster as a whole is this value times the total number of clocks.

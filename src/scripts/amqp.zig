@@ -802,6 +802,7 @@ const VSRContext = struct {
                     .configuration = &.{address},
                     .io = &self.io,
                     .trace = null,
+                    .time = time,
                 },
             },
         );
