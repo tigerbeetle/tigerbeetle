@@ -3065,7 +3065,7 @@ test "get_change_events" {
     );
 }
 
-test "quey_two_phase_transfers" {
+test "query_two_phase_transfers" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created

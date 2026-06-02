@@ -832,7 +832,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
-                .query_two_phase_transfers => "two phase transfers",
+                .query_two_phase_transfers => "two-phase transfers",
                 else => unreachable,
             };
 
