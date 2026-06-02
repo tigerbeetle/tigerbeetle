@@ -847,7 +847,7 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove;
-                groove.prefetch_setup(getter._snapshot);
+                groove.prefetch_begin(getter._snapshot);
                 groove.prefetch_enqueue(.{ .id = getter._key });
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
@@ -855,6 +855,8 @@ const Environment = struct {
             fn prefetch_callback(prefetch_context: *ThingsGroove.PrefetchContext) void {
                 const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
                 assert(!context.finished);
+
+                context._groove.prefetch_finish();
                 context.finished = true;
             }
         };
