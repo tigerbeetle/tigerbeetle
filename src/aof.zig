@@ -475,7 +475,7 @@ pub fn AOFType(comptime IO: type) type {
                 user_data: u128,
                 operation: vsr.Operation,
                 timestamp: u64,
-                result: []u8,
+                result: []align(constants.cache_line_size) const u8,
             ) void {
                 _ = operation;
                 _ = timestamp;
