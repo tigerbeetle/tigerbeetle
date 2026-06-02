@@ -32,9 +32,9 @@ pub const AOFEntry = extern struct {
     /// to allow skipping over corrupted entries.
     magic_number: u128 = magic_number,
 
-    /// The main Message to log. This is written _without_ O_DIRECT, so sector alignment is not
-    /// a concern.
-    message: [constants.message_size_max]u8 align(16),
+    /// The main Message to log.
+    /// This is written _without_ O_DIRECT, so sector alignment is not a concern.
+    message: [constants.message_size_max]u8 align(@sizeOf(u128)),
 
     comptime {
         assert(stdx.no_padding(AOFEntry));
