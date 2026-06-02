@@ -1,10 +1,11 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const vsr = @import("../../vsr.zig");
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("../../message_buffer.zig").MessageBuffer;
-const vsr = @import("../../vsr.zig");
+const Header = vsr.Header;
 const ProcessType = vsr.ProcessType;
 
 const Network = @import("network.zig").Network;
@@ -23,6 +24,7 @@ pub const MessageBus = struct {
     buffer: ?MessageBuffer,
     suspended: bool = false,
     resume_scheduled: bool = false,
+    decrypt_header: *const fn (message_bus: *MessageBus, header: *const Header) anyerror!u64,
     /// The callback to be called when a message is received.
     on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
@@ -34,6 +36,7 @@ pub const MessageBus = struct {
         _: std.mem.Allocator,
         process: Process,
         message_pool: *MessagePool,
+        decrypt_header: *const fn (message_pool: *MessagePool, header: *const Header) anyerror!u64,
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
         options: Options,
     ) !MessageBus {
@@ -41,7 +44,9 @@ pub const MessageBus = struct {
             .network = options.network,
             .pool = message_pool,
             .process = process,
-            .buffer = MessageBuffer.init(message_pool),
+            // FIXME
+            .buffer = MessageBuffer.init(null, message_pool),
+            .decrypt_header = decrypt_header,
             .on_messages_callback = on_messages_callback,
         };
     }

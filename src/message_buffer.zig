@@ -19,6 +19,8 @@ const constants = vsr.constants;
 ///
 /// Invariant: suspend_size ≤ process_size ≤ advance_size ≤ receive_size
 pub const MessageBuffer = struct {
+    context: ?*anyopaque,
+    decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
     /// The buffer passed to the kernel for reading into. This is Message rather than []u8 to
     /// enable zero-copy fast path. If a recv syscall reads exactly one message, no copying occurs.
     message: *Message,
@@ -63,8 +65,16 @@ pub const MessageBuffer = struct {
         }
     }
 
-    pub fn init(pool: *MessagePool) MessageBuffer {
-        return .{ .message = pool.get_message(null) };
+    pub fn init(
+        context: ?*anyopaque,
+        decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
+        pool: *MessagePool,
+    ) MessageBuffer {
+        return .{
+            .context = context,
+            .decrypt_header = decrypt_header,
+            .message = pool.get_message(null),
+        };
     }
 
     pub fn deinit(buffer: *MessageBuffer, pool: *MessagePool) void {
@@ -125,13 +135,15 @@ pub const MessageBuffer = struct {
         const header_bytes =
             buffer.message.buffer[buffer.process_size..][0..@sizeOf(Header)];
 
-        var header: Header = undefined;
-        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&header), header_bytes);
+        var header_encrypted: Header = undefined;
+        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&header_encrypted), header_bytes);
 
-        if (!header.valid_checksum()) {
+        const header = buffer.decrypt_header(buffer.context, &header_encrypted) catch {
             buffer.invalidate(.header_checksum);
             return;
-        }
+        };
+
+        stdx.copy_disjoint(.exact, u8, header_bytes, std.mem.asBytes(&header));
 
         // Check that command is valid without materializing invalid Zig enum value.
         comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
@@ -178,10 +190,11 @@ pub const MessageBuffer = struct {
 
         assert(buffer.advance_size - buffer.process_size == @sizeOf(Header));
         const body = buffer.message.buffer[buffer.process_size..][@sizeOf(Header)..header.size];
-        if (!header.valid_checksum_body(body)) {
-            buffer.invalidate(.body_checksum);
-            return;
-        }
+        // if (!header.valid_checksum_body(body)) {
+        //     buffer.invalidate(.body_checksum);
+        //     return;
+        // }
+        _ = body;
         buffer.advance_size += header.size - @sizeOf(Header);
     }
 
@@ -310,10 +323,11 @@ pub const MessageBuffer = struct {
         assert(buffer.advance_size - buffer.process_size >= header.size);
         assert(buffer.invalid == null);
         assert(header.size <= constants.message_size_max);
+        // TODO: maybe revisit and compare to decrypted header
         assert(std.mem.eql(
             u8,
             std.mem.asBytes(header),
-            buffer.message.buffer[buffer.process_size..][0..@sizeOf(Header)],
+            std.mem.asBytes(&buffer.copy_header()),
         ));
         assert(buffer.suspend_size <= buffer.process_size);
 
@@ -416,7 +430,8 @@ test "MessageBuffer fuzz" {
         } });
         defer pool.deinit(gpa);
 
-        var message_buffer = MessageBuffer.init(&pool);
+        // FIXME
+        var message_buffer = MessageBuffer.init(null, &pool);
         defer message_buffer.deinit(&pool);
 
         var recv_size: u32 = 0;

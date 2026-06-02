@@ -43,6 +43,9 @@ pub const Options = union(vsr.ProcessType) {
         // (e.g. Connection.parse_message(), or sending a ping when the send queue is full).
         sum += 1;
 
+        // Encryption Buffer
+        sum += 1;
+
         // This conditions is necessary (but not sufficient) to prevent deadlocks.
         assert(sum > 1);
         return sum;
@@ -84,6 +87,9 @@ pub const Options = union(vsr.ProcessType) {
         // (This is separate from the burst +1 because they may occur concurrently).
         sum += 1;
 
+        // Encryption Buffer
+        sum += 1;
+
         switch (replica.message_bus) {
             .tcp => {
                 // The maximum number of simultaneous open connections on the server.
@@ -105,6 +111,15 @@ pub const Options = union(vsr.ProcessType) {
 /// A pool of reference-counted Messages, memory for which is allocated only once during
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
+    pub const Metadata = extern struct {
+        size_value: u64 = 0,
+
+        pub fn size(self: *Metadata) u64 {
+            assert(self.size_value != 0);
+            return self.size_value;
+        }
+    };
+
     pub const Message = extern struct {
         pub const Reserved = CommandMessageType(.reserved);
         pub const Ping = CommandMessageType(.ping);
@@ -134,6 +149,7 @@ pub const MessagePool = struct {
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32 = 0,
         link: FreeList.Link,
+        metadata: Metadata = .{},
 
         /// Increment the reference count of the message and return the same pointer passed.
         pub fn ref(message: *Message) *Message {
@@ -181,6 +197,18 @@ pub const MessagePool = struct {
                 },
             }
         }
+
+        pub fn swap_content(message: *Message, other: *Message) void {
+            const header = message.header;
+            const buffer = message.buffer;
+            const metadata = message.metadata;
+            message.header = other.header;
+            message.buffer = other.buffer;
+            message.metadata = other.metadata;
+            other.header = header;
+            other.buffer = buffer;
+            other.metadata = metadata;
+        }
     };
 
     const FreeList = StackType(Message);
@@ -217,7 +245,12 @@ pub const MessagePool = struct {
             .verify_push = false,
         });
         for (messages, buffers) |*message, *buffer| {
-            message.* = .{ .header = undefined, .buffer = buffer, .link = .{} };
+            message.* = .{
+                .header = undefined,
+                .buffer = buffer,
+                .link = .{},
+                .metadata = .{},
+            };
             free_list.push(message);
         }
 
@@ -264,6 +297,7 @@ pub const MessagePool = struct {
         assert(message.link.next == null);
         message.header = mem.bytesAsValue(Header, message.buffer[0..@sizeOf(Header)]);
         assert(message.references == 0);
+        assert(message.metadata.size_value == 0);
 
         message.references = 1;
         return message;
@@ -291,6 +325,7 @@ pub const MessagePool = struct {
         message.references -= 1;
         if (message.references == 0) {
             message.header = undefined;
+            message.metadata = .{};
             if (constants.verify) {
                 @memset(message.buffer, undefined);
             }
@@ -328,6 +363,7 @@ fn CommandMessageType(comptime command: vsr.Command) type {
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32,
         link: MessagePool.FreeList.Link,
+        metadata: MessagePool.Metadata = .{},
 
         pub fn base(message: *CommandMessage) *Message {
             return @ptrCast(message);

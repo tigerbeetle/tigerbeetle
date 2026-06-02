@@ -13,6 +13,7 @@ const RingBufferType = stdx.RingBufferType;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
+const Header = vsr.Header;
 const QueueType = @import("./queue.zig").QueueType;
 const Tracer = vsr.trace.Tracer;
 
@@ -44,6 +45,9 @@ pub fn MessageBusType(comptime IO: type) type {
         /// The connection reserved for the currently in progress accept operation.
         /// This is non-null exactly when an accept operation is submitted.
         accept_connection: ?*Connection = null,
+
+        /// The function used to decrypt the header and return it's size.
+        decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
 
         /// The callback to be called when a message is received.
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
@@ -99,6 +103,7 @@ pub fn MessageBusType(comptime IO: type) type {
             allocator: mem.Allocator,
             process_id: ProcessID,
             message_pool: *MessagePool,
+            decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
             on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
             options: Options,
         ) !MessageBus {
@@ -161,6 +166,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     .replica => |index| @as(u128, index),
                     .client => |id| id,
                 },
+                .decrypt_header = decrypt_header,
                 .on_messages_callback = on_messages_callback,
                 .send_queue_buffer = send_queue_buffer,
                 .connections = connections,
@@ -388,7 +394,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
                 bus.assert_connection_initial_state(connection);
                 assert(connection.recv_buffer == null);
-                connection.recv_buffer = MessageBuffer.init(bus.pool);
+                connection.recv_buffer = MessageBuffer.init(bus, bus.decrypt_header, bus.pool);
                 bus.recv(connection);
                 // Don't start send loop yet --- on accept, we don't know which peer this is.
                 assert(connection.send_queue.empty());
@@ -585,7 +591,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
             bus.assert_connection_initial_state(connection);
             assert(connection.recv_buffer == null);
-            connection.recv_buffer = MessageBuffer.init(bus.pool);
+            connection.recv_buffer = MessageBuffer.init(bus, bus.decrypt_header, bus.pool);
             bus.recv(connection);
             bus.send(connection);
             assert(connection.state == .connected);
@@ -918,7 +924,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 send_callback,
                 &connection.send_completion,
                 connection.fd.?,
-                message.buffer[connection.send_progress..message.header.size],
+                message.buffer[connection.send_progress..message.metadata.size()],
             );
         }
 
@@ -931,20 +937,20 @@ pub fn MessageBusType(comptime IO: type) type {
 
             for (0..connection.send_queue.count) |_| {
                 const message = connection.send_queue.head().?;
-                assert(connection.send_progress < message.header.size);
+                assert(connection.send_progress < message.metadata.size());
                 const write_size = bus.io.send_now(
                     connection.fd.?,
-                    message.buffer[connection.send_progress..message.header.size],
+                    message.buffer[connection.send_progress..message.metadata.size()],
                 ) orelse return;
                 assert(write_size <= constants.message_size_max);
                 connection.send_progress += @intCast(write_size);
-                assert(connection.send_progress <= message.header.size);
-                if (connection.send_progress == message.header.size) {
+                assert(connection.send_progress <= message.metadata.size());
+                if (connection.send_progress == message.metadata.size()) {
                     _ = connection.send_queue.pop();
                     bus.unref(message);
                     connection.send_progress = 0;
                 } else {
-                    assert(connection.send_progress < message.header.size);
+                    assert(connection.send_progress < message.metadata.size());
                     return;
                 }
             }
@@ -978,9 +984,9 @@ pub fn MessageBusType(comptime IO: type) type {
             };
             assert(write_size <= constants.message_size_max);
             connection.send_progress += @intCast(write_size);
-            assert(connection.send_progress <= connection.send_queue.head().?.header.size);
+            assert(connection.send_progress <= connection.send_queue.head().?.metadata.size());
             // If the message has been fully sent, move on to the next one.
-            if (connection.send_progress == connection.send_queue.head().?.header.size) {
+            if (connection.send_progress == connection.send_queue.head().?.metadata.size()) {
                 connection.send_progress = 0;
                 const message = connection.send_queue.pop().?;
                 bus.unref(message);

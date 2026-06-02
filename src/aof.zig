@@ -15,6 +15,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusType(vsr.io.IO);
 const Header = vsr.Header;
+const EncryptionStorage = @import("encryption.zig").EncryptionStorage;
 
 const MiB = stdx.MiB;
 
@@ -805,6 +806,8 @@ test "aof write / read" {
     const dir_fd = try IO.open_dir(".");
     defer std.posix.close(dir_fd);
 
+    var prng = stdx.PRNG.from_seed_testing();
+
     var aof = try AOF.init(&io, aof_file);
 
     var message_pool = try MessagePool.init_capacity(allocator, 2);
@@ -837,8 +840,10 @@ test "aof write / read" {
     };
 
     stdx.copy_disjoint(.exact, u8, demo_message.body_used(), demo_payload);
-    demo_message.header.set_checksum_body(demo_payload);
-    demo_message.header.set_checksum();
+
+    const keys = EncryptionStorage.Keys.generate_deterministic(&prng);
+
+    EncryptionStorage.set_checksum_message(demo_message.base(), keys);
 
     try aof.write(demo_message);
     aof.close();

@@ -1616,7 +1616,8 @@ pub const Simulator = struct {
             // See recover_slots() for more detail.
             const headers_offset = vsr.Zone.wal_headers.offset(0);
             const headers_size = vsr.Zone.wal_headers.size().?;
-            const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
+            const headers_bytes: []align(@alignOf(Header)) u8 =
+                @alignCast(replica_storage.memory[headers_offset..][0..headers_size]);
             for (
                 mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
                 replica_storage.wal_prepares(),

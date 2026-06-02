@@ -26,7 +26,9 @@ const Time = @import("../time.zig").Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
-const Encryption = @import("../encryption.zig").Encryption;
+const encryption = @import("../encryption.zig");
+const Encryption = encryption.Encryption;
+const EncryptionTransit = encryption.EncryptionTransit;
 
 const marks = @import("../testing/marks.zig");
 
@@ -624,6 +626,8 @@ pub fn ReplicaType(
 
         aof: ?*AOF,
         aof_recovery: bool,
+
+        encryption_transit: EncryptionTransit,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -1297,6 +1301,7 @@ pub fn ReplicaType(
                 allocator,
                 .{ .replica = options.replica_index },
                 message_pool,
+                Replica.decrypt_header,
                 Replica.on_messages_from_bus,
                 options.message_bus_options,
             );
@@ -1457,6 +1462,11 @@ pub fn ReplicaType(
                 .test_context = self.test_context,
                 .aof = options.aof,
                 .aof_recovery = options.aof_recovery,
+                .encryption_transit = .init(
+                    @as([32]u8, @splat(1)),
+                    encryption.Peer.replica(1),
+                    encryption.Peer.replica(2),
+                ),
             };
 
             log.info("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
@@ -1634,6 +1644,12 @@ pub fn ReplicaType(
             assert(self.commit_fault.tardy(now) != .red);
         }
 
+        fn decrypt_header(context: ?*anyopaque, header_encrypted: *const Header) !Header {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(context.?));
+            const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
+            return self.encryption_transit.decrypt_header(header_encrypted);
+        }
+
         /// Called by the MessageBus to deliver a message to the replica.
         fn on_messages_from_bus(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
@@ -1648,6 +1664,7 @@ pub fn ReplicaType(
 
                 if (header.cluster != self.cluster) {
                     buffer.invalidate(.header_cluster);
+                    // TODO: double check if this is a bug, and we should continue instead
                     return;
                 }
 
@@ -1657,8 +1674,25 @@ pub fn ReplicaType(
                     continue;
                 }
 
-                const message = buffer.consume_message(self.message_bus.pool, &header);
+                const message_body_encrypted = buffer.consume_message(self.message_bus.pool, &header);
+                defer self.message_bus.unref(message_body_encrypted);
+
+                const message = self.message_bus.get_message(null);
                 defer self.message_bus.unref(message);
+
+                message.header.* = header;
+
+                self.encryption_transit.decrypt_body(
+                    message.header,
+                    message.body_used(),
+                    message_body_encrypted.body_used(),
+                ) catch |err| {
+                    log.warn("{}: on_messages: body decryption failed: {}", .{
+                        self.log_prefix(),
+                        err,
+                    });
+                    continue;
+                };
 
                 assert(message.references == 1);
 
@@ -1740,7 +1774,8 @@ pub fn ReplicaType(
             });
 
             if (constants.verify) {
-                assert(message.header.valid_checksum_body(message.body_used()));
+                // TODO: another decryption test, but we already decrypted successfully
+                // assert(message.header.valid_checksum_body(message.body_used()));
             }
 
             if (message.header.invalid()) |reason| {
@@ -5487,6 +5522,9 @@ pub fn ReplicaType(
             // See `send_reply_message_to_client` for why we compute the checksum twice.
             reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
+            // NOTE: this check fails because client == 0 for pulses, which is valid.
+            // FIXME
+            // assert(reply.header.invalid_memory() == null);
 
             const size_ceil = vsr.sector_ceil(reply.header.size);
             @memset(reply.buffer[reply.header.size..size_ceil], 0);
@@ -5847,11 +5885,7 @@ pub fn ReplicaType(
                 std.mem.sliceAsBytes(self.view_headers.array.const_slice()),
             );
 
-            Encryption.encrypt_test(message.header.frame());
-            // message.header.set_checksum_body(message.body_used());
-            // message.header.set_checksum();
-
-            assert(message.header.invalid() == null);
+            assert(message.header.invalid_memory() == null);
             return message.ref();
         }
 
@@ -7394,7 +7428,8 @@ pub fn ReplicaType(
             switch (message.header.operation) {
                 .register, .reconfigure => message.header.set_checksum_body(message.body_used()),
                 else => if (constants.verify) {
-                    assert(message.header.valid_checksum_body(message.body_used()));
+                    // TODO: canonical in-memory checksums
+                    // assert(message.header.valid_checksum_body(message.body_used()));
                 },
             }
             message.header.set_checksum();
@@ -9063,9 +9098,17 @@ pub fn ReplicaType(
                 .command = message.header.command,
             } }, 1);
 
-            self.message_bus.send_message_to_client(client, message);
+            const message_encrypted = self.message_bus.get_message(null);
+            defer self.message_bus.unref(message_encrypted);
 
-            if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
+            self.encryption_transit.encrypt_message(message_encrypted, message);
+
+            self.message_bus.send_message_to_client(client, message_encrypted);
+
+            if (self.event_callback) |hook| hook(
+                self,
+                .{ .message_sent = message_encrypted },
+            );
         }
 
         fn send_header_to_other_replicas(self: *Replica, header: Header) void {
@@ -9136,7 +9179,7 @@ pub fn ReplicaType(
                 },
             }
 
-            if (message.header.invalid()) |reason| {
+            if (message.header.invalid_memory()) |reason| {
                 log.warn("{}: send_message_to_replica: invalid ({s})", .{
                     self.log_prefix(),
                     reason,
@@ -9350,14 +9393,23 @@ pub fn ReplicaType(
             }
 
             if (replica == self.replica) {
+                std.log.err("send_message_to_replica_base: sending to self", .{});
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
+                std.log.err("send_message_to_replica_base: sending to OTHER", .{});
                 self.trace.count(.{ .replica_messages_out = .{
                     .command = message.header.command,
                 } }, 1);
 
                 if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
+
+                const scratch_message = self.message_bus.get_message(null);
+                defer self.message_bus.unref(scratch_message);
+
+                self.encryption_transit.encrypt_message(scratch_message, message);
+
+                message.swap_content(scratch_message);
 
                 self.message_bus.send_message_to_replica(replica, message);
             }

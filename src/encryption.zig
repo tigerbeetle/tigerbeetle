@@ -1,9 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const stdx = @import("stdx");
+const vsr = @import("vsr.zig");
 
 const assert = std.debug.assert;
 const Header = @import("vsr/message_header.zig").Header;
+const MessagePool = vsr.message_pool.MessagePool;
+const Message = MessagePool.Message;
 const aegis = std.crypto.aead.aegis;
 const aegis_auth = std.crypto.auth.aegis;
 const hkdf = std.crypto.kdf.hkdf;
@@ -78,7 +81,7 @@ fn checksum(bytes: []const u8) u256 {
 const Payload = enum(u8) { header = 1, body = 2 };
 const PeerType = enum(u8) { replica = 1, client = 2 };
 
-const Peer = extern struct {
+pub const Peer = extern struct {
     peer: PeerType,
     padding: [15]u8 = @splat(0),
 
@@ -173,7 +176,7 @@ comptime {
     assert(@sizeOf(KeyId) != @sizeOf(Intent));
 }
 
-const EncryptionTransit = struct {
+pub const EncryptionTransit = struct {
     key_id: u128,
 
     key_send_header: [32]u8,
@@ -239,24 +242,43 @@ const EncryptionTransit = struct {
         enc.* = undefined;
     }
 
+    pub fn encrypt_message(
+        enc: *EncryptionTransit,
+        target: *Message,
+        source: *const Message,
+    ) void {
+        const unencrypted_header = source.header.*;
+        enc.encrypt_body(
+            source.header,
+            target.buffer[@sizeOf(Header)..source.header.size],
+            source.body_used(),
+        );
+        target.header.* = enc.encrypt_header(source.header);
+        source.header.* = unencrypted_header;
+        target.header = undefined;
+        target.metadata = .{ .size_value = source.header.size };
+    }
+
     pub fn encrypt_header(
         enc: *EncryptionTransit,
-        header: *Header,
-    ) void {
+        header: *const Header,
+    ) Header {
         const key = enc.key_send_header;
         const nonce = std.crypto.random.int(u128);
 
         assert(header.body_tag != 0);
         assert(!stdx.zeroed(&key));
         assert(nonce != 0);
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+        assert(nonce != undefined_u128);
 
-        var original = header.*;
-        const bytes_cleartext = original.slice_encrypted();
+        var encrypted = header.*;
+        const bytes_cleartext = header.slice_encrypted_const();
 
-        const bytes_ciphertext = header.slice_encrypted();
-        const tag = std.mem.asBytes(&header.header_tag);
-        header.header_nonce = nonce;
-        const ad = header.slice_associated_data();
+        const bytes_ciphertext = encrypted.slice_encrypted();
+        const tag = std.mem.asBytes(&encrypted.header_tag);
+        encrypted.header_nonce = nonce;
+        const ad = encrypted.slice_associated_data();
 
         aegis.Aegis256.encrypt(
             bytes_ciphertext,
@@ -266,33 +288,39 @@ const EncryptionTransit = struct {
             extend_nonce(nonce),
             key,
         );
+
+        return encrypted;
     }
 
     pub fn decrypt_header(
         enc: *EncryptionTransit,
-        header: *Header,
-    ) !void {
+        header: *const Header,
+    ) !Header {
         const key = enc.key_recv_header;
         assert(!stdx.zeroed(&key));
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
-        var original = header.*;
-        const bytes_ciphertext = original.slice_encrypted();
-        const tag = std.mem.asBytes(&original.header_tag);
-        const ad = original.slice_associated_data();
+        if (header.header_nonce == 0 or header.header_nonce == undefined_u128) {
+            return error.InvalidHeaderNonce;
+        }
 
-        const bytes_cleartext = header.slice_encrypted();
+        var decrypted = header.*;
+        const bytes_ciphertext = header.slice_encrypted_const();
+        const tag = std.mem.asBytes(&header.header_tag);
+        const ad = header.slice_associated_data_const();
 
-        aegis.Aegis256.decrypt(
+        const bytes_cleartext = decrypted.slice_encrypted();
+
+        try aegis.Aegis256.decrypt(
             bytes_cleartext,
             bytes_ciphertext,
             tag.*,
             ad,
-            extend_nonce(original.header_nonce),
+            extend_nonce(decrypted.header_nonce),
             key,
-        ) catch |err| {
-            header.* = original;
-            return err;
-        };
+        );
+        decrypted.header_tag = 0xdeadbeef;
+        return decrypted;
     }
 
     pub fn encrypt_body(
@@ -300,12 +328,15 @@ const EncryptionTransit = struct {
         header: *Header,
         target: []u8,
         source: []const u8,
-    ) []const u8 {
+    ) void {
         const key = enc.key_send_body;
         const nonce = std.crypto.random.int(u128);
 
+        assert(target.len == source.len);
         assert(!stdx.zeroed(&key));
         assert(nonce != 0);
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+        assert(nonce != undefined_u128);
 
         const tag = std.mem.asBytes(&header.body_tag);
         header.body_nonce = nonce;
@@ -318,7 +349,6 @@ const EncryptionTransit = struct {
             extend_nonce(nonce),
             key,
         );
-        return target;
     }
 
     pub fn decrypt_body(
@@ -326,11 +356,16 @@ const EncryptionTransit = struct {
         header: *Header,
         target: []u8,
         source: []const u8,
-    ) ![]const u8 {
+    ) !void {
         const key = enc.key_recv_body;
 
+        assert(target.len == source.len);
         assert(!stdx.zeroed(&key));
-        assert(header.body_nonce != 0);
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+
+        if (header.body_nonce == 0 or header.body_nonce == undefined_u128) {
+            return error.InvalidBodyNonce;
+        }
 
         const tag = std.mem.asBytes(&header.body_tag).*;
 
@@ -342,7 +377,7 @@ const EncryptionTransit = struct {
             extend_nonce(header.body_nonce),
             key,
         );
-        return target;
+        header.body_tag = 0xdeadbeef;
     }
 };
 
@@ -350,23 +385,139 @@ fn extend_nonce(short_nonce: u128) [32]u8 {
     return std.mem.asBytes(&short_nonce)[0..16].* ++ @as([16]u8, @splat(0));
 }
 
+const undefined_u128: u128 = 0xaaaaaaaaaaaaaaaa;
+const undefined_u8: u8 = 0xaa;
+
+// NOTE: double check value for undefined
+// comptime {
+// const value: u128 = undefined;
+// assert(undefined_u128 == value);
+// }
+
 pub const EncryptionStorage = struct {
-    pub fn encrypt_header(
+    pub const Keys = struct {
+        header_key: [32]u8,
+        header_nonce: u128,
+        body_key: [32]u8,
+        body_nonce: u128,
+
+        pub fn generate() Keys {
+            var keys: Keys = undefined;
+            std.crypto.random.bytes(std.mem.asBytes(&keys));
+            return keys;
+        }
+
+        pub fn generate_deterministic(prng: *stdx.PRNG) Keys {
+            var keys: Keys = undefined;
+            prng.fill(std.mem.asBytes(&keys));
+            return keys;
+        }
+    };
+
+    pub fn encrypt_message(
+        target: *Message,
+        source: *const Message,
+        keys: Keys,
+    ) void {
+        encrypt_body(
+            source.header,
+            target.buffer[@sizeOf(Header)..source.header.size],
+            source.body_used(),
+            keys.header_key,
+            keys.header_nonce,
+        );
+        target.header.* = encrypt_header(
+            source.header,
+            keys.body_key,
+            keys.body_nonce,
+        );
+    }
+
+    pub fn decrypt_message(
+        target: *Message,
+        source: *const Message,
+        keys: Keys,
+    ) void {
+        target.header.* = decrypt_header(
+            source.header,
+            keys.header_key,
+            keys.header_nonce,
+        );
+        decrypt_body(
+            target.header,
+            target.body_used(),
+            source.buffer[@sizeOf(Header)..target.header.size],
+            keys.body_key,
+            keys.body_nonce,
+        );
+    }
+
+    pub fn calculate_checksum_header(header: *Header, keys: Keys) u128 {
+        var mac: [16]u8 = undefined;
+        aegis_auth.Aegis256Mac_128.createWithNonce(
+            &mac,
+            header.slice_without_header_tag(),
+            &keys.header_key,
+            &extend_nonce(keys.header_nonce),
+        );
+        return std.mem.bytesAsValue(u128, &mac).*;
+    }
+
+    pub fn set_checksum_header(
         header: *Header,
+        keys: Keys,
+    ) void {
+        header.header_tag = calculate_checksum_header(header, keys);
+    }
+
+    pub fn calculate_checksum_body(
+        body: []const u8,
+        keys: Keys,
+    ) u128 {
+        var mac: [16]u8 = undefined;
+        aegis_auth.Aegis256Mac_128.createWithNonce(
+            &mac,
+            body,
+            &keys.body_key,
+            &extend_nonce(keys.body_nonce),
+        );
+        return std.mem.bytesAsValue(u128, &mac).*;
+    }
+
+    pub fn set_checksum_body(
+        header: *Header,
+        body: []const u8,
+        keys: Keys,
+    ) void {
+        header.body_tag = calculate_checksum_body(body, keys);
+    }
+
+    pub fn set_checksum_message(
+        message: *Message,
+        keys: Keys,
+    ) void {
+        set_checksum_body(message.header, message.body_used(), keys);
+        set_checksum_header(message.header, keys);
+    }
+
+    pub fn encrypt_header(
+        header: *const Header,
         key: [32]u8,
         nonce: u128,
-    ) void {
+    ) Header {
         assert(header.body_tag != 0);
         assert(!stdx.zeroed(&key));
         assert(nonce != 0);
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+        assert(nonce != undefined_u128);
 
-        var original = header.*;
-        const bytes_cleartext = original.slice_encrypted();
+        var encrypted = header.*;
+        const bytes_cleartext = header.slice_encrypted_const();
 
-        const bytes_ciphertext = header.slice_encrypted();
-        const tag = std.mem.asBytes(&header.header_tag);
-        header.header_nonce = nonce;
-        const ad = header.slice_associated_data();
+        const bytes_ciphertext = encrypted.slice_encrypted();
+        const tag = std.mem.asBytes(&encrypted.header_tag);
+        encrypted.header_nonce = nonce;
+        const ad = encrypted.slice_associated_data();
 
         aegis.Aegis256.encrypt(
             bytes_ciphertext,
@@ -376,74 +527,36 @@ pub const EncryptionStorage = struct {
             extend_nonce(nonce),
             key,
         );
-    }
-
-    pub fn calculate_checksum_header(header: *Header, key: [32]u8, nonce: u128) u128 {
-        var mac: [16]u8 = undefined;
-        aegis_auth.Aegis256Mac.createWithNonce(
-            &mac,
-            header.slice_without_header_tag(),
-            &key,
-            &nonce,
-        );
-        return std.mem.bytesAsValue(u128, &mac).*;
-    }
-
-    pub fn set_checksum_header(
-        header: *Header,
-        key: [32]u8,
-        nonce: u128,
-    ) void {
-        header.header_tag = calculate_checksum_header(header, key, nonce);
-    }
-    pub fn calculate_checksum_body(
-        body: []const u8,
-        key: [32]u8,
-        nonce: u128,
-    ) u128 {
-        var mac: [16]u8 = undefined;
-        aegis_auth.Aegis256Mac.createWithNonce(
-            &mac,
-            body,
-            &key,
-            &nonce,
-        );
-        return std.mem.bytesAsValue(u128, &mac).*;
-    }
-
-    pub fn set_checksum_body(
-        header: *Header,
-        body: []const u8,
-        key: [32]u8,
-        nonce: u128,
-    ) void {
-        header.body_tag = calculate_checksum_body(body, key, nonce);
+        return encrypted;
     }
 
     pub fn decrypt_header(
-        header: *Header,
+        header: *const Header,
         key: [32]u8,
-    ) !void {
+    ) !Header {
         assert(!stdx.zeroed(&key));
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
-        var original = header.*;
-        const bytes_ciphertext = original.slice_encrypted();
-        const tag = std.mem.asBytes(&original.header_tag);
-        const ad = original.slice_associated_data();
+        if (header.header_nonce == 0 or header.header_nonce == undefined_u128) {
+            return error.InvalidHeaderNonce;
+        }
 
-        const bytes_cleartext = header.slice_encrypted();
+        var decrypted = header.*;
+        const bytes_ciphertext = header.slice_encrypted_const();
+        const tag = std.mem.asBytes(&header.header_tag).*;
+        const ad = header.slice_associated_data_const();
 
-        aegis.Aegis256.decrypt(
+        const bytes_cleartext = decrypted.slice_encrypted();
+
+        try aegis.Aegis256.decrypt(
             bytes_cleartext,
             bytes_ciphertext,
-            tag.*,
+            tag,
             ad,
-            extend_nonce(original.header_nonce),
+            extend_nonce(decrypted.header_nonce),
             key,
-        ) catch |err| {
-            header.* = original;
-            return err;
-        };
+        );
+        return decrypted;
     }
 
     pub fn encrypt_body(
@@ -452,11 +565,13 @@ pub const EncryptionStorage = struct {
         source: []const u8,
         key: [32]u8,
         nonce: u128,
-    ) []const u8 {
+    ) void {
         assert(target.len == source.len);
         assert(header.size == @sizeOf(Header) + source.len);
         assert(!stdx.zeroed(&key));
         assert(nonce != 0);
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+        assert(nonce != undefined_u128);
 
         header.body_nonce = nonce;
 
@@ -468,18 +583,22 @@ pub const EncryptionStorage = struct {
             extend_nonce(nonce),
             key,
         );
-        return target;
     }
 
     pub fn decrypt_body(
-        header: *Header,
+        header: *const Header,
         target: []u8,
         source: []const u8,
         key: [32]u8,
-    ) ![]const u8 {
+    ) !void {
         assert(target.len == source.len);
         assert(header.size == @sizeOf(Header) + source.len);
         assert(!stdx.zeroed(&key));
+        assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+
+        if (header.body_nonce == 0 or header.body_nonce == undefined_u128) {
+            return error.InvalidBodyNonce;
+        }
 
         try aegis.Aegis256.decrypt(
             target,
@@ -489,7 +608,6 @@ pub const EncryptionStorage = struct {
             extend_nonce(header.body_nonce),
             key,
         );
-        return target;
     }
 };
 
@@ -517,7 +635,7 @@ test "EncryptStorage" {
     var prepare = Header.Prepare.root(0);
     prepare.size = @intCast(@sizeOf(Header) + body.len);
 
-    const body_encrypted = EncryptionStorage.encrypt_body(
+    EncryptionStorage.encrypt_body(
         prepare.frame(),
         &encrypt_buffer,
         &body,
@@ -525,26 +643,24 @@ test "EncryptStorage" {
         body_test_nonce,
     );
 
-    var unencrypted = prepare.frame().*;
-
-    EncryptionStorage.encrypt_header(prepare.frame(), header_test_key, header_test_nonce);
-    try EncryptionStorage.decrypt_header(prepare.frame(), header_test_key);
+    const encrypted = EncryptionStorage.encrypt_header(prepare.frame(), header_test_key, header_test_nonce);
+    const unencrypted = try EncryptionStorage.decrypt_header(&encrypted, header_test_key);
 
     try std.testing.expectEqualSlices(
         u8,
-        unencrypted.slice_encrypted(),
-        prepare.frame().slice_encrypted(),
+        prepare.frame().slice_encrypted_const(),
+        unencrypted.slice_encrypted_const(),
     );
 
     var decrypt_buffer: [1024]u8 = undefined;
-    const body_decrypted = try EncryptionStorage.decrypt_body(
-        prepare.frame(),
+    try EncryptionStorage.decrypt_body(
+        &unencrypted,
         &decrypt_buffer,
-        body_encrypted,
+        &encrypt_buffer,
         body_test_key,
     );
 
-    try std.testing.expectEqualSlices(u8, &body, body_decrypted);
+    try std.testing.expectEqualSlices(u8, &body, &decrypt_buffer);
 }
 
 test "EncryptTransit" {
@@ -586,36 +702,42 @@ test "EncryptTransit" {
     var prepare = Header.Prepare.root(0);
     prepare.size = @intCast(@sizeOf(Header) + body.len);
 
-    const encrypted = enc_a.encrypt_body(prepare.frame(), &encrypt_buffer, &body);
+    enc_a.encrypt_body(prepare.frame(), &encrypt_buffer, &body);
 
-    var unencrypted = prepare.frame().*;
+    const header_unencrypted = prepare.frame().*;
 
-    enc_a.encrypt_header(prepare.frame());
+    const header_encrypted = enc_a.encrypt_header(&header_unencrypted);
 
-    try std.testing.expect(!stdx.equal_bytes(Header, &unencrypted, prepare.frame()));
+    try std.testing.expect(!stdx.equal_bytes(Header, &header_unencrypted, &header_encrypted));
+
+    try std.testing.expectError(error.AuthenticationFailed, enc_a.decrypt_header(&header_encrypted));
+
+    var header_decrypted = try enc_b.decrypt_header(&header_encrypted);
+
+    try std.testing.expectEqualSlices(
+        u8,
+        header_unencrypted.slice_encrypted_const(),
+        header_decrypted.slice_encrypted_const(),
+    );
 
     try std.testing.expectError(error.AuthenticationFailed, enc_a.decrypt_body(
-        prepare.frame(),
+        &header_decrypted,
         &decrypt_buffer,
-        encrypted,
+        &encrypt_buffer,
     ));
 
-    try std.testing.expectError(error.AuthenticationFailed, enc_a.decrypt_header(prepare.frame()));
+    try enc_b.decrypt_body(
+        &header_decrypted,
+        &decrypt_buffer,
+        &encrypt_buffer,
+    );
 
-    try enc_b.decrypt_header(prepare.frame());
-
-    const decrypted = try enc_b.decrypt_body(prepare.frame(), &decrypt_buffer, encrypted);
+    try std.testing.expectEqual(0xdeadbeef, header_decrypted.body_tag);
 
     try std.testing.expectEqualSlices(
         u8,
         &body,
-        decrypted,
-    );
-
-    try std.testing.expectEqualSlices(
-        u8,
-        unencrypted.slice_encrypted(),
-        prepare.frame().slice_encrypted(),
+        &decrypt_buffer,
     );
 }
 
@@ -633,16 +755,20 @@ test "EncryptStorage Bit Fuzzer" {
     prepare.size = @intCast(@sizeOf(Header));
 
     for (0..@bitSizeOf(Header)) |bit| {
-        var header = prepare.frame().*;
+        const header_unencrypted = prepare.frame().*;
 
-        EncryptionStorage.encrypt_header(&header, header_test_key, header_test_nonce);
+        var header_encrypted = EncryptionStorage.encrypt_header(
+            &header_unencrypted,
+            header_test_key,
+            header_test_nonce,
+        );
 
-        var header_int: u2048 = @bitCast(header);
+        var header_int: u2048 = @bitCast(header_encrypted);
         header_int ^= @as(u2048, 1) << @intCast(bit);
-        header = @bitCast(header_int);
+        header_encrypted = @bitCast(header_int);
 
         try std.testing.expectError(error.AuthenticationFailed, EncryptionStorage.decrypt_header(
-            prepare.frame(),
+            &header_encrypted,
             header_test_key,
         ));
     }
@@ -667,20 +793,19 @@ test "EncryptStorage Bit Fuzzer" {
 
     for (0..encrypt_buffer.len) |pos| {
         for (0..@bitSizeOf(u8)) |bit| {
-            const body_encrypted = EncryptionStorage.encrypt_body(
+            EncryptionStorage.encrypt_body(
                 prepare.frame(),
                 &encrypt_buffer,
                 &body,
                 body_test_key,
                 body_test_nonce,
             );
-            assert(body_encrypted.len == encrypt_buffer.len);
-            encrypt_buffer[pos] = body_encrypted[pos] ^ @as(u8, 1) << @intCast(bit);
+            encrypt_buffer[pos] = encrypt_buffer[pos] ^ @as(u8, 1) << @intCast(bit);
 
             try std.testing.expectError(error.AuthenticationFailed, EncryptionStorage.decrypt_body(
                 prepare.frame(),
                 &decrypt_buffer,
-                body_encrypted,
+                &encrypt_buffer,
                 body_test_key,
             ));
         }
@@ -710,14 +835,14 @@ test "EncryptTransit Bit Fuzzer" {
     for (0..@bitSizeOf(Header)) |bit| {
         var header = prepare.frame().*;
 
-        enc_a.encrypt_header(&header);
+        var header_encrypted = enc_a.encrypt_header(&header);
 
-        var header_int: u2048 = @bitCast(header);
+        var header_int: u2048 = @bitCast(header_encrypted);
         header_int ^= @as(u2048, 1) << @intCast(bit);
-        header = @bitCast(header_int);
+        header_encrypted = @bitCast(header_int);
 
         try std.testing.expectError(error.AuthenticationFailed, enc_b.decrypt_header(
-            prepare.frame(),
+            &header_encrypted,
         ));
     }
 
@@ -734,18 +859,17 @@ test "EncryptTransit Bit Fuzzer" {
 
     for (0..encrypt_buffer.len) |pos| {
         for (0..@bitSizeOf(u8)) |bit| {
-            const body_encrypted = enc_a.encrypt_body(
+            enc_a.encrypt_body(
                 prepare.frame(),
                 &encrypt_buffer,
                 &body,
             );
-            assert(body_encrypted.len == encrypt_buffer.len);
-            encrypt_buffer[pos] = body_encrypted[pos] ^ @as(u8, 1) << @intCast(bit);
+            encrypt_buffer[pos] = encrypt_buffer[pos] ^ @as(u8, 1) << @intCast(bit);
 
             try std.testing.expectError(error.AuthenticationFailed, enc_b.decrypt_body(
                 prepare.frame(),
                 &decrypt_buffer,
-                body_encrypted,
+                &encrypt_buffer,
             ));
         }
     }

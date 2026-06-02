@@ -7,7 +7,7 @@ const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Command = vsr.Command;
 const Operation = vsr.Operation;
-pub const Encryption = @import("../encryption.zig").Encryption;
+const Encryption = @import("../encryption.zig").Encryption;
 const schema = @import("../lsm/schema.zig");
 
 const checksum_body_empty = vsr.checksum(&.{});
@@ -16,21 +16,27 @@ const checksum_body_empty = vsr.checksum(&.{});
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
-    /// A checksum covering only the remainder of this header.
+    /// An AEAD tag covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
-    /// This checksum is enough to uniquely identify a network message or prepare.
+    /// This tag is enough to uniquely identify a network message or prepare.
     header_tag: u128,
 
-    // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum`.
+    /// The header_key_id is the ID of the key to use for decryption. It is cryptographically
+    /// derived from the encryption protocol version and the peers involved in the message.
+    ///
+    /// This field was previously checksum_padding. A value of all zeros is only valid to indicate
+    /// backwards compatibility.
     header_key_id: u128,
 
-    /// A checksum covering only the associated body after this header.
+    /// The nonce for header encryption.
     header_nonce: u128,
 
-    // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum_body`.
+    // Everything below this point is transmitted or stored encrypted.
+
+    // An AEAD tag covering only the message body.
     body_tag: u128,
 
-    /// Reserved for future use by AEAD.
+    /// The nonce for body encryption.
     body_nonce: u128,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
@@ -105,6 +111,37 @@ pub const Header = extern struct {
         };
     }
 
+    comptime {
+        assert(@offsetOf(Header, "header_key_id") == 16);
+        assert(@offsetOf(Header, "body_tag") == 48);
+        assert(@sizeOf(Header) - @offsetOf(Header, "body_tag") == 256 - 48);
+    }
+
+    pub fn slice_associated_data(self: *Header) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "header_key_id")..@offsetOf(Header, "body_tag")];
+    }
+
+    pub fn slice_associated_data_const(self: *const Header) []const u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "header_key_id")..@offsetOf(Header, "body_tag")];
+    }
+
+    pub fn slice_encrypted(self: *Header) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "body_tag")..];
+    }
+
+    pub fn slice_encrypted_const(self: *const Header) []const u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "body_tag")..];
+    }
+
+    pub fn slice_without_header_tag(self: *Header) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(Header, "header_key_id")..];
+    }
+
     pub fn calculate_checksum(self: *const Header) u128 {
         const checksum_size = @sizeOf(@TypeOf(self.checksum()));
         assert(checksum_size == 16);
@@ -123,11 +160,13 @@ pub const Header = extern struct {
     }
 
     pub fn checksum(self: *const Header) u128 {
-        return self.checksum();
+        return self.header_tag;
     }
 
     pub fn checksum_body(self: *const Header) u128 {
-        return if (self.header_key_id == 0) self.header_nonce else self.checksum_body();
+        // FIXME: backwards compatability
+        // return if (self.header_key_id == 0) self.header_nonce else self.body_tag;
+        return self.body_tag;
     }
 
     /// This must be called only after set_checksum_body() so that checksum_body is also covered:
@@ -180,7 +219,8 @@ pub const Header = extern struct {
         // Now, it's 0 for an unencrypted message and non-0 for an encrypted message.
         maybe(self.header_key_id == 0);
         // `header_nonce` was `checksum_body`, neither can be 0.
-        if (self.header_nonce == 0) return "header_nonce == 0";
+        // FIXME:
+        // if (self.header_nonce == 0) return "header_nonce == 0";
         // `body_tag` was `checksum_body_padding`, always used to be 0.
         // Now, it's 0 for an unencrypted message and non-0 for an encrypted message.
         maybe(self.checksum_body() == 0);
@@ -189,12 +229,15 @@ pub const Header = extern struct {
         maybe(self.body_nonce == 0);
 
         // If any is 0, all must be 0
-        if (self.header_key_id == 0 or self.checksum_body() == 0 or self.header_nonce == 0) {
-            if (self.header_key_id != 0 or self.checksum_body() != 0 or self.header_nonce != 0) {
-                return "header_key_id,body_tag,header_nonce must all be 0 if any is 0";
-            }
-        }
+        // if (self.header_key_id == 0 or self.checksum_body() == 0 or self.header_nonce == 0) {
+        //     if (self.header_key_id != 0 or self.checksum_body() != 0 or self.header_nonce != 0) {
+        //         return "header_key_id,body_tag,header_nonce must all be 0 if any is 0";
+        //     }
+        // }
+        return self.invalid_memory();
+    }
 
+    pub fn invalid_memory(self: *const Header) ?[]const u8 {
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.size > constants.message_size_max) return "size > message_size_max";
         if (self.epoch != 0) return "epoch != 0";
@@ -271,9 +314,14 @@ pub const Header = extern struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
-        switch (self.into_any()) {
-            inline else => |header| return try header.format(fmt, options, writer),
-        }
+        _ = self;
+        _ = fmt;
+        _ = options;
+        _ = writer;
+        return;
+        // switch (self.into_any()) {
+        //     inline else => |header| return try header.format(fmt, options, writer),
+        // }
     }
 
     fn HeaderFunctionsType(comptime CommandHeader: type) type {
@@ -288,6 +336,10 @@ pub const Header = extern struct {
 
             pub fn invalid(self: *const CommandHeader) ?[]const u8 {
                 return self.frame_const().invalid();
+            }
+
+            pub fn invalid_memory(self: *const CommandHeader) ?[]const u8 {
+                return self.frame_const().invalid_memory();
             }
 
             pub fn checksum(self: *const CommandHeader) u128 {
@@ -356,6 +408,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -395,6 +448,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -440,6 +494,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -494,6 +549,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -539,6 +595,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -584,6 +641,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -664,6 +722,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -797,6 +856,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -913,9 +973,6 @@ pub const Header = extern struct {
                 .request = 0,
             };
             Encryption.encrypt_test(header.frame());
-            if (header.invalid()) |errmsg| {
-                std.log.err("INVALID: {s}", .{errmsg});
-            }
             assert(header.invalid() == null);
             return header;
         }
@@ -957,6 +1014,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1056,6 +1114,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1128,6 +1187,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1171,6 +1231,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1225,6 +1286,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1277,6 +1339,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1325,6 +1388,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1371,6 +1435,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1417,6 +1482,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1464,6 +1530,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1508,6 +1575,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1553,6 +1621,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1619,6 +1688,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
@@ -1673,6 +1743,7 @@ pub const Header = extern struct {
         pub const frame = HeaderFunctionsType(@This()).frame;
         pub const frame_const = HeaderFunctionsType(@This()).frame_const;
         pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
         pub const checksum = HeaderFunctionsType(@This()).checksum;
         pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
         pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;

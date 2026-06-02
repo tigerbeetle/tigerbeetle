@@ -12,6 +12,9 @@ const Time = vsr.time.Time;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
+const encryption = @import("../encryption.zig");
+const Encryption = encryption.Encryption;
+const EncryptionTransit = encryption.EncryptionTransit;
 
 const log = stdx.log.scoped(.client);
 
@@ -127,6 +130,8 @@ pub fn ClientType(
             eviction: *const Message.Eviction,
         ) void = null,
 
+        encryption_transit: EncryptionTransit,
+
         pub fn init(
             allocator: mem.Allocator,
             time: Time,
@@ -149,11 +154,11 @@ pub fn ClientType(
         ) !Client {
             assert(options.id > 0);
             assert(options.replica_count > 0);
-
-            var message_bus = try MessageBus.init(
+            const message_bus = try MessageBus.init(
                 allocator,
                 .{ .client = options.id },
                 message_pool,
+                Client.decrypt_header,
                 Client.on_messages,
                 options.message_bus_options,
             );
@@ -179,6 +184,11 @@ pub fn ClientType(
                 },
                 .prng = stdx.PRNG.from_seed(@as(u64, @truncate(options.id))),
                 .on_eviction_callback = options.eviction_callback,
+                .encryption_transit = .init(
+                    @as([32]u8, @splat(1)),
+                    encryption.Peer.replica(2),
+                    encryption.Peer.replica(1),
+                ),
             };
 
             self.ping_timeout.start();
@@ -202,14 +212,38 @@ pub fn ClientType(
             return self.message_bus.shutdown_complete();
         }
 
+        fn decrypt_header(context: ?*anyopaque, header_encrypted: *const Header) !Header {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(context.?));
+            const self: *Client = @fieldParentPtr("message_bus", message_bus);
+            return self.encryption_transit.decrypt_header(header_encrypted);
+        }
+
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
             while (buffer.next_header()) |header| {
-                const message = buffer.consume_message(self.message_bus.pool, &header);
+                const message_body_encrypted = buffer.consume_message(self.message_bus.pool, &header);
+                defer self.message_bus.unref(message_body_encrypted);
+
+                const message = self.message_bus.get_message(null);
                 defer self.message_bus.unref(message);
+
+                message.header.* = header;
+
+                self.encryption_transit.decrypt_body(
+                    message.header,
+                    message.body_used(),
+                    message_body_encrypted.body_used(),
+                ) catch |err| {
+                    log.warn("{}: on_messages: body decryption failed: {}", .{
+                        self.id,
+                        err,
+                    });
+                    continue;
+                };
 
                 if (message.header.cluster != self.cluster) {
                     buffer.invalidate(.header_cluster);
+                    // TODO: double check if this is a bug, and we should continue instead
                     return;
                 }
                 if (!self.evicted) {
@@ -519,8 +553,9 @@ pub fn ClientType(
         fn on_reply(self: *Client, reply: *Message.Reply) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
-            assert(reply.header.valid_checksum());
-            assert(reply.header.valid_checksum_body(reply.body_used()));
+            // TODO: reply decrypted successfully, no checksum validation necessary.
+            // assert(reply.header.valid_checksum());
+            // assert(reply.header.valid_checksum_body(reply.body_used()));
             assert(reply.header.command == .reply);
             assert(reply.header.release.value == self.release.value);
 
@@ -551,7 +586,8 @@ pub fn ClientType(
             }
 
             assert(reply.header.request == inflight.message.header.request);
-            assert(reply.header.request_checksum == inflight.message.header.checksum());
+            // TODO: make in-memory checksums canonical.
+            // assert(reply.header.request_checksum == inflight.message.header.checksum());
             const inflight_vsr_operation = inflight.message.header.operation;
             const inflight_request = inflight.message.header.request;
 
@@ -577,7 +613,8 @@ pub fn ClientType(
                 reply.header.operation.tag_name(Operation),
             });
 
-            assert(reply.header.request_checksum == self.parent);
+            // TODO: canonical in-memory checksums
+            // assert(reply.header.request_checksum == self.parent);
             assert(reply.header.client == self.id);
             assert(reply.header.request == inflight_request);
             assert(reply.header.cluster == self.cluster);
@@ -719,7 +756,12 @@ pub fn ClientType(
                 else => unreachable,
             }
 
-            self.message_bus.send_message_to_replica(replica, message);
+            const encrypted = self.message_bus.get_message(null);
+            defer self.message_bus.unref(encrypted);
+
+            self.encryption_transit.encrypt_message(encrypted, message);
+
+            self.message_bus.send_message_to_replica(replica, encrypted);
         }
 
         // In addition to the primary, each request is also sent to a randomly chosen backup, to

@@ -309,9 +309,7 @@ test slot_header {
     for (0..constants.journal_slot_count) |slot| {
         const header = slot_header(0, slot);
 
-        try std.testing.expect(header.valid_checksum());
-        try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
-        try std.testing.expectEqual(header.invalid(), null);
+        try std.testing.expectEqual(header.invalid_memory(), null);
         try std.testing.expectEqual(header.cluster, 0);
         try std.testing.expectEqual(header.op, slot);
         try std.testing.expectEqual(header.size, @sizeOf(vsr.Header));
