@@ -101,7 +101,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     , .{options.version}) });
 
     try Shell.copy_path(
-        shell.project_root,
+        shell.cwd,
         "src/clients/java/samples/basic/src/main/java/Main.java",
         shell.cwd,
         "src/main/java/Main.java",

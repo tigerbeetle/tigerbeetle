@@ -184,6 +184,10 @@ pub fn ScanLookupType(
                 if (objects.table_mutable.get(timestamp) orelse
                     objects.table_immutable.get(timestamp)) |object|
                 {
+                    // Since the scan already found the key,
+                    // we don't expect a `tombstone` here.
+                    assert(!Groove.ObjectTree.Table.tombstone(object));
+
                     // Object present in table mutable/immutable,
                     // continue the loop to fetch the next one.
                     self.object_buffer.?[worker.object_index.?] = object.*;
@@ -192,13 +196,14 @@ pub fn ScanLookupType(
                     self.scan.snapshot(),
                     timestamp,
                 )) {
-                    // Since the scan already found the key,
-                    // we don't expect `negative` here.
+                    // We do not expect `.negative` either.
                     .negative => unreachable,
 
                     // Object is cached in memory,
                     // continue the loop to fetch the next one.
                     .positive => |object| {
+                        assert(!Groove.ObjectTree.Table.tombstone(object));
+
                         self.object_buffer.?[worker.object_index.?] = object.*;
                         continue;
                     },

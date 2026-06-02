@@ -24,18 +24,20 @@ const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
+const TimeOS = vsr.time.TimeOS;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const messages_max = args.events_max orelse 200;
     // Usually we don't need nearly this many ticks, but certain combinations of errors can make
     // delivering messages quite time consuming.
-    const ticks_max = messages_max * 10_000;
+    const ticks_max = messages_max * 200_000;
 
     var prng = stdx.PRNG.from_seed(args.seed);
 
     const replica_count = 3;
-    const clients_limit = 2;
-    const node_count = replica_count + clients_limit;
+    const clients_limit = prng.range_inclusive(u8, 3, 6);
+    const clients_count = prng.range_inclusive(u8, clients_limit, 2 * clients_limit);
+    const node_count = replica_count + clients_count;
     const message_bus_send_probability = ratio(prng.range_inclusive(u64, 1, 10), 10);
     const message_bus_tick_probability = ratio(prng.range_inclusive(u64, 3, 10), 10);
     // Ping often so that listener→connector connections are eventually identified correctly.
@@ -80,7 +82,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var io = try IO.init(gpa, .{
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
-        .recv_error_probability = ratio(prng.int_inclusive(u64, 1), 10),
+        .recv_error_probability = ratio(prng.range_inclusive(u64, 1, 2), 10),
         .recv_after_shutdown_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .send_partial_probability = ratio(prng.int_inclusive(u64, 5), 10),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
@@ -98,8 +100,11 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var messages_pending = std.AutoArrayHashMapUnmanaged(u128, MessagePending).empty;
     defer messages_pending.deinit(gpa);
 
-    var nodes = try gpa.alloc(Node, replica_count + clients_limit);
+    var nodes = try gpa.alloc(Node, replica_count + clients_count);
     defer gpa.free(nodes);
+
+    var time_os: TimeOS = .{};
+    const time = time_os.time();
 
     for (nodes[0..replica_count], 0..) |*node, i| {
         errdefer for (nodes[0..i]) |*n| n.message_bus.deinit(gpa);
@@ -116,6 +121,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 .{
                     .configuration = configuration,
                     .io = &io,
+                    .time = time,
                     .clients_limit = clients_limit,
                     .trace = null,
                 },
@@ -141,6 +147,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 .{
                     .configuration = configuration,
                     .io = &io,
+                    .time = time,
                     .clients_limit = null,
                     .trace = null,
                 },
@@ -171,7 +178,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         assert(std.meta.eql(message_header.peer_type(), .{ .replica = @intCast(replica) }));
     }
 
-    for (0..clients_limit) |i| {
+    for (0..clients_count) |i| {
         const client = replica_count + i;
         const message = messages.addOneAssumeCapacity();
         const message_header: *vsr.Header =

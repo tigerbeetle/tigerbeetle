@@ -638,7 +638,7 @@ const Environment = struct {
                         indexes_in_queries,
                     ))
                         try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
-                    .delete => if (!env.delete_thing(query_specs[0..]))
+                    .delete => if (!try env.delete_thing(query_specs[0..]))
                         try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
                 }
             }
@@ -813,7 +813,7 @@ const Environment = struct {
         return true;
     }
 
-    fn delete_thing(env: *Environment, query_specs: []const QuerySpec) bool {
+    fn delete_thing(env: *Environment, query_specs: []const QuerySpec) !bool {
         const model_index = env.pick_live_index_for_mutation(query_specs) orelse return false;
         assert(env.model_live.isSet(model_index));
 
@@ -821,24 +821,12 @@ const Environment = struct {
         const groove: *ThingsGroove = &env.forest.grooves.things;
 
         // The object may not be in the cache.
-        // The real state machine would prefetch the object before deleting it.
+        // It must be prefetched before being deleted.
         maybe(groove.objects_cache.has(thing.id));
+        try env.prefetch_thing(thing.id);
+        assert(groove.objects_cache.has(thing.id));
 
-        // TODO: This block is a naive implementation of the deletion logic.
-        // We should call `env.forest.grooves.things.remove(thing.id);` once
-        // it is fully implemented.
-        // See the TODOs in `Groove.remove()` for more details.
-        groove.objects.remove(thing);
-        inline for (std.meta.fields(ThingsGroove.IndexTrees)) |field| {
-            const IndexHelper = ThingsGroove.IndexHelperType(field.name);
-            if (IndexHelper.index_from_object(thing)) |value| {
-                @field(groove.indexes, field.name).remove(&.{
-                    .timestamp = thing.timestamp,
-                    .field = value,
-                });
-            }
-        }
-        groove.objects_cache.remove(thing.id);
+        groove.remove(thing.id);
 
         env.model_live.setValue(model_index, false);
         for (query_specs, &env.model_matches) |_, *query_matches| {
@@ -846,6 +834,42 @@ const Environment = struct {
         }
 
         return true;
+    }
+
+    fn prefetch_thing(env: *Environment, key: u128) !void {
+        const Context = struct {
+            _key: u128,
+            _snapshot: u64,
+            _groove: *ThingsGroove,
+
+            finished: bool = false,
+            prefetch_context: ThingsGroove.PrefetchContext = undefined,
+
+            fn prefetch_start(getter: *@This()) void {
+                const groove = getter._groove;
+                groove.prefetch_setup(getter._snapshot);
+                groove.prefetch_enqueue(.{ .id = getter._key });
+                groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
+            }
+
+            fn prefetch_callback(prefetch_context: *ThingsGroove.PrefetchContext) void {
+                const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
+                assert(!context.finished);
+                context.finished = true;
+            }
+        };
+
+        var context = Context{
+            ._key = key,
+            ._snapshot = env.op,
+            ._groove = &env.forest.grooves.things,
+        };
+        context.prefetch_start();
+        while (!context.finished) {
+            if (env.ticks_remaining == 0) return error.OutOfTicks;
+            env.ticks_remaining -= 1;
+            env.storage.run();
+        }
     }
 
     fn pick_live_index_for_mutation(

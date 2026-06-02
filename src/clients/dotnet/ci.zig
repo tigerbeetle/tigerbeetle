@@ -121,6 +121,14 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     errdefer tmp_beetle.log_stderr();
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const base_dir = shell.cwd;
+    try shell.pushd_dir(tmp_dir.dir);
+    defer shell.popd();
+
     try shell.exec("dotnet new console", .{});
 
     // NuGet may take a few minutes to make the new package available for download.
@@ -141,7 +149,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     }
 
     try Shell.copy_path(
-        shell.project_root,
+        base_dir,
         "src/clients/dotnet/samples/basic/Program.cs",
         shell.cwd,
         "Program.cs",

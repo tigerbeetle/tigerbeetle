@@ -37,6 +37,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     const tmp_dir = try shell.create_tmp_dir();
     defer shell.cwd.deleteTree(tmp_dir) catch {};
 
+    const base_dir = shell.cwd;
     try shell.pushd(tmp_dir);
     defer shell.popd();
 
@@ -74,7 +75,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     try Shell.copy_path(
-        shell.project_root,
+        base_dir,
         "src/clients/rust/samples/basic/src/main.rs",
         shell.cwd,
         "src/main.rs",

@@ -143,6 +143,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         "./zig/zig build scripts -- release --build --sha={git_sha} --language=zig",
         .{ .git_sha = git_sha },
     );
+    // Delete this as we will soon unzip a tigerbeetle binary to the same location.
+    try shell.cwd.deleteFile("tigerbeetle");
+
     for (artifacts) |artifact| {
         // Zig only guarantees release builds to be deterministic.
         if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
@@ -179,7 +182,6 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         },
         else => std.debug.panic("unsupported os {}", .{builtin.os.tag}),
     };
-    try shell.cwd.deleteFile("tigerbeetle");
     try shell.unzip_executable(artifact_host, "tigerbeetle");
 
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});

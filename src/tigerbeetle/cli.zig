@@ -69,9 +69,8 @@ const CLIArgs = union(enum) {
         development: bool = false,
 
         // Everything from here until positional arguments is considered experimental, and requires
-        // `--experimental` to be set. Experimental flags disable automatic upgrades with
-        // multiversion binaries; each replica has to be manually restarted. Experimental flags must
-        // default to null, except for bools which must be false.
+        // `--experimental` to be set. Experimental flags must default to null, except for bools
+        // which must be false.
         experimental: bool = false,
 
         limit_storage: ?ByteSize = null,
