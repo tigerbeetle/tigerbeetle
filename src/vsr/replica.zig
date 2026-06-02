@@ -5550,7 +5550,7 @@ pub fn ReplicaType(
         fn execute_op_register(
             self: *Replica,
             prepare: *const Message.Prepare,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             assert(self.commit_stage == .execute);
             assert(self.commit_prepare.? == prepare);
@@ -5587,7 +5587,7 @@ pub fn ReplicaType(
         fn execute_op_reconfiguration(
             self: *Replica,
             prepare: *const Message.Prepare,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             assert(self.commit_stage == .execute);
             assert(self.commit_prepare.? == prepare);
@@ -5617,7 +5617,7 @@ pub fn ReplicaType(
         fn execute_op_upgrade(
             self: *Replica,
             prepare: *const Message.Prepare,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             maybe(self.upgrade_release == null);
             assert(self.commit_stage == .execute);

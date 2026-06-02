@@ -238,7 +238,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         prefetch_context: PrefetchContext = .null,
 
         scan_lookup: ScanLookup = .null,
-        scan_lookup_buffer: []align(16) u8,
+        scan_lookup_buffer: []align(constants.cache_line_size) u8,
         scan_lookup_buffer_index: u32 = 0,
         scan_lookup_results: std.ArrayListUnmanaged(u32),
         scan_lookup_next_tick: Grid.NextTick = undefined,
@@ -922,7 +922,11 @@ pub fn StateMachineType(comptime Storage: type) type {
                     }
                     break :max .{ buffer_size_max, batch_count_max };
                 };
-            self.scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, scan_lookup_buffer_size);
+            self.scan_lookup_buffer = try allocator.alignedAlloc(
+                u8,
+                constants.cache_line_size,
+                scan_lookup_buffer_size,
+            );
             errdefer allocator.free(self.scan_lookup_buffer);
 
             self.scan_lookup_results = try std.ArrayListUnmanaged(u32).initCapacity(
@@ -979,7 +983,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn input_valid(
             self: *const StateMachine,
             operation: Operation,
-            message_body_used: []align(16) const u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
         ) bool {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
@@ -1069,7 +1073,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn prepare(
             self: *StateMachine,
             operation: Operation,
-            message_body_used: []align(16) const u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
         ) void {
             assert(message_body_used.len <= self.batch_size_limit);
             const delta: u64 = delta: {
@@ -1148,7 +1152,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             op: u64,
             snapshot: u64,
             operation: Operation,
-            message_body_used: []align(16) const u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
         ) void {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
@@ -2566,8 +2570,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             op: u64,
             timestamp: u64,
             operation: Operation,
-            message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
@@ -2671,8 +2675,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             timestamp: u64,
             comptime operation: Operation,
-            message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(!operation.is_multi_batch());
             comptime assert(operation.is_batchable());
@@ -2702,8 +2706,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self: *StateMachine,
             timestamp: u64,
             comptime operation: Operation,
-            message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(operation.is_multi_batch());
             comptime assert(operation.is_batchable());
@@ -2763,8 +2767,8 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn execute_query(
             self: *StateMachine,
             comptime operation: Operation,
-            message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(!operation.is_multi_batch());
             comptime assert(!operation.is_batchable());
@@ -2822,8 +2826,8 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn execute_query_multi_batch(
             self: *StateMachine,
             comptime operation: Operation,
-            message_body_used: []align(16) const u8,
-            output_buffer: *align(16) [constants.message_body_size_max]u8,
+            message_body_used: []align(constants.cache_line_size) const u8,
+            output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             comptime assert(operation.is_multi_batch());
             comptime assert(!operation.is_batchable());

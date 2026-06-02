@@ -15,14 +15,14 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const message_body_size_max = (1 * MiB) - @sizeOf(vsr.Header);
     const buffer_expected = try gpa.alignedAlloc(
         u8,
-        @alignOf(vsr.Header),
+        constants.cache_line_size,
         message_body_size_max,
     );
     defer gpa.free(buffer_expected);
 
     const buffer_actual = try gpa.alignedAlloc(
         u8,
-        @alignOf(vsr.Header),
+        constants.cache_line_size,
         message_body_size_max,
     );
     defer gpa.free(buffer_actual);
