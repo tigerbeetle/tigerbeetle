@@ -3118,6 +3118,18 @@ test "query_two_phase_transfers" {
         \\ two_phase_result T10  T0 EXP
         \\ commit query_two_phase_transfers
         \\
+        // Target = .pending, limit = 2:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL PEN _
+        \\ two_phase_result  T3  T0 PEN
+        \\ two_phase_result  T4  T0 PEN
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .pending, limit = 2, reversed:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL PEN REV
+        \\ two_phase_result T10  T0 EXP
+        \\ two_phase_result  T9  T0 EXP
+        \\ commit query_two_phase_transfers
+        \\
         // Target = .outcome:
         \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L-0 ALL OUT _
         \\ two_phase_result  T9  T0 EXP
@@ -3126,6 +3138,18 @@ test "query_two_phase_transfers" {
         \\ two_phase_result  T8 T18 VOI
         \\ two_phase_result  T5 T15 POS
         \\ two_phase_result  T6 T16 POS
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, limit = 2:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL OUT _
+        \\ two_phase_result  T9  T0 EXP
+        \\ two_phase_result T10  T0 EXP
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, limit = 2, reversed:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL OUT REV
+        \\ two_phase_result  T6 T16 POS
+        \\ two_phase_result  T5 T15 POS
         \\ commit query_two_phase_transfers
         \\
         // Target = .pending, user_data, reversed:
