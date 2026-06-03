@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 2nd, 2026).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 16th, 2026).
 
 jobs:
   release:
