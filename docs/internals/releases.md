@@ -99,18 +99,11 @@ The motivation for specific steps follows after.
 
 ### Error Handling
 
-If the release failed completely (nothing was published), it is safe to re-run the release GitHub
-Actions job.
-
-More likely, the release was partially successful: e.g., the Node.js package was uploaded, but
-uploading the Java package failed. This is not a problem --- the replica release on GitHub will remain a draft in
-this case. To retry the release, increment the version number of the latest changelog entry alongside
-any changes to fix the release process, push the new commit to the `release` branch, and trigger a new release
-workflow (step 2). The _old_ version number will be irrevocably burned. There will be an intentional
-gap in the changelog sequence. The newly added changes in the `release` branch must be added to the
-`main` branch as well in order for CI to work correctly. From the time the release is published
-until the `main` branch is updated, all CI runs will fail. When a release with the new version number
-is fully released, delete the draft release on GitHub.
+The release process is idempotent: for each client package, the release script checks whether that
+version is already published and skips re-publishing if so. This means it is always safe to re-run
+the release workflow, whether the release failed completely or only partially (e.g., the Node.js
+package was uploaded but the Java package failed). If needed, fix the underlying issue and
+re-trigger the workflow. No version number will be burned.
 
 It could also be the case that a release was successful, but some issue with the code is discovered
 and a quick fix is necessary. The preferred approach is to do a normal fix-forward release. While
