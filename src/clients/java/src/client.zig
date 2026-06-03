@@ -122,8 +122,12 @@ const NativeClient = struct {
             .status = undefined,
         };
 
-        client.submit(packet) catch |err| switch (err) {
-            error.ClientInvalid => ReflectionHelper.client_closed_exception_throw(env),
+        client.submit(packet) catch |err| {
+            env.delete_global_ref(global_ref);
+            global_allocator.destroy(packet);
+            switch (err) {
+                error.ClientInvalid => ReflectionHelper.client_closed_exception_throw(env),
+            }
         };
     }
 
