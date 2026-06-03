@@ -9,7 +9,7 @@ const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
-const Message = MessagePool.Message;
+const MessageNetwork = MessagePool.Message.Network;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Process = @import("message_bus.zig").Process;
@@ -24,7 +24,7 @@ pub const NetworkOptions = PacketSimulatorOptions;
 pub const LinkFilter = @import("../packet_simulator.zig").LinkFilter;
 
 pub const Network = struct {
-    const PacketSimulator = PacketSimulatorType(*Message);
+    const PacketSimulator = PacketSimulatorType(*MessageNetwork);
 
     pub const Path = struct {
         source: Process,
@@ -227,7 +227,7 @@ pub const Network = struct {
         return network.packet_simulator.replay_recorded();
     }
 
-    pub fn send_message(network: *Network, message: *Message, path: Path) void {
+    pub fn send_message(network: *Network, message: *MessageNetwork, path: Path) void {
         network.message_summary.add(message.header);
         log.debug("send_message: {} > {}: {}", .{
             path.source,
@@ -281,22 +281,22 @@ pub const Network = struct {
         return network.buses.items[network.process_to_address(process)];
     }
 
-    fn packet_command(_: *PacketSimulator, message: *Message) vsr.Command {
+    fn packet_command(_: *PacketSimulator, message: *MessageNetwork) vsr.Command {
         return message.header.command;
     }
 
-    fn packet_clone(_: *PacketSimulator, message: *Message) *Message {
+    fn packet_clone(_: *PacketSimulator, message: *MessageNetwork) *MessageNetwork {
         return message.ref();
     }
 
-    fn packet_deinit(packet_simulator: *PacketSimulator, message: *Message) void {
+    fn packet_deinit(packet_simulator: *PacketSimulator, message: *MessageNetwork) void {
         const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
         network.message_pool.unref(message);
     }
 
     fn packet_deliver(
         packet_simulator: *PacketSimulator,
-        message: *Message,
+        message: *MessageNetwork,
         path: PacketSimulatorPath,
     ) void {
         const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);

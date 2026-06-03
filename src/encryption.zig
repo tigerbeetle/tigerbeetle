@@ -7,6 +7,8 @@ const assert = std.debug.assert;
 const Header = @import("vsr/message_header.zig").Header;
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
+const MessageNetwork = Message.Network;
+const MessageStorage = Message.Storage;
 const aegis = std.crypto.aead.aegis;
 const aegis_auth = std.crypto.auth.aegis;
 const hkdf = std.crypto.kdf.hkdf;
@@ -22,14 +24,6 @@ pub const Encryption = struct {
         header.set_checksum_body(&[0]u8{});
         header.set_checksum();
     }
-
-    pub const TransitState = struct {
-        pub fn encrypt() void {}
-    };
-
-    pub const StorageState = struct {
-        pub fn encrypt() void {}
-    };
 };
 
 // NOTE: try X variants
@@ -246,17 +240,20 @@ pub const EncryptionTransit = struct {
         enc: *EncryptionTransit,
         target: *Message,
         source: *const Message,
-    ) void {
+    ) *MessageNetwork {
         const unencrypted_header = source.header.*;
         enc.encrypt_body(
             source.header,
             target.buffer[@sizeOf(Header)..source.header.size],
             source.body_used(),
         );
+        // TODO: When sending a message, assert the last 16 bytes are not zero.
+        @memset(target.buffer[source.header.size..], 0);
         target.header.* = enc.encrypt_header(source.header);
         source.header.* = unencrypted_header;
         target.header = undefined;
         target.metadata = .{ .size_value = source.header.size };
+        return @ptrCast(target);
     }
 
     pub fn encrypt_header(
@@ -278,6 +275,7 @@ pub const EncryptionTransit = struct {
         const bytes_ciphertext = encrypted.slice_encrypted();
         const tag = std.mem.asBytes(&encrypted.header_tag);
         encrypted.header_nonce = nonce;
+        encrypted.header_key_id = enc.key_id;
         const ad = encrypted.slice_associated_data();
 
         aegis.Aegis256.encrypt(
@@ -297,6 +295,7 @@ pub const EncryptionTransit = struct {
         header: *const Header,
     ) !Header {
         const key = enc.key_recv_header;
+        assert(header.header_key_id == enc.key_id);
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
@@ -319,7 +318,7 @@ pub const EncryptionTransit = struct {
             extend_nonce(decrypted.header_nonce),
             key,
         );
-        decrypted.header_tag = 0xdeadbeef;
+        decrypted.set_checksum();
         return decrypted;
     }
 
@@ -359,6 +358,7 @@ pub const EncryptionTransit = struct {
     ) !void {
         const key = enc.key_recv_body;
 
+        assert(header.header_key_id == enc.key_id);
         assert(target.len == source.len);
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
@@ -377,7 +377,9 @@ pub const EncryptionTransit = struct {
             extend_nonce(header.body_nonce),
             key,
         );
-        header.body_tag = 0xdeadbeef;
+
+        header.set_checksum_body(target);
+        header.set_checksum();
     }
 };
 
@@ -418,7 +420,7 @@ pub const EncryptionStorage = struct {
         target: *Message,
         source: *const Message,
         keys: Keys,
-    ) void {
+    ) *MessageStorage {
         encrypt_body(
             source.header,
             target.buffer[@sizeOf(Header)..source.header.size],
@@ -426,16 +428,19 @@ pub const EncryptionStorage = struct {
             keys.header_key,
             keys.header_nonce,
         );
+        // TODO: When storing a message, assert the last 16 bytes are not zero.
+        @memset(target.buffer[source.header.size..], 0);
         target.header.* = encrypt_header(
             source.header,
             keys.body_key,
             keys.body_nonce,
         );
+        return @ptrCast(target);
     }
 
     pub fn decrypt_message(
         target: *Message,
-        source: *const Message,
+        source: *const MessageStorage,
         keys: Keys,
     ) void {
         target.header.* = decrypt_header(

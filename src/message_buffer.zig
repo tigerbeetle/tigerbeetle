@@ -5,7 +5,7 @@ const maybe = stdx.maybe;
 
 const vsr = @import("./vsr.zig");
 const MessagePool = @import("message_pool.zig").MessagePool;
-const Message = MessagePool.Message;
+const MessageNetwork = MessagePool.Message.Network;
 const Header = vsr.Header;
 const constants = vsr.constants;
 
@@ -23,7 +23,7 @@ pub const MessageBuffer = struct {
     decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
     /// The buffer passed to the kernel for reading into. This is Message rather than []u8 to
     /// enable zero-copy fast path. If a recv syscall reads exactly one message, no copying occurs.
-    message: *Message,
+    message: *MessageNetwork,
 
     /// Suspended bytes, always a number of full messages.
     suspend_size: u32 = 0,
@@ -73,7 +73,7 @@ pub const MessageBuffer = struct {
         return .{
             .context = context,
             .decrypt_header = decrypt_header,
-            .message = pool.get_message(null),
+            .message = pool.get_message_network(),
         };
     }
 
@@ -280,7 +280,7 @@ pub const MessageBuffer = struct {
         buffer: *MessageBuffer,
         pool: *MessagePool,
         header: *const Header,
-    ) *Message {
+    ) *MessageNetwork {
         assert(buffer.iterator_state == .after_peek);
         assert(buffer.advance_size - buffer.process_size >= header.size);
         assert(buffer.invalid == null);
@@ -296,12 +296,13 @@ pub const MessageBuffer = struct {
             buffer.advance();
             assert(buffer.advance_size == 0);
 
-            defer buffer.message = pool.get_message(null);
+            defer buffer.message = pool.get_message_network();
 
+            buffer.message.metadata = .{ .size_value = buffer.message.header.size };
             return buffer.message;
         }
 
-        const message = pool.get_message(null);
+        const message = pool.get_message_network();
         defer pool.unref(message);
 
         stdx.copy_disjoint(
@@ -315,6 +316,8 @@ pub const MessageBuffer = struct {
         buffer.advance();
 
         assert(message.header.checksum() == header.checksum());
+
+        message.metadata = .{ .size_value = message.header.size };
         return message.ref();
     }
 

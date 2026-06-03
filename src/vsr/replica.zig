@@ -9098,16 +9098,17 @@ pub fn ReplicaType(
                 .command = message.header.command,
             } }, 1);
 
-            const message_encrypted = self.message_bus.get_message(null);
-            defer self.message_bus.unref(message_encrypted);
+            const message_buffer = self.message_bus.get_message(null);
+            defer self.message_bus.unref(message_buffer);
 
-            self.encryption_transit.encrypt_message(message_encrypted, message);
+            const message_network = self.encryption_transit.encrypt_message(message_buffer, message);
 
-            self.message_bus.send_message_to_client(client, message_encrypted);
+            self.message_bus.send_message_to_client(client, message_network);
 
             if (self.event_callback) |hook| hook(
                 self,
-                .{ .message_sent = message_encrypted },
+                // TODO: double check that we want unencrypted message here.
+                .{ .message_sent = message },
             );
         }
 
@@ -9404,14 +9405,14 @@ pub fn ReplicaType(
 
                 if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
 
-                const scratch_message = self.message_bus.get_message(null);
-                defer self.message_bus.unref(scratch_message);
+                const message_buffer = self.message_bus.get_message(null);
+                defer self.message_bus.unref(message_buffer);
 
-                self.encryption_transit.encrypt_message(scratch_message, message);
+                const message_network = self.encryption_transit.encrypt_message(message_buffer, message);
+                // TODO: maybe optimize by avoiding the copy here
+                // message.swap_content(message_buffer);
 
-                message.swap_content(scratch_message);
-
-                self.message_bus.send_message_to_replica(replica, message);
+                self.message_bus.send_message_to_replica(replica, message_network);
             }
         }
 

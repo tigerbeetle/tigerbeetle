@@ -142,11 +142,17 @@ pub const Header = extern struct {
         return bytes[@offsetOf(Header, "header_key_id")..];
     }
 
+    /// Calculates the canonical checksum which excludes header_key_id,
+    /// header_nonce, and body_nonce.
     pub fn calculate_checksum(self: *const Header) u128 {
-        const checksum_size = @sizeOf(@TypeOf(self.checksum()));
+        var header = self.*;
+        header.header_key_id = 0;
+        header.header_nonce = 0;
+        header.body_nonce = 0;
+        const checksum_size = @sizeOf(@TypeOf(header.checksum()));
         assert(checksum_size == 16);
-        const checksum_value = vsr.checksum(std.mem.asBytes(self)[checksum_size..]);
-        assert(@TypeOf(checksum_value) == @TypeOf(self.checksum()));
+        const checksum_value = vsr.checksum(std.mem.asBytes(&header)[checksum_size..]);
+        assert(@TypeOf(checksum_value) == @TypeOf(header.checksum()));
         return checksum_value;
     }
 

@@ -586,8 +586,7 @@ pub fn ClientType(
             }
 
             assert(reply.header.request == inflight.message.header.request);
-            // TODO: make in-memory checksums canonical.
-            // assert(reply.header.request_checksum == inflight.message.header.checksum());
+            assert(reply.header.request_checksum == inflight.message.header.checksum());
             const inflight_vsr_operation = inflight.message.header.operation;
             const inflight_request = inflight.message.header.request;
 
@@ -613,8 +612,7 @@ pub fn ClientType(
                 reply.header.operation.tag_name(Operation),
             });
 
-            // TODO: canonical in-memory checksums
-            // assert(reply.header.request_checksum == self.parent);
+            assert(reply.header.request_checksum == self.parent);
             assert(reply.header.client == self.id);
             assert(reply.header.request == inflight_request);
             assert(reply.header.cluster == self.cluster);
@@ -756,12 +754,12 @@ pub fn ClientType(
                 else => unreachable,
             }
 
-            const encrypted = self.message_bus.get_message(null);
-            defer self.message_bus.unref(encrypted);
+            const message_buffer = self.message_bus.get_message(null);
+            defer self.message_bus.unref(message_buffer);
 
-            self.encryption_transit.encrypt_message(encrypted, message);
+            const message_network = self.encryption_transit.encrypt_message(message_buffer, message);
 
-            self.message_bus.send_message_to_replica(replica, encrypted);
+            self.message_bus.send_message_to_replica(replica, message_network);
         }
 
         // In addition to the primary, each request is also sent to a randomly chosen backup, to

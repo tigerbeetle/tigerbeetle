@@ -11,7 +11,7 @@ const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const RingBufferType = stdx.RingBufferType;
 const MessagePool = @import("message_pool.zig").MessagePool;
-const Message = MessagePool.Message;
+const MessageNetwork = MessagePool.Message.Network;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const Header = vsr.Header;
 const QueueType = @import("./queue.zig").QueueType;
@@ -19,7 +19,7 @@ const Tracer = vsr.trace.Tracer;
 
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
-    const SendQueue = RingBufferType(*Message, .slice);
+    const SendQueue = RingBufferType(*MessageNetwork, .slice);
 
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
@@ -53,7 +53,7 @@ pub fn MessageBusType(comptime IO: type) type {
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
         /// SendQueue storage shared by all connections.
-        send_queue_buffer: []*Message,
+        send_queue_buffer: []*MessageNetwork,
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.state != .free).
@@ -125,7 +125,7 @@ pub fn MessageBusType(comptime IO: type) type {
             };
 
             const send_queue_buffer = try allocator.alloc(
-                *Message,
+                *MessageNetwork,
                 connections_max * send_queue_max,
             );
             @memset(send_queue_buffer, undefined);
@@ -230,7 +230,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 .replica => constants.connection_send_queue_max_replica,
                 .client => constants.connection_send_queue_max_client,
             };
-            var send_queue_buffer_previous: ?[]*Message = null;
+            var send_queue_buffer_previous: ?[]*MessageNetwork = null;
             for (bus.connections) |*connection| {
                 if (connection.fd) |fd| {
                     bus.io.close_socket(fd);
@@ -843,7 +843,7 @@ pub fn MessageBusType(comptime IO: type) type {
             }
         }
 
-        pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
+        pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *MessageNetwork) void {
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (bus.process == .replica) assert(replica != bus.process.replica);
 
@@ -860,7 +860,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
         /// Try to send the message to the client with the given id.
         /// If the client is not currently connected, the message is silently dropped.
-        pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
+        pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *MessageNetwork) void {
             assert(bus.process == .replica);
             assert(bus.clients.capacity() > 0);
 
@@ -876,7 +876,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
         /// Add a message to the connection's send queue, starting a send operation
         /// if the queue was previously empty.
-        fn send_message(bus: *MessageBus, connection: *Connection, message: *Message) void {
+        fn send_message(bus: *MessageBus, connection: *Connection, message: *MessageNetwork) void {
             assert(connection.peer != .unknown);
 
             switch (connection.state) {
@@ -924,7 +924,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 send_callback,
                 &connection.send_completion,
                 connection.fd.?,
-                message.buffer[connection.send_progress..message.metadata.size()],
+                message.buffer[connection.send_progress..message.size()],
             );
         }
 
@@ -937,20 +937,20 @@ pub fn MessageBusType(comptime IO: type) type {
 
             for (0..connection.send_queue.count) |_| {
                 const message = connection.send_queue.head().?;
-                assert(connection.send_progress < message.metadata.size());
+                assert(connection.send_progress < message.size());
                 const write_size = bus.io.send_now(
                     connection.fd.?,
-                    message.buffer[connection.send_progress..message.metadata.size()],
+                    message.buffer[connection.send_progress..message.size()],
                 ) orelse return;
                 assert(write_size <= constants.message_size_max);
                 connection.send_progress += @intCast(write_size);
-                assert(connection.send_progress <= message.metadata.size());
-                if (connection.send_progress == message.metadata.size()) {
+                assert(connection.send_progress <= message.size());
+                if (connection.send_progress == message.size()) {
                     _ = connection.send_queue.pop();
                     bus.unref(message);
                     connection.send_progress = 0;
                 } else {
-                    assert(connection.send_progress < message.metadata.size());
+                    assert(connection.send_progress < message.size());
                     return;
                 }
             }
@@ -984,9 +984,9 @@ pub fn MessageBusType(comptime IO: type) type {
             };
             assert(write_size <= constants.message_size_max);
             connection.send_progress += @intCast(write_size);
-            assert(connection.send_progress <= connection.send_queue.head().?.metadata.size());
+            assert(connection.send_progress <= connection.send_queue.head().?.size());
             // If the message has been fully sent, move on to the next one.
-            if (connection.send_progress == connection.send_queue.head().?.metadata.size()) {
+            if (connection.send_progress == connection.send_queue.head().?.size()) {
                 connection.send_progress = 0;
                 const message = connection.send_queue.pop().?;
                 bus.unref(message);
@@ -1154,7 +1154,7 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         /// `@TypeOf(message)` is one of:
-        /// - `*Message`
+        /// - `*MessageNetwork`
         /// - `MessageType(command)` for any `command`.
         pub fn unref(bus: *MessageBus, message: anytype) void {
             bus.pool.unref(message);

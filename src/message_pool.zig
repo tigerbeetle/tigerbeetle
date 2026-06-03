@@ -114,7 +114,7 @@ pub const MessagePool = struct {
     pub const Metadata = extern struct {
         size_value: u64 = 0,
 
-        pub fn size(self: *Metadata) u64 {
+        pub fn size(self: *const Metadata) u64 {
             assert(self.size_value != 0);
             return self.size_value;
         }
@@ -142,6 +142,8 @@ pub const MessagePool = struct {
         pub const Eviction = CommandMessageType(.eviction);
         pub const RequestBlocks = CommandMessageType(.request_blocks);
         pub const Block = CommandMessageType(.block);
+        pub const Network = MessageNetwork;
+        pub const Storage = MessageStorage;
 
         // TODO Avoid the extra level of indirection.
         // (https://github.com/tigerbeetle/tigerbeetle/pull/1295#discussion_r1394265250)
@@ -292,6 +294,12 @@ pub const MessagePool = struct {
         }
     }
 
+    /// Get an unused MessageNetwork with a buffer of constants.message_size_max.
+    /// The returned message has exactly one reference.
+    pub fn get_message_network(pool: *MessagePool) *Message.Network {
+        return @ptrCast(pool.get_message_base());
+    }
+
     fn get_message_base(pool: *MessagePool) *Message {
         const message = pool.free_list.pop().?;
         assert(message.link.next == null);
@@ -331,6 +339,97 @@ pub const MessagePool = struct {
             }
             pool.free_list.push(message);
         }
+    }
+};
+
+const MessageNetwork = extern struct {
+    const Message = MessagePool.Message;
+
+    // The underlying structure of Message and EncryptedMessage should be identical, so that their
+    // memory can be cast back-and-forth.
+    comptime {
+        assert(@sizeOf(Message) == @sizeOf(MessageNetwork));
+
+        for (
+            std.meta.fields(Message),
+            std.meta.fields(MessageNetwork),
+        ) |message_field, command_message_field| {
+            // assert(std.mem.eql(u8, message_field.name, command_message_field.name));
+            assert(@sizeOf(message_field.type) == @sizeOf(command_message_field.type));
+            assert(@offsetOf(Message, message_field.name) ==
+                @offsetOf(MessageNetwork, command_message_field.name));
+        }
+    }
+
+    /// Points into `buffer`.
+    header: *Header,
+    buffer: *align(constants.sector_size) [constants.message_size_max]u8,
+    references: u32,
+    link: MessagePool.FreeList.Link,
+    metadata: MessagePool.Metadata = .{},
+
+    pub fn base(message: *MessageNetwork) *Message {
+        return @ptrCast(message);
+    }
+
+    pub fn base_const(message: *const MessageNetwork) *const Message {
+        return @ptrCast(message);
+    }
+
+    pub fn ref(message: *MessageNetwork) *MessageNetwork {
+        return @ptrCast(message.base().ref());
+    }
+
+    pub fn body_used(message: *const MessageNetwork) []align(@sizeOf(Header)) u8 {
+        return message.buffer[@sizeOf(Header)..message.size()];
+    }
+
+    pub fn size(message: *const MessageNetwork) u64 {
+        return message.metadata.size();
+    }
+};
+
+// TODO: make type function ExternalizedMessage(storage/wire)
+const MessageStorage = extern struct {
+    const Message = MessagePool.Message;
+
+    // The underlying structure of Message and EncryptedMessage should be identical, so that their
+    // memory can be cast back-and-forth.
+    comptime {
+        assert(@sizeOf(Message) == @sizeOf(MessageStorage));
+
+        for (
+            std.meta.fields(Message),
+            std.meta.fields(MessageStorage),
+        ) |message_field, command_message_field| {
+            // assert(std.mem.eql(u8, message_field.name, command_message_field.name));
+            assert(@sizeOf(message_field.type) == @sizeOf(command_message_field.type));
+            assert(@offsetOf(Message, message_field.name) ==
+                @offsetOf(MessageStorage, command_message_field.name));
+        }
+    }
+
+    /// Points into `buffer`.
+    header: *Header,
+    buffer: *align(constants.sector_size) [constants.message_size_max]u8,
+    references: u32,
+    link: MessagePool.FreeList.Link,
+    metadata: MessagePool.Metadata = .{},
+
+    pub fn base(message: *MessageStorage) *Message {
+        return @ptrCast(message);
+    }
+
+    pub fn base_const(message: *const MessageStorage) *const Message {
+        return @ptrCast(message);
+    }
+
+    pub fn ref(message: *MessageStorage) *MessageStorage {
+        return @ptrCast(message.base().ref());
+    }
+
+    pub fn body_used(message: *const MessageStorage) []align(@sizeOf(Header)) u8 {
+        return message.buffer[@sizeOf(Header)..message.metadata.size()];
     }
 };
 

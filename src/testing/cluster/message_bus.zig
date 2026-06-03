@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const vsr = @import("../../vsr.zig");
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
-const Message = MessagePool.Message;
+const MessageNetwork = MessagePool.Message.Network;
 const MessageBuffer = @import("../../message_buffer.zig").MessageBuffer;
 const Header = vsr.Header;
 const ProcessType = vsr.ProcessType;
@@ -92,7 +92,7 @@ pub const MessageBus = struct {
         bus.resume_scheduled = true;
     }
 
-    pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
+    pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *MessageNetwork) void {
         // Messages sent by a process to itself should never be passed to the message bus
         if (bus.process == .replica) assert(replica != bus.process.replica);
 
@@ -104,7 +104,7 @@ pub const MessageBus = struct {
 
     /// Try to send the message to the client with the given id.
     /// If the client is not currently connected, the message is silently dropped.
-    pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *Message) void {
+    pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *MessageNetwork) void {
         assert(bus.process == .replica);
 
         bus.network.send_message(message, .{
