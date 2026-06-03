@@ -538,33 +538,13 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         .release_triple_client_min = info.release_triple_client_min,
     });
 
-    try backup_create(shell.cwd, "pyproject.toml");
-    defer backup_restore(shell.cwd, "pyproject.toml");
-
-    const pyproject = try shell.cwd.readFileAlloc(
-        shell.arena.allocator(),
-        "pyproject.toml",
-        1 * MiB,
+    const python_wheel = @import("../clients/python/wheel.zig");
+    try python_wheel.make(
+        shell,
+        info.tag,
+        info.commit_timestamp,
+        try shell.fmt("dist/tigerbeetle-{s}-py3-none-any.whl", .{info.tag}),
     );
-    const version_line = try shell.fmt(
-        "version = \"{s}\"",
-        .{info.tag},
-    );
-    const pyproject_updated = try std.mem.replaceOwned(
-        u8,
-        shell.arena.allocator(),
-        pyproject,
-        "version = \"0.0.1\"",
-        version_line,
-    );
-    assert(std.mem.indexOf(u8, pyproject_updated, version_line) != null);
-
-    try shell.cwd.writeFile(.{
-        .sub_path = "pyproject.toml",
-        .data = pyproject_updated,
-    });
-
-    try shell.exec("python3 -m build .", .{});
 
     try Shell.copy_path(
         shell.cwd,

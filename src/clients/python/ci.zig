@@ -3,20 +3,21 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
-const Shell = @import("stdx").Shell;
+const stdx = @import("stdx");
+const Shell = stdx.Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
+const wheel = @import("wheel.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("pyproject.toml"));
 
     // Integration tests.
 
-    // `python3 -m build` won't compile the native library automatically, we need to do that
-    // ourselves.
+    // Build the native libraries.
     try shell.exec_zig("build clients:python -Drelease", .{});
 
     // Only to test the build process - the samples below run directly from the src/ directory.
-    try shell.exec("python3 -m build .", .{});
+    try wheel.make(shell, "0.0.1", stdx.InstantUnix.now(), "tigerbeetle-0.0.1-py3-none-any.whl");
 
     const path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
         "src",
