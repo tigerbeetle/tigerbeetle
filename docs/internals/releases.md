@@ -99,11 +99,11 @@ The motivation for specific steps follows after.
 
 ### Error Handling
 
-The release process is idempotent: for each client package, the release script checks whether that
-version is already published and skips re-publishing if so. This means it is always safe to re-run
+The release process is idempotent for client packages: the release script checks whether each
+package version is already published and skips re-publishing if so. This means it is safe to re-run
 the release workflow, whether the release failed completely or only partially (e.g., the Node.js
-package was uploaded but the Java package failed). If needed, fix the underlying issue and
-re-trigger the workflow. No version number will be burned.
+package was uploaded but the Java package failed). Fix any underlying issue, delete the release
+draft, and re-trigger the workflow. No version number will be burned.
 
 It could also be the case that a release was successful, but some issue with the code is discovered
 and a quick fix is necessary. The preferred approach is to do a normal fix-forward release. While
