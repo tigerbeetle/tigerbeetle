@@ -29,7 +29,7 @@ const MiB = stdx.MiB;
 
 const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
 
-const Language = enum { dotnet, go, java, node, python, rust, zig, docker };
+const Language = enum { dotnet, go, java, node, python, ruby, rust, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CLIArgs = struct {
     sha: []const u8,
@@ -223,6 +223,13 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
         defer dist_dir_python.close();
 
         try build_python(shell, info, dist_dir_python);
+    }
+
+    if (languages.contains(.ruby)) {
+        var dist_dir_ruby = try dist_dir.makeOpenPath("ruby", .{});
+        defer dist_dir_ruby.close();
+
+        try build_ruby(shell, info, dist_dir_ruby);
     }
 
     if (languages.contains(.rust)) {
@@ -574,6 +581,62 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     );
 }
 
+fn build_ruby(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
+    var section = try shell.open_section("build ruby");
+    defer section.close();
+
+    try shell.pushd("./src/clients/ruby");
+    defer shell.popd();
+
+    const ruby_version = shell.exec_stdout("ruby --version", .{}) catch {
+        return error.NoRuby;
+    };
+    log.info("{s}", .{ruby_version});
+
+    try shell.exec_zig(
+        \\build clients:ruby -Drelease -Dconfig-release={release_triple}
+        \\ -Dconfig-release-client-min={release_triple_client_min}
+    , .{
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+    });
+
+    try backup_create(shell.cwd, "src/tigerbeetle/version.rb");
+    defer backup_restore(shell.cwd, "src/tigerbeetle/version.rb");
+
+    const version_rb = try shell.cwd.readFileAlloc(
+        shell.arena.allocator(),
+        "src/tigerbeetle/version.rb",
+        1 * MiB,
+    );
+    const version_line = try shell.fmt(
+        "VERSION = \"{s}\"",
+        .{info.tag},
+    );
+    const version_rb_updated = try std.mem.replaceOwned(
+        u8,
+        shell.arena.allocator(),
+        version_rb,
+        "VERSION = \"0.0.1\"",
+        version_line,
+    );
+    assert(std.mem.indexOf(u8, version_rb_updated, version_line) != null);
+
+    try shell.cwd.writeFile(.{
+        .sub_path = "src/tigerbeetle/version.rb",
+        .data = version_rb_updated,
+    });
+
+    try shell.exec("gem build tigerbeetle.gemspec", .{});
+
+    try Shell.copy_path(
+        shell.cwd,
+        try shell.fmt("tigerbeetle-{s}.gem", .{info.tag}),
+        dist_dir,
+        try shell.fmt("tigerbeetle-{s}.gem", .{info.tag}),
+    );
+}
+
 fn build_rust(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var section = try shell.open_section("build rust");
     defer section.close();
@@ -779,6 +842,7 @@ fn publish(
     if (languages.contains(.java)) try publish_java(shell, info);
     if (languages.contains(.node)) try publish_node(shell, info);
     if (languages.contains(.python)) try publish_python(shell, info);
+    if (languages.contains(.ruby)) try publish_ruby(shell, info);
     // Currently disabled.
     _ = &publish_rust;
 
@@ -948,6 +1012,61 @@ fn publish_python(shell: *Shell, info: VersionInfo) !void {
             info.tag,
         }),
     });
+}
+
+fn publish_ruby(shell: *Shell, info: VersionInfo) !void {
+    var section = try shell.open_section("publish ruby");
+    defer section.close();
+
+    assert(try shell.dir_exists("zig-out/dist/ruby"));
+
+    const token = try publish_ruby_trusted_publishing_token(shell);
+    assert(token.len > 0);
+    try shell.env.put("GEM_HOST_API_KEY", token);
+
+    try shell.exec("gem push {package}", .{
+        .package = try shell.fmt("zig-out/dist/ruby/tigerbeetle-{s}.gem", .{info.tag}),
+    });
+}
+
+fn publish_ruby_trusted_publishing_token(shell: *Shell) ![]const u8 {
+    const trusted_publishing_token = try shell.env_get("ACTIONS_ID_TOKEN_REQUEST_TOKEN");
+    const trusted_publishing_url = try shell.env_get("ACTIONS_ID_TOKEN_REQUEST_URL");
+
+    const oidc_response = try shell.http_get(
+        try shell.fmt("{s}&audience={%}", .{
+            trusted_publishing_url,
+            std.Uri.Component{ .raw = "rubygems.org" },
+        }),
+        .{
+            .authorization = try shell.fmt("bearer {s}", .{trusted_publishing_token}),
+        },
+    );
+    const oidc = try std.json.parseFromSliceLeaky(
+        struct { value: []const u8 },
+        shell.arena.allocator(),
+        oidc_response,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    const rubygems_request = try std.json.stringifyAlloc(
+        shell.arena.allocator(),
+        .{ .jwt = oidc.value },
+        .{},
+    );
+    const rubygems_response = try shell.http_post(
+        "https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token",
+        rubygems_request,
+        .{ .content_type = .json },
+    );
+    const rubygems = try std.json.parseFromSliceLeaky(
+        struct { rubygems_api_key: []const u8 },
+        shell.arena.allocator(),
+        rubygems_response,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    return rubygems.rubygems_api_key;
 }
 
 fn publish_rust(shell: *Shell, info: VersionInfo) !void {
