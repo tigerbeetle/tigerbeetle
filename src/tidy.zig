@@ -642,8 +642,8 @@ fn tidy_dead_declarations_is_private_declaration(
                 .keyword_inline, .keyword_extern, .string_literal => {},
                 // Public declaration can be used in a different file.
                 .keyword_pub, .keyword_export => return false,
-                // []const u8 or *const u8, not a declaration.
-                .r_bracket, .asterisk => return false,
+                // []const u8, or *const u8, or align(...), not a declaration.
+                .r_bracket, .r_paren, .asterisk => return false,
                 // Non public declarations, never used.
                 else => return true,
             }

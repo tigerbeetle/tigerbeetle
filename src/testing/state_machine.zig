@@ -167,7 +167,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn input_valid(
             state_machine: *const StateMachine,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []align(constants.cache_line_size) const u8,
         ) bool {
             _ = state_machine;
             _ = operation;
@@ -178,7 +178,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn prepare(
             state_machine: *StateMachine,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []align(constants.cache_line_size) const u8,
         ) void {
             _ = state_machine;
             _ = operation;
@@ -191,7 +191,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             op: u64,
             snapshot: u64,
             operation: Operation,
-            input: []align(16) const u8,
+            input: []align(constants.cache_line_size) const u8,
         ) void {
             _ = operation;
             _ = input;
@@ -223,8 +223,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             op: u64,
             timestamp: u64,
             operation: Operation,
-            input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            input: []align(constants.cache_line_size) const u8,
+            output: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
         ) usize {
             assert(op != 0);
 
@@ -325,7 +325,7 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub fn build_request(
             workload: *Workload,
             client_index: usize,
-            body: []align(@alignOf(vsr.Header)) u8,
+            body: []align(constants.cache_line_size) u8,
         ) struct {
             operation: StateMachine.Operation,
             size: usize,
@@ -348,8 +348,8 @@ fn WorkloadType(comptime StateMachine: type) type {
             client_index: usize,
             operation: StateMachine.Operation,
             timestamp: u64,
-            request_body: []align(@alignOf(vsr.Header)) const u8,
-            reply_body: []align(@alignOf(vsr.Header)) const u8,
+            request_body: []align(constants.cache_line_size) const u8,
+            reply_body: []align(constants.cache_line_size) const u8,
         ) void {
             _ = client_index;
             _ = timestamp;

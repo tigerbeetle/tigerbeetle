@@ -317,7 +317,7 @@ fn check_wal(integrity: *Integrity) !u64 {
     );
     assert(headers_bytes_read == integrity.buffer_headers.len);
 
-    const wal_headers: []vsr.Header.Prepare align(16) =
+    const wal_headers: []const vsr.Header.Prepare =
         std.mem.bytesAsSlice(vsr.Header.Prepare, integrity.buffer_headers);
 
     for (wal_headers, 0..) |*wal_header, slot| {
@@ -329,10 +329,11 @@ fn check_wal(integrity: *Integrity) !u64 {
         );
         assert(bytes_read == integrity.buffer_prepare.len);
 
-        const wal_prepare: *align(16) vsr.Header.Prepare = std.mem.bytesAsValue(
-            vsr.Header.Prepare,
-            integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
-        );
+        const wal_prepare: *const vsr.Header.Prepare =
+            std.mem.bytesAsValue(
+                vsr.Header.Prepare,
+                integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
+            );
 
         const wal_prepare_body_valid =
             wal_prepare.valid_checksum() and
@@ -366,7 +367,7 @@ fn check_client_replies(integrity: *Integrity) !u64 {
         );
         assert(bytes_read == integrity.buffer_prepare.len);
 
-        const reply: *align(16) vsr.Header.Reply = std.mem.bytesAsValue(
+        const reply: *const vsr.Header.Reply = std.mem.bytesAsValue(
             vsr.Header.Reply,
             integrity.buffer_prepare[0..@sizeOf(vsr.Header)],
         );

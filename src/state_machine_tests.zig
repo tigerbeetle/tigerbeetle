@@ -178,11 +178,11 @@ pub const TestContext = struct {
     fn submit(
         context: *TestContext,
         operation: TestContext.StateMachine.Operation,
-        input_buffer: []align(16) u8,
+        input_buffer: []align(constants.cache_line_size) u8,
         input_size: u32,
-        output_buffer: *align(16) [constants.message_body_size_max]u8,
+        output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
     ) []const u8 {
-        const message_body: []align(16) const u8 = message_body: {
+        const message_body: []align(constants.cache_line_size) const u8 = message_body: {
             if (!operation.is_multi_batch()) {
                 break :message_body input_buffer[0..input_size];
             }
@@ -230,7 +230,7 @@ pub const TestContext = struct {
     pub fn prepare(
         context: *TestContext,
         operation: TestContext.StateMachine.Operation,
-        message_body_used: []align(16) const u8,
+        message_body_used: []align(constants.cache_line_size) const u8,
     ) void {
         context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
         context.state_machine.prepare_timestamp += 1;
@@ -259,8 +259,8 @@ pub const TestContext = struct {
         context: *TestContext,
         op: u64,
         operation: TestContext.StateMachine.Operation,
-        message_body_used: []align(16) const u8,
-        output_buffer: *align(16) [constants.message_body_size_max]u8,
+        message_body_used: []align(constants.cache_line_size) const u8,
+        output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
     ) usize {
         const timestamp = context.state_machine.prepare_timestamp;
         context.busy = true;
@@ -640,15 +640,15 @@ fn check_version(
     //  events:  { id=1, flags=linked; id=1 }
     //  results: { result=linked_event_failed, timestamp=100; result=exists, timestamp=100 }
     //                                                   ^^^                           ^^^
-    var linked_events_failed = std.AutoHashMap(u128, u64).init(allocator);
+    var linked_events_failed: std.AutoHashMap(u128, u64) = .init(allocator);
     defer linked_events_failed.deinit();
 
-    var request = std.ArrayListAligned(u8, 16).init(allocator);
+    var request: std.ArrayListAligned(u8, constants.cache_line_size) = .init(allocator);
     defer request.deinit();
 
     try request.ensureTotalCapacity(constants.message_body_size_max);
 
-    var reply = std.ArrayListAligned(u8, 16).init(allocator);
+    var reply: std.ArrayListAligned(u8, constants.cache_line_size) = .init(allocator);
     defer reply.deinit();
 
     var operation: ?TestContext.Operation = null;
@@ -1029,7 +1029,7 @@ fn check_version(
 
                 const reply_actual_buffer = try allocator.alignedAlloc(
                     u8,
-                    16,
+                    constants.cache_line_size,
                     constants.message_body_size_max,
                 );
                 defer allocator.free(reply_actual_buffer);
@@ -2951,14 +2951,18 @@ test "StateMachine: batch_elements_max" {
 // the former single-batch format.
 test "StateMachine: input_valid" {
     const allocator = std.testing.allocator;
-    const input = try allocator.alignedAlloc(u8, 16, 2 * constants.message_body_size_max);
+    const input = try allocator.alignedAlloc(
+        u8,
+        constants.cache_line_size,
+        2 * constants.message_body_size_max,
+    );
     defer allocator.free(input);
 
     const build_input = struct {
-        fn build_input(buffer: []align(16) u8, options: struct {
+        fn build_input(buffer: []align(constants.cache_line_size) u8, options: struct {
             operation: TestContext.StateMachine.Operation,
             event_count: u32,
-        }) []align(16) const u8 {
+        }) []align(constants.cache_line_size) const u8 {
             const event_size = options.operation.event_size();
             const payload_size: u32 = options.event_count * event_size;
             if (options.operation.is_multi_batch()) {
@@ -3048,7 +3052,11 @@ test "StateMachine: input_valid" {
 // number of results that can fit in the reply message.
 test "StateMachine: query multi-batch input_valid" {
     const allocator = std.testing.allocator;
-    const input = try allocator.alignedAlloc(u8, 16, 2 * constants.message_body_size_max);
+    const input = try allocator.alignedAlloc(
+        u8,
+        constants.cache_line_size,
+        2 * constants.message_body_size_max,
+    );
     defer allocator.free(input);
 
     var context: TestContext = undefined;
@@ -3059,8 +3067,8 @@ test "StateMachine: query multi-batch input_valid" {
         fn build_input(
             operation: TestContext.StateMachine.Operation,
             limits: []const u32,
-            buffer: []align(16) u8,
-        ) []align(16) const u8 {
+            buffer: []align(constants.cache_line_size) u8,
+        ) []align(constants.cache_line_size) const u8 {
             switch (operation) {
                 .get_account_transfers,
                 .get_account_balances,

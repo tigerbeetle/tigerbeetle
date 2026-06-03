@@ -856,7 +856,7 @@ pub fn ContextType(
             raw_user_data: u128,
             operation_vsr: vsr.Operation,
             timestamp: u64,
-            reply: []const u8,
+            reply: []align(constants.cache_line_size) const u8,
         ) void {
             assert(thread_caller == .io);
 

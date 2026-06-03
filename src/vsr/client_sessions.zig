@@ -106,8 +106,8 @@ pub const ClientSessions = struct {
         var size: u64 = 0;
 
         // Write all headers:
-        assert(@alignOf(vsr.Header) == 16);
-        var new_size = std.mem.alignForward(usize, size, 16);
+        comptime assert(@alignOf(vsr.Header) == 16);
+        var new_size = std.mem.alignForward(usize, size, @alignOf(vsr.Header));
         @memset(target[size..new_size], 0);
         size = new_size;
 
@@ -117,8 +117,8 @@ pub const ClientSessions = struct {
         }
 
         // Write all sessions:
-        assert(@alignOf(u64) == 8);
-        new_size = std.mem.alignForward(usize, size, 8);
+        comptime assert(@alignOf(u64) == 8);
+        new_size = std.mem.alignForward(usize, size, @alignOf(u64));
         @memset(target[size..new_size], 0);
         size = new_size;
 
@@ -146,16 +146,16 @@ pub const ClientSessions = struct {
         assert(source.len > 0);
         assert(source.len <= encode_size);
 
-        assert(@alignOf(vsr.Header) == 16);
-        size = std.mem.alignForward(usize, size, 16);
+        comptime assert(@alignOf(vsr.Header) == 16);
+        size = std.mem.alignForward(usize, size, @alignOf(vsr.Header));
         const headers: []const vsr.Header.Reply = @alignCast(mem.bytesAsSlice(
             vsr.Header.Reply,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
         ));
         size += mem.sliceAsBytes(headers).len;
 
-        assert(@alignOf(u64) == 8);
-        size = std.mem.alignForward(usize, size, 8);
+        comptime assert(@alignOf(u64) == 8);
+        size = std.mem.alignForward(usize, size, @alignOf(u64));
         const sessions = mem.bytesAsSlice(
             u64,
             source[size..][0 .. constants.clients_max * @sizeOf(u64)],
