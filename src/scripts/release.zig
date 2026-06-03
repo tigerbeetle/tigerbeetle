@@ -1265,6 +1265,9 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
 
 fn is_already_published(shell: *Shell, comptime ci: type, info: VersionInfo) !bool {
     const published_tag = try ci.release_published_latest(shell);
+    const published_release = try multiversion.Release.parse(published_tag);
+    const release = try multiversion.Release.parse(info.tag);
+    assert(published_release.value <= release.value);
     if (std.mem.eql(u8, published_tag, info.tag)) {
         log.info("{s} is already published.", .{info.tag});
         return true;
