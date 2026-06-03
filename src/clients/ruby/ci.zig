@@ -53,7 +53,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {

@@ -109,7 +109,15 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
+}) !void {
+    _ = shell;
+    _ = gpa;
+    _ = options;
+}
+
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
@@ -180,14 +188,6 @@ fn nuget_install(shell: *Shell, options: struct {
         if (package_missing) return .{ .retry = err };
         return err;
     }
-}
-
-pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    release: []const u8,
-}) !void {
-    _ = shell;
-    _ = gpa;
-    _ = options;
 }
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
