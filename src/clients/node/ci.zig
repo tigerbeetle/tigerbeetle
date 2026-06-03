@@ -118,7 +118,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         "zig-out/dist/node/tigerbeetle-node-{s}.tgz",
         .{options.release},
     );
-    const local_tgz = try shell.project_root.realpathAlloc(
+    const local_tgz = try shell.cwd.realpathAlloc(
         shell.arena.allocator(),
         local_path_relative,
     );
@@ -139,11 +139,11 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         .{ .published = published_dir, .local = local_dir },
     );
 
-    const package_json = try shell.fmt("{s}/package/package.json", .{published_dir});
-    try validate_npm_metadata(shell, gpa, package_json);
+    const package_json_path = try shell.fmt("{s}/package/package.json", .{published_dir});
+    try validate_npm_metadata(shell, gpa, package_json_path);
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {

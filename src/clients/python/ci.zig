@@ -97,25 +97,28 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
 
     assert(pypi_package.urls.len == 1);
 
-    const whl_size_max = 8 * stdx.MiB;
-    const whl_filename = try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{options.release});
-    assert(std.mem.eql(u8, pypi_package.urls[0].filename, whl_filename));
-    const whl_url = pypi_package.urls[0].url;
+    const wheel_size_max = 8 * stdx.MiB;
+    const wheel_filename = try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{options.release});
+    assert(std.mem.eql(u8, pypi_package.urls[0].filename, wheel_filename));
+    const wheel_url = pypi_package.urls[0].url;
 
-    const whl_published = try shell.http_get(whl_url, .{ .response_body_size_max = whl_size_max });
-    const whl_local = try shell.project_root.readFileAlloc(
-        gpa,
-        try shell.fmt("zig-out/dist/python/{s}", .{whl_filename}),
-        whl_size_max,
+    const wheel_published = try shell.http_get(
+        wheel_url,
+        .{ .response_body_size_max = wheel_size_max },
     );
-    defer gpa.free(whl_local);
+    const wheel_local = try shell.cwd.readFileAlloc(
+        gpa,
+        try shell.fmt("zig-out/dist/python/{s}", .{wheel_filename}),
+        wheel_size_max,
+    );
+    defer gpa.free(wheel_local);
 
-    if (!std.mem.eql(u8, whl_published, whl_local)) {
+    if (!std.mem.eql(u8, wheel_published, wheel_local)) {
         std.debug.panic("tigerbeetle python package doesn't match local build", .{});
     }
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {

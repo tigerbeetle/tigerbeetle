@@ -1032,12 +1032,14 @@ fn http_request(
 
     // If the response is compressed, content_length is the compressed size, not the decoded size.
     const compressed = request.response.transfer_compression != .identity;
-    var response_body_buffer_size: usize = options.response_body_size_max;
-    if (!compressed) {
-        if (request.response.content_length) |response_content_length| {
-            response_body_buffer_size = response_content_length;
+    const response_body_buffer_size: usize = blk: {
+        if (!compressed) {
+            if (request.response.content_length) |response_content_length| {
+                break :blk response_content_length;
+            }
         }
-    }
+        break :blk options.response_body_size_max;
+    };
 
     if (response_body_buffer_size > options.response_body_size_max) {
         return error.ResponseTooLarge;
