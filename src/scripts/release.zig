@@ -1129,6 +1129,8 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
 
     assert(try shell.dir_exists("zig-out/dist/tigerbeetle"));
 
+    if (try is_already_published(shell, ci_docker, info)) return;
+
     try shell.exec(
         \\docker login --username tigerbeetle --password {password} ghcr.io
     , .{
@@ -1204,6 +1206,19 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         assert(std.mem.indexOf(u8, version_verbose, info.release_triple) != null);
     }
 }
+
+const ci_docker = struct {
+    fn release_published_latest(shell: *Shell) ![]const u8 {
+        // output: "TigerBeetle version X.Y.Z+git_sha".
+        const output = try shell.exec_stdout(
+            \\docker run --rm --platform linux/amd64 ghcr.io/tigerbeetle/tigerbeetle:latest version
+        , .{});
+        const prefix = "TigerBeetle version ";
+        const version_start = std.mem.indexOf(u8, output, prefix).? + prefix.len;
+        const version_end = std.mem.indexOf(u8, output, "+").?;
+        return output[version_start..version_end];
+    }
+};
 
 fn publish_docs(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish docs");
