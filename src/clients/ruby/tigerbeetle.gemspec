@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
     "sig/**/*.rbs",
     "LICENSE",
     "README.md",
+    "docs/migration.md",
   ]
 
   spec.required_ruby_version = ">= 3.3"

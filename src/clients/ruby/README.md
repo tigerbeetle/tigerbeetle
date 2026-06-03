@@ -3,11 +3,16 @@
 
 The TigerBeetle client for Ruby.
 
+>[!IMPORTANT]
+>This gem changed ownership from [Anthony D](https://github.com/antstorm)
+to TigerBeetle. If you're upgrading from a 0.0.x version, please consult
+the [migration guide](./docs/migration.md) for the necessary code changes.
+
 ## Prerequisites
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Ruby >= `3.0`
+* Ruby >= `3.3`
 
 ## Setup
 
@@ -321,6 +326,10 @@ transfer_results.each_with_index do |result, index|
 end
 ```
 
+To handle errors you can compare the result status returned
+from `client.create_transfers` with constants in the
+`TigerBeetle::CreateTransferStatus` module.
+
 ## Batching
 
 TigerBeetle performance is maximized when you batch
@@ -359,6 +368,14 @@ multiple jobs from the queue rather than just one.
 The transfer `flags` value is a bitfield. See details for these flags in
 the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfer#flags).
+
+To toggle behavior for a transfer, combine constants from the
+`TigerBeetle::TransferFlags` module with bitwise-or:
+
+* `TransferFlags::LINKED`
+* `TransferFlags::PENDING`
+* `TransferFlags::POST_PENDING_TRANSFER`
+* `TransferFlags::VOID_PENDING_TRANSFER`
 
 For example, to link `transfer0` and `transfer1`:
 
