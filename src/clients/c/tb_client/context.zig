@@ -307,7 +307,6 @@ pub fn ContextType(
                 error.AddressHasTrailingComma,
                 error.AddressInvalid,
                 error.PortInvalid,
-                error.PortOverflow,
                 => error.AddressInvalid,
             };
             assert(addresses_parsed.len > 0);

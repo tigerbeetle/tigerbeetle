@@ -1442,7 +1442,7 @@ fn format_tree_id(tree_id: u16) []const u8 {
 }
 
 fn parse_tree_id(tree_label: []const u8) ?u16 {
-    const tree_label_integer = std.fmt.parseInt(u16, tree_label, 10) catch null;
+    const tree_label_integer = stdx.parse_int(u16, tree_label, .{}) catch null;
     inline for (StateMachine.Forest.tree_infos) |tree_info| {
         if (std.mem.eql(u8, tree_info.tree_name, tree_label)) {
             return tree_info.tree_id;

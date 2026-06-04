@@ -443,7 +443,7 @@ fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
 
     // Support only unsigned integers, as a conservative choice.
     comptime assert(@typeInfo(T).int.signedness == .unsigned);
-    return std.fmt.parseUnsigned(T, value, 10) catch |err| {
+    return stdx.parse_int(T, value, .{ .allow_separators = true }) catch |err| {
         switch (err) {
             error.Overflow => fatal(
                 "{s}: value exceeds {d}-bit {s} integer: '{s}'",
@@ -451,6 +451,10 @@ fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
             ),
             error.InvalidCharacter => fatal(
                 "{s}: expected an integer value, but found '{s}' (invalid digit)",
+                .{ flag, value },
+            ),
+            error.LeadingZero => fatal(
+                "{s}: leading zero disallowed: '{s}'",
                 .{ flag, value },
             ),
         }
@@ -1203,6 +1207,13 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: --int: expected an integer value, but found '-92' (invalid digit)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=092" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: leading zero disallowed: '092'
         \\
     ));
 

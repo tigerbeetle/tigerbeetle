@@ -898,6 +898,54 @@ test fmt_int_size_bin_exact {
     });
 }
 
+// Dodge tidy:
+const std_parse_int = @field(std.fmt, "parse" ++ "Int");
+const std_parse_unsigned = @field(std.fmt, "parse" ++ "Unsigned");
+
+/// Strict by default integer parsing.
+pub fn parse_int(T: type, text: []const u8, comptime options: struct {
+    base: u8 = 10,
+    allow_leading_zero: bool = false,
+    allow_separators: bool = false,
+}) !T {
+    comptime assert((options.base == 10) or (options.base == 16));
+    if (!options.allow_leading_zero) {
+        if (text.len > 1 and text[0] == '0') return error.LeadingZero;
+    }
+    for (text) |c| switch (c) {
+        '0'...'9', 'a'...'f', 'A'...'F' => {},
+        '_' => if (!options.allow_separators) return error.InvalidCharacter,
+        '-' => if (@typeInfo(T).int.signedness == .unsigned) return error.InvalidCharacter,
+        else => return error.InvalidCharacter,
+    };
+    return std_parse_int(T, text, options.base);
+}
+
+test parse_int {
+    const T = struct {
+        fn check(text: []const u8) !void {
+            _ = try std_parse_int(u8, text, 10);
+            _ = parse_int(u8, text, .{}) catch return;
+            return error.TestExpectedError;
+        }
+    };
+
+    // Examples that parse with std, but should be rejected by default.
+    try T.check("0_0");
+    try T.check("000");
+    try T.check("-0");
+}
+
+// Allows `0b`, `0o`, `0x` prefixes to select the base, matches the syntax of Zig literals.
+pub fn parse_int_with_base(T: type, text: []const u8) !T {
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
+    return std_parse_unsigned(T, text, 0);
+}
+
+test parse_int_with_base {
+    try std.testing.expectEqual(0xBEE71E, try parse_int_with_base(u32, "0xBE_E71E"));
+}
+
 /// Like std.fmt.bufPrint, but checks, at compile time, that the buffer is sufficiently large.
 pub fn array_print(
     comptime n: usize,
@@ -983,16 +1031,21 @@ pub const ByteSize = struct {
         maybe(string_amount.len == 0);
         maybe(string_unit.len == 0);
 
-        const amount = std.fmt.parseUnsigned(u64, string_amount, 10) catch |err| switch (err) {
-            error.Overflow => {
-                static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
-                return error.InvalidFlagValue;
-            },
-            error.InvalidCharacter => {
-                static_diagnostic.* = "expected a size, but found:";
-                return error.InvalidFlagValue;
-            },
-        };
+        const amount = parse_int(u64, string_amount, .{ .allow_separators = true }) catch |err|
+            switch (err) {
+                error.Overflow => {
+                    static_diagnostic.* = "value exceeds 64-bit unsigned integer:";
+                    return error.InvalidFlagValue;
+                },
+                error.InvalidCharacter => {
+                    static_diagnostic.* = "expected a size, but found:";
+                    return error.InvalidFlagValue;
+                },
+                error.LeadingZero => {
+                    static_diagnostic.* = "leading zero disallowed:";
+                    return error.InvalidFlagValue;
+                },
+            };
 
         const unit = if (string_unit.len == 0)
             .bytes
@@ -1055,6 +1108,7 @@ test "ByteSize.parse_flag_value" {
             .{ "10bananas", "invalid unit in size, needed KiB, MiB, GiB or TiB" },
             .{ "10GB", "invalid unit in size" },
             .{ "18446744073709551GiB", "size in bytes exceeds 64-bit unsigned integer" },
+            .{ "0009GiB", "leading zero disallowed" },
         },
     });
 }

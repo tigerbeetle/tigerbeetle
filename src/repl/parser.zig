@@ -1,3 +1,4 @@
+const stdx = @import("stdx");
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -248,13 +249,11 @@ pub const Parser = struct {
         }
     }
 
+    // Allows 0b/0o/0x prefixes for UUIDs.
+    // Allows -N as a shorthand for INT_MAX - N.
     fn parse_int(comptime T: type, input: []const u8) !T {
         const info = @typeInfo(T);
         comptime assert(info == .int);
-
-        // When base is zero the string prefix is examined to detect the true base:
-        // "0b", "0o" or "0x", otherwise base=10 is assumed.
-        const base_unknown = 0;
 
         assert(input.len > 0);
         const input_negative = input[0] == '-';
@@ -263,10 +262,10 @@ pub const Parser = struct {
             // Negative input means `maxInt - input`.
             // Useful for representing sentinels such as `AMOUNT_MAX`, as `-0`.
             const max = std.math.maxInt(T);
-            return max - try std.fmt.parseUnsigned(T, input[1..], base_unknown);
+            return max - try stdx.parse_int_with_base(T, input[1..]);
         }
 
-        return try std.fmt.parseUnsigned(T, input, base_unknown);
+        return try stdx.parse_int_with_base(T, input);
     }
 
     fn parse_arguments(

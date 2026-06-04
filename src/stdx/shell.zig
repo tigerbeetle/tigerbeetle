@@ -702,7 +702,7 @@ pub fn git_commit_timestamp(shell: *Shell, sha: []const u8) !stdx.InstantUnix {
 
     const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
     return stdx.InstantUnix.from_timestamp_s(
-        try std.fmt.parseInt(u64, timestamp_s, 10),
+        try stdx.parse_int(u64, timestamp_s, .{}),
     );
 }
 
@@ -1053,10 +1053,10 @@ fn http_request(
 
 /// Converts an ISO8601 timestamp into seconds from the epoch by shelling out to the `date` util.
 pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8) !u64 {
-    return try std.fmt.parseInt(u64, try shell.exec_stdout(
+    return try stdx.parse_int(u64, try shell.exec_stdout(
         "date -d {datetime_iso8601} +%s",
         .{ .datetime_iso8601 = datetime_iso8601 },
-    ), 10);
+    ), .{});
 }
 
 pub fn unzip_executable(
