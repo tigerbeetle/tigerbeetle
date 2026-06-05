@@ -184,33 +184,29 @@ pub const Parser = struct {
         key_to_validate: []const u8,
         value_to_validate: []const u8,
     ) !void {
-        inline for (@typeInfo(ObjectSyntaxTree).@"union".fields) |object_syntax_tree_field| {
-            if (std.mem.eql(u8, @tagName(out.*), object_syntax_tree_field.name)) {
-                const active_value = @field(out, object_syntax_tree_field.name);
-                const ActiveValue = @TypeOf(active_value);
+        switch (out.*) {
+            inline else => |*object, object_tag| {
+                const Object = std.meta.TagPayload(ObjectSyntaxTree, object_tag);
 
-                inline for (@typeInfo(ActiveValue).@"struct".fields) |active_value_field| {
-                    if (std.mem.eql(u8, active_value_field.name, key_to_validate)) {
+                inline for (@typeInfo(Object).@"struct".fields) |object_field| {
+                    if (std.mem.eql(u8, object_field.name, key_to_validate)) {
                         // Handle everything but flags, and skip reserved.
-                        if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
-                            !std.mem.eql(u8, active_value_field.name, "reserved")))
+                        if (comptime (!std.mem.eql(u8, object_field.name, "flags") and
+                            !std.mem.eql(u8, object_field.name, "reserved")))
                         {
-                            @field(
-                                @field(out.*, object_syntax_tree_field.name),
-                                active_value_field.name,
-                            ) = try parse_int(
-                                active_value_field.type,
+                            @field(object, object_field.name) = try parse_int(
+                                object_field.type,
                                 value_to_validate,
                             );
                         }
 
                         // Handle flags, specific to Account and Transfer fields.
-                        if (comptime std.mem.eql(u8, active_value_field.name, "flags") and
-                            @hasField(ActiveValue, "flags"))
+                        if (comptime std.mem.eql(u8, object_field.name, "flags") and
+                            @hasField(Object, "flags"))
                         {
                             var flags_to_validate = std.mem.splitScalar(u8, value_to_validate, '|');
                             var validated_flags =
-                                std.mem.zeroInit(active_value_field.type, .{});
+                                std.mem.zeroInit(object_field.type, .{});
                             while (flags_to_validate.next()) |flag_to_validate| {
                                 const flag_to_validate_trimmed = std.mem.trim(
                                     u8,
@@ -218,7 +214,7 @@ pub const Parser = struct {
                                     std.ascii.whitespace[0..],
                                 );
                                 inline for (@typeInfo(
-                                    active_value_field.type,
+                                    object_field.type,
                                 ).@"struct".fields) |known_flag_field| {
                                     if (std.mem.eql(
                                         u8,
@@ -235,14 +231,11 @@ pub const Parser = struct {
                                     }
                                 }
                             }
-                            @field(
-                                @field(out.*, object_syntax_tree_field.name),
-                                "flags",
-                            ) = validated_flags;
+                            object.flags = validated_flags;
                         }
                     }
                 }
-            }
+            },
         }
     }
 
@@ -277,7 +270,7 @@ pub const Parser = struct {
             .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
             .create_transfers => .{ .transfer = std.mem.zeroInit(tb.Transfer, .{}) },
             .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
-            inline .get_account_transfers,
+            .get_account_transfers,
             .get_account_balances,
             => |operation_comptime| .{ .account_filter = tb.AccountFilter{
                 .account_id = 0,
@@ -296,7 +289,7 @@ pub const Parser = struct {
                     .reversed = false,
                 },
             } },
-            inline .query_accounts,
+            .query_accounts,
             .query_transfers,
             => |operation_comptime| .{ .query_filter = tb.QueryFilter{
                 .user_data_128 = 0,
