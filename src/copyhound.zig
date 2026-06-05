@@ -165,7 +165,7 @@ fn extract_memcpy_size(memcpy_call: []const u8) ?u32 {
     // Runtime-known memcpy size, assume that's OK.
     if (std.mem.startsWith(u8, size_value, "%")) return 0;
 
-    return std.fmt.parseInt(u32, size_value, 10) catch null;
+    return stdx.parse_int(u32, size_value, .{}) catch null;
 }
 
 test "extract_memcpy_size" {

@@ -72,8 +72,8 @@ fn verify_address_is_huge_page(ptr: [*]const u8) !bool {
 fn parse_mapping_range(line: []const u8) ?struct { min: u64, max: u64 } {
     const addr_range, _ = stdx.cut(line, " ") orelse return null;
     const addr_hex_min, const addr_hex_max = stdx.cut(addr_range, "-") orelse return null;
-    const addr_min = std.fmt.parseUnsigned(u64, addr_hex_min, 16) catch return null;
-    const addr_max = std.fmt.parseUnsigned(u64, addr_hex_max, 16) catch return null;
+    const addr_min = stdx.parse_int(u64, addr_hex_min, .{ .base = 16 }) catch return null;
+    const addr_max = stdx.parse_int(u64, addr_hex_max, .{ .base = 16 }) catch return null;
     return .{ .min = addr_min, .max = addr_max };
 }
 

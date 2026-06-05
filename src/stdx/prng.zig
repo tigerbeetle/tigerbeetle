@@ -62,11 +62,17 @@ pub const Ratio = struct {
             return error.InvalidFlagValue;
         };
 
-        const numerator = std.fmt.parseInt(u64, string_numerator, 10) catch {
+        const numerator = stdx.parse_int(u64, string_numerator, .{
+            .base = 10,
+            .allow_separators = true,
+        }) catch {
             static_diagnostic.* = "invalid numerator:";
             return error.InvalidFlagValue;
         };
-        const denominator = std.fmt.parseInt(u64, string_denominator, 10) catch {
+        const denominator = stdx.parse_int(u64, string_denominator, .{
+            .base = 10,
+            .allow_separators = true,
+        }) catch {
             static_diagnostic.* = "invalid denominator:";
             return error.InvalidFlagValue;
         };

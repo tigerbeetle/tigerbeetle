@@ -1,3 +1,4 @@
+const stdx = @import("stdx");
 const std = @import("std");
 const assert = std.debug.assert;
 const posix = std.posix;
@@ -254,7 +255,8 @@ pub const Terminal = struct {
                     else => return err,
                 }
             };
-            const row = std.fmt.parseInt(usize, buffer_in.getWritten(), 10) catch continue;
+            const row = stdx.parse_int(usize, buffer_in.getWritten(), .{}) catch
+                continue;
 
             buffer_in.reset();
             stdin.streamUntilDelimiter(
@@ -267,7 +269,8 @@ pub const Terminal = struct {
                     else => return err,
                 }
             };
-            const column = std.fmt.parseInt(usize, buffer_in.getWritten(), 10) catch continue;
+            const column = stdx.parse_int(usize, buffer_in.getWritten(), .{}) catch
+                continue;
 
             return .{
                 .row = row,

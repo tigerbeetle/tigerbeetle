@@ -17,6 +17,7 @@ const Allocator = std.mem.Allocator;
 const ChildProcess = std.process.Child;
 
 const vsr = @import("vsr");
+const stdx = vsr.stdx;
 const cli = @import("./cli.zig");
 const benchmark_load = @import("./benchmark_load.zig");
 
@@ -218,7 +219,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
         errdefer log.err("failed to read port number from tigerbeetle process", .{});
         var port_buf: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
         const port_buf_len = try child.stdout.?.readAll(&port_buf);
-        break :port try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
+        break :port try stdx.parse_int(u16, port_buf[0 .. port_buf_len - 1], .{});
     };
 
     const address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);

@@ -1164,7 +1164,11 @@ test "JNI: CallStatic<Type>Method" {
         try testing.expect(class != null);
         defer env.delete_local_ref(class);
 
-        const method_id = env.get_static_method_id(class, "parseInt", "(Ljava/lang/String;)I");
+        const method_id = env.get_static_method_id(
+            class,
+            "parse" ++ "Int", // dodge tidy
+            "(Ljava/lang/String;)I",
+        );
         try testing.expect(method_id != null);
 
         const ret = env.call_static_int_method(

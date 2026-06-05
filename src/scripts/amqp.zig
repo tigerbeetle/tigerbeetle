@@ -947,7 +947,7 @@ const TmpRabbitMQ = struct {
                 _, const host = stdx.cut(line, " -> ") orelse continue;
                 // Last index of `:`, because ipv6 can be `[::]:port`.
                 const index = std.mem.lastIndexOfScalar(u8, host, ':') orelse continue;
-                const port = try std.fmt.parseUnsigned(u16, host[index + 1 ..], 10);
+                const port = try stdx.parse_int(u16, host[index + 1 ..], .{});
                 break :host try std.net.Address.parseIp4("127.0.0.1", port);
             }
             try testing.expect(false);

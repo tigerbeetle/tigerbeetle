@@ -1398,7 +1398,6 @@ fn parse_addresses(
         error.AddressHasMoreThanOneColon => {
             vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
         },
-        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
         error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
         error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
     };
@@ -1422,7 +1421,6 @@ fn parse_address_and_port(
         error.AddressHasMoreThanOneColon => {
             vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
         },
-        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
         error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
         error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
     };

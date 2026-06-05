@@ -319,6 +319,8 @@ fn tidy_banned(file: SourceFile, errors: *Errors) void {
         .{ "intRangeLessThan", "stdx.PRNG" },
         .{ "intRangeAtMost", "stdx.PRNG" },
         .{ "intRangeAtMostBiased", "stdx.PRNG" },
+        .{ "parseInt", "stdx.parse_int" },
+        .{ "parseUnsigned", "stdx.parse_int" },
 
         // Library footguns:
         .{ "unexpectedErrno", "stdx.unexpected_errno" },
@@ -1313,7 +1315,7 @@ test "tidy no large blobs" {
         const blob = stdx.cut_prefix(line, "blob ") orelse continue;
 
         const size_string, const path = stdx.cut(blob, " ").?;
-        const size = try std.fmt.parseInt(u64, size_string, 10);
+        const size = try stdx.parse_int(u64, size_string, .{});
 
         if (std.mem.eql(u8, path, "src/vsr/replica.zig")) continue; // :-)
         if (std.mem.eql(u8, path, "src/state_machine.zig")) continue; // :-|
