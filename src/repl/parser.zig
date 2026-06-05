@@ -1138,7 +1138,7 @@ test "parser.zig: Parser two-phase filter successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
