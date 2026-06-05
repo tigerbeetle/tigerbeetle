@@ -3,6 +3,60 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.6
+
+Released: 2026-06-05
+
+### Safety And Performance
+
+- [#3778](https://github.com/tigerbeetle/tigerbeetle/pull/3778),
+  [#3762](https://github.com/tigerbeetle/tigerbeetle/pull/3762)
+
+  Fix resource leak & potential overflow in the .NET, Java, and Go clients.
+
+  Thank you @jf-li00 for spotting these!
+
+- [#3673](https://github.com/tigerbeetle/tigerbeetle/pull/3673),
+  [#3770](https://github.com/tigerbeetle/tigerbeetle/pull/3770)
+
+  Substantially reduce tail latency by performing compaction merge incrementally
+  as opposed to a single big merge at the end of the bar.
+
+- [#3748](https://github.com/tigerbeetle/tigerbeetle/pull/3748)
+
+  Make space for replica connections on the `accept` path, evicting clients or
+  random peers that may be hogging TCP connections.
+
+- [#3769](https://github.com/tigerbeetle/tigerbeetle/pull/3769)
+
+  Various improvements to the ping-pong protocol between the client and cluster.
+
+  Specifically, clients now proactively send a ping while registering a session
+  with the cluster (as opposed to waiting 30 seconds), and the cluster may now
+  respond with an eviction message when a ping is received (as opposed to
+  waiting for the next request from an evicted client).
+
+- [#3735](https://github.com/tigerbeetle/tigerbeetle/pull/3735)
+
+  Improve fuzzing around LSM tree deletions on the lookup path, which now checks
+  for tombstones.
+
+- [#3774](https://github.com/tigerbeetle/tigerbeetle/pull/3774)
+
+  Guarantee that the StateMachine works on cache-line-aligned buffers; callers
+  can take advantage of this alignment to efficiently reinterpret the bytes.
+
+### Internals
+
+- [#3780](https://github.com/tigerbeetle/tigerbeetle/pull/3780)
+
+  Ban the usage of `std.fmt.parseInt`, which is useful for interactive use-cases
+  like CLI/REPL, but a bit too permissive for protocols.
+
+### TigerTracks 🎧
+
+- [Everything In Its Right Place](https://open.spotify.com/track/2kRFrWaLWiKq48YYVdGcm8)
+
 ## TigerBeetle 0.17.5
 
 Released: 2026-05-29
