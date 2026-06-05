@@ -369,21 +369,23 @@ pub const TableValue = struct {
     pub inline fn block_values_bytes(
         schema: *const TableValue,
         value_block: BlockPtr,
-    ) []align(16) u8 {
+    ) []align(constants.cache_line_size) u8 {
+        assert(schema.values_offset % constants.cache_line_size == 0);
         return @alignCast(value_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_bytes_const(
         schema: *const TableValue,
         value_block: BlockPtrConst,
-    ) []align(16) const u8 {
+    ) []align(constants.cache_line_size) const u8 {
+        assert(schema.values_offset % constants.cache_line_size == 0);
         return @alignCast(value_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_used_bytes(
         schema: *const TableValue,
         value_block: BlockPtrConst,
-    ) []align(16) const u8 {
+    ) []align(constants.cache_line_size) const u8 {
         const header = header_from_block(value_block);
         assert(header.block_type == .value);
 
@@ -461,7 +463,12 @@ pub const TrailerNode = struct {
         }
     }
 
-    pub fn body(block: BlockPtrConst) []align(@sizeOf(vsr.Header)) const u8 {
+    /// Returns the body up to the size specified in the header.
+    /// The returned slice guarantees elements aligned to the CPU cache
+    /// line size, but its length depends on the specific payload.
+    /// Callers can take advantage of this alignment to efficiently
+    /// reinterpret the bytes.
+    pub fn body(block: BlockPtrConst) []align(constants.cache_line_size) const u8 {
         const header = header_from_block(block);
         return block[@sizeOf(vsr.Header)..header.size];
     }

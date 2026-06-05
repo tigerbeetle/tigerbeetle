@@ -78,6 +78,8 @@ public abstract class Batch {
         assertTrue(ELEMENT_SIZE > 0, "Element size cannot be zero or negative");
 
         if (capacity < 0) throw new IllegalArgumentException("Buffer capacity cannot be negative");
+        if ((long)capacity * (long)ELEMENT_SIZE > Integer.MAX_VALUE)
+            throw new IllegalArgumentException("Buffer capacity overflows");
 
         this.ELEMENT_SIZE = ELEMENT_SIZE;
 

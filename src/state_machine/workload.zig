@@ -346,7 +346,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         pub fn build_request(
             self: *Workload,
             client_index: usize,
-            body_buffer: []align(@alignOf(vsr.Header)) u8,
+            body_buffer: []align(constants.cache_line_size) u8,
         ) struct {
             operation: Operation,
             size: usize,
@@ -548,8 +548,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             client_index: usize,
             operation: Operation,
             timestamp: u64,
-            request_body: []const u8,
-            reply_body: []const u8,
+            request_body: []align(constants.cache_line_size) const u8,
+            reply_body: []align(constants.cache_line_size) const u8,
         ) void {
             assert(timestamp != 0);
             assert(request_body.len <= constants.message_body_size_max);

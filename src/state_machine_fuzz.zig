@@ -43,14 +43,14 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     const request_buffer = try allocator.alignedAlloc(
         u8,
-        16,
+        constants.cache_line_size,
         vsr.constants.message_body_size_max,
     );
     defer allocator.free(request_buffer);
 
     const reply_buffer = try allocator.alignedAlloc(
         u8,
-        16,
+        constants.cache_line_size,
         vsr.constants.message_body_size_max,
     );
     defer allocator.free(reply_buffer);

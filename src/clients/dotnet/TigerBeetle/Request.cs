@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,8 +31,9 @@ internal abstract class NativeRequest
         {
             nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
         }
-        catch (ObjectDisposedException)
+        catch
         {
+            requestHandle.Free();
             packetHandle.Value.Free();
             throw;
         }
@@ -76,7 +76,7 @@ internal abstract class Request<TResult, TBody> : NativeRequest
 
     public unsafe void Submit(NativeClient nativeClient, void* body, int bodyCount)
     {
-        this.Submit(nativeClient, this.operation, body, bodyCount * sizeof(TBody));
+        this.Submit(nativeClient, this.operation, body, checked(bodyCount * sizeof(TBody)));
     }
 
     public override void Complete(PacketStatus status, byte operation, ReadOnlySpan<byte> result)

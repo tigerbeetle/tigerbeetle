@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Buffers;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -125,6 +126,24 @@ public class IntegrationTests
         // No using here, we want to test the finalizer
         var client = new Client(1, new string[] { "3000" });
         Assert.IsTrue(client.ClusterID == 1);
+    }
+
+    [TestMethod]
+    [ExpectedException(typeof(OverflowException))]
+    public void CreateAccountBatchSizeOverflow()
+    {
+        var batch = new DummyMemory<Account>(int.MaxValue);
+        _ = client.CreateAccounts(batch.Memory.Span);
+        Assert.Fail();
+    }
+
+    [TestMethod]
+    [ExpectedException(typeof(OverflowException))]
+    public async Task CreateAccountBatchSizeOverflowAsync()
+    {
+        var batch = new DummyMemory<Account>(int.MaxValue);
+        _ = await client.CreateAccountsAsync(batch.Memory);
+        Assert.Fail();
     }
 
     [TestMethod]
@@ -2362,5 +2381,45 @@ internal class TBServer : IDisposable
         process.WaitForExit();
         process.Dispose();
         File.Delete($"./{dataFile}");
+    }
+}
+
+/// <summary>
+/// Dummy allocator capable of creating memory regions
+/// and spans for testing purposes.
+/// The contents cannot be dereferenced.
+/// </summary>
+sealed class DummyMemory<T> : MemoryManager<T>
+    where T : unmanaged
+{
+    private readonly int length;
+
+    public DummyMemory(int length)
+    {
+        this.length = length;
+    }
+
+    public override Memory<T> Memory => base.CreateMemory(length);
+
+    public override Span<T> GetSpan()
+    {
+        unsafe
+        {
+            return new Span<T>(null, length);
+        }
+    }
+
+    public override MemoryHandle Pin(int elementIndex = 0)
+    {
+        return new MemoryHandle();
+    }
+
+    public override void Unpin()
+    {
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        _ = disposing;
     }
 }

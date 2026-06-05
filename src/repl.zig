@@ -47,7 +47,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         /// Saved input string while navigating through history.
         buffer_outside_history: ReplBufferBoundedArray,
 
-        arguments: std.ArrayListUnmanaged(u8),
+        arguments: Parser.ArgumentsList,
         message_pool: *MessagePool,
         io: *IO,
 
@@ -544,7 +544,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn do_repl(
             repl: *Repl,
-            arguments: *std.ArrayListUnmanaged(u8),
+            arguments: *Parser.ArgumentsList,
         ) !void {
             try repl.terminal.print(prompt, .{});
             const input = repl.read_until_newline_or_eof() catch |err| {
@@ -657,7 +657,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             var static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = static_allocator.allocator();
 
-            var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+            var arguments: Parser.ArgumentsList = try .initCapacity(
                 allocator,
                 constants.message_body_size_max,
             );
@@ -819,7 +819,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn send(
             repl: *Repl,
             operation: tb.Operation,
-            arguments: *std.ArrayListUnmanaged(u8),
+            arguments: *Parser.ArgumentsList,
         ) !void {
             const operation_type = switch (operation) {
                 .create_accounts, .create_transfers => "create",
@@ -849,7 +849,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             try repl.debug("Sending command: {}.\n", .{operation});
 
             const payload_size: u32 = @intCast(arguments.items.len);
-            const buffer: []u8 = buffer: {
+            const buffer: []align(constants.cache_line_size) u8 = buffer: {
                 arguments.expandToCapacity();
                 assert(arguments.items.len == constants.message_body_size_max);
                 break :buffer arguments.items;
@@ -1053,7 +1053,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             user_data: u128,
             operation_vsr: vsr.Operation,
             timestamp: u64,
-            result: []u8,
+            result: []align(constants.cache_line_size) const u8,
         ) void {
             const operation = operation_vsr.cast(tb.Operation);
             const reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(result, .{

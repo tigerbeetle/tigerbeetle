@@ -15,6 +15,8 @@ pub const Parser = struct {
     offset: usize = 0,
     terminal: *const Terminal,
 
+    pub const ArgumentsList = std.ArrayListAlignedUnmanaged(u8, constants.cache_line_size);
+
     pub const Error = error{
         IdentifierBad,
         OperationBad,
@@ -69,7 +71,7 @@ pub const Parser = struct {
 
     pub const Statement = struct {
         operation: Operation,
-        arguments: *std.ArrayListUnmanaged(u8),
+        arguments: *ArgumentsList,
     };
 
     fn print_current_position(parser: *const Parser) !void {
@@ -305,7 +307,7 @@ pub const Parser = struct {
     fn parse_arguments(
         parser: *Parser,
         operation: Operation,
-        arguments: *std.ArrayListUnmanaged(u8),
+        arguments: *ArgumentsList,
     ) !void {
         const default: ObjectSyntaxTree = switch (operation) {
             .help, .none => return,
@@ -474,7 +476,7 @@ pub const Parser = struct {
     pub fn parse_statement(
         input: []const u8,
         terminal: *const Terminal,
-        arguments: *std.ArrayListUnmanaged(u8),
+        arguments: *ArgumentsList,
     ) (error{OutOfMemory} || std.fs.File.WriteError || Error)!Statement {
         var parser = Parser{ .input = input, .terminal = terminal };
         parser.eat_whitespace();
@@ -733,7 +735,7 @@ test "parser.zig: Parser single transfer successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -802,7 +804,7 @@ test "parser.zig: Parser multiple transfers successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -901,7 +903,7 @@ test "parser.zig: Parser single account successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -979,7 +981,7 @@ test "parser.zig: Parser account filter successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -1053,7 +1055,7 @@ test "parser.zig: Parser query filter successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -1201,7 +1203,7 @@ test "parser.zig: Parser multiple accounts successfully" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -1340,7 +1342,7 @@ test "parser.zig: Parser odd but correct formatting" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -1426,7 +1428,7 @@ test "parser.zig: Handle parsing errors" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );
@@ -1470,7 +1472,7 @@ test "parser.zig: Parser fails for operations not supporting multiple objects" {
 
         const allocator = arena.allocator();
 
-        var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        var arguments: Parser.ArgumentsList = try .initCapacity(
             allocator,
             constants.message_size_max,
         );

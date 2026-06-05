@@ -10,7 +10,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.math.BigInteger;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 /**
@@ -50,6 +49,11 @@ public class BatchTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithNegativeCapacity() {
         new AccountBatch(-1);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testConstructorOverflows() {
+        new AccountBatch(Integer.MAX_VALUE);
     }
 
     @Test(expected = NullPointerException.class)

@@ -144,7 +144,7 @@ pub const MessagePool = struct {
             return message;
         }
 
-        pub fn body_used(message: *const Message) []align(@sizeOf(Header)) u8 {
+        pub fn body_used(message: *const Message) []align(constants.cache_line_size) u8 {
             return message.buffer[@sizeOf(Header)..message.header.size];
         }
 
@@ -341,7 +341,12 @@ fn CommandMessageType(comptime command: vsr.Command) type {
             return @ptrCast(message.base().ref());
         }
 
-        pub fn body_used(message: *const CommandMessage) []align(@sizeOf(Header)) u8 {
+        /// Returns the body up to the size specified in the header.
+        /// The returned slice guarantees elements aligned to the CPU cache
+        /// line size, but its length depends on the specific payload.
+        /// Callers can take advantage of this alignment to efficiently
+        /// reinterpret the bytes.
+        pub fn body_used(message: *const CommandMessage) []align(constants.cache_line_size) u8 {
             return message.base_const().body_used();
         }
     };
