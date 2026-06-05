@@ -35,26 +35,26 @@ const Pending = error{Pending};
 /// timestamps produced by the scan can be used for lookups in any of those
 /// Grooves.
 pub fn ScanBuilderConfigType(comptime Forest: type) type {
-    const FieldEnum = std.meta.FieldEnum(Forest.Grooves);
+    const GrooveName = std.meta.FieldEnum(Forest.Grooves);
     // TODO(zig): Special case for Forests with a single groove,
     // as the FieldEnum type is zero-sized.
     // Compiler error "value stored in comptime field does not match
     // the default value of the field".
-    if (@sizeOf(FieldEnum) == 0) return struct {
-        comptime object: FieldEnum = @enumFromInt(0),
-        comptime indexes: []const FieldEnum = &.{@enumFromInt(0)},
+    if (@sizeOf(GrooveName) == 0) return struct {
+        comptime object_groove: GrooveName = @enumFromInt(0),
+        comptime index_grooves: []const GrooveName = &.{@enumFromInt(0)},
     };
 
     return struct {
         /// Indicates which Groove the ObjectTree comes from.
         /// Used for queries by `timestamp`.
-        object: FieldEnum,
+        object_groove: GrooveName,
 
-        /// Array of Grooves whose secondary indexes can be queried together,
+        /// Array of GrooveNames whose secondary indexes can be queried together,
         /// meaning the `timestamp` of related objects is the same across all Grooves.
         /// Index names must not conflict.
         /// There is no support for aliasing or fully qualified names.
-        indexes: []const FieldEnum,
+        index_grooves: []const GrooveName,
     };
 }
 
@@ -354,30 +354,30 @@ pub fn ScanType(
             callback: Callback,
         };
 
-        /// Maps the `Index` -> `Groove` relation.
+        /// Maps the index name -> `Groove` relation.
         const index_map: T: {
-            const FieldEnum = std.meta.FieldEnum(Forest.Grooves);
+            const GrooveName = std.meta.FieldEnum(Forest.Grooves);
             var indexes: []const std.builtin.Type.StructField = &.{};
 
             // Timestamp from the ObjectTree:
             indexes = indexes ++ [_]std.builtin.Type.StructField{.{
                 .name = "timestamp",
-                .type = FieldEnum,
+                .type = GrooveName,
                 .is_comptime = true,
-                .default_value_ptr = &scan_config.object,
-                .alignment = @alignOf(FieldEnum),
+                .default_value_ptr = &scan_config.object_groove,
+                .alignment = @alignOf(GrooveName),
             }};
 
             // Secondary indexes from joined Grooves' IndexTrees:
-            for (scan_config.indexes) |*groove_name| {
+            for (scan_config.index_grooves) |*groove_name| {
                 const Groove = @FieldType(Forest.Grooves, @tagName(groove_name.*));
                 for (std.meta.fields(Groove.IndexTrees)) |field| {
                     indexes = indexes ++ [_]std.builtin.Type.StructField{.{
                         .name = field.name,
-                        .type = FieldEnum,
+                        .type = GrooveName,
                         .is_comptime = true,
                         .default_value_ptr = groove_name,
-                        .alignment = @alignOf(FieldEnum),
+                        .alignment = @alignOf(GrooveName),
                     }};
                 }
             }

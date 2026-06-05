@@ -731,29 +731,29 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             /// Used by `query_accounts`.
             const Accounts = ScanBuilderType(Storage, Forest, .{
-                .object = .accounts,
-                .indexes = &.{.accounts},
+                .object_groove = .accounts,
+                .index_grooves = &.{.accounts},
             });
 
             /// Used by `query_transfers`, `get_account_transfers` and `get_account_balances`.
             const Transfers = ScanBuilderType(Storage, Forest, .{
-                .object = .transfers,
-                .indexes = &.{ .transfers, .transfers_pending, .account_events },
+                .object_groove = .transfers,
+                .index_grooves = &.{ .transfers, .transfers_pending, .account_events },
             });
 
             /// Used by `query_two_phase_transfers`.
             const TransfersTwoPhasePending = ScanBuilderType(Storage, Forest, .{
                 // The `TransfersPending` object Groove filters out single-phase transfers.
-                .object = .transfers_pending,
-                .indexes = &.{ .transfers_pending, .transfers },
+                .object_groove = .transfers_pending,
+                .index_grooves = &.{ .transfers_pending, .transfers },
             });
 
             /// Used by `query_two_phase_transfers`.
             const TransfersTwoPhaseOutcome = ScanBuilderType(Storage, Forest, .{
                 // Expiry events have no related `Transfer`,
                 // so the object Groove is `AccountEvents`.
-                .object = .account_events,
-                .indexes = &.{ .account_events, .transfers },
+                .object_groove = .account_events,
+                .index_grooves = &.{ .account_events, .transfers },
             });
 
             // Used by `expire_pending_transfers`.
@@ -1177,12 +1177,32 @@ pub fn StateMachineType(comptime Storage: type) type {
             while (body_decoder.pop()) |batch| {
                 if (!self.batch_valid(operation, batch)) return false;
 
-                // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
-                // for queries, the limit was capped instead.
-                // Remove `@min` when clients < 0.17.0 are no longer supported.
                 switch (operation) {
                     // Operations added _before_ 0.17.0:
-                    else => {
+                    .pulse,
+                    .deprecated_create_accounts_unbatched,
+                    .deprecated_create_transfers_unbatched,
+                    .deprecated_lookup_accounts_unbatched,
+                    .deprecated_lookup_transfers_unbatched,
+                    .deprecated_get_account_transfers_unbatched,
+                    .deprecated_get_account_balances_unbatched,
+                    .deprecated_query_accounts_unbatched,
+                    .deprecated_query_transfers_unbatched,
+                    .get_change_events,
+                    .deprecated_create_accounts_sparse,
+                    .deprecated_create_transfers_sparse,
+                    .lookup_accounts,
+                    .lookup_transfers,
+                    // TODO(client_release): Clients before 0.17.0 did not err `too_much_data`
+                    // for queries, the limit was capped instead.
+                    // Drop this logic when < 0.17.0 are no longer supported.
+                    .get_account_transfers,
+                    .get_account_balances,
+                    .query_accounts,
+                    .query_transfers,
+                    .create_accounts,
+                    .create_transfers,
+                    => {
                         result_count_expected += @min(
                             operation.result_count_expected(batch),
                             // Replies are not constrained by the runtime `batch_size_limit`.
@@ -2459,7 +2479,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 );
                 assert(scan_buffer.len >= limit_max);
                 assert(filter.limit > 0);
-                assert(filter.limit <= limit_max);
+                assert(filter.limit <= limit_max); // Already validated by `input_valid()`.
                 scan_lookup.read(
                     scan_buffer[0..filter.limit],
                     &prefetch_query_two_phase_transfers_target_pending_scan_callback,
@@ -2624,7 +2644,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 );
                 assert(scan_buffer.len >= limit_max);
                 assert(filter.limit > 0);
-                assert(filter.limit <= limit_max);
+                assert(filter.limit <= limit_max); // Already validated by `input_valid()`.
 
                 scan_lookup.read(
                     scan_buffer[0..filter.limit],
@@ -2706,6 +2726,9 @@ pub fn StateMachineType(comptime Storage: type) type {
         } {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(filter.flags.target == target);
+            // Already validated by `input_valid()`.
+            assert(filter.limit <=
+                Operation.query_two_phase_transfers.result_max(constants.message_body_size_max));
 
             const filter_valid =
                 (filter.timestamp_min == 0 or TimestampRange.valid(filter.timestamp_min)) and

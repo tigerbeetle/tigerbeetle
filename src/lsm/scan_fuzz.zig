@@ -144,8 +144,8 @@ const Index = enum {
 };
 
 const ScanBuilder = ScanBuilderType(Storage, Forest, .{
-    .object = .things,
-    .indexes = &.{.things},
+    .object_groove = .things,
+    .index_grooves = &.{.things},
 });
 const Scan = ScanBuilder.Scan;
 
