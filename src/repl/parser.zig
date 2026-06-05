@@ -19,6 +19,8 @@ pub const Parser = struct {
         IdentifierBad,
         OperationBad,
         ValueBad,
+        KeyInvalid,
+        KeyDuplicate,
         KeyValuePairBad,
         KeyValuePairEqualMissing,
         SliceOperationUnsupported,
@@ -265,6 +267,7 @@ pub const Parser = struct {
         operation: Operation,
         arguments: *std.ArrayListUnmanaged(u8),
     ) !void {
+        // FIXME extract
         const default: ObjectSyntaxTree = switch (operation) {
             .help, .none => return,
             .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
@@ -476,6 +479,73 @@ const null_terminal = Terminal{
     .stderr = null,
     .stdout = null,
 };
+
+test "fuzz: FIXME" {
+    const stdx = @import("stdx");
+    const test_count = 1024 * 128; // FIXME
+    const input_size_max = 128;
+
+    const operations = std.enums.values(Parser.Operation);
+    const fields: []const []const u8 = comptime fields: {
+        var fields: []const []const u8 = &.{};
+        for (.{ tb.Account, tb.Transfer, tb.AccountFilter, tb.QueryFilter }) |Object| {
+            for (std.meta.fieldNames(Object)) |field| {
+                fields = fields ++ [_][]const u8{ field };
+            }
+        }
+        break :fields fields;
+    };
+
+    var input = try std.ArrayListUnmanaged(u8).initCapacity(std.testing.allocator, input_size_max);
+    defer input.deinit(std.testing.allocator);
+
+    var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
+        std.testing.allocator,
+        constants.message_size_max,
+    );
+    defer arguments.deinit(std.testing.allocator);
+
+    var prng = stdx.PRNG.from_seed_testing();
+    for (0..test_count) |_| {
+        defer input.clearRetainingCapacity();
+        defer arguments.clearRetainingCapacity();
+
+        const input_size_target = prng.int_inclusive(u32, input_size_max / 2);
+        const separator_probability = stdx.PRNG.ratio(1, 4);
+
+        input.appendSliceAssumeCapacity(@tagName(operations[prng.index(operations)]));
+        input.appendAssumeCapacity(' ');
+
+        while (input.items.len < input_size_target) {
+            input.appendSliceAssumeCapacity(fields[prng.index(fields)]);
+            input.appendAssumeCapacity('=');
+
+            const value_powers = [_]u8{ 0, 8, 16, 32, 64, 128 };
+            const value_power = value_powers[prng.index(value_powers)];
+            const value: u256 = if (prng.boolean())
+                prng.int_inclusive(u256, (@as(u256, 1) << value_power) - 1)
+            else
+                (@as(u256, 1) << value_power) - @intFromBool(prng.boolean());
+
+            _ = switch (prng.enum_uniform(enum { hex, dec, oct, bin })) {
+                .dec => input.writer(std.testing.allocator).print("{d}", .{ value }),
+                .hex => input.writer(std.testing.allocator).print("0x{x}", .{ value }),
+                .oct => input.writer(std.testing.allocator).print("0o{o}", .{ value }),
+                .bin => input.writer(std.testing.allocator).print("0b{b}", .{ value }),
+            } catch unreachable;
+
+            input.appendAssumeCapacity(' ');
+            if (prng.chance(separator_probability)) input.appendAssumeCapacity(',');
+        }
+
+        if (prng.boolean()) {
+            const alphabet = " _;,\n\t01-=";
+            input.items[prng.index(input.items)] = alphabet[prng.index(alphabet)];
+        }
+
+        _ = Parser.parse_statement(input.items, &null_terminal, &arguments) catch {};
+    }
+}
 
 test "parser.zig: Parser single transfer successfully" {
     const vectors = [_]struct {
@@ -1232,10 +1302,18 @@ test "parser.zig: Handle parsing errors" {
             .string = "create_transfers amount=--0",
             .result = error.KeyValuePairBad,
         },
+        //.{
+        //    .string = "create_transfers id=1 id=2",
+        //    .result = error.KeyDuplicate,
+        //},
         .{
             .string = "create_transfers id=1; id=2",
             .result = error.UnexpectedStatement,
         },
+        //.{
+        //    .string = "create_transfers idd=1",
+        //    .result = error.UnexpectedKey,
+        //},
     };
 
     for (vectors) |vector| {
