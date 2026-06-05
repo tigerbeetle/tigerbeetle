@@ -24,8 +24,8 @@ pub const Parser = struct {
         ValueBad,
         KeyValuePairBad,
         KeyValuePairEqualMissing,
-        SyntaxMatchNone,
         SliceOperationUnsupported,
+        UnexpectedStatement,
     };
 
     pub const Operation = enum {
@@ -132,17 +132,17 @@ pub const Parser = struct {
         return parser.input[after_whitespace..parser.offset];
     }
 
-    fn parse_syntax_char(parser: *Parser, syntax_char: u8) !void {
+    fn parse_syntax_char(parser: *Parser, syntax_char: u8) bool {
         parser.eat_whitespace();
 
         if (parser.offset < parser.input.len and
             parser.input[parser.offset] == syntax_char)
         {
             parser.offset += 1;
-            return;
+            return true;
         }
 
-        return Error.SyntaxMatchNone;
+        return false;
     }
 
     fn parse_value(parser: *Parser) []const u8 {
@@ -320,10 +320,10 @@ pub const Parser = struct {
         var object_has_fields = false;
         while (parser.offset < parser.input.len) {
             parser.eat_whitespace();
-            // Always need to check i against length in case we've hit the end.
-            if (parser.offset >= parser.input.len or parser.input[parser.offset] == ';') {
-                break;
-            }
+            // Always need to check i against length in case we've hit the end. FIXME
+            if (parser.offset >= parser.input.len) break;
+
+            if (parser.parse_syntax_char(';')) break;
 
             // Expect comma separating objects.
             if (parser.offset < parser.input.len and parser.input[parser.offset] == ',') {
@@ -363,7 +363,7 @@ pub const Parser = struct {
             }
 
             // Grab =.
-            parser.parse_syntax_char('=') catch {
+            if (!parser.parse_syntax_char('=')) {
                 try parser.print_current_position();
                 try parser.terminal.print_error(
                     "Expected equal sign after key '{s}' in key-value" ++
@@ -371,7 +371,7 @@ pub const Parser = struct {
                     .{id_result},
                 );
                 return Error.KeyValuePairEqualMissing;
-            };
+            }
 
             // Grab value.
             const value_result = parser.parse_value();
@@ -406,6 +406,13 @@ pub const Parser = struct {
                     arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
                 }
             }
+        }
+
+        parser.eat_whitespace();
+        if (parser.offset < parser.input.len) {
+            try parser.print_current_position();
+            try parser.terminal.print_error("unexpected statement\n", .{});
+            return error.UnexpectedStatement;
         }
     }
 
@@ -1139,6 +1146,14 @@ test "parser.zig: Parser odd but correct formatting" {
                 }),
             },
         },
+        // Multiple objects.
+        .{
+            .string = "create_transfers id=1, id=2",
+            .result = &.{
+                std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
+                std.mem.zeroInit(tb.Transfer, .{ .id = 2 }),
+            },
+        },
     };
 
     for (vectors) |vector| {
@@ -1224,6 +1239,10 @@ test "parser.zig: Handle parsing errors" {
         .{
             .string = "create_transfers amount=--0",
             .result = error.KeyValuePairBad,
+        },
+        .{
+            .string = "create_transfers id=1; id=2",
+            .result = error.UnexpectedStatement,
         },
     };
 

@@ -593,7 +593,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     Parser.Error.ValueBad,
                     Parser.Error.KeyValuePairBad,
                     Parser.Error.KeyValuePairEqualMissing,
-                    Parser.Error.SyntaxMatchNone,
+                    Parser.Error.UnexpectedStatement,
                     Parser.Error.SliceOperationUnsupported,
                     // TODO(zig): This will be more convenient to express
                     // once https://github.com/ziglang/zig/issues/2473 is
@@ -763,7 +763,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 Parser.Error.ValueBad,
                                 Parser.Error.KeyValuePairBad,
                                 Parser.Error.KeyValuePairEqualMissing,
-                                Parser.Error.SyntaxMatchNone,
+                                Parser.Error.UnexpectedStatement,
                                 Parser.Error.SliceOperationUnsupported,
                                 // TODO: This will be more convenient to express
                                 // once https://github.com/ziglang/zig/issues/2473 is
