@@ -19,6 +19,8 @@ pub const Parser = struct {
         IdentifierBad,
         OperationBad,
         ValueBad,
+        KeyInvalid,
+        KeyDuplicate,
         KeyValuePairBad,
         KeyValuePairEqualMissing,
         SliceOperationUnsupported,
@@ -179,64 +181,49 @@ pub const Parser = struct {
         return parser.input[after_whitespace..parser.offset];
     }
 
-    fn match_arg(
-        out: *ObjectSyntaxTree,
-        key_to_validate: []const u8,
-        value_to_validate: []const u8,
+    fn object_update(
+        parser: *Parser,
+        comptime Object: type,
+        object: *Object,
+        comptime field: std.meta.FieldEnum(Object),
+        value_string: []const u8,
     ) !void {
-        switch (out.*) {
-            inline else => |*object, object_tag| {
-                const Object = std.meta.TagPayload(ObjectSyntaxTree, object_tag);
+        const Value = std.meta.FieldType(Object, field);
 
-                inline for (@typeInfo(Object).@"struct".fields) |object_field| {
-                    if (std.mem.eql(u8, object_field.name, key_to_validate)) {
-                        // Handle everything but flags, and skip reserved.
-                        if (comptime (!std.mem.eql(u8, object_field.name, "flags") and
-                            !std.mem.eql(u8, object_field.name, "reserved")))
-                        {
-                            @field(object, object_field.name) = try parse_int(
-                                object_field.type,
-                                value_to_validate,
-                            );
-                        }
-
-                        // Handle flags, specific to Account and Transfer fields.
-                        if (comptime std.mem.eql(u8, object_field.name, "flags") and
-                            @hasField(Object, "flags"))
-                        {
-                            var flags_to_validate = std.mem.splitScalar(u8, value_to_validate, '|');
-                            var validated_flags =
-                                std.mem.zeroInit(object_field.type, .{});
-                            while (flags_to_validate.next()) |flag_to_validate| {
-                                const flag_to_validate_trimmed = std.mem.trim(
-                                    u8,
-                                    flag_to_validate,
-                                    std.ascii.whitespace[0..],
-                                );
-                                inline for (@typeInfo(
-                                    object_field.type,
-                                ).@"struct".fields) |known_flag_field| {
-                                    if (std.mem.eql(
-                                        u8,
-                                        known_flag_field.name,
-                                        flag_to_validate_trimmed,
-                                    )) {
-                                        if (comptime !std.mem.eql(
-                                            u8,
-                                            known_flag_field.name,
-                                            "padding",
-                                        )) {
-                                            @field(validated_flags, known_flag_field.name) = true;
-                                        }
-                                    }
-                                }
-                            }
-                            object.flags = validated_flags;
+        if (@hasField(Object, "flags") and field == .flags) {
+            var flags_strings = std.mem.splitScalar(u8, value_string, '|');
+            var validated_flags = std.mem.zeroInit(Value, .{});
+            while (flags_strings.next()) |flag_string| {
+                const flag_to_validate_trimmed =
+                    std.mem.trim(u8, flag_string, std.ascii.whitespace[0..]);
+                inline for (@typeInfo(Value).@"struct".fields) |known_flag_field| {
+                    if (std.mem.eql(u8, known_flag_field.name, flag_to_validate_trimmed)) {
+                        if (comptime !std.mem.eql(u8, known_flag_field.name, "padding")) {
+                            // TODO Check for duplicates.
+                            // TODO Check for invalid flags.
+                            @field(validated_flags, known_flag_field.name) = true;
                         }
                     }
                 }
-            },
+            }
+            object.flags = validated_flags;
+            return;
         }
+
+        if (@hasField(Object, "reserved") and field == .reserved) {
+            try parser.print_current_position();
+            try parser.terminal.print_error("Unexpected key 'reserved'.\n", .{});
+            return Error.KeyValuePairBad;
+        }
+
+        @field(object, @tagName(field)) = parse_int(Value, value_string) catch {
+            try parser.print_current_position();
+            try parser.terminal.print_error(
+                "Invalid value '{s}'; expected {s} for key {s}.\n",
+                .{ value_string, @typeName(Value), @tagName(field) },
+            );
+            return Error.KeyValuePairBad;
+        };
     }
 
     fn parse_int(comptime T: type, input: []const u8) !T {
@@ -262,17 +249,17 @@ pub const Parser = struct {
 
     fn parse_arguments(
         parser: *Parser,
-        operation: Operation,
+        comptime operation: Operation,
         arguments: *std.ArrayListUnmanaged(u8),
     ) !void {
-        const default: ObjectSyntaxTree = switch (operation) {
+        const default = switch (operation) {
             .help, .none => return,
-            .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
-            .create_transfers => .{ .transfer = std.mem.zeroInit(tb.Transfer, .{}) },
-            .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
+            .create_accounts => std.mem.zeroInit(tb.Account, .{}),
+            .create_transfers => std.mem.zeroInit(tb.Transfer, .{}),
+            .lookup_accounts, .lookup_transfers => LookupSyntaxTree{ .id = 0 },
             .get_account_transfers,
             .get_account_balances,
-            => |operation_comptime| .{ .account_filter = tb.AccountFilter{
+            => |operation_comptime| tb.AccountFilter{
                 .account_id = 0,
                 .user_data_128 = 0,
                 .user_data_64 = 0,
@@ -288,10 +275,10 @@ pub const Parser = struct {
                     .debits = true,
                     .reversed = false,
                 },
-            } },
+            },
             .query_accounts,
             .query_transfers,
-            => |operation_comptime| .{ .query_filter = tb.QueryFilter{
+            => |operation_comptime| tb.QueryFilter{
                 .user_data_128 = 0,
                 .user_data_64 = 0,
                 .user_data_32 = 0,
@@ -305,11 +292,13 @@ pub const Parser = struct {
                 .flags = .{
                     .reversed = false,
                 },
-            } },
+            },
         };
         var object = default;
 
-        var object_has_fields = false;
+        const ObjectField = std.meta.FieldEnum(@TypeOf(object));
+        var object_fields = std.enums.EnumSet(ObjectField).initEmpty();
+
         while (parser.offset < parser.input.len) {
             parser.eat_whitespace();
             // Always need to check i against length in case we've hit the end. FIXME
@@ -318,28 +307,22 @@ pub const Parser = struct {
             if (parser.parse_syntax_char(';')) break;
 
             // Expect comma separating objects.
-            if (parser.offset < parser.input.len and parser.input[parser.offset] == ',') {
-                parser.offset += 1;
-                inline for (@typeInfo(ObjectSyntaxTree).@"union".fields) |object_tree_field| {
-                    if (std.mem.eql(u8, @tagName(object), object_tree_field.name)) {
-                        const unwrapped_field = @field(object, object_tree_field.name);
-                        arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
-                    }
-                }
+            if (parser.parse_syntax_char(',')) {
+                arguments.appendSliceAssumeCapacity(std.mem.asBytes(&object));
 
                 const state_machine_op = operation.state_machine_op();
                 if (!state_machine_op.is_batchable()) {
                     try parser.print_current_position();
                     try parser.terminal.print_error(
-                        "{s} expects a single {s} but received multiple.\n",
-                        .{ @tagName(operation), @tagName(object) },
+                        "{s} expects a single object, but received multiple.\n",
+                        .{@tagName(operation)},
                     );
                     return error.SliceOperationUnsupported;
                 }
 
                 // Reset object.
                 object = default;
-                object_has_fields = false;
+                object_fields = .initEmpty();
             }
 
             // Grab key.
@@ -352,6 +335,23 @@ pub const Parser = struct {
                     .{},
                 );
                 return Error.IdentifierBad;
+            }
+
+            const field = std.meta.stringToEnum(ObjectField, id_result) orelse {
+                try parser.print_current_position();
+                try parser.terminal.print_error(
+                    "Unknown key: \"{s}\".\n",
+                    .{id_result},
+                );
+                return Error.IdentifierBad;
+            };
+            if (object_fields.contains(field)) {
+                try parser.print_current_position();
+                try parser.terminal.print_error(
+                    "Duplicate field {s} for single object. Separate objects with \",\".\n",
+                    .{@tagName(field)},
+                );
+                return Error.KeyDuplicate;
             }
 
             // Grab =.
@@ -378,26 +378,21 @@ pub const Parser = struct {
             }
 
             // Match key to a field in the struct.
-            match_arg(&object, id_result, value_result) catch {
-                try parser.print_current_position();
-                try parser.terminal.print_error(
-                    "'{s}'='{s}' is not a valid pair for {s}.\n",
-                    .{ id_result, value_result, @tagName(object) },
-                );
-                return Error.KeyValuePairBad;
-            };
+            switch (field) {
+                inline else => |field_comptime| try parser.object_update(
+                    @TypeOf(object),
+                    &object,
+                    field_comptime,
+                    value_result,
+                ),
+            }
 
-            object_has_fields = true;
+            object_fields.insert(field);
         }
 
         // Add final object.
-        if (object_has_fields) {
-            inline for (@typeInfo(ObjectSyntaxTree).@"union".fields) |object_tree_field| {
-                if (std.mem.eql(u8, @tagName(object), object_tree_field.name)) {
-                    const unwrapped_field = @field(object, object_tree_field.name);
-                    arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
-                }
-            }
+        if (object_fields.count() > 0) {
+            arguments.appendSliceAssumeCapacity(std.mem.asBytes(&object));
         }
 
         parser.eat_whitespace();
@@ -461,7 +456,11 @@ pub const Parser = struct {
             return Error.OperationBad;
         };
 
-        try parser.parse_arguments(operation, arguments);
+        switch (operation) {
+            inline else => |operation_comptime| {
+                try parser.parse_arguments(operation_comptime, arguments);
+            },
+        }
 
         return Statement{
             .operation = operation,
@@ -1146,6 +1145,14 @@ test "parser.zig: Parser odd but correct formatting" {
                 std.mem.zeroInit(tb.Transfer, .{ .id = 2 }),
             },
         },
+        // Whitespace before comma.
+        .{
+            .string = "create_transfers id=1 , id=2",
+            .result = &.{
+                std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
+                std.mem.zeroInit(tb.Transfer, .{ .id = 2 }),
+            },
+        },
     };
 
     for (vectors) |vector| {
@@ -1201,23 +1208,23 @@ test "parser.zig: Handle parsing errors" {
             .result = error.IdentifierBad,
         },
         .{
-            .string = "create_transfers x",
+            .string = "create_transfers id",
             .result = error.KeyValuePairEqualMissing,
         },
         .{
-            .string = "create_transfers x=",
+            .string = "create_transfers id=",
             .result = error.ValueBad,
         },
         .{
-            .string = "create_transfers x=    ",
+            .string = "create_transfers id=    ",
             .result = error.ValueBad,
         },
         .{
-            .string = "create_transfers x=    ;",
+            .string = "create_transfers id=    ;",
             .result = error.ValueBad,
         },
         .{
-            .string = "create_transfers x=[]",
+            .string = "create_transfers id=[]",
             .result = error.ValueBad,
         },
         .{
@@ -1233,8 +1240,16 @@ test "parser.zig: Handle parsing errors" {
             .result = error.KeyValuePairBad,
         },
         .{
+            .string = "create_transfers id=1 id=2",
+            .result = error.KeyDuplicate,
+        },
+        .{
             .string = "create_transfers id=1; id=2",
             .result = error.UnexpectedStatement,
+        },
+        .{
+            .string = "create_transfers idd=1",
+            .result = error.IdentifierBad,
         },
     };
 
@@ -1273,11 +1288,11 @@ test "parser.zig: Parser fails for operations not supporting multiple objects" {
             .result = error.SliceOperationUnsupported,
         },
         .{
-            .string = "query_accounts account_id=1, account_id=2",
+            .string = "query_accounts code=1, code=2",
             .result = error.SliceOperationUnsupported,
         },
         .{
-            .string = "query_transfers account_id=1, account_id=2",
+            .string = "query_transfers code=1, code=2",
             .result = error.SliceOperationUnsupported,
         },
     };
