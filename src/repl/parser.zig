@@ -483,39 +483,11 @@ test "parser.zig: Parser single transfer successfully" {
     }{
         .{
             .string = "create_transfers id=1",
-            .result = tb.Transfer{
-                .id = 1,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
         },
         .{
             .string = "create_transfers timestamp=1",
-            .result = tb.Transfer{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 1,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .timestamp = 1 }),
         },
         .{
             .string =
@@ -549,128 +521,46 @@ test "parser.zig: Parser single transfer successfully" {
             \\ pending |
             \\ linked
             ,
-            .result = tb.Transfer{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{
-                    .post_pending_transfer = true,
-                    .balancing_credit = true,
-                    .balancing_debit = true,
-                    .void_pending_transfer = true,
-                    .pending = true,
-                    .linked = true,
-                },
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .flags = .{
+                .post_pending_transfer = true,
+                .balancing_credit = true,
+                .balancing_debit = true,
+                .void_pending_transfer = true,
+                .pending = true,
+                .linked = true,
+            } }),
         },
         .{
             .string =
             \\create_transfers amount=-0
             ,
-            .result = tb.Transfer{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = std.math.maxInt(u128),
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = std.math.maxInt(u128) }),
         },
         .{
             .string =
             \\create_transfers amount=-1
             ,
-            .result = tb.Transfer{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = std.math.maxInt(u128) - 1,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = std.math.maxInt(u128) - 1 }),
         },
         .{
             .string =
             \\create_transfers amount=0xbee71e
             ,
-            .result = tb.Transfer{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0xbee71e,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = 0xbee71e }),
         },
         .{
             .string =
             \\create_transfers amount=1_000_000
             ,
-            .result = tb.Transfer{
-                .id = 0,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 1_000_000,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = 1_000_000 }),
         },
         .{
             .string =
             \\create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6
             ,
-            .result = tb.Transfer{
+            .result = std.mem.zeroInit(tb.Transfer, .{
                 .id = 0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6,
-                .debit_account_id = 0,
-                .credit_account_id = 0,
-                .amount = 0,
-                .pending_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .timeout = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            }),
         },
     };
 
@@ -709,36 +599,8 @@ test "parser.zig: Parser multiple transfers successfully" {
         .{
             .string = "create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;",
             .result = [2]tb.Transfer{
-                tb.Transfer{
-                    .id = 1,
-                    .debit_account_id = 2,
-                    .credit_account_id = 0,
-                    .amount = 0,
-                    .pending_id = 0,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .timeout = 0,
-                    .ledger = 0,
-                    .code = 0,
-                    .flags = .{},
-                    .timestamp = 0,
-                },
-                tb.Transfer{
-                    .id = 2,
-                    .debit_account_id = 0,
-                    .credit_account_id = 1,
-                    .amount = 0,
-                    .pending_id = 0,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .timeout = 0,
-                    .ledger = 0,
-                    .code = 0,
-                    .flags = .{},
-                    .timestamp = 0,
-                },
+                std.mem.zeroInit(tb.Transfer, .{ .id = 1, .debit_account_id = 2 }),
+                std.mem.zeroInit(tb.Transfer, .{ .id = 2, .credit_account_id = 1 }),
             },
         },
     };
@@ -777,21 +639,7 @@ test "parser.zig: Parser single account successfully" {
     }{
         .{
             .string = "create_accounts id=1",
-            .result = tb.Account{
-                .id = 1,
-                .debits_pending = 0,
-                .debits_posted = 0,
-                .credits_pending = 0,
-                .credits_posted = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .reserved = 0,
-                .ledger = 0,
-                .code = 0,
-                .flags = .{},
-                .timestamp = 0,
-            },
+            .result = std.mem.zeroInit(tb.Account, .{ .id = 1 }),
         },
         .{
             .string =
@@ -820,25 +668,14 @@ test "parser.zig: Parser single account successfully" {
             \\create_accounts flags=credits_must_not_exceed_debits|
             \\ linked|debits_must_not_exceed_credits id =1
             ,
-            .result = tb.Account{
+            .result = std.mem.zeroInit(tb.Account, .{
                 .id = 1,
-                .debits_pending = 0,
-                .debits_posted = 0,
-                .credits_pending = 0,
-                .credits_posted = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .reserved = 0,
-                .ledger = 0,
-                .code = 0,
                 .flags = .{
                     .credits_must_not_exceed_debits = true,
                     .linked = true,
                     .debits_must_not_exceed_credits = true,
                 },
-                .timestamp = 0,
-            },
+            }),
         },
     };
 
