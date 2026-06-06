@@ -74,6 +74,9 @@ pub const Terminal = struct {
         comptime format: []const u8,
         arguments: anytype,
     ) !void {
+        comptime assert(format.len > 0);
+        comptime assert(format[format.len - 1] == '\n' or std.mem.eql(u8, format, " "));
+
         if (self.stderr) |stderr| {
             try stderr.print(format, arguments);
         }

@@ -1027,7 +1027,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 reply_decoder.peek(),
             ) catch |err| {
                 const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
-                repl.fail("Error in callback: {any}", .{err}) catch return;
+                repl.fail("Error in callback: {any}\n", .{err}) catch return;
             };
         }
     };
