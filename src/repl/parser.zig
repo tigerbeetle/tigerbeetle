@@ -57,16 +57,8 @@ pub const Parser = struct {
         }
     };
 
-    pub const LookupSyntaxTree = struct {
+    pub const LookupSyntaxTree = extern struct {
         id: u128,
-    };
-
-    pub const ObjectSyntaxTree = union(enum) {
-        account: tb.Account,
-        transfer: tb.Transfer,
-        id: LookupSyntaxTree,
-        account_filter: tb.AccountFilter,
-        query_filter: tb.QueryFilter,
     };
 
     pub const Statement = struct {
@@ -478,682 +470,288 @@ const null_terminal = Terminal{
     .stdout = null,
 };
 
-test "parser.zig: Parser single transfer successfully" {
-    const vectors = [_]struct {
-        string: []const u8 = "",
-        result: tb.Transfer,
-    }{
-        .{
-            .string = "create_transfers id=1",
-            .result = std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
-        },
-        .{
-            .string = "create_transfers timestamp=1",
-            .result = std.mem.zeroInit(tb.Transfer, .{ .timestamp = 1 }),
-        },
-        .{
-            .string =
-            \\create_transfers id=32 amount=65 ledger=12 code=9999 pending_id=7
-            \\ credit_account_id=2121 debit_account_id=77 user_data_128=2
-            \\ user_data_64=3 user_data_32=4 flags=linked
-            ,
-            .result = tb.Transfer{
-                .id = 32,
-                .debit_account_id = 77,
-                .credit_account_id = 2121,
-                .amount = 65,
-                .pending_id = 7,
-                .user_data_128 = 2,
-                .user_data_64 = 3,
-                .user_data_32 = 4,
-                .timeout = 0,
-                .ledger = 12,
-                .code = 9999,
-                .flags = .{ .linked = true },
-                .timestamp = 0,
-            },
-        },
-        .{
-            .string =
-            \\create_transfers flags=
-            \\ post_pending_transfer |
-            \\ balancing_credit |
-            \\ balancing_debit |
-            \\ void_pending_transfer |
-            \\ pending |
-            \\ linked
-            ,
-            .result = std.mem.zeroInit(tb.Transfer, .{ .flags = .{
-                .post_pending_transfer = true,
-                .balancing_credit = true,
-                .balancing_debit = true,
-                .void_pending_transfer = true,
-                .pending = true,
-                .linked = true,
-            } }),
-        },
-        .{
-            .string =
-            \\create_transfers amount=-0
-            ,
-            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = std.math.maxInt(u128) }),
-        },
-        .{
-            .string =
-            \\create_transfers amount=-1
-            ,
-            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = std.math.maxInt(u128) - 1 }),
-        },
-        .{
-            .string =
-            \\create_transfers amount=0xbee71e
-            ,
-            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = 0xbee71e }),
-        },
-        .{
-            .string =
-            \\create_transfers amount=1_000_000
-            ,
-            .result = std.mem.zeroInit(tb.Transfer, .{ .amount = 1_000_000 }),
-        },
-        .{
-            .string =
-            \\create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6
-            ,
-            .result = std.mem.zeroInit(tb.Transfer, .{
-                .id = 0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6,
-            }),
-        },
-    };
+test "Parser: snap" {
+    const stdx = @import("stdx");
+    const snap = stdx.Snap.snap_fn("src");
 
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
+    const T = struct {
+        body: Parser.ArgumentsList,
+        body_formatted: std.ArrayListUnmanaged(u8),
+        stderr: std.ArrayListUnmanaged(u8),
 
-        const allocator = arena.allocator();
+        fn check(t: *@This(), string: []const u8, want: stdx.Snap) !void {
+            assert(t.body.items.len == 0);
+            assert(t.body_formatted.items.len == 0);
+            assert(t.stderr.items.len == 0);
+            defer t.body.clearRetainingCapacity();
+            defer t.body_formatted.clearRetainingCapacity();
+            defer t.stderr.clearRetainingCapacity();
 
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
+            try t.body.ensureTotalCapacity(std.testing.allocator, constants.message_size_max);
 
-        const statement = try Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
+            const statement = Parser.parse_statement(string, &null_terminal, &t.body) catch |err| {
+                try want.diff_fmt("{}", .{err});
+                return;
+            };
 
-        try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.asBytes(&vector.result),
-        );
-    }
-}
-
-test "parser.zig: Parser multiple transfers successfully" {
-    const vectors = [_]struct {
-        string: []const u8 = "",
-        result: [2]tb.Transfer,
-    }{
-        .{
-            .string = "create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;",
-            .result = [2]tb.Transfer{
-                std.mem.zeroInit(tb.Transfer, .{ .id = 1, .debit_account_id = 2 }),
-                std.mem.zeroInit(tb.Transfer, .{ .id = 2, .credit_account_id = 1 }),
-            },
-        },
-    };
-
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const statement = try Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
-
-        try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.sliceAsBytes(&vector.result),
-        );
-    }
-}
-
-test "parser.zig: Parser single account successfully" {
-    const vectors = [_]struct {
-        string: []const u8,
-        result: tb.Account,
-    }{
-        .{
-            .string = "create_accounts id=1",
-            .result = std.mem.zeroInit(tb.Account, .{ .id = 1 }),
-        },
-        .{
-            .string =
-            \\create_accounts id=32 credits_posted=344 ledger=12 credits_pending=18
-            \\ code=9999 flags=linked | debits_must_not_exceed_credits debits_posted=3390
-            \\ debits_pending=3212 user_data_128=2 user_data_64=3 user_data_32=4
-            ,
-            .result = tb.Account{
-                .id = 32,
-                .debits_pending = 3212,
-                .debits_posted = 3390,
-                .credits_pending = 18,
-                .credits_posted = 344,
-                .user_data_128 = 2,
-                .user_data_64 = 3,
-                .user_data_32 = 4,
-                .reserved = 0,
-                .ledger = 12,
-                .code = 9999,
-                .flags = .{ .linked = true, .debits_must_not_exceed_credits = true },
-                .timestamp = 0,
-            },
-        },
-        .{
-            .string =
-            \\create_accounts flags=credits_must_not_exceed_debits|
-            \\ linked|debits_must_not_exceed_credits id =1
-            ,
-            .result = std.mem.zeroInit(tb.Account, .{
-                .id = 1,
-                .flags = .{
-                    .credits_must_not_exceed_debits = true,
-                    .linked = true,
-                    .debits_must_not_exceed_credits = true,
-                },
-            }),
-        },
-    };
-
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
-
-        try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.asBytes(&vector.result),
-        );
-    }
-}
-
-test "parser.zig: Parser account filter successfully" {
-    const vectors = [_]struct {
-        string: []const u8,
-        operation: Parser.Operation,
-        result: tb.AccountFilter,
-    }{
-        .{
-            .string = "get_account_transfers account_id=1",
-            .operation = .get_account_transfers,
-            .result = tb.AccountFilter{
-                .account_id = 1,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .code = 0,
-                .timestamp_min = 0,
-                .timestamp_max = 0,
-                .limit = StateMachine.Operation.get_account_transfers.result_max(
-                    constants.message_body_size_max,
+            switch (statement.operation) {
+                .none => {},
+                .help => {},
+                inline else => |operation| try t.print_objects(
+                    operation.state_machine_op(),
+                    @alignCast(std.mem.bytesAsSlice(
+                        ObjectType(operation.state_machine_op()),
+                        t.body.items,
+                    )),
                 ),
-                .flags = .{
-                    .credits = true,
-                    .debits = true,
-                    .reversed = false,
-                },
-            },
-        },
-        .{
-            .string =
-            \\get_account_balances account_id=1000
-            \\user_data_128=128 user_data_64=64 user_data_32=32
-            \\code=2
-            \\flags=debits|reversed limit=10
-            \\timestamp_min=1 timestamp_max=9999;
-            \\
-            ,
-            .operation = .get_account_balances,
-            .result = tb.AccountFilter{
-                .account_id = 1000,
-                .user_data_128 = 128,
-                .user_data_64 = 64,
-                .user_data_32 = 32,
-                .code = 2,
-                .timestamp_min = 1,
-                .timestamp_max = 9999,
-                .limit = 10,
-                .flags = .{
-                    .credits = false,
-                    .debits = true,
-                    .reversed = true,
-                },
-            },
-        },
+            }
+            try want.diff(t.body_formatted.items);
+        }
+
+        fn print_objects(
+            t: *@This(),
+            comptime operation: StateMachine.Operation,
+            objects: []const ObjectType(operation),
+        ) !void {
+            const body_formatted_writer = t.body_formatted.writer(std.testing.allocator);
+            try body_formatted_writer.print("{s}", .{@tagName(operation)});
+            if (objects.len > 1) try t.body_formatted.append(std.testing.allocator, '\n');
+
+            const Object = ObjectType(operation);
+            for (objects, 0..) |*object, i| {
+                if (i > 0) try t.body_formatted.append(std.testing.allocator, '\n');
+                inline for (std.meta.fields(Object)) |field| {
+                    const value = @field(object, field.name);
+
+                    if (stdx.zeroed(std.mem.asBytes(&value))) {
+                        // Omit zeroed fields for readability.
+                    } else {
+                        if (comptime std.mem.eql(u8, field.name, "flags")) {
+                            try body_formatted_writer.print(" flags=", .{});
+                            var separate = false;
+                            inline for (std.meta.fields(field.type)) |flag| {
+                                const flag_value = @field(value, flag.name);
+                                if (comptime std.mem.eql(u8, flag.name, "padding")) {
+                                    assert(flag_value == 0);
+                                } else {
+                                    if (flag_value) {
+                                        if (separate) try body_formatted_writer.print("|", .{});
+                                        separate = true;
+                                        try body_formatted_writer.print("{s}", .{flag.name});
+                                    }
+                                }
+                            }
+                        } else {
+                            try body_formatted_writer.print(" {s}={any}", .{ field.name, value });
+                        }
+                    }
+                }
+            }
+        }
+
+        fn ObjectType(comptime operation: StateMachine.Operation) type {
+            return switch (operation) {
+                .lookup_accounts => Parser.LookupSyntaxTree,
+                .lookup_transfers => Parser.LookupSyntaxTree,
+                else => operation.EventType(),
+            };
+        }
     };
 
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
+    var t = T{ .body = .{}, .body_formatted = .{}, .stderr = .{} };
+    defer t.stderr.deinit(std.testing.allocator);
+    defer t.body_formatted.deinit(std.testing.allocator);
+    defer t.body.deinit(std.testing.allocator);
 
-        const allocator = arena.allocator();
+    // create_transfers
+    try t.check("create_transfers id=1", snap(@src(),
+        \\create_transfers id=1
+    ));
+    try t.check("create_transfers timestamp=1", snap(@src(),
+        \\create_transfers timestamp=1
+    ));
+    try t.check(
+        \\create_transfers id=32 amount=65 ledger=12 code=9999 pending_id=7
+        \\ credit_account_id=2121 debit_account_id=77 user_data_128=2
+        \\ user_data_64=3 user_data_32=4 flags=linked
+    , snap(@src(),
+        \\create_transfers id=32 debit_account_id=77 credit_account_id=2121 amount=65 pending_id=7 user_data_128=2 user_data_64=3 user_data_32=4 ledger=12 code=9999 flags=linked
+    ));
+    try t.check(
+        \\create_transfers flags=
+        \\ pending | post_pending_transfer | void_pending_transfer |
+        \\ balancing_credit | balancing_debit | linked
+    , snap(@src(),
+        \\create_transfers flags=linked|pending|post_pending_transfer|void_pending_transfer|balancing_debit|balancing_credit
+    ));
+    try t.check("create_transfers amount=-0", snap(@src(),
+        \\create_transfers amount=340282366920938463463374607431768211455
+    ));
+    try t.check("create_transfers amount=-1", snap(@src(),
+        \\create_transfers amount=340282366920938463463374607431768211454
+    ));
+    try t.check("create_transfers amount=0xbee71e", snap(@src(),
+        \\create_transfers amount=12511006
+    ));
+    try t.check("create_transfers amount=1_000_000", snap(@src(),
+        \\create_transfers amount=1000000
+    ));
+    try t.check("create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6", snap(@src(),
+        \\create_transfers id=214850178493633095719753766415838275046
+    ));
+    try t.check("create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;", snap(@src(),
+        \\create_transfers
+        \\ id=1 debit_account_id=2
+        \\ id=2 credit_account_id=1
+    ));
 
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
+    // create_accounts
+    try t.check("create_accounts id=1", snap(@src(),
+        \\create_accounts id=1
+    ));
+    try t.check("create_accounts id=1", snap(@src(),
+        \\create_accounts id=1
+    ));
+    try t.check(
+        \\create_accounts id=32 credits_posted=344 ledger=12 credits_pending=18
+        \\ code=9999 flags=linked | debits_must_not_exceed_credits debits_posted=3390
+        \\ debits_pending=3212 user_data_128=2 user_data_64=3 user_data_32=4
+    , snap(@src(),
+        \\create_accounts id=32 debits_pending=3212 debits_posted=3390 credits_pending=18 credits_posted=344 user_data_128=2 user_data_64=3 user_data_32=4 ledger=12 code=9999 flags=linked|debits_must_not_exceed_credits
+    ));
+    try t.check(
+        \\create_accounts flags=credits_must_not_exceed_debits|
+        \\ linked|debits_must_not_exceed_credits id =1
+    , snap(@src(),
+        \\create_accounts id=1 flags=linked|debits_must_not_exceed_credits|credits_must_not_exceed_debits
+    ));
 
-        const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
+    // get_account_transfers/get_account_balances
+    try t.check("get_account_transfers account_id=1", snap(@src(),
+        \\get_account_transfers account_id=1 limit=29 flags=debits|credits
+    ));
+    try t.check(
+        \\get_account_balances account_id=1000
+        \\user_data_128=128 user_data_64=64 user_data_32=32
+        \\code=2
+        \\flags=debits|reversed limit=10
+        \\timestamp_min=1 timestamp_max=9999;
+    , snap(@src(),
+        \\get_account_balances account_id=1000 user_data_128=128 user_data_64=64 user_data_32=32 code=2 timestamp_min=1 timestamp_max=9999 limit=10 flags=debits|reversed
+    ));
 
-        try std.testing.expectEqual(statement.operation, vector.operation);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.asBytes(&vector.result),
-        );
-    }
-}
+    // query_accounts/query_transfers
+    try t.check("query_transfers user_data_128=1", snap(@src(),
+        \\query_transfers user_data_128=1 limit=29
+    ));
+    try t.check(
+        \\query_accounts user_data_128=1000
+        \\user_data_64=100 user_data_32=10
+        \\ledger=1 code=2
+        \\flags=reversed limit=10
+        \\timestamp_min=1 timestamp_max=9999;
+    , snap(@src(),
+        \\query_accounts user_data_128=1000 user_data_64=100 user_data_32=10 ledger=1 code=2 timestamp_min=1 timestamp_max=9999 limit=10 flags=reversed
+    ));
 
-test "parser.zig: Parser query filter successfully" {
-    const vectors = [_]struct {
-        string: []const u8,
-        operation: Parser.Operation,
-        result: tb.QueryFilter,
-    }{
-        .{
-            .string = "query_transfers user_data_128=1",
-            .operation = .query_transfers,
-            .result = tb.QueryFilter{
-                .user_data_128 = 1,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .ledger = 0,
-                .code = 0,
-                .timestamp_min = 0,
-                .timestamp_max = 0,
-                .limit = StateMachine.Operation.query_transfers.result_max(
-                    constants.message_body_size_max,
-                ),
-                .flags = .{
-                    .reversed = false,
-                },
-            },
-        },
-        .{
-            .string =
-            \\query_accounts user_data_128=1000
-            \\user_data_64=100 user_data_32=10
-            \\ledger=1 code=2
-            \\flags=reversed limit=10
-            \\timestamp_min=1 timestamp_max=9999;
-            \\
-            ,
-            .operation = .query_accounts,
-            .result = tb.QueryFilter{
-                .user_data_128 = 1000,
-                .user_data_64 = 100,
-                .user_data_32 = 10,
-                .ledger = 1,
-                .code = 2,
-                .timestamp_min = 1,
-                .timestamp_max = 9999,
-                .limit = 10,
-                .flags = .{
-                    .reversed = true,
-                },
-            },
-        },
-    };
+    // Unusual formatting.
+    try t.check("create_transfers id = 1", snap(@src(),
+        \\create_transfers id=1
+    ));
+    try t.check("create_transfers id =1", snap(@src(),
+        \\create_transfers id=1
+    ));
+    try t.check("  \t  \n  create_transfers id=1", snap(@src(),
+        \\create_transfers id=1
+    ));
+    try t.check("create_transfers id=1;", snap(@src(),
+        \\create_transfers id=1
+    ));
+    try t.check("create_transfers id=1 , id=2", snap(@src(),
+        \\create_transfers
+        \\ id=1
+        \\ id=2
+    ));
+    try t.check("create_transfers id=1 ,id=2", snap(@src(),
+        \\create_transfers
+        \\ id=1
+        \\ id=2
+    ));
+    try t.check(
+        \\
+        \\
+        \\      create_transfers
+        \\            id =    1
+        \\       user_data_128 = 12
+        \\ debit_account_id=1 credit_account_id        = 10
+        \\    ;
+        \\
+    , snap(@src(),
+        \\create_transfers id=1 debit_account_id=1 credit_account_id=10 user_data_128=12
+    ));
 
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
+    // Errors
+    try t.check("create_trans", snap(@src(),
+        \\error.OperationBad
+    ));
+    try t.check(
+        \\
+        \\
+        \\ create
+    , snap(@src(),
+        \\error.OperationBad
+    ));
+    try t.check("create_transfers 12", snap(@src(),
+        \\error.IdentifierBad
+    ));
+    try t.check("create_transfers =12", snap(@src(),
+        \\error.IdentifierBad
+    ));
+    try t.check("create_transfers id", snap(@src(),
+        \\error.KeyValuePairEqualMissing
+    ));
+    try t.check("create_transfers id=", snap(@src(),
+        \\error.ValueBad
+    ));
+    try t.check("create_transfers id=    ", snap(@src(),
+        \\error.ValueBad
+    ));
+    try t.check("create_transfers id=    ;", snap(@src(),
+        \\error.ValueBad
+    ));
+    try t.check("create_transfers id=[]", snap(@src(),
+        \\error.ValueBad
+    ));
+    try t.check("create_transfers id=abcd", snap(@src(),
+        \\error.KeyValuePairBad
+    ));
+    try t.check("create_transfers amount=0y1234", snap(@src(),
+        \\error.KeyValuePairBad
+    ));
+    try t.check("create_transfers amount=--0", snap(@src(),
+        \\error.KeyValuePairBad
+    ));
+    try t.check("create_transfers id=1 id=2", snap(@src(),
+        \\error.KeyDuplicate
+    ));
+    try t.check("create_transfers id=1; id=2", snap(@src(),
+        \\error.UnexpectedStatement
+    ));
+    try t.check("create_transfers idd=1", snap(@src(),
+        \\error.IdentifierBad
+    ));
 
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const statement = try Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
-
-        try std.testing.expectEqual(statement.operation, vector.operation);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.asBytes(&vector.result),
-        );
-    }
-}
-
-test "parser.zig: Parser multiple accounts successfully" {
-    const vectors = [_]struct {
-        string: []const u8,
-        result: [2]tb.Account,
-    }{
-        .{
-            .string = "create_accounts id=1, id=2",
-            .result = [2]tb.Account{
-                tb.Account{
-                    .id = 1,
-                    .debits_pending = 0,
-                    .debits_posted = 0,
-                    .credits_pending = 0,
-                    .credits_posted = 0,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .reserved = 0,
-                    .ledger = 0,
-                    .code = 0,
-                    .flags = .{},
-                    .timestamp = 0,
-                },
-                tb.Account{
-                    .id = 2,
-                    .debits_pending = 0,
-                    .debits_posted = 0,
-                    .credits_pending = 0,
-                    .credits_posted = 0,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .reserved = 0,
-                    .ledger = 0,
-                    .code = 0,
-                    .flags = .{},
-                    .timestamp = 0,
-                },
-            },
-        },
-    };
-
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const statement = try Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
-
-        try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.sliceAsBytes(&vector.result),
-        );
-    }
-}
-
-test "parser.zig: Parser odd but correct formatting" {
-    const vectors = [_]struct {
-        string: []const u8 = "",
-        result: []const tb.Transfer,
-    }{
-        // Space between key-value pair and equality
-        .{
-            .string = "create_transfers id = 1",
-            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
-        },
-        // Space only before equals sign
-        .{
-            .string = "create_transfers id =1",
-            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
-        },
-        // Whitespace before command
-        .{
-            .string = "  \t  \n  create_transfers id=1",
-            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
-        },
-        // Trailing semicolon
-        .{
-            .string = "create_transfers id=1;",
-            .result = &.{std.mem.zeroInit(tb.Transfer, .{ .id = 1 })},
-        },
-        // Spaces everywhere
-        .{
-            .string =
-            \\
-            \\
-            \\      create_transfers
-            \\            id =    1
-            \\       user_data_128 = 12
-            \\ debit_account_id=1 credit_account_id        = 10
-            \\    ;
-            \\
-            \\
-            ,
-            .result = &.{
-                std.mem.zeroInit(tb.Transfer, .{
-                    .id = 1,
-                    .debit_account_id = 1,
-                    .credit_account_id = 10,
-                    .user_data_128 = 12,
-                }),
-            },
-        },
-        // Multiple objects.
-        .{
-            .string = "create_transfers id=1, id=2",
-            .result = &.{
-                std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
-                std.mem.zeroInit(tb.Transfer, .{ .id = 2 }),
-            },
-        },
-        // Whitespace before comma.
-        .{
-            .string = "create_transfers id=1 , id=2",
-            .result = &.{
-                std.mem.zeroInit(tb.Transfer, .{ .id = 1 }),
-                std.mem.zeroInit(tb.Transfer, .{ .id = 2 }),
-            },
-        },
-    };
-
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const statement = try Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
-
-        try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(
-            u8,
-            statement.arguments.items,
-            std.mem.sliceAsBytes(vector.result),
-        );
-    }
-}
-
-test "parser.zig: Handle parsing errors" {
-    const vectors = [_]struct {
-        string: []const u8 = "",
-        result: anyerror,
-    }{
-        .{
-            .string = "create_trans",
-            .result = error.OperationBad,
-        },
-        .{
-            .string =
-            \\
-            \\
-            \\ create
-            ,
-            .result = error.OperationBad,
-        },
-        .{
-            .string = "create_transfers 12",
-            .result = error.IdentifierBad,
-        },
-        .{
-            .string = "create_transfers =12",
-            .result = error.IdentifierBad,
-        },
-        .{
-            .string = "create_transfers id",
-            .result = error.KeyValuePairEqualMissing,
-        },
-        .{
-            .string = "create_transfers id=",
-            .result = error.ValueBad,
-        },
-        .{
-            .string = "create_transfers id=    ",
-            .result = error.ValueBad,
-        },
-        .{
-            .string = "create_transfers id=    ;",
-            .result = error.ValueBad,
-        },
-        .{
-            .string = "create_transfers id=[]",
-            .result = error.ValueBad,
-        },
-        .{
-            .string = "create_transfers id=abcd",
-            .result = error.KeyValuePairBad,
-        },
-        .{
-            .string = "create_transfers amount=0y1234",
-            .result = error.KeyValuePairBad,
-        },
-        .{
-            .string = "create_transfers amount=--0",
-            .result = error.KeyValuePairBad,
-        },
-        .{
-            .string = "create_transfers id=1 id=2",
-            .result = error.KeyDuplicate,
-        },
-        .{
-            .string = "create_transfers id=1; id=2",
-            .result = error.UnexpectedStatement,
-        },
-        .{
-            .string = "create_transfers idd=1",
-            .result = error.IdentifierBad,
-        },
-    };
-
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const result = Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
-        try std.testing.expectError(vector.result, result);
-    }
-}
-
-test "parser.zig: Parser fails for operations not supporting multiple objects" {
-    const vectors = [_]struct {
-        string: []const u8,
-        result: anyerror,
-    }{
-        .{
-            .string = "get_account_transfers account_id=1, account_id=2",
-            .result = error.SliceOperationUnsupported,
-        },
-        .{
-            .string = "get_account_balances account_id=1, account_id=2",
-            .result = error.SliceOperationUnsupported,
-        },
-        .{
-            .string = "query_accounts code=1, code=2",
-            .result = error.SliceOperationUnsupported,
-        },
-        .{
-            .string = "query_transfers code=1, code=2",
-            .result = error.SliceOperationUnsupported,
-        },
-    };
-
-    for (vectors) |vector| {
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
-
-        const allocator = arena.allocator();
-
-        var arguments: Parser.ArgumentsList = try .initCapacity(
-            allocator,
-            constants.message_size_max,
-        );
-        errdefer arguments.deinit(allocator);
-
-        const result = Parser.parse_statement(
-            vector.string,
-            &null_terminal,
-            &arguments,
-        );
-
-        try std.testing.expectError(vector.result, result);
-    }
+    // Operations not supporting multiple objects:
+    try t.check("get_account_transfers account_id=1, account_id=2", snap(@src(),
+        \\error.SliceOperationUnsupported
+    ));
+    try t.check("get_account_balances account_id=1, account_id=2", snap(@src(),
+        \\error.SliceOperationUnsupported
+    ));
+    try t.check("query_accounts code=1, code=2", snap(@src(),
+        \\error.SliceOperationUnsupported
+    ));
+    try t.check("query_transfers code=1, code=2", snap(@src(),
+        \\error.SliceOperationUnsupported
+    ));
 }
