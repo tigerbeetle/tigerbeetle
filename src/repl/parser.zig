@@ -182,9 +182,17 @@ pub const Parser = struct {
                 inline for (@typeInfo(Value).@"struct".fields) |known_flag_field| {
                     if (std.mem.eql(u8, known_flag_field.name, flag_to_validate_trimmed)) {
                         if (comptime !std.mem.eql(u8, known_flag_field.name, "padding")) {
-                            // TODO Check for duplicates.
+                            const flag_value = &@field(validated_flags, known_flag_field.name);
+                            if (flag_value.*) {
+                                try parser.print_current_position();
+                                try parser.print_error(
+                                    "Duplicate flag set: \"{s}\".\n",
+                                    .{ known_flag_field.name },
+                                );
+                                return error.ParseError;
+                            }
                             // TODO Check for invalid flags.
-                            @field(validated_flags, known_flag_field.name) = true;
+                            flag_value.* = true;
                         }
                     }
                 }
@@ -872,6 +880,15 @@ test "Parser: snap" {
         \\                       ^ Near here.
         \\
         \\query_transfers expects a single object, but received multiple.
+        \\
+    ));
+    try t.check("create_transfers flags=linked|linked", snap(@src(),
+        \\Fail near line 1, column 36:
+        \\
+        \\create_transfers flags=linked|linked
+        \\                                    ^ Near here.
+        \\
+        \\Duplicate flag set: "linked".
         \\
     ));
 }
