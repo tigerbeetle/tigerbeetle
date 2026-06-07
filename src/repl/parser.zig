@@ -140,7 +140,8 @@ pub const Parser = struct {
                 '0'...'9',
                 'A'...'Z',
                 'a'...'z',
-                '-', '_',
+                '-',
+                '_',
                 => {
                     parser.offset += 1;
                 },
@@ -232,58 +233,13 @@ pub const Parser = struct {
         comptime operation: Operation,
         arguments: *std.ArrayListUnmanaged(u8),
     ) !void {
-        const default = switch (operation) {
-            .help, .none => return,
-            .create_accounts => std.mem.zeroInit(tb.Account, .{}),
-            .create_transfers => std.mem.zeroInit(tb.Transfer, .{}),
-            .lookup_accounts, .lookup_transfers => LookupSyntaxTree{ .id = 0 },
-            .get_account_transfers,
-            .get_account_balances,
-            => |operation_comptime| tb.AccountFilter{
-                .account_id = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .code = 0,
-                .timestamp_min = 0,
-                .timestamp_max = 0,
-                .limit = operation_comptime.state_machine_op().result_max(
-                    constants.message_body_size_max,
-                ),
-                .flags = .{
-                    .credits = true,
-                    .debits = true,
-                    .reversed = false,
-                },
-            },
-            .query_accounts,
-            .query_transfers,
-            => |operation_comptime| tb.QueryFilter{
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .ledger = 0,
-                .code = 0,
-                .timestamp_min = 0,
-                .timestamp_max = 0,
-                .limit = operation_comptime.state_machine_op().result_max(
-                    constants.message_body_size_max,
-                ),
-                .flags = .{
-                    .reversed = false,
-                },
-            },
-        };
+        const default = object_default(operation.state_machine_op());
         var object = default;
 
         const ObjectField = std.meta.FieldEnum(@TypeOf(object));
         var object_fields = std.enums.EnumSet(ObjectField).initEmpty();
 
         while (parser.offset < parser.input.len) {
-            parser.eat_whitespace();
-            // Always need to check i against length in case we've hit the end. FIXME
-            if (parser.offset >= parser.input.len) break;
-
             if (parser.parse_syntax_char(';')) break;
 
             // Expect comma separating objects.
@@ -438,6 +394,8 @@ pub const Parser = struct {
         };
 
         switch (operation) {
+            .none => {},
+            .help => {},
             inline else => |operation_comptime| {
                 try parser.parse_arguments(operation_comptime, arguments);
             },
@@ -449,6 +407,57 @@ pub const Parser = struct {
         };
     }
 };
+
+fn ObjectType(comptime operation: StateMachine.Operation) type {
+    return switch (operation) {
+        .lookup_accounts => Parser.LookupSyntaxTree,
+        .lookup_transfers => Parser.LookupSyntaxTree,
+        else => operation.EventType(),
+    };
+}
+
+fn object_default(comptime operation: StateMachine.Operation) ObjectType(operation) {
+    return switch (operation) {
+        .create_accounts => std.mem.zeroInit(tb.Account, .{}),
+        .create_transfers => std.mem.zeroInit(tb.Transfer, .{}),
+        .lookup_accounts,
+        .lookup_transfers,
+        => Parser.LookupSyntaxTree{ .id = 0 },
+        .get_account_transfers,
+        .get_account_balances,
+        => tb.AccountFilter{
+            .account_id = 0,
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .code = 0,
+            .timestamp_min = 0,
+            .timestamp_max = 0,
+            .limit = operation.result_max(constants.message_body_size_max),
+            .flags = .{
+                .credits = true,
+                .debits = true,
+                .reversed = false,
+            },
+        },
+        .query_accounts,
+        .query_transfers,
+        => tb.QueryFilter{
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .ledger = 0,
+            .code = 0,
+            .timestamp_min = 0,
+            .timestamp_max = 0,
+            .limit = operation.result_max(constants.message_body_size_max),
+            .flags = .{
+                .reversed = false,
+            },
+        },
+        else => unreachable,
+    };
+}
 
 test "Parser: snap" {
     const stdx = @import("stdx");
@@ -528,14 +537,6 @@ test "Parser: snap" {
                     }
                 }
             }
-        }
-
-        fn ObjectType(comptime operation: StateMachine.Operation) type {
-            return switch (operation) {
-                .lookup_accounts => Parser.LookupSyntaxTree,
-                .lookup_transfers => Parser.LookupSyntaxTree,
-                else => operation.EventType(),
-            };
         }
     };
 
