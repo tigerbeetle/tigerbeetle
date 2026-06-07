@@ -15,8 +15,8 @@ pub const Terminal = struct {
     mode_start: ?ModeStart,
     stdin: std.io.BufferedReader(4096, std.fs.File.Reader),
     // These are made optional so that printing on failure can be disabled in tests expecting them.
-    stdout: ?std.fs.File.Writer,
-    stderr: ?std.fs.File.Writer,
+    stdout: std.fs.File.Writer,
+    stderr: std.fs.File.Writer,
 
     pub fn init(
         self: *Terminal,
@@ -64,9 +64,7 @@ pub const Terminal = struct {
         comptime format: []const u8,
         arguments: anytype,
     ) !void {
-        if (self.stdout) |stdout| {
-            try stdout.print(format, arguments);
-        }
+        try self.stdout.print(format, arguments);
     }
 
     pub fn print_error(
@@ -77,9 +75,7 @@ pub const Terminal = struct {
         comptime assert(format.len > 0);
         comptime assert(format[format.len - 1] == '\n' or std.mem.eql(u8, format, " "));
 
-        if (self.stderr) |stderr| {
-            try stderr.print(format, arguments);
-        }
+        try self.stderr.print(format, arguments);
     }
 
     pub fn read_user_input(self: *Terminal) !?UserInput {

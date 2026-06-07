@@ -8,12 +8,10 @@ const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage);
 const tb = vsr.tigerbeetle;
 
-const Terminal = @import("terminal.zig").Terminal;
-
 pub const Parser = struct {
     input: []const u8,
     offset: usize = 0,
-    terminal: *const Terminal,
+    stderr: std.io.AnyWriter,
 
     pub const Error = error{
         IdentifierBad,
@@ -63,6 +61,13 @@ pub const Parser = struct {
         arguments: *std.ArrayListUnmanaged(u8),
     };
 
+    fn print_error(parser: *const Parser, comptime format: []const u8, arguments: anytype) !void {
+        comptime assert(format.len > 0);
+        comptime assert(format[format.len - 1] == '\n' or std.mem.eql(u8, format, " "));
+
+        return parser.stderr.print(format, arguments);
+    }
+
     fn print_current_position(parser: *const Parser) !void {
         const target = target: {
             var position_cursor: usize = 0;
@@ -82,17 +87,17 @@ pub const Parser = struct {
             } else unreachable;
         };
 
-        try parser.terminal.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
+        try parser.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
             target.position_line,
             target.position_column,
             target.line,
         });
         var column = target.position_column;
         while (column > 0) {
-            try parser.terminal.print_error(" ", .{});
+            try parser.print_error(" ", .{});
             column -= 1;
         }
-        try parser.terminal.print_error("^ Near here.\n\n", .{});
+        try parser.print_error("^ Near here.\n\n", .{});
     }
 
     fn eat_whitespace(parser: *Parser) void {
@@ -147,7 +152,7 @@ pub const Parser = struct {
                 var copy = Parser{
                     .input = parser.input,
                     .offset = parser.offset,
-                    .terminal = parser.terminal,
+                    .stderr = parser.stderr,
                 };
                 copy.eat_whitespace();
                 if (copy.offset < parser.input.len and parser.input[copy.offset] == '|') {
@@ -204,13 +209,13 @@ pub const Parser = struct {
 
         if (@hasField(Object, "reserved") and field == .reserved) {
             try parser.print_current_position();
-            try parser.terminal.print_error("Unexpected key 'reserved'.\n", .{});
+            try parser.print_error("Unexpected key 'reserved'.\n", .{});
             return Error.KeyValuePairBad;
         }
 
         @field(object, @tagName(field)) = parse_int(Value, value_string) catch {
             try parser.print_current_position();
-            try parser.terminal.print_error(
+            try parser.print_error(
                 "Invalid value '{s}'; expected {s} for key {s}.\n",
                 .{ value_string, @typeName(Value), @tagName(field) },
             );
@@ -305,7 +310,7 @@ pub const Parser = struct {
                 const state_machine_op = operation.state_machine_op();
                 if (!state_machine_op.is_batchable()) {
                     try parser.print_current_position();
-                    try parser.terminal.print_error(
+                    try parser.print_error(
                         "{s} expects a single object, but received multiple.\n",
                         .{@tagName(operation)},
                     );
@@ -322,7 +327,7 @@ pub const Parser = struct {
 
             if (id_result.len == 0) {
                 try parser.print_current_position();
-                try parser.terminal.print_error(
+                try parser.print_error(
                     "Expected key starting key-value pair. e.g. `id=1`\n",
                     .{},
                 );
@@ -331,7 +336,7 @@ pub const Parser = struct {
 
             const field = std.meta.stringToEnum(ObjectField, id_result) orelse {
                 try parser.print_current_position();
-                try parser.terminal.print_error(
+                try parser.print_error(
                     "Unknown key: \"{s}\".\n",
                     .{id_result},
                 );
@@ -339,7 +344,7 @@ pub const Parser = struct {
             };
             if (object_fields.contains(field)) {
                 try parser.print_current_position();
-                try parser.terminal.print_error(
+                try parser.print_error(
                     "Duplicate field {s} for single object. Separate objects with \",\".\n",
                     .{@tagName(field)},
                 );
@@ -349,7 +354,7 @@ pub const Parser = struct {
             // Grab =.
             if (!parser.parse_syntax_char('=')) {
                 try parser.print_current_position();
-                try parser.terminal.print_error(
+                try parser.print_error(
                     "Expected equal sign after key '{s}' in key-value" ++
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
@@ -362,7 +367,7 @@ pub const Parser = struct {
 
             if (value_result.len == 0) {
                 try parser.print_current_position();
-                try parser.terminal.print_error(
+                try parser.print_error(
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
                     .{},
                 );
@@ -390,7 +395,7 @@ pub const Parser = struct {
         parser.eat_whitespace();
         if (parser.offset < parser.input.len) {
             try parser.print_current_position();
-            try parser.terminal.print_error("unexpected statement\n", .{});
+            try parser.print_error("unexpected statement\n", .{});
             return error.UnexpectedStatement;
         }
     }
@@ -406,12 +411,15 @@ pub const Parser = struct {
     // For example:
     //   create_accounts id=1 code=2 ledger=3, id = 2 code= 2 ledger =3;
     //   create_accounts flags=linked | debits_must_not_exceed_credits ;
+    //
+    // TODO(zig): Replace the (implicit) anyerror with a concrete:
+    // (std.io.Writer.Error || Error).
     pub fn parse_statement(
         input: []const u8,
-        terminal: *const Terminal,
+        stderr: std.io.AnyWriter,
         arguments: *std.ArrayListUnmanaged(u8),
-    ) (error{OutOfMemory} || std.fs.File.WriteError || Error)!Statement {
-        var parser = Parser{ .input = input, .terminal = terminal };
+    ) !Statement {
+        var parser = Parser{ .input = input, .stderr = stderr };
         parser.eat_whitespace();
         const after_whitespace = parser.offset;
         const operation_identifier = parser.parse_identifier();
@@ -430,7 +438,7 @@ pub const Parser = struct {
             // token.
             parser.offset = after_whitespace;
             try parser.print_current_position();
-            try parser.terminal.print_error(
+            try parser.print_error(
                 "Operation must be " ++
                     comptime operations: {
                         var names: []const u8 = "";
@@ -461,13 +469,6 @@ pub const Parser = struct {
     }
 };
 
-const null_terminal = Terminal{
-    .mode_start = null,
-    .stdin = undefined,
-    .stderr = null,
-    .stdout = null,
-};
-
 test "Parser: snap" {
     const stdx = @import("stdx");
     const snap = stdx.Snap.snap_fn("src");
@@ -487,8 +488,9 @@ test "Parser: snap" {
 
             try t.body.ensureTotalCapacity(std.testing.allocator, constants.message_size_max);
 
-            const statement = Parser.parse_statement(string, &null_terminal, &t.body) catch |err| {
-                try want.diff_fmt("{}", .{err});
+            const stderr_writer = t.stderr.writer(std.testing.allocator);
+            const statement = Parser.parse_statement(string, stderr_writer.any(), &t.body) catch {
+                try want.diff(t.stderr.items);
                 return;
             };
 
@@ -690,66 +692,180 @@ test "Parser: snap" {
 
     // Errors
     try t.check("create_trans", snap(@src(),
-        \\error.OperationBad
+        \\Fail near line 1, column 0:
+        \\
+        \\create_trans
+        \\^ Near here.
+        \\
+        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers. Got: 'create_trans'.
+        \\
     ));
     try t.check(
         \\
         \\
         \\ create
     , snap(@src(),
-        \\error.OperationBad
+        \\Fail near line 3, column 1:
+        \\
+        \\ create
+        \\ ^ Near here.
+        \\
+        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers. Got: 'create'.
+        \\
     ));
     try t.check("create_transfers 12", snap(@src(),
-        \\error.IdentifierBad
+        \\Fail near line 1, column 17:
+        \\
+        \\create_transfers 12
+        \\                 ^ Near here.
+        \\
+        \\Expected key starting key-value pair. e.g. `id=1`
+        \\
     ));
     try t.check("create_transfers =12", snap(@src(),
-        \\error.IdentifierBad
+        \\Fail near line 1, column 17:
+        \\
+        \\create_transfers =12
+        \\                 ^ Near here.
+        \\
+        \\Expected key starting key-value pair. e.g. `id=1`
+        \\
     ));
     try t.check("create_transfers id", snap(@src(),
-        \\error.KeyValuePairEqualMissing
+        \\Fail near line 1, column 19:
+        \\
+        \\create_transfers id
+        \\                   ^ Near here.
+        \\
+        \\Expected equal sign after key 'id' in key-value pair. e.g. `id=1`.
+        \\
     ));
     try t.check("create_transfers id=", snap(@src(),
-        \\error.ValueBad
+        \\Fail near line 1, column 20:
+        \\
+        \\create_transfers id=
+        \\                    ^ Near here.
+        \\
+        \\Expected value after equal sign in key-value pair. e.g. `id=1`.
+        \\
     ));
     try t.check("create_transfers id=    ", snap(@src(),
-        \\error.ValueBad
+        \\Fail near line 1, column 24:
+        \\
+        \\create_transfers id=    
+        \\                        ^ Near here.
+        \\
+        \\Expected value after equal sign in key-value pair. e.g. `id=1`.
+        \\
     ));
     try t.check("create_transfers id=    ;", snap(@src(),
-        \\error.ValueBad
+        \\Fail near line 1, column 24:
+        \\
+        \\create_transfers id=    ;
+        \\                        ^ Near here.
+        \\
+        \\Expected value after equal sign in key-value pair. e.g. `id=1`.
+        \\
     ));
     try t.check("create_transfers id=[]", snap(@src(),
-        \\error.ValueBad
+        \\Fail near line 1, column 20:
+        \\
+        \\create_transfers id=[]
+        \\                    ^ Near here.
+        \\
+        \\Expected value after equal sign in key-value pair. e.g. `id=1`.
+        \\
     ));
     try t.check("create_transfers id=abcd", snap(@src(),
-        \\error.KeyValuePairBad
+        \\Fail near line 1, column 24:
+        \\
+        \\create_transfers id=abcd
+        \\                        ^ Near here.
+        \\
+        \\Invalid value 'abcd'; expected u128 for key id.
+        \\
     ));
     try t.check("create_transfers amount=0y1234", snap(@src(),
-        \\error.KeyValuePairBad
+        \\Fail near line 1, column 30:
+        \\
+        \\create_transfers amount=0y1234
+        \\                              ^ Near here.
+        \\
+        \\Invalid value '0y1234'; expected u128 for key amount.
+        \\
     ));
     try t.check("create_transfers amount=--0", snap(@src(),
-        \\error.KeyValuePairBad
+        \\Fail near line 1, column 27:
+        \\
+        \\create_transfers amount=--0
+        \\                           ^ Near here.
+        \\
+        \\Invalid value '--0'; expected u128 for key amount.
+        \\
     ));
     try t.check("create_transfers id=1 id=2", snap(@src(),
-        \\error.KeyDuplicate
+        \\Fail near line 1, column 24:
+        \\
+        \\create_transfers id=1 id=2
+        \\                        ^ Near here.
+        \\
+        \\Duplicate field id for single object. Separate objects with ",".
+        \\
     ));
     try t.check("create_transfers id=1; id=2", snap(@src(),
-        \\error.UnexpectedStatement
+        \\Fail near line 1, column 23:
+        \\
+        \\create_transfers id=1; id=2
+        \\                       ^ Near here.
+        \\
+        \\unexpected statement
+        \\
     ));
     try t.check("create_transfers idd=1", snap(@src(),
-        \\error.IdentifierBad
+        \\Fail near line 1, column 20:
+        \\
+        \\create_transfers idd=1
+        \\                    ^ Near here.
+        \\
+        \\Unknown key: "idd".
+        \\
     ));
 
     // Operations not supporting multiple objects:
     try t.check("get_account_transfers account_id=1, account_id=2", snap(@src(),
-        \\error.SliceOperationUnsupported
+        \\Fail near line 1, column 35:
+        \\
+        \\get_account_transfers account_id=1, account_id=2
+        \\                                   ^ Near here.
+        \\
+        \\get_account_transfers expects a single object, but received multiple.
+        \\
     ));
     try t.check("get_account_balances account_id=1, account_id=2", snap(@src(),
-        \\error.SliceOperationUnsupported
+        \\Fail near line 1, column 34:
+        \\
+        \\get_account_balances account_id=1, account_id=2
+        \\                                  ^ Near here.
+        \\
+        \\get_account_balances expects a single object, but received multiple.
+        \\
     ));
     try t.check("query_accounts code=1, code=2", snap(@src(),
-        \\error.SliceOperationUnsupported
+        \\Fail near line 1, column 22:
+        \\
+        \\query_accounts code=1, code=2
+        \\                      ^ Near here.
+        \\
+        \\query_accounts expects a single object, but received multiple.
+        \\
     ));
     try t.check("query_transfers code=1, code=2", snap(@src(),
-        \\error.SliceOperationUnsupported
+        \\Fail near line 1, column 23:
+        \\
+        \\query_transfers code=1, code=2
+        \\                       ^ Near here.
+        \\
+        \\query_transfers expects a single object, but received multiple.
+        \\
     ));
 }
