@@ -206,7 +206,7 @@ pub const Parser = struct {
         @field(object, @tagName(field)) = parse_int(Value, value_string) catch {
             try parser.print_current_position();
             try parser.print_error(
-                "Invalid value '{s}'; expected {s} for key {s}.\n",
+                "Invalid value \"{s}\"; expected {s} for key \"{s}\".\n",
                 .{ value_string, @typeName(Value), @tagName(field) },
             );
             return error.ParseError;
@@ -326,10 +326,7 @@ pub const Parser = struct {
 
             const field = std.meta.stringToEnum(ObjectField, id_result) orelse {
                 try parser.print_current_position();
-                try parser.print_error(
-                    "Unknown key: \"{s}\".\n",
-                    .{id_result},
-                );
+                try parser.print_error("Unknown key: \"{s}\".\n", .{id_result});
                 return error.ParseError;
             };
             if (object_fields.contains(field)) {
@@ -345,7 +342,7 @@ pub const Parser = struct {
             if (!parser.parse_syntax_char('=')) {
                 try parser.print_current_position();
                 try parser.print_error(
-                    "Expected equal sign after key '{s}' in key-value" ++
+                    "Expected equal sign after key \"{s}\" in key-value" ++
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
                 );
@@ -373,7 +370,7 @@ pub const Parser = struct {
                     value_result,
                 ),
             }
-
+            assert(!object_fields.contains(field));
             object_fields.insert(field);
         }
 
@@ -440,9 +437,10 @@ pub const Parser = struct {
                                 @tagName(operation);
                         }
                         break :operations names;
-                    } ++ ". Got: '{s}'.\n",
-                .{operation_identifier},
+                    } ++ ".\n",
+                .{},
             );
+            try parser.print_error("Got: \"{s}\".\n", .{operation_identifier});
             return error.ParseError;
         };
 
@@ -687,7 +685,8 @@ test "Parser: snap" {
         \\create_trans
         \\^ Near here.
         \\
-        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers. Got: 'create_trans'.
+        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers.
+        \\Got: "create_trans".
         \\
     ));
     try t.check(
@@ -700,7 +699,8 @@ test "Parser: snap" {
         \\ create
         \\ ^ Near here.
         \\
-        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers. Got: 'create'.
+        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers.
+        \\Got: "create".
         \\
     ));
     try t.check("create_transfers 12", snap(@src(),
@@ -727,7 +727,7 @@ test "Parser: snap" {
         \\create_transfers id
         \\                   ^ Near here.
         \\
-        \\Expected equal sign after key 'id' in key-value pair. e.g. `id=1`.
+        \\Expected equal sign after key "id" in key-value pair. e.g. `id=1`.
         \\
     ));
     try t.check("create_transfers id=", snap(@src(),
@@ -772,7 +772,7 @@ test "Parser: snap" {
         \\create_transfers id=abcd
         \\                        ^ Near here.
         \\
-        \\Invalid value 'abcd'; expected u128 for key id.
+        \\Invalid value "abcd"; expected u128 for key "id".
         \\
     ));
     try t.check("create_transfers amount=0y1234", snap(@src(),
@@ -781,7 +781,7 @@ test "Parser: snap" {
         \\create_transfers amount=0y1234
         \\                              ^ Near here.
         \\
-        \\Invalid value '0y1234'; expected u128 for key amount.
+        \\Invalid value "0y1234"; expected u128 for key "amount".
         \\
     ));
     try t.check("create_transfers amount=--0", snap(@src(),
@@ -790,7 +790,7 @@ test "Parser: snap" {
         \\create_transfers amount=--0
         \\                           ^ Near here.
         \\
-        \\Invalid value '--0'; expected u128 for key amount.
+        \\Invalid value "--0"; expected u128 for key "amount".
         \\
     ));
     try t.check("create_transfers id=1 id=2", snap(@src(),
