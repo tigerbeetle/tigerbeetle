@@ -13,17 +13,7 @@ pub const Parser = struct {
     offset: usize = 0,
     stderr: std.io.AnyWriter,
 
-    pub const Error = error{
-        IdentifierBad,
-        OperationBad,
-        ValueBad,
-        KeyInvalid,
-        KeyDuplicate,
-        KeyValuePairBad,
-        KeyValuePairEqualMissing,
-        SliceOperationUnsupported,
-        UnexpectedStatement,
-    };
+    pub const Error = error{ParseError};
 
     pub const Operation = enum {
         none,
@@ -210,7 +200,7 @@ pub const Parser = struct {
         if (@hasField(Object, "reserved") and field == .reserved) {
             try parser.print_current_position();
             try parser.print_error("Unexpected key 'reserved'.\n", .{});
-            return Error.KeyValuePairBad;
+            return error.ParseError;
         }
 
         @field(object, @tagName(field)) = parse_int(Value, value_string) catch {
@@ -219,7 +209,7 @@ pub const Parser = struct {
                 "Invalid value '{s}'; expected {s} for key {s}.\n",
                 .{ value_string, @typeName(Value), @tagName(field) },
             );
-            return Error.KeyValuePairBad;
+            return error.ParseError;
         };
     }
 
@@ -314,7 +304,7 @@ pub const Parser = struct {
                         "{s} expects a single object, but received multiple.\n",
                         .{@tagName(operation)},
                     );
-                    return error.SliceOperationUnsupported;
+                    return error.ParseError;
                 }
 
                 // Reset object.
@@ -331,7 +321,7 @@ pub const Parser = struct {
                     "Expected key starting key-value pair. e.g. `id=1`\n",
                     .{},
                 );
-                return Error.IdentifierBad;
+                return error.ParseError;
             }
 
             const field = std.meta.stringToEnum(ObjectField, id_result) orelse {
@@ -340,7 +330,7 @@ pub const Parser = struct {
                     "Unknown key: \"{s}\".\n",
                     .{id_result},
                 );
-                return Error.IdentifierBad;
+                return error.ParseError;
             };
             if (object_fields.contains(field)) {
                 try parser.print_current_position();
@@ -348,7 +338,7 @@ pub const Parser = struct {
                     "Duplicate field {s} for single object. Separate objects with \",\".\n",
                     .{@tagName(field)},
                 );
-                return Error.KeyDuplicate;
+                return error.ParseError;
             }
 
             // Grab =.
@@ -359,7 +349,7 @@ pub const Parser = struct {
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
                 );
-                return Error.KeyValuePairEqualMissing;
+                return error.ParseError;
             }
 
             // Grab value.
@@ -371,7 +361,7 @@ pub const Parser = struct {
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
                     .{},
                 );
-                return Error.ValueBad;
+                return error.ParseError;
             }
 
             // Match key to a field in the struct.
@@ -396,7 +386,7 @@ pub const Parser = struct {
         if (parser.offset < parser.input.len) {
             try parser.print_current_position();
             try parser.print_error("unexpected statement\n", .{});
-            return error.UnexpectedStatement;
+            return error.ParseError;
         }
     }
 
@@ -453,7 +443,7 @@ pub const Parser = struct {
                     } ++ ". Got: '{s}'.\n",
                 .{operation_identifier},
             );
-            return Error.OperationBad;
+            return error.ParseError;
         };
 
         switch (operation) {
