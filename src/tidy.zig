@@ -425,6 +425,9 @@ fn tidy_line(file: SourceFile, line: []const u8, line_index: usize, errors: *Err
         // Flag snapshot test.
         if (std.mem.endsWith(u8, file.path, "flags.zig") and
             std.mem.startsWith(u8, string_value, "error: subcommand required")) return;
+
+        // REPL parser snapshot tests.
+        if (std.mem.endsWith(u8, file.path, "parser.zig")) return;
     }
 
     errors.add_long_line(file, line_index);

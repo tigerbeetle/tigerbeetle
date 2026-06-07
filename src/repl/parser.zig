@@ -581,11 +581,14 @@ test "Parser: snap" {
     try t.check("create_transfers id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6", snap(@src(),
         \\create_transfers id=214850178493633095719753766415838275046
     ));
-    try t.check("create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;", snap(@src(),
-        \\create_transfers
-        \\ id=1 debit_account_id=2
-        \\ id=2 credit_account_id=1
-    ));
+    try t.check(
+        "create_transfers id=1 debit_account_id=2, id=2 credit_account_id = 1;",
+        snap(@src(),
+            \\create_transfers
+            \\ id=1 debit_account_id=2
+            \\ id=2 credit_account_id=1
+        ),
+    );
 
     // create_accounts
     try t.check("create_accounts id=1", snap(@src(),
