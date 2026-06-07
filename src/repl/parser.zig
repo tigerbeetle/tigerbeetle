@@ -136,33 +136,26 @@ pub const Parser = struct {
         const after_whitespace = parser.offset;
 
         while (parser.offset < parser.input.len) {
-            const c = parser.input[parser.offset];
-            if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '|' or c == '-')) {
-                // Allows flag fields to have whitespace before a '|'.
-                var copy = Parser{
-                    .input = parser.input,
-                    .offset = parser.offset,
-                    .stderr = parser.stderr,
-                };
-                copy.eat_whitespace();
-                if (copy.offset < parser.input.len and parser.input[copy.offset] == '|') {
-                    parser.offset = copy.offset;
-                    continue;
-                }
-
-                // Allow flag fields to have whitespace after a '|'.
-                if (copy.offset < parser.input.len and
-                    parser.offset > 0 and
-                    parser.input[parser.offset - 1] == '|')
-                {
-                    parser.offset = copy.offset;
-                    continue;
-                }
-
-                break;
+            switch (parser.input[parser.offset]) {
+                '0'...'9',
+                'A'...'Z',
+                'a'...'z',
+                '-', '_',
+                => {
+                    parser.offset += 1;
+                },
+                else => {
+                    var copy = parser.*;
+                    // Flags may have whitespace on either side of a '|'.
+                    copy.eat_whitespace();
+                    if (copy.parse_syntax_char('|')) {
+                        copy.eat_whitespace();
+                        parser.offset = copy.offset;
+                        continue;
+                    }
+                    break;
+                },
             }
-
-            parser.offset += 1;
         }
 
         return parser.input[after_whitespace..parser.offset];
@@ -818,6 +811,24 @@ test "Parser: snap" {
         \\                    ^ Near here.
         \\
         \\Unknown key: "idd".
+        \\
+    ));
+    try t.check("query_accounts user_data_128=1|,", snap(@src(),
+        \\Fail near line 1, column 31:
+        \\
+        \\query_accounts user_data_128=1|,
+        \\                               ^ Near here.
+        \\
+        \\Invalid value "1|"; expected u128 for key "user_data_128".
+        \\
+    ));
+    try t.check("query_accounts user_data_128=1||", snap(@src(),
+        \\Fail near line 1, column 32:
+        \\
+        \\query_accounts user_data_128=1||
+        \\                                ^ Near here.
+        \\
+        \\Invalid value "1||"; expected u128 for key "user_data_128".
         \\
     ));
 
