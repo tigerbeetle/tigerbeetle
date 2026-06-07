@@ -19,7 +19,7 @@ pub const Terminal = struct {
     stderr: std.fs.File.Writer,
 
     pub fn init(
-        self: *Terminal,
+        terminal: *Terminal,
         interactive: bool,
     ) !void {
         const stdout = std.io.getStdOut();
@@ -51,7 +51,7 @@ pub const Terminal = struct {
             }
         }
 
-        self.* = Terminal{
+        terminal.* = Terminal{
             .mode_start = mode_start,
             .stdin = std.io.bufferedReader(stdin.reader()),
             .stdout = stdout.writer(),
@@ -60,27 +60,27 @@ pub const Terminal = struct {
     }
 
     pub fn print(
-        self: *const Terminal,
+        terminal: *const Terminal,
         comptime format: []const u8,
         arguments: anytype,
     ) !void {
-        try self.stdout.print(format, arguments);
+        try terminal.stdout.print(format, arguments);
     }
 
     pub fn print_error(
-        self: *const Terminal,
+        terminal: *const Terminal,
         comptime format: []const u8,
         arguments: anytype,
     ) !void {
         comptime assert(format.len > 0);
         comptime assert(format[format.len - 1] == '\n' or std.mem.eql(u8, format, " "));
 
-        try self.stderr.print(format, arguments);
+        try terminal.stderr.print(format, arguments);
     }
 
-    pub fn read_user_input(self: *Terminal) !?UserInput {
-        assert(self.mode_start != null);
-        const stdin = self.stdin.reader();
+    pub fn read_user_input(terminal: *Terminal) !?UserInput {
+        assert(terminal.mode_start != null);
+        const stdin = terminal.stdin.reader();
 
         // NB: Many control codes have names unrelated to their modern function.
         // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
@@ -162,11 +162,11 @@ pub const Terminal = struct {
         }
     }
 
-    pub fn prompt_mode_set(self: *const Terminal) anyerror!void {
-        assert(self.mode_start != null);
+    pub fn prompt_mode_set(terminal: *const Terminal) anyerror!void {
+        assert(terminal.mode_start != null);
         const stdin = std.io.getStdIn();
         if (builtin.os.tag == .windows) {
-            const console_mode = self.mode_start.?;
+            const console_mode = terminal.mode_start.?;
 
             var mode_stdin: u32 = console_mode.stdin;
             mode_stdin &= ~@intFromEnum(WindowsConsoleMode.Input.enable_processed_input);
@@ -188,7 +188,7 @@ pub const Terminal = struct {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
         } else {
-            var termios_new = self.mode_start.?;
+            var termios_new = terminal.mode_start.?;
             termios_new.lflag.ECHO = false;
             termios_new.lflag.ISIG = false;
             termios_new.lflag.ICANON = false;
@@ -198,11 +198,11 @@ pub const Terminal = struct {
         }
     }
 
-    pub fn prompt_mode_unset(self: *const Terminal) !void {
-        assert(self.mode_start != null);
+    pub fn prompt_mode_unset(terminal: *const Terminal) !void {
+        assert(terminal.mode_start != null);
         const stdin = std.io.getStdIn();
         if (builtin.os.tag == .windows) {
-            const console_mode = self.mode_start.?;
+            const console_mode = terminal.mode_start.?;
             if (windows.kernel32.SetConsoleMode(stdin.handle, console_mode.stdin) == 0) {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
@@ -211,25 +211,25 @@ pub const Terminal = struct {
                 return windows.unexpectedError(windows.kernel32.GetLastError());
             }
         } else {
-            const termios = self.mode_start.?;
+            const termios = terminal.mode_start.?;
             try posix.tcsetattr(std.io.getStdIn().handle, .NOW, termios);
         }
     }
 
     fn get_cursor_position(
-        self: *Terminal,
+        terminal: *Terminal,
     ) !struct { row: usize, column: usize } {
         // Obtaining the cursor's position relies on sending a request payload to stdout. The
         // response is read from stdin, but it may have been altered by user input, so we keep
         // retrying until successful.
-        const stdin = self.stdin.reader();
+        const stdin = terminal.stdin.reader();
         while (true) {
             // The terminal needs to read control codes, but the exact input capacity
             // is unknown; this should be more than enough.
             var buffer: [256]u8 = undefined;
             var buffer_in = std.io.fixedBufferStream(&buffer);
             // The response is of the form `<ESC>[{row};{col}R`.
-            try self.print("\x1b[6n", .{});
+            try terminal.print("\x1b[6n", .{});
             buffer_in.reset();
             stdin.streamUntilDelimiter(
                 buffer_in.writer(),
@@ -276,16 +276,16 @@ pub const Terminal = struct {
     }
 
     pub fn get_screen(
-        self: *Terminal,
+        terminal: *Terminal,
     ) !Screen {
         // We move the cursor to a location that is unlikely to exist (2^16th row and column).
         // Terminals usually handle this by placing the cursor at their end position, which we can
         // use to obtain its resolution/size.
-        const cursor_start = try self.get_cursor_position();
-        try self.print("\x1b[{};{}H", .{ std.math.maxInt(u16), std.math.maxInt(u16) });
+        const cursor_start = try terminal.get_cursor_position();
+        try terminal.print("\x1b[{};{}H", .{ std.math.maxInt(u16), std.math.maxInt(u16) });
 
-        const cursor_end = try self.get_cursor_position();
-        try self.print("\x1b[{};{}H", .{ cursor_start.row, cursor_start.column });
+        const cursor_end = try terminal.get_cursor_position();
+        try terminal.print("\x1b[{};{}H", .{ cursor_start.row, cursor_start.column });
 
         return Screen{
             .rows = cursor_end.row,
@@ -302,21 +302,21 @@ const Screen = struct {
     cursor_row: usize,
     cursor_column: usize,
 
-    pub fn update_cursor_position(self: *Screen, delta: isize) void {
+    pub fn update_cursor_position(screen: *Screen, delta: isize) void {
         if (delta == 0) return;
 
         // Rows and columns in terminals are one-based indexed. For simple manipulation across the
         // grid, we map it to a zero-based index array of cells. When experiencing overflows on
         // either end, we always saturate them such that they remain within the first or last row of
         // the terminal (assuming a fixed size).
-        const cell_total: isize = @intCast(self.rows * self.columns);
+        const cell_total: isize = @intCast(screen.rows * screen.columns);
         const cell_index_current: isize = @intCast(
-            (self.cursor_row - 1) * self.columns + (self.cursor_column - 1),
+            (screen.cursor_row - 1) * screen.columns + (screen.cursor_column - 1),
         );
         assert(cell_index_current >= 0 and cell_index_current < cell_total);
 
         const cell_index_last: isize = @intCast(cell_total - 1);
-        const column_total: isize = @intCast(self.columns);
+        const column_total: isize = @intCast(screen.columns);
 
         var cell_index_after_delta: isize = cell_index_current + delta;
         if (cell_index_after_delta > cell_index_last) {
@@ -332,11 +332,11 @@ const Screen = struct {
         const row_after_delta = @divTrunc(cell_index_after_delta, column_total) + 1;
         const column_after_delta = @rem(cell_index_after_delta, column_total) + 1;
 
-        assert(row_after_delta >= 1 and row_after_delta <= self.rows);
-        assert(column_after_delta >= 1 and column_after_delta <= self.columns);
+        assert(row_after_delta >= 1 and row_after_delta <= screen.rows);
+        assert(column_after_delta >= 1 and column_after_delta <= screen.columns);
 
-        self.cursor_row = @intCast(row_after_delta);
-        self.cursor_column = @intCast(column_after_delta);
+        screen.cursor_row = @intCast(row_after_delta);
+        screen.cursor_column = @intCast(column_after_delta);
     }
 };
 
