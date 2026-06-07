@@ -581,7 +581,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             const statement = Parser.parse_statement(
                 input,
-                &repl.terminal,
+                repl.terminal.stderr.any(),
                 arguments,
             ) catch |err| {
                 switch (err) {
@@ -604,25 +604,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     // An unexpected error for which we do
                     // want the stacktrace.
-                    error.AccessDenied,
-                    error.BrokenPipe,
-                    error.ConnectionResetByPeer,
-                    error.DeviceBusy,
-                    error.DiskQuota,
-                    error.FileTooBig,
-                    error.InputOutput,
-                    error.InvalidArgument,
-                    error.LockViolation,
-                    error.NoSpaceLeft,
-                    error.NotOpenForWriting,
-                    error.OperationAborted,
-                    error.OutOfMemory,
-                    error.SystemResources,
-                    error.Unexpected,
-                    error.WouldBlock,
-                    error.NoDevice,
-                    error.ProcessNotFound,
-                    => return err,
+                    else => return err,
                 }
             };
             try repl.do_statement(statement);
@@ -753,7 +735,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                         const statement = Parser.parse_statement(
                             statement_string,
-                            &repl.terminal,
+                            repl.terminal.stderr.any(),
                             &repl.arguments,
                         ) catch |err| {
                             switch (err) {
@@ -777,25 +759,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                                 // An unexpected error for which we do
                                 // want the stacktrace.
-                                error.AccessDenied,
-                                error.BrokenPipe,
-                                error.ConnectionResetByPeer,
-                                error.DeviceBusy,
-                                error.DiskQuota,
-                                error.FileTooBig,
-                                error.InputOutput,
-                                error.InvalidArgument,
-                                error.LockViolation,
-                                error.NoSpaceLeft,
-                                error.NotOpenForWriting,
-                                error.OperationAborted,
-                                error.OutOfMemory,
-                                error.SystemResources,
-                                error.Unexpected,
-                                error.WouldBlock,
-                                error.NoDevice,
-                                error.ProcessNotFound,
-                                => return err,
+                                else => return err,
                             }
                         };
 
