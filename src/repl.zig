@@ -588,19 +588,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     // These are parsing errors, so the REPL should
                     // not continue to execute this statement but can
                     // still accept new statements.
-                    Parser.Error.IdentifierBad,
-                    Parser.Error.OperationBad,
-                    Parser.Error.ValueBad,
-                    Parser.Error.KeyInvalid,
-                    Parser.Error.KeyDuplicate,
-                    Parser.Error.KeyValuePairBad,
-                    Parser.Error.KeyValuePairEqualMissing,
-                    Parser.Error.UnexpectedStatement,
-                    Parser.Error.SliceOperationUnsupported,
-                    // TODO(zig): This will be more convenient to express
-                    // once https://github.com/ziglang/zig/issues/2473 is
-                    // in.
-                    => return,
+                    error.ParseError => return,
 
                     // An unexpected error for which we do
                     // want the stacktrace.
@@ -743,19 +731,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 // is not an interactive command, we should
                                 // exit immediately. Parsing error info
                                 // has already been emitted to stderr.
-                                Parser.Error.IdentifierBad,
-                                Parser.Error.OperationBad,
-                                Parser.Error.ValueBad,
-                                Parser.Error.KeyInvalid,
-                                Parser.Error.KeyDuplicate,
-                                Parser.Error.KeyValuePairBad,
-                                Parser.Error.KeyValuePairEqualMissing,
-                                Parser.Error.UnexpectedStatement,
-                                Parser.Error.SliceOperationUnsupported,
-                                // TODO: This will be more convenient to express
-                                // once https://github.com/ziglang/zig/issues/2473 is
-                                // in.
-                                => std.posix.exit(1),
+                                error.ParseError => std.posix.exit(1),
 
                                 // An unexpected error for which we do
                                 // want the stacktrace.
