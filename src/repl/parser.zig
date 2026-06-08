@@ -474,6 +474,84 @@ fn object_default(comptime operation: StateMachine.Operation) ObjectType(operati
     };
 }
 
+test "Parser: fuzz" {
+    const stdx = @import("stdx");
+    const test_count = 1024;
+    const input_size_max = 256;
+
+    const operations = std.enums.values(Parser.Operation);
+    const fields: []const []const u8 = comptime fields: {
+        var fields: []const []const u8 = &.{};
+        for (.{ tb.Account, tb.Transfer, tb.AccountFilter, tb.QueryFilter }) |Object| {
+            for (std.meta.fieldNames(Object)) |field| {
+                fields = fields ++ [_][]const u8{field};
+            }
+        }
+        break :fields fields;
+    };
+
+    var stderr = std.ArrayListUnmanaged(u8){};
+    defer stderr.deinit(std.testing.allocator);
+
+    var input = try std.ArrayListUnmanaged(u8).initCapacity(std.testing.allocator, input_size_max);
+    defer input.deinit(std.testing.allocator);
+
+    var body = try std.ArrayListUnmanaged(u8).initCapacity(
+        std.testing.allocator,
+        constants.message_size_max,
+    );
+    defer body.deinit(std.testing.allocator);
+
+    var prng = stdx.PRNG.from_seed_testing();
+    var error_count: u32 = 0;
+    for (0..test_count) |_| {
+        defer stderr.clearRetainingCapacity();
+        defer input.clearRetainingCapacity();
+        defer body.clearRetainingCapacity();
+
+        const input_size_target = prng.int_inclusive(u32, input_size_max / 2);
+        const separator_probability = stdx.PRNG.ratio(1, 4);
+
+        input.appendSliceAssumeCapacity(@tagName(operations[prng.index(operations)]));
+        input.appendAssumeCapacity(' ');
+
+        while (input.items.len < input_size_target) {
+            input.appendSliceAssumeCapacity(fields[prng.index(fields)]);
+            input.appendAssumeCapacity('=');
+
+            const value_powers = [_]u8{ 0, 8, 16, 32, 64, 128 };
+            const value_power = value_powers[prng.index(value_powers)];
+            const value: u256 = if (prng.boolean())
+                prng.int_inclusive(u256, (@as(u256, 1) << value_power) - 1)
+            else
+                (@as(u256, 1) << value_power) - @intFromBool(prng.boolean());
+
+            _ = switch (prng.enum_uniform(enum { hex, dec, oct, bin })) {
+                .dec => input.writer(std.testing.allocator).print("{d}", .{value}),
+                .hex => input.writer(std.testing.allocator).print("0x{x}", .{value}),
+                .oct => input.writer(std.testing.allocator).print("0o{o}", .{value}),
+                .bin => input.writer(std.testing.allocator).print("0b{b}", .{value}),
+            } catch unreachable;
+
+            input.appendAssumeCapacity(' ');
+            if (prng.chance(separator_probability)) input.appendAssumeCapacity(',');
+        }
+
+        if (prng.boolean()) {
+            const alphabet = "\n\t _|-=;,01aA";
+            input.items[prng.index(input.items)] = alphabet[prng.index(alphabet)];
+        }
+
+        const stderr_writer = stderr.writer(std.testing.allocator);
+        _ = Parser.parse_statement(input.items, stderr_writer.any(), &body) catch {
+            error_count += 1;
+        };
+    }
+    // Verify that we are testing both failures and successes.
+    assert(error_count > 0);
+    assert(error_count < test_count);
+}
+
 test "Parser: snap" {
     const stdx = @import("stdx");
     const snap = stdx.Snap.snap_fn("src");
