@@ -15,7 +15,7 @@ pub const Parser = struct {
 
     pub const Error = error{ParseError};
 
-    pub const Operation = enum {
+    pub const Command = enum {
         none,
         help,
         create_accounts,
@@ -27,8 +27,8 @@ pub const Parser = struct {
         query_accounts,
         query_transfers,
 
-        pub fn state_machine_op(operation: Operation) StateMachine.Operation {
-            return switch (operation) {
+        pub fn operation(command: Command) StateMachine.Operation {
+            return switch (command) {
                 .none, .help => unreachable,
                 .create_accounts => .create_accounts,
                 .create_transfers => .create_transfers,
@@ -47,7 +47,7 @@ pub const Parser = struct {
     };
 
     pub const Statement = struct {
-        operation: Operation,
+        command: Command,
         arguments: *std.ArrayListUnmanaged(u8),
     };
 
@@ -245,10 +245,10 @@ pub const Parser = struct {
 
     fn parse_arguments(
         parser: *Parser,
-        comptime operation: Operation,
+        comptime command: Command,
         arguments: *std.ArrayListUnmanaged(u8),
     ) !void {
-        const default = object_default(operation.state_machine_op());
+        const default = object_default(command.operation());
         var object = default;
 
         const ObjectField = std.meta.FieldEnum(@TypeOf(object));
@@ -262,12 +262,12 @@ pub const Parser = struct {
             if (parser.parse_syntax_char(',')) {
                 arguments.appendSliceAssumeCapacity(std.mem.asBytes(&object));
 
-                const state_machine_op = operation.state_machine_op();
-                if (!state_machine_op.is_batchable()) {
+                const operation = command.operation();
+                if (!operation.is_batchable()) {
                     try parser.print_current_position();
                     try parser.print_error(
                         "{s} expects a single object, but received multiple.\n",
-                        .{@tagName(operation)},
+                        .{@tagName(command)},
                     );
                     return error.ParseError;
                 }
@@ -347,8 +347,8 @@ pub const Parser = struct {
     }
 
     // Statement grammar parsed here.
-    // STATEMENT: OPERATION ARGUMENTS [;]
-    // OPERATION: create_accounts | lookup_accounts | create_transfers | lookup_transfers
+    // STATEMENT: COMMAND ARGUMENTS [;]
+    // COMMAND: create_accounts | lookup_accounts | create_transfers | lookup_transfers | ...
     //      ARGUMENTS: ARG [, ARG]
     //       ARG: KEY = VALUE
     //       KEY: string
@@ -369,13 +369,13 @@ pub const Parser = struct {
         const after_whitespace = parser.offset;
         const operation_identifier = parser.parse_identifier();
 
-        const operation = operation: {
-            if (std.meta.stringToEnum(Operation, operation_identifier)) |valid_operation| {
-                break :operation valid_operation;
+        const command = command: {
+            if (std.meta.stringToEnum(Command, operation_identifier)) |valid_operation| {
+                break :command valid_operation;
             }
 
             if (operation_identifier.len == 0) {
-                break :operation .none;
+                break :command .none;
             }
 
             // Set up the offset to after the whitespace so the
@@ -386,12 +386,12 @@ pub const Parser = struct {
                 "Operation must be " ++
                     comptime operations: {
                         var names: []const u8 = "";
-                        for (std.enums.values(Operation), 0..) |operation, index| {
-                            if (operation == .none) continue;
+                        for (std.enums.values(Command), 0..) |command, index| {
+                            if (command == .none) continue;
                             names = names ++
                                 (if (names.len > 0) ", " else "") ++
-                                (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
-                                @tagName(operation);
+                                (if (index == std.enums.values(Command).len - 1) "or " else "") ++
+                                @tagName(command);
                         }
                         break :operations names;
                     } ++ ".\n",
@@ -401,7 +401,7 @@ pub const Parser = struct {
             return error.ParseError;
         };
 
-        switch (operation) {
+        switch (command) {
             .none => {},
             .help => {},
             inline else => |operation_comptime| {
@@ -411,7 +411,7 @@ pub const Parser = struct {
         }
 
         return .{
-            .operation = operation,
+            .command = command,
             .arguments = arguments,
         };
     }
@@ -473,7 +473,7 @@ test "Parser: fuzz" {
     const test_count = 1024;
     const input_size_max = 256;
 
-    const operations = std.enums.values(Parser.Operation);
+    const commands = std.enums.values(Parser.Command);
     const fields: []const []const u8 = comptime fields: {
         var fields: []const []const u8 = &.{};
         for (.{ tb.Account, tb.Transfer, tb.AccountFilter, tb.QueryFilter }) |Object| {
@@ -506,7 +506,7 @@ test "Parser: fuzz" {
         const input_size_target = prng.int_inclusive(u32, input_size_max / 3);
         const separator_probability = stdx.PRNG.ratio(1, 4);
 
-        input.appendSliceAssumeCapacity(@tagName(operations[prng.index(operations)]));
+        input.appendSliceAssumeCapacity(@tagName(commands[prng.index(commands)]));
         input.appendAssumeCapacity(' ');
 
         while (input.items.len < input_size_target) {
@@ -571,13 +571,13 @@ test "Parser: snap" {
                 return;
             };
 
-            switch (statement.operation) {
+            switch (statement.command) {
                 .none => {},
                 .help => {},
-                inline else => |operation| try t.print_objects(
-                    operation.state_machine_op(),
+                inline else => |command| try t.print_objects(
+                    command.operation(),
                     @alignCast(std.mem.bytesAsSlice(
-                        ObjectType(operation.state_machine_op()),
+                        ObjectType(command.operation()),
                         t.body.items,
                     )),
                 ),

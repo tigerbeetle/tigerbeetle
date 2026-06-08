@@ -74,8 +74,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             statement: Parser.Statement,
         ) !void {
-            try repl.debug("Running command: {}.\n", .{statement.operation});
-            switch (statement.operation) {
+            try repl.debug("Running command: {}.\n", .{statement.command});
+            switch (statement.command) {
                 .none => {
                     // No input was parsed.
                     try repl.debug("No command was parsed, continuing.\n", .{});
@@ -92,8 +92,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
-                => |operation| {
-                    const state_machine_operation = operation.state_machine_op();
+                => |command| {
+                    const state_machine_operation = command.operation();
                     try repl.send(
                         state_machine_operation,
                         statement.arguments,
