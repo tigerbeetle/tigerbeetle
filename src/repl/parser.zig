@@ -469,7 +469,6 @@ fn object_default(comptime operation: StateMachine.Operation) ObjectType(operati
 }
 
 test "Parser: fuzz" {
-    const stdx = @import("stdx");
     const test_count = 1024;
     const input_size_max = 256;
 
@@ -490,10 +489,8 @@ test "Parser: fuzz" {
     var input = try std.ArrayListUnmanaged(u8).initCapacity(std.testing.allocator, input_size_max);
     defer input.deinit(std.testing.allocator);
 
-    var body = try std.ArrayListUnmanaged(u8).initCapacity(
-        std.testing.allocator,
-        constants.message_size_max,
-    );
+    var body =
+        try Parser.ArgumentsList.initCapacity(std.testing.allocator, constants.message_size_max);
     defer body.deinit(std.testing.allocator);
 
     var prng = stdx.PRNG.from_seed_testing();
@@ -547,7 +544,6 @@ test "Parser: fuzz" {
 }
 
 test "Parser: snap" {
-    const stdx = @import("stdx");
     const snap = stdx.Snap.snap_fn("src");
 
     const T = struct {
