@@ -1023,10 +1023,7 @@ fn publish_ruby(shell: *Shell, info: VersionInfo) !void {
     const token = try publish_ruby_trusted_publishing_token(shell);
     assert(token.len > 0);
     try shell.env.put("GEM_HOST_API_KEY", token);
-
-    try shell.exec("gem push {package}", .{
-        .package = try shell.fmt("zig-out/dist/ruby/tigerbeetle-{s}.gem", .{info.tag}),
-    });
+    _ = info;
 }
 
 fn publish_ruby_trusted_publishing_token(shell: *Shell) ![]const u8 {
@@ -1048,6 +1045,41 @@ fn publish_ruby_trusted_publishing_token(shell: *Shell) ![]const u8 {
         oidc_response,
         .{ .ignore_unknown_fields = true },
     );
+    assert(oidc.value.len > 0);
+
+    const oidc_claims_json = try jwt_payload_decode(shell, oidc.value);
+    const oidc_claims = try std.json.parseFromSliceLeaky(
+        struct {
+            iss: ?[]const u8 = null,
+            aud: ?std.json.Value = null,
+            repository: ?[]const u8 = null,
+            repository_owner: ?[]const u8 = null,
+            repository_owner_id: ?[]const u8 = null,
+            environment: ?[]const u8 = null,
+            job_workflow_ref: ?[]const u8 = null,
+            ref: ?[]const u8 = null,
+            sha: ?[]const u8 = null,
+            sub: ?[]const u8 = null,
+        },
+        shell.arena.allocator(),
+        oidc_claims_json,
+        .{ .ignore_unknown_fields = true },
+    );
+    log.info(
+        "ruby oidc claims iss={s} aud={s} repository={s} repository_owner={s} repository_owner_id={s} environment={s} job_workflow_ref={s} ref={s} sha={s} sub={s}",
+        .{
+            oidc_claims.iss orelse "(null)",
+            try jwt_aud_format(shell, oidc_claims.aud),
+            oidc_claims.repository orelse "(null)",
+            oidc_claims.repository_owner orelse "(null)",
+            oidc_claims.repository_owner_id orelse "(null)",
+            oidc_claims.environment orelse "(null)",
+            oidc_claims.job_workflow_ref orelse "(null)",
+            oidc_claims.ref orelse "(null)",
+            oidc_claims.sha orelse "(null)",
+            oidc_claims.sub orelse "(null)",
+        },
+    );
 
     const rubygems_request = try std.json.stringifyAlloc(
         shell.arena.allocator(),
@@ -1065,8 +1097,37 @@ fn publish_ruby_trusted_publishing_token(shell: *Shell) ![]const u8 {
         rubygems_response,
         .{ .ignore_unknown_fields = true },
     );
+    assert(rubygems.rubygems_api_key.len > 0);
 
     return rubygems.rubygems_api_key;
+}
+
+fn jwt_payload_decode(shell: *Shell, jwt: []const u8) ![]const u8 {
+    var segments = std.mem.splitScalar(u8, jwt, '.');
+    _ = segments.next() orelse return error.InvalidJWT;
+    const payload = segments.next() orelse return error.InvalidJWT;
+
+    const padding = (4 - payload.len % 4) % 4;
+    const payload_padded = try shell.arena.allocator().alloc(u8, payload.len + padding);
+    @memcpy(payload_padded[0..payload.len], payload);
+    @memset(payload_padded[payload.len..], '=');
+
+    const decoder = std.base64.url_safe.Decoder;
+    const payload_json = try shell.arena.allocator().alloc(
+        u8,
+        try decoder.calcSizeForSlice(payload_padded),
+    );
+    try decoder.decode(payload_json, payload_padded);
+
+    return payload_json;
+}
+
+fn jwt_aud_format(shell: *Shell, aud: ?std.json.Value) ![]const u8 {
+    const value = aud orelse return "(null)";
+    return switch (value) {
+        .string => |string| string,
+        else => try std.json.stringifyAlloc(shell.arena.allocator(), value, .{}),
+    };
 }
 
 fn publish_rust(shell: *Shell, info: VersionInfo) !void {
