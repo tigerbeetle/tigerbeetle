@@ -187,14 +187,21 @@ pub const Parser = struct {
                                 try parser.print_current_position();
                                 try parser.print_error(
                                     "Duplicate flag set: \"{s}\".\n",
-                                    .{ known_flag_field.name },
+                                    .{known_flag_field.name},
                                 );
                                 return error.ParseError;
                             }
-                            // TODO Check for invalid flags.
                             flag_value.* = true;
+                            break;
                         }
                     }
+                } else {
+                    try parser.print_current_position();
+                    try parser.print_error(
+                        "Invalid flag: \"{s}\".\n",
+                        .{flag_to_validate_trimmed},
+                    );
+                    return error.ParseError;
                 }
             }
             object.flags = validated_flags;
@@ -880,6 +887,24 @@ test "Parser: snap" {
         \\                       ^ Near here.
         \\
         \\query_transfers expects a single object, but received multiple.
+        \\
+    ));
+    try t.check("create_transfers flags=foo", snap(@src(),
+        \\Fail near line 1, column 26:
+        \\
+        \\create_transfers flags=foo
+        \\                          ^ Near here.
+        \\
+        \\Invalid flag: "foo".
+        \\
+    ));
+    try t.check("create_transfers flags=linked|foo", snap(@src(),
+        \\Fail near line 1, column 33:
+        \\
+        \\create_transfers flags=linked|foo
+        \\                                 ^ Near here.
+        \\
+        \\Invalid flag: "foo".
         \\
     ));
     try t.check("create_transfers flags=linked|linked", snap(@src(),
