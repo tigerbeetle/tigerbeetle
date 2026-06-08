@@ -11,7 +11,7 @@ const tb = vsr.tigerbeetle;
 
 pub const Parser = struct {
     input: []const u8,
-    offset: usize = 0,
+    offset: u32 = 0,
     stderr: std.io.AnyWriter,
 
     pub const ArgumentsList = std.ArrayListAlignedUnmanaged(u8, constants.cache_line_size);
@@ -278,18 +278,16 @@ pub const Parser = struct {
                 object_fields = .initEmpty();
             }
 
-            // Grab key.
-            const id_result = parser.parse_identifier();
-
-            if (id_result.len == 0) {
+            const field_string = parser.parse_identifier();
+            if (field_string.len == 0) {
                 try parser.print_current_position();
                 try parser.print_error("Expected key starting key-value pair. e.g. `id=1`\n", .{});
                 return error.ParseError;
             }
 
-            const field = std.meta.stringToEnum(ObjectField, id_result) orelse {
+            const field = std.meta.stringToEnum(ObjectField, field_string) orelse {
                 try parser.print_current_position();
-                try parser.print_error("Unknown key: \"{s}\".\n", .{id_result});
+                try parser.print_error("Unknown key: \"{s}\".\n", .{field_string});
                 return error.ParseError;
             };
             if (object_fields.contains(field)) {
@@ -301,21 +299,17 @@ pub const Parser = struct {
                 return error.ParseError;
             }
 
-            // Grab =.
             if (!parser.parse_syntax_char('=')) {
                 try parser.print_current_position();
                 try parser.print_error(
-                    "Expected equal sign after key \"{s}\" in key-value" ++
-                        " pair. e.g. `id=1`.\n",
-                    .{id_result},
+                    "Expected equal sign after key \"{s}\" in key-value pair. e.g. `id=1`.\n",
+                    .{field_string},
                 );
                 return error.ParseError;
             }
 
-            // Grab value.
-            const value_result = parser.parse_value();
-
-            if (value_result.len == 0) {
+            const value_string = parser.parse_value();
+            if (value_string.len == 0) {
                 try parser.print_current_position();
                 try parser.print_error(
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
@@ -330,7 +324,7 @@ pub const Parser = struct {
                     @TypeOf(object),
                     &object,
                     field_comptime,
-                    value_result,
+                    value_string,
                 ),
             }
             assert(!object_fields.contains(field));
@@ -386,8 +380,7 @@ pub const Parser = struct {
             }
 
             // Set up the offset to after the whitespace so the
-            // print_current_position function points at where we actually expected the
-            // token.
+            // print_current_position function points at where we actually expected the token.
             parser.offset = after_whitespace;
             try parser.print_current_position();
             try parser.print_error(
@@ -414,6 +407,7 @@ pub const Parser = struct {
             .help => {},
             inline else => |operation_comptime| {
                 try parser.parse_arguments(operation_comptime, arguments);
+                assert(parser.offset == parser.input.len);
             },
         }
 
@@ -510,7 +504,7 @@ test "Parser: fuzz" {
         defer input.clearRetainingCapacity();
         defer body.clearRetainingCapacity();
 
-        const input_size_target = prng.int_inclusive(u32, input_size_max / 2);
+        const input_size_target = prng.int_inclusive(u32, input_size_max / 3);
         const separator_probability = stdx.PRNG.ratio(1, 4);
 
         input.appendSliceAssumeCapacity(@tagName(operations[prng.index(operations)]));
