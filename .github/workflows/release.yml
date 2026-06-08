@@ -4,6 +4,11 @@ permissions: {}
 on:
   workflow_dispatch:
 
+# Don't run release and release_validate simultaneously, to avoid races.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 16th, 2026).
 
