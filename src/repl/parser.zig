@@ -85,9 +85,8 @@ pub const Parser = struct {
             target.line,
         });
         var column = target.position_column;
-        while (column > 0) {
+        while (column > 0) : (column -= 1) {
             try parser.print_error(" ", .{});
-            column -= 1;
         }
         try parser.print_error("^ Near here.\n\n", .{});
     }
@@ -104,7 +103,7 @@ pub const Parser = struct {
         parser.eat_whitespace();
         const after_whitespace = parser.offset;
 
-        while (parser.offset < parser.input.len) {
+        while (parser.offset < parser.input.len) : (parser.offset += 1) {
             const char_is_valid = switch (parser.input[parser.offset]) {
                 // Identifiers can contain any letter and `_`.
                 'A'...'Z', 'a'...'z', '_' => true,
@@ -114,7 +113,6 @@ pub const Parser = struct {
             };
 
             if (!char_is_valid) break;
-            parser.offset += 1;
         }
 
         return parser.input[after_whitespace..parser.offset];
@@ -153,6 +151,8 @@ pub const Parser = struct {
                     copy.eat_whitespace();
                     if (copy.parse_syntax_char('|')) {
                         copy.eat_whitespace();
+
+                        assert(parser.offset < copy.offset);
                         parser.offset = copy.offset;
                         continue;
                     }
@@ -256,6 +256,7 @@ pub const Parser = struct {
         var object_fields = std.enums.EnumSet(ObjectField).initEmpty();
 
         while (parser.offset < parser.input.len) {
+            const offset_start = parser.offset;
             if (parser.parse_syntax_char(';')) break;
 
             // Expect comma separating objects.
@@ -282,10 +283,7 @@ pub const Parser = struct {
 
             if (id_result.len == 0) {
                 try parser.print_current_position();
-                try parser.print_error(
-                    "Expected key starting key-value pair. e.g. `id=1`\n",
-                    .{},
-                );
+                try parser.print_error("Expected key starting key-value pair. e.g. `id=1`\n", .{});
                 return error.ParseError;
             }
 
@@ -337,6 +335,9 @@ pub const Parser = struct {
             }
             assert(!object_fields.contains(field));
             object_fields.insert(field);
+
+            // Assert that the parser state advances, to guard against unbounded loops.
+            assert(offset_start < parser.offset);
         }
 
         // Add final object.
@@ -364,8 +365,7 @@ pub const Parser = struct {
     //   create_accounts id=1 code=2 ledger=3, id = 2 code= 2 ledger =3;
     //   create_accounts flags=linked | debits_must_not_exceed_credits ;
     //
-    // TODO(zig): Replace the (implicit) anyerror with a concrete:
-    // (std.io.Writer.Error || Error).
+    // TODO(zig): Replace the (implicit) anyerror with a concrete (std.io.Writer.Error || Error).
     pub fn parse_statement(
         input: []const u8,
         stderr: std.io.AnyWriter,
@@ -417,7 +417,7 @@ pub const Parser = struct {
             },
         }
 
-        return Statement{
+        return .{
             .operation = operation,
             .arguments = arguments,
         };
