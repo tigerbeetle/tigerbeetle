@@ -1091,11 +1091,11 @@ test "parse_addresses: fuzz" {
 
     var prng = stdx.PRNG.from_seed_testing();
 
-    var input_bufer: [input_size_max]u8 = @splat(0);
+    var input_buffer: [input_size_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
         const input_size = prng.int_inclusive(usize, input_size_max);
-        const input = input_bufer[0..input_size];
+        const input = input_buffer[0..input_size];
         for (input) |*c| {
             c.* = alphabet[prng.index(alphabet)];
         }
