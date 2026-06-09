@@ -1236,6 +1236,7 @@ const DeadFilesDetector = struct {
             "npm_install.zig",
             "page_writer.zig",
             "python_bindings.zig",
+            "ruby_bindings.zig",
             "rust_bindings.zig",
             "scripts.zig",
             "search_index_writer.zig",
@@ -1246,7 +1247,6 @@ const DeadFilesDetector = struct {
             "vopr.zig",
             "vortex.zig",
             "zig_driver.zig",
-            "ruby_bindings.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
