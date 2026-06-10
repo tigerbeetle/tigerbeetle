@@ -27,6 +27,7 @@ const Tracer = @import("../trace.zig").Tracer;
 const Storage = @import("./storage.zig").Storage;
 const SuperBlock = vsr.SuperBlockType(Storage);
 const Grid = vsr.GridType(Storage);
+const Header = vsr.Header;
 
 const TimeSim = @import("./time.zig").TimeSim;
 
@@ -180,4 +181,11 @@ pub fn open_grid(grid: *Grid) void {
         storage.run();
         if (!Context.global.pending) break;
     } else @panic("open grid stuck");
+}
+
+pub fn decrypt_header_no_op(_: ?*anyopaque, header: *const Header) anyerror!Header {
+    if (!header.valid_checksum()) {
+        return error.InvalidHeader;
+    }
+    return header.*;
 }

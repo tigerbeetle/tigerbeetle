@@ -7,7 +7,6 @@ const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Command = vsr.Command;
 const Operation = vsr.Operation;
-const Encryption = @import("../encryption.zig").Encryption;
 const schema = @import("../lsm/schema.zig");
 
 const checksum_body_empty = vsr.checksum(&.{});
@@ -146,6 +145,9 @@ pub const Header = extern struct {
     /// header_nonce, and body_nonce.
     pub fn calculate_checksum(self: *const Header) u128 {
         var header = self.*;
+        // assert(header.header_key_id == 0);
+        // assert(header.header_nonce == 0);
+        // assert(header.body_nonce == 0);
         header.header_key_id = 0;
         header.header_nonce = 0;
         header.body_nonce = 0;
@@ -170,7 +172,7 @@ pub const Header = extern struct {
     }
 
     pub fn checksum_body(self: *const Header) u128 {
-        // FIXME: backwards compatability
+        // TODO: backwards compatability
         // return if (self.header_key_id == 0) self.header_nonce else self.body_tag;
         return self.body_tag;
     }
@@ -225,7 +227,7 @@ pub const Header = extern struct {
         // Now, it's 0 for an unencrypted message and non-0 for an encrypted message.
         maybe(self.header_key_id == 0);
         // `header_nonce` was `checksum_body`, neither can be 0.
-        // FIXME:
+        //  TODO:
         // if (self.header_nonce == 0) return "header_nonce == 0";
         // `body_tag` was `checksum_body_padding`, always used to be 0.
         // Now, it's 0 for an unencrypted message and non-0 for an encrypted message.
@@ -320,6 +322,7 @@ pub const Header = extern struct {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
+        // FIXTHIS
         _ = self;
         _ = fmt;
         _ = options;
@@ -615,7 +618,7 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.header_nonce != checksum_body_empty) return "checksum_body != expected";
+            if (self.checksum_body() != checksum_body_empty) return "checksum_body != expected";
             if (self.release.value == 0) return "release == 0";
             if (self.replica != 0) return "replica != 0";
             if (self.view != 0) return "view != 0";
@@ -956,7 +959,8 @@ pub const Header = extern struct {
                 .timestamp = 0,
                 .request = 0,
             };
-            Encryption.encrypt_test(header.frame());
+            header.set_checksum_body(&[0]u8{});
+            header.set_checksum();
             assert(header.invalid() == null);
             return header;
         }
@@ -978,7 +982,8 @@ pub const Header = extern struct {
                 .timestamp = 0,
                 .request = 0,
             };
-            Encryption.encrypt_test(header.frame());
+            header.set_checksum_body(&[0]u8{});
+            header.set_checksum();
             assert(header.invalid() == null);
             return header;
         }
@@ -1917,7 +1922,7 @@ test format_header {
     };
 
     try snap(@src(),
-        \\Prepare{ .checksum()=00000000000000000123456789abcdef, .header_key_id=0, .header_nonce=0, .checksum_body()=0000000000000000fedcba9876543210, .body_nonce=0, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse }
+        \\Prepare{ .header_tag=00000000000000000123456789abcdef, .header_key_id=0, .header_nonce=0, .body_tag=0000000000000000fedcba9876543210, .body_nonce=0, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse }
     ).diff_fmt("{}", .{prepare});
 
     // Check that non-zero padding/reserved fields are printed.
@@ -1925,6 +1930,6 @@ test format_header {
     prepare.reserved_frame[0] = 2;
     prepare.reserved[0] = 3;
     try snap(@src(),
-        \\Prepare{ .checksum()=00000000000000000123456789abcdef, .header_key_id=1, .header_nonce=0, .checksum_body()=0000000000000000fedcba9876543210, .body_nonce=0, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .reserved_frame={ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse, .reserved={ 3, 0, 0 } }
+        \\Prepare{ .header_tag=00000000000000000123456789abcdef, .header_key_id=1, .header_nonce=0, .body_tag=0000000000000000fedcba9876543210, .body_nonce=0, .cluster=1, .size=321, .epoch=0, .view=2, .release=0.0.0, .protocol=0, .command=vsr.Command.prepare, .replica=3, .reserved_frame={ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, .parent=000000000abcdeffedcba00123456789, .request_checksum=00000000000000012345678987654321, .checkpoint_id=00000000000000000000000000000004, .client=5, .op=5, .commit=6, .timestamp=123456789, .request=7, .operation=vsr.Operation.pulse, .reserved={ 3, 0, 0 } }
     ).diff_fmt("{}", .{prepare});
 }

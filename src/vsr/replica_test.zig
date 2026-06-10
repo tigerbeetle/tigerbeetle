@@ -12,6 +12,7 @@ const vsr = @import("../vsr.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
 const Message = @import("../message_pool.zig").MessagePool.Message;
+const MessageNetwork = Message.Network;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
@@ -20,6 +21,8 @@ const Release = @import("../testing/cluster.zig").Release;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 const Ratio = stdx.PRNG.Ratio;
+const encryption = @import("../encryption.zig");
+const EncryptionTransit = encryption.EncryptionTransit;
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);
@@ -1093,9 +1096,16 @@ test "Cluster: view-change: nack older view" {
     b1.pass(.R_, .outgoing, .view);
     a0.drop_all(.R_, .bidirectional);
     b2.pass(.R_, .incoming, .prepare);
-    b2.drop_fn(.R_, .incoming, struct {
-        fn drop_message(message: *const Message) bool {
-            const header = message.header.into(.prepare) orelse return false;
+    b2.drop_fn(.R_, .incoming, t, struct {
+        fn drop_message(context: ?*anyopaque, message: *const MessageNetwork) bool {
+            const test_context: *TestContext = @ptrCast(@alignCast(context.?));
+            const replica_index = test_context.replica(.B2).index();
+            const replica = &test_context.cluster.replicas[replica_index];
+            var header_decrypted = Cluster.Replica.decrypt_header(
+                &replica.message_bus,
+                message.get_header_encrypted(),
+            ) catch unreachable;
+            const header = header_decrypted.into(.prepare) orelse return false;
             return header.op < checkpoint_1_trigger + 3;
         }
     }.drop_message);
@@ -1109,7 +1119,7 @@ test "Cluster: view-change: nack older view" {
 
     a0.pass_all(.R_, .bidirectional);
     b2.pass_all(.R_, .bidirectional);
-    b2.drop_fn(.R_, .incoming, null);
+    b2.drop_fn(.R_, .incoming, t, null);
     b1.drop_all(.R_, .bidirectional);
 
     try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger + 3);
@@ -1378,9 +1388,16 @@ test "Cluster: sync: checkpoint from a newer view" {
         b1.corrupt(.{ .wal_prepare = (checkpoint_1 - 1) % slot_count });
         try b1.open();
         b1.pass(.A0, .incoming, .prepare);
-        b1.drop_fn(.A0, .incoming, struct {
-            fn drop_message(message: *const Message) bool {
-                const header = message.header.into(.prepare) orelse return false;
+        b1.drop_fn(.A0, .incoming, t, struct {
+            fn drop_message(context: ?*anyopaque, message: *const MessageNetwork) bool {
+                const test_context: *TestContext = @ptrCast(@alignCast(context.?));
+                const replica_index = test_context.replica(.B1).index();
+                const replica = &test_context.cluster.replicas[replica_index];
+                var header_decrypted = Cluster.Replica.decrypt_header(
+                    &replica.message_bus,
+                    message.get_header_encrypted(),
+                ) catch unreachable;
+                const header = header_decrypted.into(.prepare) orelse return false;
                 return header.op == checkpoint_1 - 1;
             }
         }.drop_message);
@@ -2015,9 +2032,16 @@ test "Cluster: broken hash chain within the same view does not stall commit via 
 
     // Disallow receiving a specific prepare, and repairing headers via repair and view, to
     // force a hash chain break.
-    b2.drop_fn(.R_, .incoming, struct {
-        fn drop_message(message: *const Message) bool {
-            const header = message.header.into(.prepare) orelse return false;
+    b2.drop_fn(.R_, .incoming, t, struct {
+        fn drop_message(context: ?*anyopaque, message: *const MessageNetwork) bool {
+            const test_context: *TestContext = @ptrCast(@alignCast(context.?));
+            const replica_index = test_context.replica(.B2).index();
+            const replica = &test_context.cluster.replicas[replica_index];
+            var header_decrypted = Cluster.Replica.decrypt_header(
+                &replica.message_bus,
+                message.get_header_encrypted(),
+            ) catch unreachable;
+            const header = header_decrypted.into(.prepare) orelse return false;
             return header.op == constants.pipeline_prepare_queue_max + 1;
         }
     }.drop_message);
@@ -2681,12 +2705,13 @@ const TestReplicas = struct {
         t: *const TestReplicas,
         peer: ProcessSelector,
         direction: LinkDirection,
-        comptime drop_message_fn: ?fn (message: *const Message) bool,
+        context: ?*anyopaque,
+        comptime drop_message_fn: ?fn (context: ?*anyopaque, message: *const MessageNetwork) bool,
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| {
-            t.cluster.network.link_drop_packet_fn(path).* = if (drop_message_fn) |f|
-                &f
+            t.cluster.network.link_drop_packet(path).* = if (drop_message_fn) |f|
+                .{ .context = context, .function = &f }
             else
                 null;
         }
@@ -2766,10 +2791,16 @@ const TestReplicas = struct {
                 const block_want = want_replica.superblock.storage.grid_block(address).?;
                 const block_got = got_replica.superblock.storage.grid_block(address).?;
 
-                try expectEqual(
-                    std.mem.bytesToValue(vsr.Header, block_want[0..@sizeOf(vsr.Header)]),
-                    std.mem.bytesToValue(vsr.Header, block_got[0..@sizeOf(vsr.Header)]),
+                const header_want = std.mem.bytesToValue(
+                    vsr.Header,
+                    block_want[0..@sizeOf(vsr.Header)],
                 );
+                const header_got = std.mem.bytesToValue(
+                    vsr.Header,
+                    block_got[0..@sizeOf(vsr.Header)],
+                );
+
+                try expectEqual(header_want, header_got);
             }
         }
     }
@@ -2852,6 +2883,13 @@ const TestClientBus = struct {
     message_pool: *MessagePool,
     message_bus: MessageBus,
     reply: ?*Message = null,
+    encryption_transit: EncryptionTransit,
+
+    fn decrypt_header(context: ?*anyopaque, header_encrypted: *const vsr.Header) !vsr.Header {
+        const message_bus: *MessageBus = @ptrCast(@alignCast(context.?));
+        const self: *TestClientBus = @alignCast(@fieldParentPtr("message_bus", message_bus));
+        return self.encryption_transit.decrypt_header(header_encrypted);
+    }
 
     fn init(context: *TestContext, client_id: u128) !*TestClientBus {
         const message_pool = try allocator.create(MessagePool);
@@ -2871,11 +2909,18 @@ const TestClientBus = struct {
                 allocator,
                 .{ .client = client_id },
                 message_pool,
+                TestClientBus.decrypt_header,
                 on_messages,
                 .{ .network = context.cluster.network },
             ),
+            .encryption_transit = .init(
+                @as([32]u8, @splat(1)),
+                encryption.Peer.replica(1),
+                encryption.Peer.replica(1),
+            ),
         };
         errdefer client_bus.message_bus.deinit(allocator);
+        try client_bus.message_bus.listen();
 
         context.cluster.state_checker.clients_exhaustive = false;
         context.cluster.network.link(client_bus.message_bus.process, &client_bus.message_bus);
@@ -2897,12 +2942,31 @@ const TestClientBus = struct {
     fn on_messages(message_bus: *Cluster.MessageBus, buffer: *MessageBuffer) void {
         const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
         while (buffer.next_header()) |header| {
-            const message = buffer.consume_message(t.message_pool, &header);
-            defer t.message_pool.unref(message);
+            const message_body_encrypted = buffer.consume_message(
+                t.message_pool,
+                &header,
+            );
+            defer t.message_pool.unref(message_body_encrypted);
 
-            assert(message.header.cluster == t.context.cluster.options.cluster_id);
+            const message = t.message_bus.get_message(null);
+            defer t.message_bus.unref(message);
 
-            switch (message.header.command) {
+            message.header.* = header;
+
+            t.encryption_transit.decrypt_body(
+                message.header,
+                message.body_used(),
+                message_body_encrypted.body_used(),
+            ) catch |err| {
+                log.warn("on_messages: body decryption failed: {}", .{
+                    err,
+                });
+                continue;
+            };
+
+            assert(header.cluster == t.context.cluster.options.cluster_id);
+
+            switch (header.command) {
                 .reply, .eviction => {
                     assert(t.reply == null);
                     t.reply = message.ref();
@@ -2928,6 +2992,14 @@ const TestClientBus = struct {
         message.header.* = header.*;
         stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(vsr.Header)..], body);
 
-        t.message_bus.send_message_to_replica(replica, message.base());
+        const message_buffer = t.message_bus.get_message(null);
+        defer t.message_bus.unref(message_buffer);
+
+        const message_network = t.encryption_transit.encrypt_message(
+            message_buffer,
+            message.base_const(),
+        );
+
+        t.message_bus.send_message_to_replica(replica, message_network);
     }
 };

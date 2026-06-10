@@ -843,7 +843,11 @@ pub fn MessageBusType(comptime IO: type) type {
             }
         }
 
-        pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *MessageNetwork) void {
+        pub fn send_message_to_replica(
+            bus: *MessageBus,
+            replica: u8,
+            message: *MessageNetwork,
+        ) void {
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (bus.process == .replica) assert(replica != bus.process.replica);
 
@@ -860,7 +864,11 @@ pub fn MessageBusType(comptime IO: type) type {
 
         /// Try to send the message to the client with the given id.
         /// If the client is not currently connected, the message is silently dropped.
-        pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *MessageNetwork) void {
+        pub fn send_message_to_client(
+            bus: *MessageBus,
+            client_id: u128,
+            message: *MessageNetwork,
+        ) void {
             assert(bus.process == .replica);
             assert(bus.clients.capacity() > 0);
 

@@ -1479,8 +1479,10 @@ test "Headers.ViewChangeSlice.view_for_op" {
         Headers.jv_blank(5),
     };
 
-    Encryption.encrypt_test(headers_array[0].frame());
-    Encryption.encrypt_test(headers_array[3].frame());
+    headers_array[0].frame().set_checksum_body(&[0]u8{});
+    headers_array[0].frame().set_checksum();
+    headers_array[3].frame().set_checksum_body(&[0]u8{});
+    headers_array[3].frame().set_checksum();
 
     const headers = Headers.ViewChangeSlice.init(.join_view, &headers_array);
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));

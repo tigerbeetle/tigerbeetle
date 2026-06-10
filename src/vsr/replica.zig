@@ -27,7 +27,6 @@ const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
 const encryption = @import("../encryption.zig");
-const Encryption = encryption.Encryption;
 const EncryptionTransit = encryption.EncryptionTransit;
 
 const marks = @import("../testing/marks.zig");
@@ -1465,7 +1464,7 @@ pub fn ReplicaType(
                 .encryption_transit = .init(
                     @as([32]u8, @splat(1)),
                     encryption.Peer.replica(1),
-                    encryption.Peer.replica(2),
+                    encryption.Peer.replica(1),
                 ),
             };
 
@@ -1644,7 +1643,7 @@ pub fn ReplicaType(
             assert(self.commit_fault.tardy(now) != .red);
         }
 
-        fn decrypt_header(context: ?*anyopaque, header_encrypted: *const Header) !Header {
+        pub fn decrypt_header(context: ?*anyopaque, header_encrypted: *const Header) !Header {
             const message_bus: *MessageBus = @ptrCast(@alignCast(context.?));
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
             return self.encryption_transit.decrypt_header(header_encrypted);
@@ -1661,27 +1660,26 @@ pub fn ReplicaType(
             var message_suspended_count: u32 = 0;
             while (buffer.next_header()) |header| {
                 message_count += 1;
-
                 if (header.cluster != self.cluster) {
                     buffer.invalidate(.header_cluster);
                     // TODO: double check if this is a bug, and we should continue instead
                     return;
                 }
-
                 if (self.suspend_message(&header)) {
                     buffer.suspend_message(&header);
                     message_suspended_count += 1;
                     continue;
                 }
-
-                const message_body_encrypted = buffer.consume_message(self.message_bus.pool, &header);
+                const message_body_encrypted = buffer.consume_message(
+                    self.message_bus.pool,
+                    &header,
+                );
                 defer self.message_bus.unref(message_body_encrypted);
 
                 const message = self.message_bus.get_message(null);
                 defer self.message_bus.unref(message);
 
                 message.header.* = header;
-
                 self.encryption_transit.decrypt_body(
                     message.header,
                     message.body_used(),
@@ -1713,13 +1711,11 @@ pub fn ReplicaType(
                 if (message.header.into(.request)) |request_header| {
                     assert(request_header.client != 0 or self.aof_recovery);
                 }
-
                 self.trace.count(.{ .replica_messages_in = .{
                     .command = message.header.command,
                 } }, 1);
                 self.on_message(message);
             }
-
             if (message_count > constants.bus_message_burst_warn_min) {
                 log.warn("{}: on_messages: message count={} suspended={}", .{
                     self.log_prefix(),
@@ -1774,8 +1770,7 @@ pub fn ReplicaType(
             });
 
             if (constants.verify) {
-                // TODO: another decryption test, but we already decrypted successfully
-                // assert(message.header.valid_checksum_body(message.body_used()));
+                assert(message.header.valid_checksum_body(message.body_used()));
             }
 
             if (message.header.invalid()) |reason| {
@@ -5523,7 +5518,7 @@ pub fn ReplicaType(
             reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
             // NOTE: this check fails because client == 0 for pulses, which is valid.
-            // FIXME
+            // TODO
             // assert(reply.header.invalid_memory() == null);
 
             const size_ceil = vsr.sector_ceil(reply.header.size);
@@ -7192,7 +7187,7 @@ pub fn ReplicaType(
 
             if (op <= checkpoint_next_2) {
                 // Case 4: op is in the next checkpoint (which we have not checkpointed).
-                return vsr.checksum(std.mem.asBytes(checkpoint));
+                return checkpoint.calculate_checksum();
             }
 
             // Case 5: op is from the too far future for us to know anything!
@@ -7428,8 +7423,7 @@ pub fn ReplicaType(
             switch (message.header.operation) {
                 .register, .reconfigure => message.header.set_checksum_body(message.body_used()),
                 else => if (constants.verify) {
-                    // TODO: canonical in-memory checksums
-                    // assert(message.header.valid_checksum_body(message.body_used()));
+                    assert(message.header.valid_checksum_body(message.body_used()));
                 },
             }
             message.header.set_checksum();
@@ -9101,7 +9095,10 @@ pub fn ReplicaType(
             const message_buffer = self.message_bus.get_message(null);
             defer self.message_bus.unref(message_buffer);
 
-            const message_network = self.encryption_transit.encrypt_message(message_buffer, message);
+            const message_network = self.encryption_transit.encrypt_message(
+                message_buffer,
+                message,
+            );
 
             self.message_bus.send_message_to_client(client, message_network);
 
@@ -9394,11 +9391,9 @@ pub fn ReplicaType(
             }
 
             if (replica == self.replica) {
-                std.log.err("send_message_to_replica_base: sending to self", .{});
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
-                std.log.err("send_message_to_replica_base: sending to OTHER", .{});
                 self.trace.count(.{ .replica_messages_out = .{
                     .command = message.header.command,
                 } }, 1);
@@ -9408,7 +9403,10 @@ pub fn ReplicaType(
                 const message_buffer = self.message_bus.get_message(null);
                 defer self.message_bus.unref(message_buffer);
 
-                const message_network = self.encryption_transit.encrypt_message(message_buffer, message);
+                const message_network = self.encryption_transit.encrypt_message(
+                    message_buffer,
+                    message,
+                );
                 // TODO: maybe optimize by avoiding the copy here
                 // message.swap_content(message_buffer);
 

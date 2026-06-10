@@ -13,7 +13,6 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const encryption = @import("../encryption.zig");
-const Encryption = encryption.Encryption;
 const EncryptionTransit = encryption.EncryptionTransit;
 
 const log = stdx.log.scoped(.client);
@@ -186,7 +185,7 @@ pub fn ClientType(
                 .on_eviction_callback = options.eviction_callback,
                 .encryption_transit = .init(
                     @as([32]u8, @splat(1)),
-                    encryption.Peer.replica(2),
+                    encryption.Peer.replica(1),
                     encryption.Peer.replica(1),
                 ),
             };
@@ -221,7 +220,10 @@ pub fn ClientType(
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
             while (buffer.next_header()) |header| {
-                const message_body_encrypted = buffer.consume_message(self.message_bus.pool, &header);
+                const message_body_encrypted = buffer.consume_message(
+                    self.message_bus.pool,
+                    &header,
+                );
                 defer self.message_bus.unref(message_body_encrypted);
 
                 const message = self.message_bus.get_message(null);
@@ -553,9 +555,8 @@ pub fn ClientType(
         fn on_reply(self: *Client, reply: *Message.Reply) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
-            // TODO: reply decrypted successfully, no checksum validation necessary.
-            // assert(reply.header.valid_checksum());
-            // assert(reply.header.valid_checksum_body(reply.body_used()));
+            assert(reply.header.valid_checksum());
+            assert(reply.header.valid_checksum_body(reply.body_used()));
             assert(reply.header.command == .reply);
             assert(reply.header.release.value == self.release.value);
 
@@ -757,7 +758,10 @@ pub fn ClientType(
             const message_buffer = self.message_bus.get_message(null);
             defer self.message_bus.unref(message_buffer);
 
-            const message_network = self.encryption_transit.encrypt_message(message_buffer, message);
+            const message_network = self.encryption_transit.encrypt_message(
+                message_buffer,
+                message,
+            );
 
             self.message_bus.send_message_to_replica(replica, message_network);
         }

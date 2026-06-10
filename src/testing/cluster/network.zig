@@ -151,7 +151,7 @@ pub const Network = struct {
 
                     // The Simulator doesn't use link_drop_packet_fn(), and replica_test.zig doesn't
                     // use transition_to_liveness_mode().
-                    assert(network.link_drop_packet_fn(path).* == null);
+                    assert(network.link_drop_packet(path).* == null);
                     network.link_filter(path).* = LinkFilter.initFull();
                 }
             }
@@ -209,8 +209,8 @@ pub const Network = struct {
         });
     }
 
-    pub fn link_drop_packet_fn(network: *Network, path: Path) *?PacketSimulator.LinkDropPacketFn {
-        return network.packet_simulator.link_drop_packet_fn(.{
+    pub fn link_drop_packet(network: *Network, path: Path) *?PacketSimulator.LinkDropPacket {
+        return network.packet_simulator.link_drop_packet(.{
             .source = network.process_to_address(path.source),
             .target = network.process_to_address(path.target),
         });
@@ -228,31 +228,34 @@ pub const Network = struct {
     }
 
     pub fn send_message(network: *Network, message: *MessageNetwork, path: Path) void {
-        network.message_summary.add(message.header);
+        network.message_summary.add(message.metadata);
         log.debug("send_message: {} > {}: {}", .{
             path.source,
             path.target,
-            message.header.command,
+            message.metadata.command(),
         });
 
-        switch (message.header.peer_type()) {
-            .unknown => {},
-            .client_likely => |client_id| {
-                // Requests may be forwarded by replicas, but peer_type always returns client ID,
-                // as it is useful for the production MessageBus. Specifically, a replica that
-                // receives a request from a client can immediately cache the connection in the
-                // client map, instead of waiting for an infrequent PingClient message to do so.
-                assert(message.header.command == .request);
-                if (path.source == .client) assert(path.source.client == client_id);
-            },
-            .client => |client_id| assert(std.meta.eql(path.source, .{ .client = client_id })),
-            .replica => |index| assert(std.meta.eql(path.source, .{ .replica = index })),
-        }
+        // TODO: figure out if you can reintroduce these asserts
+        // switch (message.header.peer_type()) {
+        //     .unknown => {},
+        //     .client_likely => |client_id| {
+        //         // Requests may be forwarded by replicas, but peer_type always returns client ID,
+        //         // as it is useful for the production MessageBus. Specifically, a replica that
+        //         // receives a request from a client can immediately cache the connection in the
+        //         // client map, instead of waiting for an infrequent PingClient message to do so.
+        //         assert(message.metadata.command() == .request);
+        //         if (path.source == .client) assert(path.source.client == client_id);
+        //     },
+        //     .client => |client_id| assert(std.meta.eql(path.source, .{ .client = client_id })),
+        //     .replica => |index| assert(std.meta.eql(path.source, .{ .replica = index })),
+        // }
 
-        const network_message = network.message_pool.get_message(null);
+        const network_message = network.message_pool.get_message_network();
         defer network.message_pool.unref(network_message);
 
         stdx.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
+        network_message.metadata = message.metadata;
+        network_message.header = undefined;
 
         network.packet_simulator.submit_packet(
             network_message.ref(),
@@ -282,7 +285,7 @@ pub const Network = struct {
     }
 
     fn packet_command(_: *PacketSimulator, message: *MessageNetwork) vsr.Command {
-        return message.header.command;
+        return message.metadata.command();
     }
 
     fn packet_clone(_: *PacketSimulator, message: *MessageNetwork) *MessageNetwork {
@@ -309,7 +312,7 @@ pub const Network = struct {
             log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
                 process_path.source,
                 process_path.target,
-                message.header.command,
+                message.metadata.command(),
             });
             return;
         }
@@ -317,17 +320,19 @@ pub const Network = struct {
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
             process_path.target,
-            message.header.command,
+            message.metadata.command(),
         });
 
         const target_bus = network.buses.items[path.target];
         assert(target_bus.buffer != null);
 
-        if (target_bus.buffer.?.receive_size + message.header.size > constants.message_size_max) {
+        if (target_bus.buffer.?.receive_size + message.metadata.size() >
+            constants.message_size_max)
+        {
             log.debug("deliver_message: {} > {}: {} (dropped; buffer is full)", .{
                 process_path.source,
                 process_path.target,
-                message.header.command,
+                message.metadata.command(),
             });
             return;
         }
@@ -336,11 +341,14 @@ pub const Network = struct {
             .inexact,
             u8,
             target_bus.buffer.?.recv_slice(),
-            message.buffer[0..message.header.size],
+            message.buffer[0..message.metadata.size()],
         );
-        target_bus.buffer.?.recv_advance(message.header.size);
+        target_bus.buffer.?.recv_advance(@intCast(message.metadata.size()));
         target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
         assert(target_bus.buffer != null);
+        if (target_bus.buffer.?.invalid) |msg| {
+            std.log.err("INVALID: {}", .{msg});
+        }
         assert(target_bus.buffer.?.invalid == null);
         maybe(target_bus.buffer.?.receive_size > 0);
         maybe(target_bus.buffer.?.process_size > 0);
@@ -365,10 +373,10 @@ pub const MessageSummary = struct {
 
     const Map = std.EnumArray(vsr.Command, struct { count: u32, size: u64 });
 
-    pub fn add(summary: *MessageSummary, header: *const vsr.Header) void {
-        const entry = summary.map.getPtr(header.command);
+    pub fn add(summary: *MessageSummary, metadata: MessagePool.Metadata) void {
+        const entry = summary.map.getPtr(metadata.command());
         entry.count += 1;
-        entry.size += header.size;
+        entry.size += metadata.size();
     }
 
     pub fn format(

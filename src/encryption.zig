@@ -15,20 +15,8 @@ const hkdf = std.crypto.kdf.hkdf;
 
 pub const encryption_version: u8 = 1;
 
-pub const Encryption = struct {
-    pub fn encrypt_test(header: *Header) void {
-        // assert(builtin.is_test);
-        header.body_nonce = 1;
-        header.header_nonce = 1;
-        header.header_key_id = 1;
-        header.set_checksum_body(&[0]u8{});
-        header.set_checksum();
-    }
-};
-
-// NOTE: try X variants
-
 var seed_once = std.once(seed_init);
+// NOTE: try X variants
 var seed_state: aegis_auth.Aegis256Mac = undefined;
 
 comptime {
@@ -119,7 +107,7 @@ const KeyId = extern struct {
     identifier: [5]u8 = "keyid".*,
     padding: [10]u8 = @splat(0),
 
-    // FIXME
+    // TODO
     /// This is still undefined, as it will relate to the key exchange protocol, but the core idea
     /// is to ensure we tie some part of the authority of the key that allowed the key exchange
     /// (eg, the signed certificate and the CA) into the key_id. Otherwise, imagine a situation
@@ -136,7 +124,9 @@ const KeyId = extern struct {
         else
             .{ peer_other, peer_self };
 
-        assert(peer_1.less_than(peer_2));
+        // TOOD: properly setup encryption between clients and replicas.
+        // Currently we use peer_1 = peer_2
+        // assert(peer_1.less_than(peer_2));
 
         return .{
             .version = version,
@@ -252,7 +242,10 @@ pub const EncryptionTransit = struct {
         target.header.* = enc.encrypt_header(source.header);
         source.header.* = unencrypted_header;
         target.header = undefined;
-        target.metadata = .{ .size_value = source.header.size };
+        target.metadata = .{
+            .size_value = source.header.size,
+            .command_value = source.header.command,
+        };
         return @ptrCast(target);
     }
 
@@ -295,9 +288,12 @@ pub const EncryptionTransit = struct {
         header: *const Header,
     ) !Header {
         const key = enc.key_recv_header;
-        assert(header.header_key_id == enc.key_id);
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+
+        if (header.header_key_id != enc.key_id) {
+            return error.AuthenticationFailed;
+        }
 
         if (header.header_nonce == 0 or header.header_nonce == undefined_u128) {
             return error.InvalidHeaderNonce;
@@ -358,10 +354,13 @@ pub const EncryptionTransit = struct {
     ) !void {
         const key = enc.key_recv_body;
 
-        assert(header.header_key_id == enc.key_id);
         assert(target.len == source.len);
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
+
+        if (header.header_key_id != enc.key_id) {
+            return error.AuthenticationFailed;
+        }
 
         if (header.body_nonce == 0 or header.body_nonce == undefined_u128) {
             return error.InvalidBodyNonce;
@@ -379,6 +378,9 @@ pub const EncryptionTransit = struct {
         );
 
         header.set_checksum_body(target);
+        header.header_key_id = 0;
+        header.header_nonce = 0;
+        header.body_nonce = 0;
         header.set_checksum();
     }
 };
@@ -410,6 +412,7 @@ pub const EncryptionStorage = struct {
         }
 
         pub fn generate_deterministic(prng: *stdx.PRNG) Keys {
+            assert(builtin.is_test);
             var keys: Keys = undefined;
             prng.fill(std.mem.asBytes(&keys));
             return keys;
@@ -648,7 +651,11 @@ test "EncryptStorage" {
         body_test_nonce,
     );
 
-    const encrypted = EncryptionStorage.encrypt_header(prepare.frame(), header_test_key, header_test_nonce);
+    const encrypted = EncryptionStorage.encrypt_header(
+        prepare.frame(),
+        header_test_key,
+        header_test_nonce,
+    );
     const unencrypted = try EncryptionStorage.decrypt_header(&encrypted, header_test_key);
 
     try std.testing.expectEqualSlices(
@@ -715,7 +722,10 @@ test "EncryptTransit" {
 
     try std.testing.expect(!stdx.equal_bytes(Header, &header_unencrypted, &header_encrypted));
 
-    try std.testing.expectError(error.AuthenticationFailed, enc_a.decrypt_header(&header_encrypted));
+    try std.testing.expectError(
+        error.AuthenticationFailed,
+        enc_a.decrypt_header(&header_encrypted),
+    );
 
     var header_decrypted = try enc_b.decrypt_header(&header_encrypted);
 
@@ -737,7 +747,7 @@ test "EncryptTransit" {
         &encrypt_buffer,
     );
 
-    try std.testing.expectEqual(0xdeadbeef, header_decrypted.body_tag);
+    try std.testing.expect(header_decrypted.valid_checksum_body(&decrypt_buffer));
 
     try std.testing.expectEqualSlices(
         u8,

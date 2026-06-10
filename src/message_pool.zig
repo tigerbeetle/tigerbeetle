@@ -113,10 +113,18 @@ pub const Options = union(vsr.ProcessType) {
 pub const MessagePool = struct {
     pub const Metadata = extern struct {
         size_value: u64 = 0,
+        // for testing only
+        command_value: vsr.Command = .reserved,
 
         pub fn size(self: *const Metadata) u64 {
             assert(self.size_value != 0);
             return self.size_value;
+        }
+
+        pub fn command(self: *const Metadata) vsr.Command {
+            // TODO: can it be reserved?
+            assert(self.command_value != .reserved);
+            return self.command_value;
         }
     };
 
@@ -354,7 +362,7 @@ const MessageNetwork = extern struct {
             std.meta.fields(Message),
             std.meta.fields(MessageNetwork),
         ) |message_field, command_message_field| {
-            // assert(std.mem.eql(u8, message_field.name, command_message_field.name));
+            assert(std.mem.eql(u8, message_field.name, command_message_field.name));
             assert(@sizeOf(message_field.type) == @sizeOf(command_message_field.type));
             assert(@offsetOf(Message, message_field.name) ==
                 @offsetOf(MessageNetwork, command_message_field.name));
@@ -370,6 +378,10 @@ const MessageNetwork = extern struct {
 
     pub fn base(message: *MessageNetwork) *Message {
         return @ptrCast(message);
+    }
+
+    pub fn get_header_encrypted(message: *const MessageNetwork) *Header {
+        return mem.bytesAsValue(Header, message.buffer[0..@sizeOf(Header)]);
     }
 
     pub fn base_const(message: *const MessageNetwork) *const Message {
@@ -402,7 +414,7 @@ const MessageStorage = extern struct {
             std.meta.fields(Message),
             std.meta.fields(MessageStorage),
         ) |message_field, command_message_field| {
-            // assert(std.mem.eql(u8, message_field.name, command_message_field.name));
+            assert(std.mem.eql(u8, message_field.name, command_message_field.name));
             assert(@sizeOf(message_field.type) == @sizeOf(command_message_field.type));
             assert(@offsetOf(Message, message_field.name) ==
                 @offsetOf(MessageStorage, command_message_field.name));

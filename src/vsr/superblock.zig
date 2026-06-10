@@ -394,6 +394,13 @@ pub const SuperBlockHeader = extern struct {
             assert(@sizeOf(CheckpointState) == 1024);
             assert(stdx.no_padding(CheckpointState));
         }
+        pub fn calculate_checksum(checkpoint_state: *const CheckpointState) u128 {
+            var checksum = vsr.ChecksumStream.init();
+            const header_checksum = checkpoint_state.header.calculate_checksum();
+            checksum.add(std.mem.asBytes(&header_checksum));
+            checksum.add(std.mem.asBytes(checkpoint_state)[@sizeOf(vsr.Header.Prepare)..]);
+            return checksum.checksum();
+        }
     };
 
     pub fn calculate_checksum(superblock: *const SuperBlockHeader) u128 {
@@ -442,7 +449,8 @@ pub const SuperBlockHeader = extern struct {
     }
 
     pub fn checkpoint_id(superblock: *const SuperBlockHeader) u128 {
-        return vsr.checksum(std.mem.asBytes(&superblock.vsr_state.checkpoint));
+        return superblock.vsr_state.checkpoint.calculate_checksum();
+        // return vsr.checksum(std.mem.asBytes(&superblock.vsr_state.checkpoint));
     }
 
     pub fn parent_checkpoint_id(superblock: *const SuperBlockHeader) u128 {

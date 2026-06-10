@@ -24,8 +24,8 @@ pub const MessageBus = struct {
     buffer: ?MessageBuffer,
     suspended: bool = false,
     resume_scheduled: bool = false,
-    decrypt_header: *const fn (message_bus: *MessageBus, header: *const Header) anyerror!u64,
     /// The callback to be called when a message is received.
+    decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
     on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
     pub const Options = struct {
@@ -36,7 +36,7 @@ pub const MessageBus = struct {
         _: std.mem.Allocator,
         process: Process,
         message_pool: *MessagePool,
-        decrypt_header: *const fn (message_pool: *MessagePool, header: *const Header) anyerror!u64,
+        decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
         options: Options,
     ) !MessageBus {
@@ -44,16 +44,17 @@ pub const MessageBus = struct {
             .network = options.network,
             .pool = message_pool,
             .process = process,
-            // FIXME
-            .buffer = MessageBuffer.init(null, message_pool),
             .decrypt_header = decrypt_header,
+            .buffer = null,
             .on_messages_callback = on_messages_callback,
         };
     }
 
     pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
-        bus.buffer.?.deinit(bus.pool);
-        bus.buffer = null;
+        if (bus.buffer != null) {
+            bus.buffer.?.deinit(bus.pool);
+            bus.buffer = null;
+        }
         bus.resume_scheduled = false;
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
@@ -61,9 +62,29 @@ pub const MessageBus = struct {
 
     pub fn trace_gauge(_: *MessageBus) void {}
 
-    pub fn listen(_: *MessageBus) !void {}
+    pub fn listen(bus: *MessageBus) !void {
+        // FIXTHIS: Find better place for init,
+        // this requires adding a listen call in replica_test.zig
+        if (bus.buffer == null) {
+            bus.buffer = MessageBuffer.init(
+                bus,
+                bus.decrypt_header,
+                bus.pool,
+            );
+        }
+    }
 
-    pub fn tick(_: *MessageBus) void {}
+    pub fn tick(bus: *MessageBus) void {
+        // FIXTHIS: Find better place for init,
+        // this requires adding a listen call in replica_test.zig
+        if (bus.buffer == null) {
+            bus.buffer = MessageBuffer.init(
+                bus,
+                bus.decrypt_header,
+                bus.pool,
+            );
+        }
+    }
 
     pub fn tick_client(bus: *MessageBus) void {
         bus.tick();
@@ -104,7 +125,11 @@ pub const MessageBus = struct {
 
     /// Try to send the message to the client with the given id.
     /// If the client is not currently connected, the message is silently dropped.
-    pub fn send_message_to_client(bus: *MessageBus, client_id: u128, message: *MessageNetwork) void {
+    pub fn send_message_to_client(
+        bus: *MessageBus,
+        client_id: u128,
+        message: *MessageNetwork,
+    ) void {
         assert(bus.process == .replica);
 
         bus.network.send_message(message, .{

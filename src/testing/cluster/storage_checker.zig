@@ -220,7 +220,8 @@ pub const StorageChecker = struct {
             if (areas.contains(.superblock_checkpoint)) {
                 checkpoint.put(
                     .superblock_checkpoint,
-                    vsr.checksum(std.mem.asBytes(&superblock.working.vsr_state.checkpoint)),
+                    superblock.working.vsr_state.checkpoint.calculate_checksum(),
+                    // vsr.checksum(std.mem.asBytes(&superblock.working.vsr_state.checkpoint)),
                 );
             }
             if (areas.contains(.client_replies)) {
@@ -248,7 +249,7 @@ pub const StorageChecker = struct {
                 const checksum_actual = checkpoint_actual.get(area) orelse continue;
                 if (checkpoint_expect.fetchPut(area, checksum_actual)) |checksum_expect| {
                     if (checksum_expect != checksum_actual) {
-                        log.warn("{}: {s}: mismatch " ++
+                        log.err("{}: {s}: mismatch " ++
                             "area={s} expect={x:0>32} actual={x:0>32}", .{
                             superblock.replica_index.?,
                             caller,
@@ -454,7 +455,9 @@ pub const StorageChecker = struct {
                 const block_header = schema.header_from_block(block);
                 assert(block_header.address == block_address);
 
-                stream.add(block[0..block_header.size]);
+                const block_header_checksum = block_header.calculate_checksum();
+
+                stream.add(std.mem.asBytes(&block_header_checksum));
                 // Extra guard against identical blocks:
                 stream.add(std.mem.asBytes(&block_address));
 

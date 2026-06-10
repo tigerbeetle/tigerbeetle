@@ -101,14 +101,17 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
         };
 
-        pub const LinkDropPacketFn = *const fn (packet: Packet) bool;
+        pub const LinkDropPacket = struct {
+            context: ?*anyopaque,
+            function: *const fn (context: ?*anyopaque, packet: Packet) bool,
+        };
 
         const Link = struct {
             queue: std.PriorityQueue(LinkPacket, void, LinkPacket.less_than),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
-            drop_packet_fn: ?LinkDropPacketFn = null,
+            drop_packet: ?LinkDropPacket = null,
             /// Commands in the set are recorded for a later replay.
             record: LinkFilter = .{},
             /// We can arbitrary clog a path until a given moment.
@@ -118,8 +121,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 if (!link.filter.contains(command)) {
                     return true;
                 }
-                if (link.drop_packet_fn) |drop_packet_fn| {
-                    return drop_packet_fn(packet);
+                if (link.drop_packet) |drop_packet| {
+                    return drop_packet.function(drop_packet.context, packet);
                 }
                 return false;
             }
@@ -231,8 +234,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return &self.links[self.path_index(path)].filter;
         }
 
-        pub fn link_drop_packet_fn(self: *PacketSimulator, path: Path) *?LinkDropPacketFn {
-            return &self.links[self.path_index(path)].drop_packet_fn;
+        pub fn link_drop_packet(self: *PacketSimulator, path: Path) *?LinkDropPacket {
+            return &self.links[self.path_index(path)].drop_packet;
         }
 
         pub fn link_record(self: *PacketSimulator, path: Path) *LinkFilter {
