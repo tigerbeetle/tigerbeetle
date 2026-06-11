@@ -27,11 +27,11 @@ pub fn StackType(comptime T: type) type {
             } };
         }
 
-        pub inline fn count(self: *Stack) u32 {
+        pub inline fn count(self: *const Stack) u32 {
             return self.any.count;
         }
 
-        pub inline fn capacity(self: *Stack) u32 {
+        pub inline fn capacity(self: *const Stack) u32 {
             return self.any.capacity;
         }
 
