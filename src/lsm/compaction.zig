@@ -270,7 +270,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                 self.reads.available(),  self.reads.total(),
                 self.writes.available(), self.writes.total(),
                 self.cpus.available(),   self.cpus.total(),
-                self.blocks.count,       self.blocks_backing_storage.len,
+                self.blocks.count(),     self.blocks_backing_storage.len,
             });
         }
     };
