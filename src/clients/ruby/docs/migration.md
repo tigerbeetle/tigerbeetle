@@ -89,10 +89,11 @@ account_1, account_2 = client.lookup_accounts([100, 101])
 
 ### Flag handling
 
-All flags are now explicit numeric constants combined with `|`, not symbol arrays.
+Flags can be passed as explicit numeric constants combined with `|`, or as
+arrays of lowercase or uppercase symbols.
 
 ```rb
-# Before
+# Before, still valid
 filter = TigerBeetle::AccountFilter.new(
   account_id: 100,
   limit: 10,
@@ -101,7 +102,7 @@ filter = TigerBeetle::AccountFilter.new(
 
 transfers = client.get_account_transfers(filter)
 
-# After
+# After, alternative version
 filter = TigerBeetle::AccountFilter.new(
   account_id: 100,
   limit: 10,
@@ -111,6 +112,9 @@ filter = TigerBeetle::AccountFilter.new(
 
 transfers = client.get_account_transfers(filter)
 ```
+
+The constant form is preferred because editors can autocomplete the available
+flags, but symbol arrays remain supported for compatibility.
 
 ### Timestamp attributes
 

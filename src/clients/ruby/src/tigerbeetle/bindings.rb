@@ -4,7 +4,35 @@
 ########################################################
 
 module TigerBeetle
+  module Flags
+    def from(value)
+      case value
+      when Integer
+        value
+      when Array
+        value.reduce(0) { |flags, flag| flags | const_get(flag.upcase) }
+      else
+        raise TypeError, "expected Integer or Array[Symbol] for #{name}"
+      end
+    rescue NameError
+      raise ArgumentError, "unknown flag for #{name}: #{value.inspect}"
+    end
+  end
+
+  module FlagField
+    def self.included(base)
+      flags_module_name = "#{base.name.split("::").last}Flags"
+      flags_module = TigerBeetle.const_get(flags_module_name)
+
+      base.define_method(:flags=) do |value|
+        @flags = flags_module.from(value)
+      end
+    end
+  end
+
   module AccountFlags
+    extend Flags
+
     NONE = 0
     LINKED = 1 << 0
     DEBITS_MUST_NOT_EXCEED_CREDITS = 1 << 1
@@ -15,6 +43,8 @@ module TigerBeetle
   end
 
   module TransferFlags
+    extend Flags
+
     NONE = 0
     LINKED = 1 << 0
     PENDING = 1 << 1
@@ -28,6 +58,8 @@ module TigerBeetle
   end
 
   module AccountFilterFlags
+    extend Flags
+
     NONE = 0
     DEBITS = 1 << 0
     CREDITS = 1 << 1
@@ -35,6 +67,8 @@ module TigerBeetle
   end
 
   module QueryFilterFlags
+    extend Flags
+
     NONE = 0
     REVERSED = 1 << 0
   end
@@ -152,6 +186,8 @@ module TigerBeetle
   end
 
   class Account
+    include FlagField
+
     attr_accessor :id
     attr_accessor :debits_pending
     attr_accessor :debits_posted
@@ -162,7 +198,7 @@ module TigerBeetle
     attr_accessor :user_data_32
     attr_accessor :ledger
     attr_accessor :code
-    attr_accessor :flags
+    attr_reader :flags
     attr_accessor :timestamp
 
     def initialize(
@@ -189,12 +225,14 @@ module TigerBeetle
       @user_data_32 = user_data_32
       @ledger = ledger
       @code = code
-      @flags = flags
+      self.flags = flags
       @timestamp = timestamp
     end
   end
 
   class Transfer
+    include FlagField
+
     attr_accessor :id
     attr_accessor :debit_account_id
     attr_accessor :credit_account_id
@@ -206,7 +244,7 @@ module TigerBeetle
     attr_accessor :timeout
     attr_accessor :ledger
     attr_accessor :code
-    attr_accessor :flags
+    attr_reader :flags
     attr_accessor :timestamp
 
     def initialize(
@@ -235,12 +273,14 @@ module TigerBeetle
       @timeout = timeout
       @ledger = ledger
       @code = code
-      @flags = flags
+      self.flags = flags
       @timestamp = timestamp
     end
   end
 
   class AccountFilter
+    include FlagField
+
     attr_accessor :account_id
     attr_accessor :user_data_128
     attr_accessor :user_data_64
@@ -249,7 +289,7 @@ module TigerBeetle
     attr_accessor :timestamp_min
     attr_accessor :timestamp_max
     attr_accessor :limit
-    attr_accessor :flags
+    attr_reader :flags
 
     def initialize(
       account_id: 0,
@@ -270,11 +310,13 @@ module TigerBeetle
       @timestamp_min = timestamp_min
       @timestamp_max = timestamp_max
       @limit = limit
-      @flags = flags
+      self.flags = flags
     end
   end
 
   class QueryFilter
+    include FlagField
+
     attr_accessor :user_data_128
     attr_accessor :user_data_64
     attr_accessor :user_data_32
@@ -283,7 +325,7 @@ module TigerBeetle
     attr_accessor :timestamp_min
     attr_accessor :timestamp_max
     attr_accessor :limit
-    attr_accessor :flags
+    attr_reader :flags
 
     def initialize(
       user_data_128: 0,
@@ -304,7 +346,7 @@ module TigerBeetle
       @timestamp_min = timestamp_min
       @timestamp_max = timestamp_max
       @limit = limit
-      @flags = flags
+      self.flags = flags
     end
   end
 
@@ -352,4 +394,6 @@ module TigerBeetle
       "#<#{self.class} timestamp=#{@timestamp} status_name=#{@status_name}>"
   end
 
+  private_constant :Flags
+  private_constant :FlagField
 end
