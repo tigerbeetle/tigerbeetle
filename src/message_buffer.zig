@@ -143,26 +143,6 @@ pub const MessageBuffer = struct {
             return;
         };
 
-        stdx.copy_disjoint(.exact, u8, header_bytes, std.mem.asBytes(&header));
-
-        // Check that command is valid without materializing invalid Zig enum value.
-        comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
-            @FieldType(Header, "command") == vsr.Command);
-        const command_raw: u8 = header_bytes[@offsetOf(Header, "command")];
-        _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
-            vsr.fatal(
-                .unknown_vsr_command,
-                "unknown VSR command, crashing for safety " ++
-                    "(command={d} protocol={d} replica={d} release={})",
-                .{
-                    command_raw,
-                    header.protocol,
-                    header.replica,
-                    header.release,
-                },
-            );
-        };
-
         if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
             buffer.invalidate(.header_size);
             return;
@@ -170,6 +150,7 @@ pub const MessageBuffer = struct {
         assert(@sizeOf(Header) <= header.size and header.size <= constants.message_size_max);
 
         buffer.advance_size += @sizeOf(Header);
+        assert(buffer.advance_size - buffer.process_size == @sizeOf(Header));
     }
 
     fn advance_body(buffer: *MessageBuffer) void {
@@ -199,14 +180,13 @@ pub const MessageBuffer = struct {
 
     /// Peek at the header for the incoming message. Necessitates a copy to guarantee alignment.
     fn copy_header(buffer: *const MessageBuffer) Header {
-        assert(buffer.receive_size - buffer.process_size >= @sizeOf(Header));
-        var header: Header = undefined;
-        stdx.copy_disjoint(
-            .exact,
-            u8,
-            std.mem.asBytes(&header),
-            buffer.message.buffer[buffer.process_size..][0..@sizeOf(Header)],
-        );
+        const header_bytes =
+            buffer.message.buffer[buffer.process_size..][0..@sizeOf(Header)];
+
+        var header_encrypted: Header = undefined;
+        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&header_encrypted), header_bytes);
+
+        const header = buffer.decrypt_header(buffer.context, &header_encrypted) catch unreachable;
         return header;
     }
 
@@ -286,7 +266,7 @@ pub const MessageBuffer = struct {
         defer buffer.iterator_state = .after_consume_suspend;
 
         if (buffer.process_size == 0 and buffer.receive_size == header.size) {
-            assert(buffer.message.header.checksum() == header.checksum());
+            // assert(buffer.message.header.checksum() == header.checksum());
 
             assert(buffer.suspend_size == 0);
             buffer.process_size = 0;
@@ -318,7 +298,7 @@ pub const MessageBuffer = struct {
         assert(buffer.process_size <= buffer.receive_size);
         buffer.advance();
 
-        assert(message.header.checksum() == header.checksum());
+        // assert(message.header.checksum() == header.checksum());
 
         message.header = undefined;
 
@@ -334,7 +314,6 @@ pub const MessageBuffer = struct {
         assert(buffer.advance_size - buffer.process_size >= header.size);
         assert(buffer.invalid == null);
         assert(header.size <= constants.message_size_max);
-        // TODO: maybe revisit and compare to decrypted header
         assert(std.mem.eql(
             u8,
             std.mem.asBytes(header),
@@ -433,8 +412,11 @@ test "MessageBuffer fuzz" {
             const byte_index = prng.index(buffer[0..@sizeOf(Header)]);
             const bit_index = prng.int_inclusive(u3, 7);
             buffer[byte_index] ^= @as(u8, 1) << bit_index;
-            const invalid_header = std.mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]).*;
-            if (invalid_header.valid_checksum()) {
+            const invalid_header: Header = std.mem.bytesAsValue(
+                Header,
+                buffer[0..@sizeOf(Header)],
+            ).*;
+            if (invalid_header.valid_checksum_zeros()) {
                 fault = false;
             }
         }

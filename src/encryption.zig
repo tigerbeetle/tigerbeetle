@@ -118,13 +118,13 @@ const KeyId = extern struct {
     peer_2: Peer,
 
     pub fn init(version: u8, peer_self: Peer, peer_other: Peer) KeyId {
-        // TOOD: add tests for stability of this.
+        // TODO: add tests for stability of this.
         const peer_1, const peer_2 = if (peer_self.less_than(peer_other))
             .{ peer_self, peer_other }
         else
             .{ peer_other, peer_self };
 
-        // TOOD: properly setup encryption between clients and replicas.
+        // TODO: properly setup encryption between clients and replicas.
         // Currently we use peer_1 = peer_2
         // assert(peer_1.less_than(peer_2));
 
@@ -160,7 +160,215 @@ comptime {
     assert(@sizeOf(KeyId) != @sizeOf(Intent));
 }
 
+const X25519 = std.crypto.dh.X25519;
+
+pub const KeyExchangeInsecure = struct {
+    state: State,
+    self_id: u128,
+    self_type: PeerType,
+    key_pair: X25519.KeyPair,
+    result: ?KeyExchangeResult = null,
+
+    const State = union(Role) {
+        initiator: DHState,
+        responder: DHState,
+    };
+
+    const DHState = enum {
+        recv_dh,
+        send_dh,
+        derive_secret,
+    };
+
+    const Role = enum {
+        initiator,
+        responder,
+    };
+
+    const SharedSecret = [32]u8;
+
+    const KeyExchangeResult = struct {
+        shared_secret: SharedSecret,
+        peer_id: u128,
+        peer_type: PeerType,
+    };
+
+    const KeyExchangeMessage = extern struct {
+        peer_type: PeerType,
+        peer_id: u128,
+        public_key: [32]u8,
+    };
+
+    const Action = union(enum) {
+        send: KeyExchangeMessage,
+        recv,
+        done: KeyExchangeResult,
+        terminate,
+    };
+
+    pub fn init(role: Role, self_id: u128, self_type: PeerType) KeyExchangeInsecure {
+        return .{
+            .state = switch (role) {
+                .responder => .{ .responder = .recv_dh },
+                .initiator => .{ .initiator = .send_dh },
+            },
+            .self_id = self_id,
+            .self_type = self_type,
+            .key_pair = X25519.KeyPair.generate(),
+        };
+    }
+
+    pub fn feed(
+        kex: *KeyExchangeInsecure,
+        maybe_msg: ?KeyExchangeMessage,
+    ) Action {
+        switch (kex.state) {
+            .initiator => |state| {
+                switch (state) {
+                    .send_dh => {
+                        if (maybe_msg != null) return .terminate;
+                        kex.state.initiator = .recv_dh;
+                        return .{ .send = .{
+                            .public_key = kex.key_pair.public_key,
+                            .peer_id = kex.self_id,
+                            .peer_type = kex.self_type,
+                        } };
+                    },
+                    .recv_dh => {
+                        if (maybe_msg) |msg| {
+                            const shared_secret = X25519.scalarmult(
+                                kex.key_pair.secret_key,
+                                msg.public_key,
+                            ) catch {
+                                return .terminate;
+                            };
+
+                            kex.result = .{
+                                .shared_secret = shared_secret,
+                                .peer_type = msg.peer_type,
+                                .peer_id = msg.peer_id,
+                            };
+                            return .{ .done = kex.result.? };
+                        } else {
+                            return .{ .send = .{
+                                .public_key = kex.key_pair.public_key,
+                                .peer_id = kex.self_id,
+                                .peer_type = kex.self_type,
+                            } };
+                        }
+                    },
+                    .derive_secret => {
+                        if (maybe_msg != null) return .terminate;
+                        return .{ .done = kex.result.? };
+                    },
+                }
+            },
+            .responder => |state| {
+                switch (state) {
+                    .recv_dh => {
+                        if (maybe_msg) |msg| {
+                            const shared_secret = X25519.scalarmult(
+                                kex.key_pair.secret_key,
+                                msg.public_key,
+                            ) catch {
+                                return .terminate;
+                            };
+
+                            kex.result = .{
+                                .shared_secret = shared_secret,
+                                .peer_type = msg.peer_type,
+                                .peer_id = msg.peer_id,
+                            };
+                            kex.state.responder = .send_dh;
+                            return .{ .send = .{
+                                .public_key = kex.key_pair.public_key,
+                                .peer_id = kex.self_id,
+                                .peer_type = kex.self_type,
+                            } };
+                        } else {
+                            return .recv;
+                        }
+                    },
+                    .send_dh => {
+                        if (maybe_msg != null) return .terminate;
+                        kex.state.responder = .derive_secret;
+                        return .{ .done = kex.result.? };
+                    },
+                    .derive_secret => {
+                        if (maybe_msg != null) return .terminate;
+                        return .{ .done = kex.result.? };
+                    },
+                }
+            },
+        }
+    }
+};
+
+test "KeyExchangeInsecure" {
+    var initiator_kex: KeyExchangeInsecure = .init(.initiator, 1, .replica);
+    var responder_kex: KeyExchangeInsecure = .init(.responder, 2, .replica);
+
+    var initiator_result: ?KeyExchangeInsecure.KeyExchangeResult = null;
+    var responder_result: ?KeyExchangeInsecure.KeyExchangeResult = null;
+
+    var maybe_initiator_action: ?KeyExchangeInsecure.Action = null;
+    var maybe_responder_action: ?KeyExchangeInsecure.Action = null;
+    while (initiator_result == null or responder_result == null) {
+        const initiator_action = maybe_initiator_action orelse initiator_kex.feed(null);
+        maybe_initiator_action = null;
+        switch (initiator_action) {
+            .done => |shared_secret| {
+                initiator_result = shared_secret;
+            },
+            .send => |msg| {
+                maybe_responder_action = responder_kex.feed(msg);
+            },
+            else => unreachable,
+        }
+
+        const responder_action = maybe_responder_action orelse responder_kex.feed(null);
+        maybe_responder_action = null;
+        switch (responder_action) {
+            .done => |shared_secret| {
+                responder_result = shared_secret;
+            },
+            .send => |msg| {
+                maybe_initiator_action = initiator_kex.feed(msg);
+            },
+            else => unreachable,
+        }
+    }
+
+    try std.testing.expectEqualSlices(
+        u8,
+        &initiator_result.?.shared_secret,
+        &responder_result.?.shared_secret,
+    );
+
+    try std.testing.expectEqual(
+        initiator_result.?.peer_type,
+        responder_kex.self_type,
+    );
+
+    try std.testing.expectEqual(
+        initiator_result.?.peer_id,
+        responder_kex.self_id,
+    );
+
+    try std.testing.expectEqual(
+        responder_result.?.peer_type,
+        initiator_kex.self_type,
+    );
+
+    try std.testing.expectEqual(
+        responder_result.?.peer_id,
+        initiator_kex.self_id,
+    );
+}
+
 pub const EncryptionTransit = struct {
+    const BodyTagNonce = struct { body_nonce: u128, body_tag: u128 };
+
     key_id: u128,
 
     key_send_header: [32]u8,
@@ -231,22 +439,50 @@ pub const EncryptionTransit = struct {
         target: *Message,
         source: *const Message,
     ) *MessageNetwork {
-        const unencrypted_header = source.header.*;
-        enc.encrypt_body(
-            source.header,
+        const body_tag_nonce = enc.encrypt_body(
             target.buffer[@sizeOf(Header)..source.header.size],
             source.body_used(),
         );
+
+        var header = source.header.*;
+        header.body_tag = body_tag_nonce.body_tag;
+        header.body_nonce = body_tag_nonce.body_nonce;
+
         // TODO: When sending a message, assert the last 16 bytes are not zero.
         @memset(target.buffer[source.header.size..], 0);
-        target.header.* = enc.encrypt_header(source.header);
-        source.header.* = unencrypted_header;
+        target.header.* = enc.encrypt_header(&header);
         target.header = undefined;
         target.metadata = .{
-            .size_value = source.header.size,
-            .command_value = source.header.command,
+            .size_value = header.size,
+            .command_value = header.command,
         };
         return @ptrCast(target);
+    }
+
+    pub fn decrypt_message(
+        enc: *EncryptionTransit,
+        target: *Message,
+        source: *const MessageNetwork,
+    ) !void {
+        const header_encrypted = source.get_header_encrypted();
+        if (header_encrypted.header_key_id != enc.key_id) {
+            return error.AuthenticationFailed;
+        }
+
+        // We are decrypting the header, despite already having decrypted it in message_buffer.zig
+        const header_decrypted = try enc.decrypt_header(header_encrypted);
+
+        target.header.* = header_decrypted;
+
+        try enc.decrypt_body(
+            .{ .body_tag = header_decrypted.body_tag, .body_nonce = header_decrypted.body_nonce },
+            target.body_used(),
+            source.body_used(),
+        );
+
+        target.header.set_checksum_body(target.body_used());
+        target.header.set_zeroes();
+        target.header.set_checksum();
     }
 
     pub fn encrypt_header(
@@ -314,16 +550,32 @@ pub const EncryptionTransit = struct {
             extend_nonce(decrypted.header_nonce),
             key,
         );
-        decrypted.set_checksum();
+
+        // Check that command is valid.
+        const command_raw = @intFromEnum(decrypted.command);
+        _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
+            // TODO: revisit this and do not crash
+            vsr.fatal(
+                .unknown_vsr_command,
+                "unknown VSR command, crashing for safety " ++
+                    "(command={d} protocol={d} replica={d} release={})",
+                .{
+                    command_raw,
+                    decrypted.protocol,
+                    decrypted.replica,
+                    decrypted.release,
+                },
+            );
+        };
+
         return decrypted;
     }
 
-    pub fn encrypt_body(
+    fn encrypt_body(
         enc: *EncryptionTransit,
-        header: *Header,
         target: []u8,
         source: []const u8,
-    ) void {
+    ) BodyTagNonce {
         const key = enc.key_send_body;
         const nonce = std.crypto.random.int(u128);
 
@@ -333,8 +585,8 @@ pub const EncryptionTransit = struct {
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
         assert(nonce != undefined_u128);
 
-        const tag = std.mem.asBytes(&header.body_tag);
-        header.body_nonce = nonce;
+        var body_tag: u128 = 0;
+        const tag = std.mem.asBytes(&body_tag);
 
         aegis.Aegis256.encrypt(
             target,
@@ -344,11 +596,12 @@ pub const EncryptionTransit = struct {
             extend_nonce(nonce),
             key,
         );
+        return .{ .body_nonce = nonce, .body_tag = body_tag };
     }
 
-    pub fn decrypt_body(
+    fn decrypt_body(
         enc: *EncryptionTransit,
-        header: *Header,
+        body_tag_nonce: BodyTagNonce,
         target: []u8,
         source: []const u8,
     ) !void {
@@ -358,30 +611,20 @@ pub const EncryptionTransit = struct {
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
-        if (header.header_key_id != enc.key_id) {
-            return error.AuthenticationFailed;
-        }
-
-        if (header.body_nonce == 0 or header.body_nonce == undefined_u128) {
+        if (body_tag_nonce.body_nonce == 0 or body_tag_nonce.body_nonce == undefined_u128) {
             return error.InvalidBodyNonce;
         }
 
-        const tag = std.mem.asBytes(&header.body_tag).*;
+        const tag = std.mem.asBytes(&body_tag_nonce.body_tag).*;
 
         try aegis.Aegis256.decrypt(
             target,
             source,
             tag,
             &[0]u8{},
-            extend_nonce(header.body_nonce),
+            extend_nonce(body_tag_nonce.body_nonce),
             key,
         );
-
-        header.set_checksum_body(target);
-        header.header_key_id = 0;
-        header.header_nonce = 0;
-        header.body_nonce = 0;
-        header.set_checksum();
     }
 };
 
@@ -713,8 +956,11 @@ test "EncryptTransit" {
 
     var prepare = Header.Prepare.root(0);
     prepare.size = @intCast(@sizeOf(Header) + body.len);
+    prepare.frame().set_zeroes();
 
-    enc_a.encrypt_body(prepare.frame(), &encrypt_buffer, &body);
+    const body_tag_nonce = enc_a.encrypt_body(&encrypt_buffer, &body);
+    prepare.frame().body_tag = body_tag_nonce.body_tag;
+    prepare.frame().body_nonce = body_tag_nonce.body_nonce;
 
     const header_unencrypted = prepare.frame().*;
 
@@ -736,18 +982,16 @@ test "EncryptTransit" {
     );
 
     try std.testing.expectError(error.AuthenticationFailed, enc_a.decrypt_body(
-        &header_decrypted,
+        body_tag_nonce,
         &decrypt_buffer,
         &encrypt_buffer,
     ));
 
     try enc_b.decrypt_body(
-        &header_decrypted,
+        body_tag_nonce,
         &decrypt_buffer,
         &encrypt_buffer,
     );
-
-    try std.testing.expect(header_decrypted.valid_checksum_body(&decrypt_buffer));
 
     try std.testing.expectEqualSlices(
         u8,
@@ -874,15 +1118,14 @@ test "EncryptTransit Bit Fuzzer" {
 
     for (0..encrypt_buffer.len) |pos| {
         for (0..@bitSizeOf(u8)) |bit| {
-            enc_a.encrypt_body(
-                prepare.frame(),
+            const body_tag_nonce = enc_a.encrypt_body(
                 &encrypt_buffer,
                 &body,
             );
             encrypt_buffer[pos] = encrypt_buffer[pos] ^ @as(u8, 1) << @intCast(bit);
 
             try std.testing.expectError(error.AuthenticationFailed, enc_b.decrypt_body(
-                prepare.frame(),
+                body_tag_nonce,
                 &decrypt_buffer,
                 &encrypt_buffer,
             ));

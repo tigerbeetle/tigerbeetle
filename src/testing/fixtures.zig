@@ -184,7 +184,7 @@ pub fn open_grid(grid: *Grid) void {
 }
 
 pub fn decrypt_header_no_op(_: ?*anyopaque, header: *const Header) anyerror!Header {
-    if (!header.valid_checksum()) {
+    if (!header.valid_checksum_zeros()) {
         return error.InvalidHeader;
     }
     return header.*;

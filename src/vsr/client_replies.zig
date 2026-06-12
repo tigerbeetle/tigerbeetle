@@ -251,7 +251,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 return;
             };
 
-            if (!message.header.valid_checksum() or
+            if (!message.header.frame_const().valid_checksum_zeros() or
                 !message.header.valid_checksum_body(message.body_used()))
             {
                 log.warn("{}: read_reply: corrupt reply (client={} reply={x:0>32})", .{

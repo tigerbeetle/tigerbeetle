@@ -366,8 +366,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.prepare_checksums.len == slot_count);
             assert(journal.prepare_inhabited.len == slot_count);
 
-            for (journal.headers) |*h| assert(!h.valid_checksum());
-            for (journal.headers_redundant) |*h| assert(!h.valid_checksum());
+            for (journal.headers) |*h| assert(!h.frame().valid_checksum_zeros());
+            for (journal.headers_redundant) |*h| assert(!h.frame().valid_checksum_zeros());
 
             return journal;
         }
@@ -2488,7 +2488,7 @@ fn header_ok(
 ) ?Header.Prepare {
     // We must first validate the header checksum before accessing any fields.
     // Otherwise, we may hit undefined data or an out-of-bounds enum and cause a runtime crash.
-    if (!header.valid_checksum()) return null;
+    if (!header.frame_const().valid_checksum_zeros()) return null;
     if (header.command != .prepare) return null;
 
     // A header with the wrong cluster, or in the wrong slot, may indicate a misdirected read/write.

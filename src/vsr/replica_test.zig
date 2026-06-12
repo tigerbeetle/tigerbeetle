@@ -2942,27 +2942,24 @@ const TestClientBus = struct {
     fn on_messages(message_bus: *Cluster.MessageBus, buffer: *MessageBuffer) void {
         const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
         while (buffer.next_header()) |header| {
-            const message_body_encrypted = buffer.consume_message(
+            const message_encrypted = buffer.consume_message(
                 t.message_pool,
                 &header,
             );
-            defer t.message_pool.unref(message_body_encrypted);
+            defer t.message_pool.unref(message_encrypted);
 
             const message = t.message_bus.get_message(null);
             defer t.message_bus.unref(message);
 
             message.header.* = header;
 
-            t.encryption_transit.decrypt_body(
-                message.header,
-                message.body_used(),
-                message_body_encrypted.body_used(),
-            ) catch |err| {
-                log.warn("on_messages: body decryption failed: {}", .{
-                    err,
-                });
-                continue;
-            };
+            t.encryption_transit.decrypt_message(message, message_encrypted) catch |err|
+                {
+                    log.warn("on_messages: decryption failed: {}", .{
+                        err,
+                    });
+                    continue;
+                };
 
             assert(header.cluster == t.context.cluster.options.cluster_id);
 

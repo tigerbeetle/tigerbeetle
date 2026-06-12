@@ -627,6 +627,7 @@ pub fn ReplicaType(
         aof_recovery: bool,
 
         encryption_transit: EncryptionTransit,
+        encryptions_transit: [constants.replicas_max]EncryptionTransit,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -1308,6 +1309,15 @@ pub fn ReplicaType(
 
             try self.message_bus.listen();
 
+            var encryptions_transit: [constants.replicas_max]EncryptionTransit = @splat(undefined);
+            for (0..constants.replicas_max) |idx| {
+                encryptions_transit[idx] = .init(
+                    @as([32]u8, @splat(1)),
+                    encryption.Peer.replica(1),
+                    encryption.Peer.replica(replica_index),
+                );
+            }
+
             self.* = .{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -1466,6 +1476,7 @@ pub fn ReplicaType(
                     encryption.Peer.replica(1),
                     encryption.Peer.replica(1),
                 ),
+                .encryptions_transit = encryptions_transit,
             };
 
             log.info("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
@@ -1670,27 +1681,23 @@ pub fn ReplicaType(
                     message_suspended_count += 1;
                     continue;
                 }
-                const message_body_encrypted = buffer.consume_message(
+                const message_encrypted = buffer.consume_message(
                     self.message_bus.pool,
                     &header,
                 );
-                defer self.message_bus.unref(message_body_encrypted);
+                defer self.message_bus.unref(message_encrypted);
 
                 const message = self.message_bus.get_message(null);
                 defer self.message_bus.unref(message);
 
-                message.header.* = header;
-                self.encryption_transit.decrypt_body(
-                    message.header,
-                    message.body_used(),
-                    message_body_encrypted.body_used(),
-                ) catch |err| {
-                    log.warn("{}: on_messages: body decryption failed: {}", .{
-                        self.log_prefix(),
-                        err,
-                    });
-                    continue;
-                };
+                self.encryption_transit.decrypt_message(message, message_encrypted) catch |err|
+                    {
+                        log.err("{}: on_messages: decryption failed: {}", .{
+                            self.log_prefix(),
+                            err,
+                        });
+                        continue;
+                    };
 
                 assert(message.references == 1);
 

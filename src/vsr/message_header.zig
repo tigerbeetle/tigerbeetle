@@ -145,12 +145,12 @@ pub const Header = extern struct {
     /// header_nonce, and body_nonce.
     pub fn calculate_checksum(self: *const Header) u128 {
         var header = self.*;
-        // assert(header.header_key_id == 0);
-        // assert(header.header_nonce == 0);
-        // assert(header.body_nonce == 0);
-        header.header_key_id = 0;
-        header.header_nonce = 0;
-        header.body_nonce = 0;
+        assert(header.header_key_id == 0);
+        assert(header.header_nonce == 0);
+        assert(header.body_nonce == 0);
+        // header.header_key_id = 0;
+        // header.header_nonce = 0;
+        // header.body_nonce = 0;
         const checksum_size = @sizeOf(@TypeOf(header.checksum()));
         assert(checksum_size == 16);
         const checksum_value = vsr.checksum(std.mem.asBytes(&header)[checksum_size..]);
@@ -177,6 +177,12 @@ pub const Header = extern struct {
         return self.body_tag;
     }
 
+    pub fn set_zeroes(self: *Header) void {
+        self.header_key_id = 0;
+        self.header_nonce = 0;
+        self.body_nonce = 0;
+    }
+
     /// This must be called only after set_checksum_body() so that checksum_body is also covered:
     pub fn set_checksum(self: *Header) void {
         self.header_tag = self.calculate_checksum();
@@ -186,7 +192,19 @@ pub const Header = extern struct {
         self.body_tag = self.calculate_checksum_body(body);
     }
 
+    pub fn valid_checksum_zeros(self: *const Header) bool {
+        if (self.header_key_id != 0 or self.header_nonce != 0 or self.body_nonce != 0) {
+            return false;
+        }
+        return self.valid_checksum();
+    }
+
     pub fn valid_checksum(self: *const Header) bool {
+        // std.log.err("valid_checksum called", .{};
+        // std.debug.dumpCurrentStackTrace(@returnAddress());
+        // if (self.header_key_id != 0 or self.header_nonce != 0 or self.body_nonce != 0) {
+        //     return false;
+        // }
         return self.checksum() == self.calculate_checksum();
     }
 

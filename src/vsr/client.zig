@@ -220,28 +220,23 @@ pub fn ClientType(
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
             while (buffer.next_header()) |header| {
-                const message_body_encrypted = buffer.consume_message(
+                const message_encrypted = buffer.consume_message(
                     self.message_bus.pool,
                     &header,
                 );
-                defer self.message_bus.unref(message_body_encrypted);
+                defer self.message_bus.unref(message_encrypted);
 
                 const message = self.message_bus.get_message(null);
                 defer self.message_bus.unref(message);
 
-                message.header.* = header;
-
-                self.encryption_transit.decrypt_body(
-                    message.header,
-                    message.body_used(),
-                    message_body_encrypted.body_used(),
-                ) catch |err| {
-                    log.warn("{}: on_messages: body decryption failed: {}", .{
-                        self.id,
-                        err,
-                    });
-                    continue;
-                };
+                self.encryption_transit.decrypt_message(message, message_encrypted) catch |err|
+                    {
+                        log.warn("{}: on_messages: decryption failed: {}", .{
+                            self.id,
+                            err,
+                        });
+                        continue;
+                    };
 
                 if (message.header.cluster != self.cluster) {
                     buffer.invalidate(.header_cluster);
