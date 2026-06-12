@@ -401,7 +401,7 @@ const MessagePending = struct {
     target: u8,
 };
 
-const IO = struct {
+pub const IO = struct {
     gpa: std.mem.Allocator,
     prng: stdx.PRNG,
     options: Options,

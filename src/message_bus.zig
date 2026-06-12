@@ -1256,3 +1256,147 @@ pub fn MessageBusType(comptime IO: type) type {
         };
     };
 }
+
+fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
+    return .{
+        .header_tag = 0,
+        .header_key_id = 0,
+        .header_nonce = 0,
+        .body_tag = 0,
+        .body_nonce = 0,
+        .cluster = prng.int(u128), // MessageBus doesn't check cluster.
+        .size = @sizeOf(vsr.Header),
+        .epoch = 0,
+        .view = prng.int(u32),
+        .release = vsr.Release.zero,
+        .protocol = vsr.Version,
+        .command = command,
+        .replica = 0,
+        .reserved_frame = @splat(0),
+        .reserved_command = @splat(0),
+    };
+}
+
+test "MessageBus unit test" {
+    std.testing.log_level = .info;
+    const IO = @import("message_bus_fuzz.zig").IO;
+    const MessageBus = MessageBusType(IO);
+    const gpa = std.testing.allocator;
+
+    var message_pool = try MessagePool.init_capacity(gpa, 128);
+    defer message_pool.deinit(gpa);
+
+    var prng = stdx.PRNG.from_seed_testing();
+
+    var io = try IO.init(gpa, .{
+        .seed = prng.int(u64),
+        .recv_partial_probability = .zero(),
+        .recv_error_probability = .zero(),
+        .recv_after_shutdown_probability = .zero(),
+        .send_partial_probability = .zero(),
+        .send_corrupt_probability = .zero(),
+        .send_error_probability = .zero(),
+        .send_now_probability = .zero(),
+        .send_after_shutdown_probability = .zero(),
+        .close_error_probability = .zero(),
+        .shutdown_error_probability = .zero(),
+        .accept_error_probability = .zero(),
+        .connect_error_probability = .zero(),
+    });
+    defer io.deinit();
+
+    const clients_limit = 2;
+    const configuration = &.{
+        try std.net.Address.parseIp4("127.0.0.1", 3000),
+        try std.net.Address.parseIp4("127.0.0.1", 3001),
+    };
+
+    const cb1 = struct {
+        fn decrypt_header(context: ?*anyopaque, header: *const Header) anyerror!Header {
+            _ = context;
+            return header.*;
+        }
+    }.decrypt_header;
+
+    const cb2 = struct {
+        fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
+            while (buffer.next_header()) |header| {
+                assert(header.valid_checksum());
+                const message = buffer.consume_message(message_bus.pool, &header);
+                defer message_bus.unref(message);
+
+                std.log.info("received message: {}", .{message.metadata});
+            }
+        }
+    }.on_messages_callback;
+
+    var bus1 = try MessageBus.init(
+        gpa,
+        .{ .replica = 0 },
+        &message_pool,
+        cb1,
+        cb2,
+        .{
+            .configuration = configuration,
+            .io = &io,
+            .clients_limit = clients_limit,
+            .trace = null,
+        },
+    );
+    defer bus1.deinit(gpa);
+
+    var bus2 = try MessageBus.init(
+        gpa,
+        .{ .replica = 1 },
+        &message_pool,
+        cb1,
+        cb2,
+        .{
+            .configuration = configuration,
+            .io = &io,
+            .clients_limit = clients_limit,
+            .trace = null,
+        },
+    );
+    defer bus2.deinit(gpa);
+
+    const message = message_pool.get_message(.reserved).base();
+    defer message_pool.unref(message);
+
+    const message_header: *vsr.Header =
+        @alignCast(std.mem.bytesAsValue(vsr.Header, message.buffer[0..@sizeOf(vsr.Header)]));
+
+    const message_body_size: u32 = prng.int_inclusive(u32, constants.message_body_size_max);
+    const message_body = message.buffer[@sizeOf(vsr.Header)..][0..message_body_size];
+
+    message_header.* = random_header(&prng, .prepare);
+    message_header.size += message_body_size;
+    prng.fill(message_body);
+
+    const message_network: *MessageNetwork = @ptrCast(message);
+    message_network.metadata = .{
+        .size_value = message.header.size,
+        .command_value = message.header.command,
+    };
+
+    message_network.header.set_checksum_body(message_network.body_used());
+    message_network.header.set_checksum();
+    message_network.header = undefined;
+
+    try bus1.listen();
+    try bus2.listen();
+
+    for (0..1000) |_| {
+        try io.run();
+        bus1.tick();
+        bus2.tick();
+    }
+
+    bus1.send_message_to_replica(1, message_network);
+
+    for (0..1000) |_| {
+        try io.run();
+        bus1.tick();
+        bus2.tick();
+    }
+}
