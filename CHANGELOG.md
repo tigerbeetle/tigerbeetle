@@ -3,6 +3,39 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.7
+
+Released: 2026-06-12
+
+### Safety And Performance
+
+- [#3786](https://github.com/tigerbeetle/tigerbeetle/pull/3786)
+
+  Significantly improve the TigerBeetle REPL parser. Ensure that users see correct and useful error
+  messages, and fix some inconsistencies.
+
+  Introduce snapshot testing and proper fuzzing, which allowed fixing some latent parsing bugs.
+
+### Internals
+
+- [#3779](https://github.com/tigerbeetle/tigerbeetle/pull/3779)
+
+  Replace `hatchling` as the TigerBeetle python client packager with our own zig wheel builder,
+  which allows reproducible builds without dependencies.
+
+- [#3783](https://github.com/tigerbeetle/tigerbeetle/pull/3783)
+
+  Allow passing timeouts for all shell operations called from zig tooling.
+
+- [#3785](https://github.com/tigerbeetle/tigerbeetle/pull/3785)
+
+  Ensure CI release and release validation jobs don't run concurrently to reduce flakes induced by
+  CI job race conditions.
+
+### TigerTracks 🎧
+
+- [むこう岸が視る夢](https://open.spotify.com/track/4NGcqePLnHw7Si5BrDzGSM)
+
 ## TigerBeetle 0.17.6
 
 Released: 2026-06-05
