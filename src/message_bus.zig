@@ -16,6 +16,7 @@ const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const Header = vsr.Header;
 const QueueType = @import("./queue.zig").QueueType;
 const Tracer = vsr.trace.Tracer;
+const KeyExchange = @import("encryption.zig").KeyExchangeInsecure;
 
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
@@ -204,7 +205,7 @@ pub fn MessageBusType(comptime IO: type) type {
                     // `.accepting` would need different handling (no fd yet); only client-side
                     // bus shutdown is supported today, and clients never accept.
                     .accepting => assert(bus.process == .replica),
-                    .connecting, .connected => {
+                    .connecting, .connected, .authorized => {
                         bus.terminate(connection, .shutdown);
                     },
                 }
@@ -396,6 +397,11 @@ pub fn MessageBusType(comptime IO: type) type {
                 assert(connection.recv_buffer == null);
                 connection.recv_buffer = MessageBuffer.init(bus, bus.decrypt_header, bus.pool);
                 bus.recv(connection);
+                connection.key_exchange = .init(
+                    .responder,
+                    bus.process.replica,
+                    .replica,
+                );
                 // Don't start send loop yet --- on accept, we don't know which peer this is.
                 assert(connection.send_queue.empty());
                 assert(connection.state == .connected);
@@ -592,8 +598,22 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.assert_connection_initial_state(connection);
             assert(connection.recv_buffer == null);
             connection.recv_buffer = MessageBuffer.init(bus, bus.decrypt_header, bus.pool);
+            connection.key_exchange = .init(
+                .initiator,
+                bus.process.replica,
+                .replica,
+            );
+            const action = connection.key_exchange.?.feed(null);
             bus.recv(connection);
-            bus.send(connection);
+            switch (action) {
+                .send => |msg| {
+                    const message_network = create_message_with_body(bus.pool, std.mem.asBytes(&msg));
+                    defer bus.pool.unref(message_network);
+
+                    bus.send_message(connection, message_network);
+                },
+                else => unreachable,
+            }
             assert(connection.state == .connected);
         }
 
@@ -662,6 +682,93 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bytes_received <= constants.message_size_max);
             assert(connection.recv_buffer != null);
             connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
+
+            blk: {
+                if (connection.key_exchange) |*kex| {
+                    const buffer = &connection.recv_buffer.?;
+                    if (buffer.has_message()) {
+                        while (buffer.next_header()) |header| {
+                            assert(header.valid_checksum());
+                            const message = buffer.consume_message(bus.pool, &header);
+                            defer bus.unref(message);
+
+                            const kex_message = std.mem.bytesToValue(
+                                KeyExchange.KeyExchangeMessage,
+                                message.body_used(),
+                            );
+                            switch (kex_message.peer_type) {
+                                .replica => {
+                                    connection.peer = .{
+                                        .replica = @intCast(kex_message.peer_id),
+                                    };
+                                },
+                                else => unreachable,
+                            }
+
+                            const action = kex.feed(kex_message);
+                            switch (action) {
+                                .send => |msg| {
+                                    const message_network = create_message_with_body(
+                                        bus.pool,
+                                        std.mem.asBytes(&msg),
+                                    );
+                                    defer bus.pool.unref(message_network);
+
+                                    bus.send_message(connection, message_network);
+
+                                    const action_done = kex.feed(null);
+                                    assert(action_done == .done);
+                                    connection.key_exchange = null;
+                                    connection.key_exchange_result = action_done.done;
+                                    break :blk;
+                                },
+                                .recv => {},
+                                .done => |key_exchange_result| {
+                                    connection.key_exchange = null;
+                                    connection.key_exchange_result = key_exchange_result;
+                                    break :blk;
+                                },
+                                .terminate => {
+                                    log.warn(
+                                        "{}: on_recv: from={} terminating connection: invalid key exchange",
+                                        .{
+                                            bus.id,
+                                            connection.peer,
+                                        },
+                                    );
+                                    bus.terminate(connection, .no_shutdown);
+                                    return;
+                                },
+                            }
+
+                            std.log.info("received KEX message: {}", .{message.metadata});
+                        }
+                    }
+
+                    if (connection.recv_buffer.?.invalid) |reason| {
+                        log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
+                            bus.id,
+                            connection.peer,
+                            @tagName(reason),
+                        });
+                        bus.terminate(connection, .no_shutdown);
+                        return;
+                    }
+
+                    if (connection.recv_buffer.?.has_message()) {
+                        maybe(connection.state == .terminating);
+                        bus.connections_suspended.push(connection);
+                    } else {
+                        if (connection.state == .terminating) {
+                            bus.terminate_join(connection);
+                        } else {
+                            bus.recv(connection);
+                        }
+                    }
+
+                    return;
+                }
+            }
 
             switch (bus.process) {
                 // Replicas may forward messages from clients or from other replicas so we
@@ -890,7 +997,7 @@ pub fn MessageBusType(comptime IO: type) type {
             switch (connection.state) {
                 .connected, .connecting => {},
                 .terminating => return,
-                .free, .accepting => unreachable,
+                .free, .accepting, .authorized => unreachable,
             }
             if (connection.send_queue.full()) {
                 log.info("{}: send_message: to={} queue full, dropping command={s}", .{
@@ -1215,6 +1322,10 @@ pub fn MessageBusType(comptime IO: type) type {
             /// message), we terminate the connection.
             peer: vsr.Peer = .unknown,
 
+            key_exchange: ?KeyExchange = null,
+
+            key_exchange_result: ?KeyExchange.KeyExchangeResult = null,
+
             state: enum {
                 /// The connection is not in use, with peer set to `.unknown`.
                 free,
@@ -1226,6 +1337,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 connecting,
                 /// The peer is fully connected and may be a client, replica, or unknown.
                 connected,
+                authorized,
                 /// The connection is being terminated but cleanup has not yet finished.
                 terminating,
             } = .free,
@@ -1255,6 +1367,48 @@ pub fn MessageBusType(comptime IO: type) type {
             link: QueueType(Connection).Link = .{},
         };
     };
+}
+
+fn create_message_with_body(message_pool: *MessagePool, body: []const u8) *MessageNetwork {
+    assert(body.len <= constants.message_body_size_max);
+    const message = message_pool.get_message(.reserved).base();
+
+    const message_header: *vsr.Header =
+        @alignCast(std.mem.bytesAsValue(vsr.Header, message.buffer[0..@sizeOf(vsr.Header)]));
+
+    const message_body = message.buffer[@sizeOf(vsr.Header)..][0..body.len];
+
+    stdx.copy_disjoint(.exact, u8, message_body, body);
+
+    message_header.* =
+        .{
+            .header_tag = 0,
+            .header_key_id = 0,
+            .header_nonce = 0,
+            .body_tag = 0,
+            .body_nonce = 0,
+            .cluster = 123, // MessageBus doesn't check cluster.
+            .size = @sizeOf(vsr.Header) + @as(u32, @intCast(body.len)),
+            .epoch = 0,
+            .view = 10,
+            .release = vsr.Release.zero,
+            .protocol = vsr.Version,
+            .command = .reserved,
+            .replica = 0,
+            .reserved_frame = @splat(0),
+            .reserved_command = @splat(0),
+        };
+
+    const message_network: *MessageNetwork = @ptrCast(message);
+    message_network.metadata = .{
+        .size_value = message.header.size,
+        .command_value = message.header.command,
+    };
+
+    message_network.header.set_checksum_body(message_network.body_used());
+    message_network.header.set_checksum();
+    message_network.header = undefined;
+    return message_network;
 }
 
 fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
@@ -1314,6 +1468,9 @@ test "MessageBus unit test" {
     const cb1 = struct {
         fn decrypt_header(context: ?*anyopaque, header: *const Header) anyerror!Header {
             _ = context;
+            if (!header.valid_checksum()) {
+                return error.InvalidHeader;
+            }
             return header.*;
         }
     }.decrypt_header;

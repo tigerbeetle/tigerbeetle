@@ -187,13 +187,13 @@ pub const KeyExchangeInsecure = struct {
 
     const SharedSecret = [32]u8;
 
-    const KeyExchangeResult = struct {
+    pub const KeyExchangeResult = struct {
         shared_secret: SharedSecret,
         peer_id: u128,
         peer_type: PeerType,
     };
 
-    const KeyExchangeMessage = extern struct {
+    pub const KeyExchangeMessage = extern struct {
         peer_type: PeerType,
         peer_id: u128,
         public_key: [32]u8,
