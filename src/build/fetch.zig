@@ -77,14 +77,29 @@ fn fetch(arena: Allocator, options: struct {
         try std.fs.cwd().makePath(tmp_dir);
 
         const curl_output = path_join(arena, &.{ tmp_dir, url_file_name });
-        _ = try stdb.exec(arena, &(.{
-            "curl",             "--retry-all-errors",
-            "--retry",          "5",
-            "--retry-max-time", "120",
-            "--retry-delay",    "30",
-            "--location",       options.url,
-            "--output",         curl_output,
-        }));
+        // TODO Go back to using stdb.exec once this curl/zip issue is debugged.
+        const curl_result = std.process.Child.run(.{
+            .allocator = arena,
+            .argv = &(.{
+                "curl",             "--retry-all-errors",
+                "--retry",          "5",
+                "--retry-max-time", "120",
+                "--retry-delay",    "30",
+                "--location",       options.url,
+                "--output",         curl_output,
+                "--verbose",
+            }),
+            .max_output_bytes = 1024 * 1024,
+        }) catch |err| {
+            log.err("curl error: {}", .{err});
+            return err;
+        };
+        errdefer log.err("curl stderr: {s}\n\ncurl stderr end", .{curl_result.stderr});
+
+        if (!(curl_result.term == .Exited and curl_result.term.Exited == 0)) {
+            log.err("curl error: {}", .{curl_result.term});
+            return error.Exec;
+        }
         return try stdb.exec(arena, &.{ options.zig, "fetch", curl_output });
     }
     log.debug("download: zig fetch", .{});
