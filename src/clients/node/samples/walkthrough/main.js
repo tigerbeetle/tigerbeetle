@@ -1,6 +1,5 @@
 // section:imports
-const { id } = require("tigerbeetle-node");
-const { createClient } = require("tigerbeetle-node");
+const { createClient, id } = require("tigerbeetle-node");
 const process = require("process");
 
 console.log("Import ok!");

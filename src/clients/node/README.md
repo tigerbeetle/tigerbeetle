@@ -22,8 +22,7 @@ npm install --save-exact tigerbeetle-node
 Now, create `main.js` and copy this into it:
 
 ```javascript
-const { id } = require("tigerbeetle-node");
-const { createClient } = require("tigerbeetle-node");
+const { createClient, id } = require("tigerbeetle-node");
 const process = require("process");
 
 console.log("Import ok!");
