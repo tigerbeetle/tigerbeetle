@@ -1358,39 +1358,6 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
     };
 }
 
-/// Parse and allocate the addresses returning a slice into that array.
-fn parse_addresses(
-    raw_addresses: []const u8,
-    comptime flag: []const u8,
-    comptime BoundedArray: type,
-) BoundedArray {
-    comptime assert(std.mem.startsWith(u8, flag, "--"));
-    var result: BoundedArray = .{};
-
-    const addresses_parsed = vsr.parse_addresses(
-        raw_addresses,
-        result.unused_capacity_slice(),
-    ) catch |err| switch (err) {
-        error.AddressHasTrailingComma => {
-            vsr.fatal(.cli, flag ++ ": invalid trailing comma", .{});
-        },
-        error.AddressLimitExceeded => {
-            vsr.fatal(.cli, flag ++ ": too many addresses, at most {d} are allowed", .{
-                result.capacity(),
-            });
-        },
-        error.AddressHasMoreThanOneColon => {
-            vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
-        },
-        error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
-        error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
-    };
-    assert(addresses_parsed.len > 0);
-    assert(addresses_parsed.len <= result.capacity());
-    result.resize(addresses_parsed.len) catch unreachable;
-    return result;
-}
-
 fn parse_address_and_port(
     raw_address: []const u8,
     comptime flag: []const u8,
@@ -1398,7 +1365,7 @@ fn parse_address_and_port(
 ) stdx.SocketAddress {
     comptime assert(std.mem.startsWith(u8, flag, "--"));
 
-    const address = vsr.parse_address_and_port(.{
+    return vsr.parse_address_and_port(.{
         .string = raw_address,
         .port_default = port_default,
     }) catch |err| switch (err) {
@@ -1407,11 +1374,6 @@ fn parse_address_and_port(
         },
         error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
         error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
-    };
-    return stdx.SocketAddress.from_std(address) catch |err| switch (err) {
-        error.UnsupportedFamily => {
-            vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{});
-        },
     };
 }
 
