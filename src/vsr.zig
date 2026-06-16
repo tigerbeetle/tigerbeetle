@@ -956,13 +956,10 @@ pub fn parse_addresses(
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        const address_std = try parse_address_and_port(.{
+        out_buffer[index] = try parse_address_and_port(.{
             .string = raw_address,
             .port_default = constants.port,
         });
-        out_buffer[index] = stdx.SocketAddress.from_std(address_std) catch |err| switch (err) {
-            error.UnsupportedFamily => return error.AddressInvalid,
-        };
     }
     assert(index == address_count);
 
@@ -972,39 +969,39 @@ pub fn parse_addresses(
 pub fn parse_address_and_port(options: struct {
     string: []const u8,
     port_default: u16,
-}) !std.net.Address {
+}) !stdx.SocketAddress {
     assert(options.string.len > 0);
     assert(options.port_default > 0);
 
     if (std.mem.lastIndexOfAny(u8, options.string, ":.]")) |split| {
         if (options.string[split] == ':') {
-            return parse_address(
-                options.string[0..split],
-                stdx.parse_int(u16, options.string[split + 1 ..], .{}) catch
-                    return error.PortInvalid,
-            );
+            const port = stdx.parse_int(u16, options.string[split + 1 ..], .{}) catch
+                return error.PortInvalid;
+            const ip = try parse_address(options.string[0..split]);
+            return .{ .ip = ip, .port = port };
         } else {
-            return parse_address(options.string, options.port_default);
+            const ip = try parse_address(options.string);
+            return .{ .ip = ip, .port = options.port_default };
         }
     } else {
-        return std.net.Address.parseIp4(
-            constants.address,
-            stdx.parse_int(u16, options.string, .{}) catch
-                return error.PortInvalid,
-        ) catch unreachable;
+        const ip = comptime stdx.IPAddress.parse(constants.address) catch unreachable;
+        const port = stdx.parse_int(u16, options.string, .{}) catch return error.PortInvalid;
+        return .{ .ip = ip, .port = port };
     }
 }
 
-fn parse_address(string: []const u8, port: u16) !std.net.Address {
+// A variation of stdx.IPAddress.parse that requires `[]` around IPv6 addresses.
+fn parse_address(string: []const u8) !stdx.IPAddress {
     if (string.len == 0) return error.AddressInvalid;
     if (string[string.len - 1] == ':') return error.AddressHasMoreThanOneColon;
 
-    if (string[0] == '[' and string[string.len - 1] == ']') {
-        return std.net.Address.parseIp6(string[1 .. string.len - 1], port) catch
-            return error.AddressInvalid;
-    } else {
-        return std.net.Address.parseIp4(string, port) catch return error.AddressInvalid;
-    }
+    const expect_v6 = string[0] == '[' and string[string.len - 1] == ']';
+    const ip = if (expect_v6)
+        stdx.IPAddress.parse(string[1 .. string.len - 1]) catch return error.AddressInvalid
+    else
+        stdx.IPAddress.parse(string) catch return error.AddressInvalid;
+    if ((ip.family() == .IPv6) != expect_v6) return error.AddressInvalid;
+    return ip;
 }
 
 test parse_addresses {
@@ -1099,6 +1096,8 @@ test parse_addresses {
         .{ .raw = ".", .err = error.AddressInvalid },
         .{ .raw = ":", .err = error.PortInvalid },
         .{ .raw = ":92", .err = error.AddressInvalid },
+        .{ .raw = "[127.0.0.1]", .err = error.AddressInvalid },
+        .{ .raw = "[127.0.0.1]:3001", .err = error.AddressInvalid },
         .{ .raw = "::ff:92", .err = error.AddressInvalid },
         .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
         .{ .raw = "1.2.3.4:7777,", .err = error.AddressHasTrailingComma },
@@ -1125,6 +1124,7 @@ test parse_addresses {
     }
 
     for (vectors_negative) |vector| {
+        errdefer log.err("raw = '{s}', err = {any}", .{ vector.raw, vector.err });
         try std.testing.expectEqual(
             vector.err,
             parse_addresses(vector.raw, buffer[0..2]),
