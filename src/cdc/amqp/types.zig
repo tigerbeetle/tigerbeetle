@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const vsr = @import("../../vsr.zig");
 const protocol = @import("protocol.zig");
@@ -6,7 +7,7 @@ const Encoder = protocol.Encoder;
 const Decoder = protocol.Decoder;
 
 pub const ConnectOptions = struct {
-    host: std.net.Address,
+    host: stdx.SocketAddress,
     user_name: []const u8,
     password: []const u8,
     vhost: []const u8,

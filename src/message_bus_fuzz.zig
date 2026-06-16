@@ -48,10 +48,10 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     // Note that this probability is conditional on sending a ping.
     const message_bus_ping_misdirect_probability = ratio(prng.range_inclusive(u64, 0, 3), 10);
 
-    const configuration = &.{
-        try std.net.Address.parseIp4("127.0.0.1", 3000),
-        try std.net.Address.parseIp4("127.0.0.1", 3001),
-        try std.net.Address.parseIp4("127.0.0.1", 3002),
+    const configuration: []const stdx.SocketAddress = &.{
+        .{ .ip = .@"127.0.0.1", .port = 3000 },
+        .{ .ip = .@"127.0.0.1", .port = 3001 },
+        .{ .ip = .@"127.0.0.1", .port = 3002 },
     };
 
     const command_weights = weights: {
@@ -445,7 +445,7 @@ const IO = struct {
     };
 
     const SocketServer = struct {
-        address: std.net.Address,
+        address: stdx.SocketAddress,
         /// Invariant: completion.operation == .connect
         backlog: std.ArrayListUnmanaged(*Completion) = .empty,
     };
@@ -475,7 +475,7 @@ const IO = struct {
     const Operation = union(enum) {
         accept: struct { socket: socket_t },
         close: struct { fd: fd_t },
-        connect: struct { socket: socket_t, address: std.net.Address },
+        connect: struct { socket: socket_t, address: stdx.SocketAddress },
         recv: struct { socket: socket_t, buffer: []u8 },
         send: struct { socket: socket_t, buffer: []const u8 },
         timeout,
@@ -606,7 +606,7 @@ const IO = struct {
                 }
 
                 for (io.servers.values()) |*server| {
-                    if (server.address.eql(operation.address)) {
+                    if (std.meta.eql(server.address, operation.address)) {
                         try server.backlog.append(gpa, completion);
                         break;
                     }
@@ -743,7 +743,7 @@ const IO = struct {
         return .done;
     }
 
-    pub fn open_socket_tcp(io: *IO, _: u32, _: RealIO.TCPOptions) !socket_t {
+    pub fn open_socket_tcp(io: *IO, _: stdx.IPAddress.Family, _: RealIO.TCPOptions) !socket_t {
         const socket = io.fd_next;
         io.fd_next += 1;
         io.fds_open += 1;
@@ -753,9 +753,9 @@ const IO = struct {
     pub fn listen(
         io: *IO,
         fd: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
         _: RealIO.ListenOptions,
-    ) !std.net.Address {
+    ) !stdx.SocketAddress {
         io.servers.putNoClobber(io.gpa, fd, .{ .address = address }) catch @panic("OOM");
         return address;
     }
@@ -841,7 +841,7 @@ const IO = struct {
         comptime callback: fn (Context, *Completion, ConnectError!void) void,
         completion: *Completion,
         socket: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
     ) void {
         completion.* = .{
             .context = context,

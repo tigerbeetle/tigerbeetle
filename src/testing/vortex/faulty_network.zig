@@ -269,7 +269,7 @@ const Connection = struct {
     origin_to_remote_pipe: Pipe,
     remote_to_origin_pipe: Pipe,
 
-    remote_address: ?std.net.Address = null,
+    remote_address: ?stdx.SocketAddress = null,
 
     accept_completion: IO.Completion = undefined,
     connect_completion: IO.Completion = undefined,
@@ -296,7 +296,7 @@ const Connection = struct {
         connection.origin_fd = fd;
 
         const remote_fd = connection.io.open_socket_tcp(
-            connection.remote_address.?.any.family,
+            connection.remote_address.?.ip.family(),
             tcp_options,
         ) catch |err| {
             log.warn("couldn't open socket for remote ({d},{d}): {}", .{
@@ -452,8 +452,8 @@ const Connection = struct {
 const Proxy = struct {
     io: *IO,
     accept_fd: std.posix.socket_t,
-    origin_address: std.net.Address, // The proxy's address.
-    remote_address: std.net.Address, // The replica's address.
+    origin_address: stdx.SocketAddress, // The proxy's address.
+    remote_address: stdx.SocketAddress, // The replica's address.
     connections: [constants.vortex.connections_count_max]Connection,
 
     fn deinit(proxy: *Proxy) void {
@@ -502,10 +502,12 @@ pub const Network = struct {
         // /proc/sys/net/ipv4/ip_local_port_range) by listening on port=0.
         // We assume that replicas' ports are from outside of that range and cannot conflict.
         for (proxies, replica_ports, 0..) |*proxy, replica_port, replica_index| {
-            const Address = std.net.Address;
-            const replica_address = Address.parseIp("127.0.0.1", replica_port) catch unreachable;
-            const listen_address = Address.parseIp("127.0.0.1", 0) catch unreachable;
-            const listen_fd = try io.open_socket_tcp(std.posix.AF.INET, tcp_options);
+            const replica_address: stdx.SocketAddress = .{
+                .ip = .@"127.0.0.1",
+                .port = replica_port,
+            };
+            const listen_address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
+            const listen_fd = try io.open_socket_tcp(.IPv4, tcp_options);
             errdefer io.close_socket(listen_fd);
 
             const origin_address = try io.listen(listen_fd, listen_address, .{ .backlog = 64 });

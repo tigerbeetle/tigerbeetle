@@ -216,7 +216,7 @@ pub const Client = struct {
         } };
 
         self.fd = try self.io.open_socket_tcp(
-            options.host.any.family,
+            options.host.ip.family(),
             .{
                 // Keeping the default value.
                 // Large buffers can cause latency issues.

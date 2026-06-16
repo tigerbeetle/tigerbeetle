@@ -132,16 +132,17 @@ pub const StatsD = struct {
         allocator: std.mem.Allocator,
         process_id: ProcessID,
         io: *IO,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
     ) !StatsD {
-        const socket = try io.open_socket_udp(address.any.family);
+        const socket = try io.open_socket_udp(address.ip.family());
         errdefer io.close_socket(socket);
 
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
         errdefer allocator.destroy(send_buffer);
 
+        const address_std = address.to_std();
         // 'Connect' the UDP socket, so we can just send() to it normally.
-        try std.posix.connect(socket, &address.any, address.getOsSockLen());
+        try std.posix.connect(socket, &address_std.any, address_std.getOsSockLen());
 
         log.info("{}: sending statsd metrics to {}", .{ process_id, address });
 

@@ -109,7 +109,7 @@ pub fn main() !void {
     var trace_file: ?std.fs.File = null;
     defer if (trace_file) |file| file.close();
 
-    var statsd_address: ?std.net.Address = null;
+    var statsd_address: ?stdx.SocketAddress = null;
     var log_trace = true;
 
     switch (command) {
@@ -263,7 +263,7 @@ fn command_start(
     // (Here or in Replica.open()?).
 
     var message_pool = try MessagePool.init(gpa, .{ .replica = .{
-        .members_count = args.addresses.count_as(u8),
+        .members_count = args.addresses.members_count(),
         .pipeline_requests_limit = args.pipeline_requests_limit,
         .message_bus = .tcp,
     } });
@@ -322,7 +322,7 @@ fn command_start(
             break :blk .single_release(constants.config.process.release);
         }
 
-        if (args.addresses_zero) {
+        if (args.addresses.zero) {
             log.info("multiversioning: upgrades disabled due to --addresses=0", .{});
             break :blk .single_release(constants.config.process.release);
         }
@@ -355,7 +355,7 @@ fn command_start(
         storage,
         &message_pool,
         .{
-            .node_count = args.addresses.count_as(u8),
+            .node_count = args.addresses.members_count(),
             .release = config.process.release,
             .release_client_min = config.process.release_client_min,
             .multiversion = multiversion,
@@ -381,7 +381,7 @@ fn command_start(
                 .aof_recovery = args.aof_recovery,
             },
             .message_bus_options = .{
-                .configuration = args.addresses.const_slice(),
+                .configuration = args.addresses.slice(),
                 .io = io,
                 .trace = tracer,
                 .time = time,
@@ -465,8 +465,8 @@ fn command_start(
     // - The port, and only the port, is printed to the stdout, so that the parent process
     //   can learn it.
     // - tigerbeetle process exits when its stdin gets closed.
-    if (args.addresses_zero) {
-        const port_actual = replica.message_bus.accept_address.?.getPort();
+    if (args.addresses.zero) {
+        const port_actual = replica.message_bus.accept_address.?.port;
         const stdout = std.io.getStdOut();
         try stdout.writer().print("{}\n", .{port_actual});
         stdout.close();
@@ -546,7 +546,7 @@ fn command_reformat(
             .aof_recovery = false,
 
             .message_bus_options = .{
-                .configuration = args.addresses.const_slice(),
+                .configuration = args.addresses.slice(),
                 .io = io,
                 .trace = null,
                 .time = time,
@@ -597,7 +597,7 @@ fn command_repl(
 
     var repl_instance = try Repl.init(gpa, io, time, .{
         .cluster_id = args.cluster,
-        .addresses = args.addresses.const_slice(),
+        .addresses = args.addresses.slice(),
         .verbose = args.verbose,
     });
     defer repl_instance.deinit(gpa);
@@ -612,7 +612,7 @@ fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !
         time,
         .{
             .cluster_id = args.cluster,
-            .addresses = args.addresses.const_slice(),
+            .addresses = args.addresses.slice(),
             .host = args.host,
             .user = args.user,
             .password = args.password,

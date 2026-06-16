@@ -211,7 +211,7 @@ pub fn ContextType(
         cluster_id: u128,
         addresses_owned: []const u8,
 
-        addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max) = .{},
+        addresses: stdx.BoundedArrayType(stdx.SocketAddress, constants.replicas_max) = .{},
         io: IO,
         message_pool: MessagePool,
         client: Client,

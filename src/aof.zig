@@ -338,7 +338,7 @@ pub fn AOFType(comptime IO: type) type {
                 allocator: std.mem.Allocator,
                 time: vsr.time.Time,
                 cluster: u128,
-                addresses: []std.net.Address,
+                addresses: []stdx.SocketAddress,
             ) !ReplayClient {
                 assert(addresses.len > 0);
                 assert(addresses.len <= constants.replicas_max);
@@ -957,7 +957,7 @@ pub fn main() !void {
             var it = try AOFIterator.init(&io, command.path);
             defer it.close();
 
-            var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
+            var addresses_buffer: [constants.replicas_max]stdx.SocketAddress = undefined;
             const addresses_parsed = try vsr.parse_addresses(command.addresses, &addresses_buffer);
             var replay =
                 try AOFReplayClient.init(&io, gpa, time, command.cluster, addresses_parsed);

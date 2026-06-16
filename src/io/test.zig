@@ -175,13 +175,13 @@ test "accept/connect/send/receive" {
             var io = try IO.init(32, 0);
             defer io.deinit();
 
-            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
+            const address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
             const kernel_backlog = 1;
 
-            const server = try io.open_socket_tcp(address.any.family, tcp_options);
+            const server = try io.open_socket_tcp(address.ip.family(), tcp_options);
             defer io.close_socket(server);
 
-            const client = try io.open_socket_tcp(address.any.family, tcp_options);
+            const client = try io.open_socket_tcp(address.ip.family(), tcp_options);
             defer io.close_socket(client);
 
             try posix.setsockopt(
@@ -190,12 +190,14 @@ test "accept/connect/send/receive" {
                 posix.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
-            try posix.bind(server, &address.any, address.getOsSockLen());
+            const address_std = address.to_std();
+            try posix.bind(server, &address_std.any, address_std.getOsSockLen());
             try posix.listen(server, kernel_backlog);
 
-            var client_address = std.net.Address.initIp4(undefined, undefined);
-            var client_address_len = client_address.getOsSockLen();
-            try posix.getsockname(server, &client_address.any, &client_address_len);
+            var client_address_std = std.net.Address.initIp4(undefined, undefined);
+            var client_address_std_len = client_address_std.getOsSockLen();
+            try posix.getsockname(server, &client_address_std.any, &client_address_std_len);
+            const client_address = try stdx.SocketAddress.from_std(client_address_std);
 
             var self: Context = .{
                 .io = &io,
@@ -474,10 +476,10 @@ test "tick to wait" {
             var self: Context = .{ .io = try IO.init(1, 0) };
             defer self.io.deinit();
 
-            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
+            const address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
             const kernel_backlog = 1;
 
-            const server = try self.io.open_socket_tcp(address.any.family, tcp_options);
+            const server = try self.io.open_socket_tcp(address.ip.family(), tcp_options);
             defer self.io.close_socket(server);
 
             try posix.setsockopt(
@@ -486,14 +488,16 @@ test "tick to wait" {
                 posix.SO.REUSEADDR,
                 &std.mem.toBytes(@as(c_int, 1)),
             );
-            try posix.bind(server, &address.any, address.getOsSockLen());
+            const address_std = address.to_std();
+            try posix.bind(server, &address_std.any, address_std.getOsSockLen());
             try posix.listen(server, kernel_backlog);
 
-            var client_address = std.net.Address.initIp4(undefined, undefined);
-            var client_address_len = client_address.getOsSockLen();
-            try posix.getsockname(server, &client_address.any, &client_address_len);
+            var client_address_std = std.net.Address.initIp4(undefined, undefined);
+            var client_address_std_len = client_address_std.getOsSockLen();
+            try posix.getsockname(server, &client_address_std.any, &client_address_std_len);
+            const client_address = try stdx.SocketAddress.from_std(client_address_std);
 
-            const client = try self.io.open_socket_tcp(client_address.any.family, tcp_options);
+            const client = try self.io.open_socket_tcp(client_address.ip.family(), tcp_options);
             defer self.io.close_socket(client);
 
             // Start the accept.
@@ -636,10 +640,10 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try self.io.open_socket_tcp(posix.AF.INET, tcp_options);
+            self.server.fd = try self.io.open_socket_tcp(.IPv4, tcp_options);
             defer self.io.close_socket(self.server.fd.?);
 
-            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
+            const address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
             try posix.setsockopt(
                 self.server.fd.?,
                 posix.SOL.SOCKET,
@@ -647,12 +651,18 @@ test "pipe data over socket" {
                 &std.mem.toBytes(@as(c_int, 1)),
             );
 
-            try posix.bind(self.server.fd.?, &address.any, address.getOsSockLen());
+            const address_std = address.to_std();
+            try posix.bind(self.server.fd.?, &address_std.any, address_std.getOsSockLen());
             try posix.listen(self.server.fd.?, 1);
 
-            var client_address = std.net.Address.initIp4(undefined, undefined);
-            var client_address_len = client_address.getOsSockLen();
-            try posix.getsockname(self.server.fd.?, &client_address.any, &client_address_len);
+            var client_address_std = std.net.Address.initIp4(undefined, undefined);
+            var client_address_std_len = client_address_std.getOsSockLen();
+            try posix.getsockname(
+                self.server.fd.?,
+                &client_address_std.any,
+                &client_address_std_len,
+            );
+            const client_address = try stdx.SocketAddress.from_std(client_address_std);
 
             self.io.accept(
                 *Context,
@@ -662,7 +672,7 @@ test "pipe data over socket" {
                 self.server.fd.?,
             );
 
-            self.tx.socket.fd = try self.io.open_socket_tcp(posix.AF.INET, tcp_options);
+            self.tx.socket.fd = try self.io.open_socket_tcp(.IPv4, tcp_options);
             defer self.io.close_socket(self.tx.socket.fd.?);
 
             self.io.connect(
