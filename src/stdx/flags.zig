@@ -596,7 +596,7 @@ pub fn parse_flag_value_fuzz(
 
     std.mem.sort(u8, corpus.items, {}, std.sort.asc(u8));
 
-    const alphabet = unique(corpus.items);
+    const alphabet = stdx.unique(corpus.items);
 
     var string_buffer: [string_size_max]u8 = @splat(0);
     for (0..test_count) |_| {
@@ -633,23 +633,6 @@ fn parse_flag_value_check_diagnostic(string: []const u8, diagnostic: ?[]const u8
         });
         return error.TestUnexpectedResult;
     }
-}
-
-fn unique(sorted: []u8) []u8 {
-    assert(sorted.len > 0);
-
-    var count: usize = 1;
-    for (1..sorted.len) |index| {
-        assert(sorted[count - 1] <= sorted[index]);
-        if (sorted[count - 1] == sorted[index]) {
-            // Duplicate! Skip to the next index.
-        } else {
-            sorted[count] = sorted[index];
-            count += 1;
-        }
-    }
-
-    return sorted[0..count];
 }
 
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
