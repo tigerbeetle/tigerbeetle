@@ -1050,6 +1050,7 @@ test parse_addresses {
         .{ .raw = ".", .err = error.AddressInvalid },
         .{ .raw = ":", .err = error.PortInvalid },
         .{ .raw = ":92", .err = error.AddressInvalid },
+        .{ .raw = "::ff:92", .err = error.AddressInvalid },
         .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
         .{ .raw = "1.2.3.4:7777,", .err = error.AddressHasTrailingComma },
         .{ .raw = "1.2.3.4:7777,2.3.4.5::8888", .err = error.AddressHasMoreThanOneColon },
