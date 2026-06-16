@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
+const stdx = vsr.stdx;
 
 const type_mappings = .{
     .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
@@ -81,15 +82,6 @@ fn resolve_c_type(comptime Type: type) []const u8 {
     }
 }
 
-fn to_uppercase(comptime input: []const u8) [input.len]u8 {
-    comptime var output: [input.len]u8 = undefined;
-    inline for (&output, 0..) |*char, i| {
-        char.* = input[i];
-        char.* -= 32 * @as(u8, @intFromBool(char.* >= 'a' and char.* <= 'z'));
-    }
-    return output;
-}
-
 fn emit_enum(
     buffer: *std.ArrayList(u8),
     comptime Type: type,
@@ -110,12 +102,12 @@ fn emit_enum(
         }
 
         if (!skip) {
-            const field_name = to_uppercase(field.name);
+            const field_name = stdx.to_case(field.name, .upper);
             if (@typeInfo(Type) == .@"enum") {
                 const int_value = @intFromEnum(@field(Type, field.name));
                 try buffer.writer().print("    {s}_{s} = {s},\n", .{
                     c_name[0..suffix_pos],
-                    @as([]const u8, &field_name),
+                    field_name,
                     if (int_value == std.math.maxInt(@TypeOf(int_value)))
                         std.fmt.comptimePrint("0x{X}", .{int_value})
                     else
@@ -125,7 +117,7 @@ fn emit_enum(
                 // Packed structs.
                 try buffer.writer().print("    {s}_{s} = 1 << {},\n", .{
                     c_name[0..suffix_pos],
-                    @as([]const u8, &field_name),
+                    field_name,
                     i,
                 });
             }

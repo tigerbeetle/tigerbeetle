@@ -1194,6 +1194,53 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
         Term{ .Unknown = status };
 }
 
+/// Converts a snake_case identifier to another identifier case at comptime.
+pub fn to_case(
+    comptime input: []const u8,
+    comptime case: enum { camel, kebab, pascal, upper },
+) []const u8 {
+    return comptime blk: {
+        var output: [input.len]u8 = undefined;
+        switch (case) {
+            .kebab => {
+                for (input, 0..) |byte, index| output[index] = if (byte == '_') '-' else byte;
+                break :blk comptime_slice(&output, input.len);
+            },
+            .upper => {
+                const len = std.ascii.upperString(output[0..], input).len;
+                break :blk comptime_slice(&output, len);
+            },
+            .camel, .pascal => {
+                var len: usize = 0;
+                var iterator = std.mem.tokenizeScalar(u8, input, '_');
+                while (iterator.next()) |word| {
+                    _ = std.ascii.lowerString(output[len..], word);
+                    output[len] = std.ascii.toUpper(output[len]);
+                    len += word.len;
+                }
+
+                output[0] = switch (case) {
+                    .camel => std.ascii.toLower(output[0]),
+                    .pascal => std.ascii.toUpper(output[0]),
+                    .kebab, .upper => unreachable,
+                };
+
+                break :blk comptime_slice(&output, len);
+            },
+        }
+    };
+}
+
+test "to_case" {
+    try std.testing.expectEqualStrings("createAccounts", to_case("create_accounts", .camel));
+    try std.testing.expectEqualStrings("CreateTransfers", to_case("create_transfers", .pascal));
+    try std.testing.expectEqualStrings("user-data-128", to_case("user_data_128", .kebab));
+    try std.testing.expectEqualStrings(
+        "GET_ACCOUNT_BALANCES",
+        to_case("get_account_balances", .upper),
+    );
+}
+
 comptime {
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
