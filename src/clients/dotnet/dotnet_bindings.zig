@@ -190,26 +190,6 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
     } else return null;
 }
 
-fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []const u8 {
-    return comptime blk: {
-        var len: usize = 0;
-        var output: [input.len]u8 = undefined;
-        var iterator = std.mem.tokenizeScalar(u8, input, '_');
-        while (iterator.next()) |word| {
-            _ = std.ascii.lowerString(output[len..], word);
-            output[len] = std.ascii.toUpper(output[len]);
-            len += word.len;
-        }
-
-        output[0] = switch (case) {
-            .camel => std.ascii.toLower(output[0]),
-            .pascal => std.ascii.toUpper(output[0]),
-        };
-
-        break :blk stdx.comptime_slice(&output, len);
-    };
-}
-
 fn emit_enum(
     buffer: *std.ArrayList(u8),
     comptime Type: type,
@@ -250,13 +230,13 @@ fn emit_enum(
         try emit_docs(buffer, mapping, field.name);
         if (is_packed_struct) {
             try buffer.writer().print("    {s} = 1 << {},\n\n", .{
-                to_case(field.name, .pascal),
+                stdx.to_case(field.name, .pascal),
                 i,
             });
         } else {
             const int_value = @intFromEnum(@field(Type, field.name));
             try buffer.writer().print("    {s} = {s},\n\n", .{
-                to_case(field.name, .pascal),
+                stdx.to_case(field.name, .pascal),
                 if (int_value == std.math.maxInt(@TypeOf(int_value)))
                     std.fmt.comptimePrint("0x{X}", .{int_value})
                 else
@@ -336,7 +316,7 @@ fn emit_struct(
                     \\
                     \\
                 , .{
-                    .name = to_case(field.name, .pascal),
+                    .name = stdx.to_case(field.name, .pascal),
                     .size = array.len * @sizeOf(array.child),
                     .len = array.len,
                     .child_type = dotnet_type(array.child),
@@ -358,8 +338,8 @@ fn emit_struct(
             ,
                 .{
                     if (mapping.visibility == .internal and !is_private) "public" else "private",
-                    to_case(field.name, .pascal),
-                    to_case(field.name, .camel),
+                    stdx.to_case(field.name, .pascal),
+                    stdx.to_case(field.name, .camel),
                 },
             ),
             else => try buffer.writer().print(
@@ -370,7 +350,7 @@ fn emit_struct(
                 .{
                     if (mapping.visibility == .internal and !is_private) "public" else "private",
                     dotnet_type(field.type),
-                    to_case(field.name, .camel),
+                    stdx.to_case(field.name, .camel),
                 },
             ),
         }
@@ -392,10 +372,10 @@ fn emit_struct(
                     \\
                 , .{
                     if (is_private) "internal" else "public",
-                    to_case(field.name, .pascal),
-                    to_case(field.name, .camel),
+                    stdx.to_case(field.name, .pascal),
+                    stdx.to_case(field.name, .camel),
                     if (is_read_only and !is_private) "internal " else "",
-                    to_case(field.name, .camel),
+                    stdx.to_case(field.name, .camel),
                 }),
                 else => try buffer.writer().print(
                     \\    {s} {s} {s} {{ get => {s}; {s}set => {s} = value; }}
@@ -404,10 +384,10 @@ fn emit_struct(
                 , .{
                     if (is_private) "internal" else "public",
                     dotnet_type(field.type),
-                    to_case(field.name, .pascal),
-                    to_case(field.name, .camel),
+                    stdx.to_case(field.name, .pascal),
+                    stdx.to_case(field.name, .camel),
                     if (is_read_only and !is_private) "internal " else "",
-                    to_case(field.name, .camel),
+                    stdx.to_case(field.name, .camel),
                 }),
             }
         }
