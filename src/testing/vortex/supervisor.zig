@@ -191,9 +191,9 @@ pub const Supervisor = struct {
             var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
             for (replica_ports[0..options.replica_count], 0..) |*replica_port, i| {
                 if (replica_index == i) {
-                    replica_port.* = network.proxies[i].remote_address.getPort();
+                    replica_port.* = network.proxies[i].remote_address.port;
                 } else {
-                    replica_port.* = network.proxies[i].origin_address.getPort();
+                    replica_port.* = network.proxies[i].origin_address.port;
                 }
             }
 
@@ -656,7 +656,7 @@ pub const Supervisor = struct {
 
         var proxy_ports_all: [constants.vsr.replicas_max]u16 = undefined;
         for (proxy_ports_all[0..supervisor.options.replica_count], 0..) |*port, i| {
-            port.* = supervisor.network.proxies[i].origin_address.getPort();
+            port.* = supervisor.network.proxies[i].origin_address.port;
         }
         const proxy_ports = proxy_ports_all[0..supervisor.options.replica_count];
 

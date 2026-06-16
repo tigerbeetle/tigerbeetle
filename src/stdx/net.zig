@@ -24,11 +24,23 @@ pub const IPAddress = extern struct {
     // - Natural alignment to allow re-interpreting as u128.
     big: [16]u8 align(16),
 
-    const Family = enum { IPv4, IPv6 };
+    pub const Family = enum {
+        IPv4,
+        IPv6,
+
+        pub fn to_std(f: Family) u32 {
+            return switch (f) {
+                .IPv4 => std.posix.AF.INET,
+                .IPv6 => std.posix.AF.INET6,
+            };
+        }
+    };
 
     const IPv4_prefix: u128 = 0x0000_0000_0000_0000_0000_FFFF_0000_0000;
     const IPv4_prefix_octets: [12]u8 =
         @as([16]u8, @bitCast(std.mem.nativeToBig(u128, IPv4_prefix)))[0..12].*;
+
+    pub const @"127.0.0.1" = parse("127.0.0.1") catch unreachable;
 
     comptime {
         // The code is endianness-clean, aspirationally. Audit before running on your PowerPC!

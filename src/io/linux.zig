@@ -930,7 +930,7 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
     ) void {
         completion.* = .{
             .io = self,
@@ -939,7 +939,7 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address,
+                    .address = address.to_std(),
                 },
             },
         };
@@ -1346,9 +1346,13 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+    pub fn open_socket_tcp(
+        self: *IO,
+        family: stdx.IPAddress.Family,
+        options: TCPOptions,
+    ) !socket_t {
         const fd = try posix.socket(
-            family,
+            family.to_std(),
             posix.SOCK.STREAM | posix.SOCK.CLOEXEC,
             posix.IPPROTO.TCP,
         );
@@ -1359,10 +1363,10 @@ pub const IO = struct {
     }
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+    pub fn open_socket_udp(self: *IO, family: stdx.IPAddress.Family) !socket_t {
         _ = self;
         return try posix.socket(
-            family,
+            family.to_std(),
             std.posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
             posix.IPPROTO.UDP,
         );
@@ -1380,9 +1384,9 @@ pub const IO = struct {
     pub fn listen(
         _: *IO,
         fd: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
         options: ListenOptions,
-    ) !std.net.Address {
+    ) !stdx.SocketAddress {
         return common.listen(fd, address, options);
     }
 
