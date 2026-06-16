@@ -33,6 +33,10 @@ pub const Instant = @import("time_units.zig").Instant;
 pub const Duration = @import("time_units.zig").Duration;
 pub const InstantUnix = @import("time_units.zig").InstantUnix;
 
+const net = @import("./net.zig");
+pub const IPAddress = net.IPAddress;
+pub const SocketAddress = net.SocketAddress;
+
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;
 pub const MiB = 1 << 20;
@@ -324,6 +328,28 @@ pub fn cut_suffix(haystack: []const u8, needle: []const u8) ?[]const u8 {
 test cut_suffix {
     try std.testing.expectEqualStrings("hello ", cut_suffix("hello world", "world").?);
     assert(null == cut_suffix("hello world", "hello"));
+}
+
+pub fn unique(sorted: []u8) []u8 {
+    assert(sorted.len > 0);
+
+    var count: usize = 1;
+    for (1..sorted.len) |index| {
+        assert(sorted[count - 1] <= sorted[index]);
+        if (sorted[count - 1] == sorted[index]) {
+            // Duplicate! Skip to the next index.
+        } else {
+            sorted[count] = sorted[index];
+            count += 1;
+        }
+    }
+
+    return sorted[0..count];
+}
+
+test unique {
+    var abba = "AAABBBCaaa".*;
+    try std.testing.expectEqualStrings("ABCa", unique(&abba));
 }
 
 /// `maybe` is the dual of `assert`: it signals that condition is sometimes true
@@ -1174,9 +1200,11 @@ comptime {
     _ = @import("flags.zig");
     _ = @import("huge_page_allocator.zig");
     _ = @import("iops.zig");
+    _ = @import("net.zig");
     _ = @import("prng.zig");
     _ = @import("radix.zig");
     _ = @import("ring_buffer.zig");
+    _ = @import("shell.zig");
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
     _ = @import("testing/snaptest.zig");
@@ -1184,5 +1212,4 @@ comptime {
     _ = @import("unshare.zig");
     _ = @import("vendored/aegis.zig");
     _ = @import("zipfian.zig");
-    _ = @import("shell.zig");
 }
