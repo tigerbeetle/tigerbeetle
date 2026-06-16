@@ -303,6 +303,9 @@ pub fn ReplicaType(
         /// Presently, it is used to detect outdated View messages in recovering head status.
         nonce: Nonce,
 
+        /// The (real)time at which the replica started.
+        time_start: i64,
+
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall
         /// clock:
         clock: Clock,
@@ -1325,6 +1328,7 @@ pub fn ReplicaType(
                 .commit_stall_lag_max = commit_stall_lag_max,
                 .commit_stall_multiple_max = commit_stall_multiple_max,
                 .nonce = options.nonce,
+                .time_start = self.clock.realtime(),
                 .clock = self.clock,
                 .journal = self.journal,
                 .journal_repair_message_budget = self.journal_repair_message_budget,
@@ -3878,6 +3882,7 @@ pub fn ReplicaType(
             assert(self.trace_emit_timeout.ticking);
             self.trace_emit_timeout.reset();
 
+            self.trace.gauge(.replica_start, self.time_start);
             self.trace.gauge(.replica_status, @intFromEnum(self.status));
             self.trace.gauge(.replica_view, self.view);
             self.trace.gauge(.replica_log_view, self.log_view);
