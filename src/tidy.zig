@@ -319,6 +319,8 @@ fn tidy_banned(file: SourceFile, errors: *Errors) void {
         .{ "intRangeLessThan", "stdx.PRNG" },
         .{ "intRangeAtMost", "stdx.PRNG" },
         .{ "intRangeAtMostBiased", "stdx.PRNG" },
+        .{ "parseInt", "stdx.parse_int" },
+        .{ "parseUnsigned", "stdx.parse_int" },
 
         // Library footguns:
         .{ "unexpectedErrno", "stdx.unexpected_errno" },
@@ -425,6 +427,9 @@ fn tidy_line(file: SourceFile, line: []const u8, line_index: usize, errors: *Err
         // Flag snapshot test.
         if (std.mem.endsWith(u8, file.path, "flags.zig") and
             std.mem.startsWith(u8, string_value, "error: subcommand required")) return;
+
+        // REPL parser snapshot tests.
+        if (std.mem.endsWith(u8, file.path, "parser.zig")) return;
     }
 
     errors.add_long_line(file, line_index);
@@ -1234,6 +1239,7 @@ const DeadFilesDetector = struct {
             "npm_install.zig",
             "page_writer.zig",
             "python_bindings.zig",
+            "ruby_bindings.zig",
             "rust_bindings.zig",
             "scripts.zig",
             "search_index_writer.zig",
@@ -1244,7 +1250,6 @@ const DeadFilesDetector = struct {
             "vopr.zig",
             "vortex.zig",
             "zig_driver.zig",
-            "ruby_bindings.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -1313,7 +1318,7 @@ test "tidy no large blobs" {
         const blob = stdx.cut_prefix(line, "blob ") orelse continue;
 
         const size_string, const path = stdx.cut(blob, " ").?;
-        const size = try std.fmt.parseInt(u64, size_string, 10);
+        const size = try stdx.parse_int(u64, size_string, .{});
 
         if (std.mem.eql(u8, path, "src/vsr/replica.zig")) continue; // :-)
         if (std.mem.eql(u8, path, "src/state_machine.zig")) continue; // :-|

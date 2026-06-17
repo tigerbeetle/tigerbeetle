@@ -122,7 +122,7 @@ pub fn init(
             return error.NoPort;
         }
 
-        break :port try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
+        break :port try stdx.parse_int(u16, port_buf[0 .. port_buf_len - 1], .{});
     };
 
     const port_str = try std.fmt.allocPrint(gpa, "{d}", .{port});

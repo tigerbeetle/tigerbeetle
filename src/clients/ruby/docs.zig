@@ -12,9 +12,14 @@ pub const RubyDocs = Docs{
     .name = "tigerbeetle",
     .description =
     \\The TigerBeetle client for Ruby.
+    \\
+    \\>[!IMPORTANT]
+    \\>This gem changed ownership from [Anthony D](https://github.com/antstorm)
+    \\to TigerBeetle. If you're upgrading from a 0.0.x version, please consult
+    \\the [migration guide](./docs/migration.md) for the necessary code changes.
     ,
     .prerequisites =
-    \\* Ruby >= `3.0`
+    \\* Ruby >= `3.3`
     ,
 
     .project_file = "",
@@ -81,7 +86,19 @@ pub const RubyDocs = Docs{
     \\`TigerBeetle::CreateAccountStatus` module.
     ,
     .create_transfers_documentation = "",
-    .create_transfers_errors_documentation = "",
+    .create_transfers_errors_documentation =
+    \\To handle errors you can compare the result status returned
+    \\from `client.create_transfers` with constants in the
+    \\`TigerBeetle::CreateTransferStatus` module.
+    ,
 
-    .transfer_flags_documentation = "",
+    .transfer_flags_documentation =
+    \\To toggle behavior for a transfer, combine constants from the
+    \\`TigerBeetle::TransferFlags` module with bitwise-or:
+    \\
+    \\* `TransferFlags::LINKED`
+    \\* `TransferFlags::PENDING`
+    \\* `TransferFlags::POST_PENDING_TRANSFER`
+    \\* `TransferFlags::VOID_PENDING_TRANSFER`
+    ,
 };

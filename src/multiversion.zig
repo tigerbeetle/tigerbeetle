@@ -259,9 +259,9 @@ pub const ReleaseTriple = extern struct {
         const patch = parts.next() orelse return error.InvalidRelease;
         if (parts.next() != null) return error.InvalidRelease;
         return .{
-            .major = std.fmt.parseUnsigned(u16, major, 10) catch return error.InvalidRelease,
-            .minor = std.fmt.parseUnsigned(u8, minor, 10) catch return error.InvalidRelease,
-            .patch = std.fmt.parseUnsigned(u8, patch, 10) catch return error.InvalidRelease,
+            .major = stdx.parse_int(u16, major, .{}) catch return error.InvalidRelease,
+            .minor = stdx.parse_int(u8, minor, .{}) catch return error.InvalidRelease,
+            .patch = stdx.parse_int(u8, patch, .{}) catch return error.InvalidRelease,
         };
     }
 };

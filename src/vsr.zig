@@ -920,12 +920,10 @@ pub fn parse_addresses(
     return out_buffer[0..address_count];
 }
 
-pub fn parse_address_and_port(
-    options: struct {
-        string: []const u8,
-        port_default: u16,
-    },
-) !std.net.Address {
+pub fn parse_address_and_port(options: struct {
+    string: []const u8,
+    port_default: u16,
+}) !std.net.Address {
     assert(options.string.len > 0);
     assert(options.port_default > 0);
 
@@ -933,14 +931,8 @@ pub fn parse_address_and_port(
         if (options.string[split] == ':') {
             return parse_address(
                 options.string[0..split],
-                std.fmt.parseUnsigned(
-                    u16,
-                    options.string[split + 1 ..],
-                    10,
-                ) catch |err| switch (err) {
-                    error.Overflow => return error.PortOverflow,
-                    error.InvalidCharacter => return error.PortInvalid,
-                },
+                stdx.parse_int(u16, options.string[split + 1 ..], .{}) catch
+                    return error.PortInvalid,
             );
         } else {
             return parse_address(options.string, options.port_default);
@@ -948,10 +940,8 @@ pub fn parse_address_and_port(
     } else {
         return std.net.Address.parseIp4(
             constants.address,
-            std.fmt.parseUnsigned(u16, options.string, 10) catch |err| switch (err) {
-                error.Overflow => return error.PortOverflow,
-                error.InvalidCharacter => return error.AddressInvalid,
-            },
+            stdx.parse_int(u16, options.string, .{}) catch
+                return error.PortInvalid,
         ) catch unreachable;
     }
 }
@@ -961,9 +951,8 @@ fn parse_address(string: []const u8, port: u16) !std.net.Address {
     if (string[string.len - 1] == ':') return error.AddressHasMoreThanOneColon;
 
     if (string[0] == '[' and string[string.len - 1] == ']') {
-        return std.net.Address.parseIp6(string[1 .. string.len - 1], port) catch {
+        return std.net.Address.parseIp6(string[1 .. string.len - 1], port) catch
             return error.AddressInvalid;
-        };
     } else {
         return std.net.Address.parseIp4(string, port) catch return error.AddressInvalid;
     }
@@ -1061,16 +1050,17 @@ test parse_addresses {
         .{ .raw = ".", .err = error.AddressInvalid },
         .{ .raw = ":", .err = error.PortInvalid },
         .{ .raw = ":92", .err = error.AddressInvalid },
+        .{ .raw = "::ff:92", .err = error.AddressInvalid },
         .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
         .{ .raw = "1.2.3.4:7777,", .err = error.AddressHasTrailingComma },
         .{ .raw = "1.2.3.4:7777,2.3.4.5::8888", .err = error.AddressHasMoreThanOneColon },
-        .{ .raw = "1.2.3.4:5,A", .err = error.AddressInvalid }, // default port
+        .{ .raw = "1.2.3.4:5,A", .err = error.PortInvalid }, // default port
         .{ .raw = "1.2.3.4:5,2.a.4.5", .err = error.AddressInvalid }, // default port
         .{ .raw = "1.2.3.4:5,2.a.4.5:6", .err = error.AddressInvalid }, // specified port
         .{ .raw = "1.2.3.4:5,2.3.4.5:", .err = error.PortInvalid },
         .{ .raw = "1.2.3.4:5,2.3.4.5:A", .err = error.PortInvalid },
-        .{ .raw = "1.2.3.4:5,65536", .err = error.PortOverflow }, // default address
-        .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortOverflow },
+        .{ .raw = "1.2.3.4:5,65536", .err = error.PortInvalid }, // default address
+        .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortInvalid },
     };
 
     var buffer: [3]std.net.Address = undefined;
@@ -1102,11 +1092,11 @@ test "parse_addresses: fuzz" {
 
     var prng = stdx.PRNG.from_seed_testing();
 
-    var input_bufer: [input_size_max]u8 = @splat(0);
+    var input_buffer: [input_size_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
         const input_size = prng.int_inclusive(usize, input_size_max);
-        const input = input_bufer[0..input_size];
+        const input = input_buffer[0..input_size];
         for (input) |*c| {
             c.* = alphabet[prng.index(alphabet)];
         }

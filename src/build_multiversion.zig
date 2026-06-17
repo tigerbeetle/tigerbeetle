@@ -792,10 +792,9 @@ fn git_sha_to_binary(commit: []const u8) ![20]u8 {
     assert(commit.len == 40);
 
     var commit_bytes: [20]u8 = std.mem.zeroes([20]u8);
-    for (0..@divExact(commit.len, 2)) |i| {
-        const byte = try std.fmt.parseInt(u8, commit[i * 2 ..][0..2], 16);
-        commit_bytes[i] = byte;
-    }
+    const commit_int =
+        try stdx.parse_int(u160, commit, .{ .base = 16, .allow_leading_zero = true });
+    std.mem.writeInt(u160, &commit_bytes, commit_int, .big);
 
     var commit_roundtrip: [40]u8 = undefined;
     assert(std.mem.eql(u8, try std.fmt.bufPrint(

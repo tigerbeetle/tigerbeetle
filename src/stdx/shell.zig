@@ -449,6 +449,7 @@ pub fn exec_stdout_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
+        timeout: stdx.Duration = .minutes(10),
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -460,6 +461,7 @@ pub fn exec_stdout_options(
     try exec_inner(shell, argv.slice(), .{
         .stdin_slice = options.stdin_slice,
         .capture_stdout = &captured_stdout,
+        .timeout = options.timeout,
     });
     return captured_stdout;
 }
@@ -702,7 +704,7 @@ pub fn git_commit_timestamp(shell: *Shell, sha: []const u8) !stdx.InstantUnix {
 
     const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
     return stdx.InstantUnix.from_timestamp_s(
-        try std.fmt.parseInt(u64, timestamp_s, 10),
+        try stdx.parse_int(u64, timestamp_s, .{}),
     );
 }
 
@@ -963,6 +965,7 @@ pub const HttpOptions = struct {
     authorization: ?[]const u8 = null,
 
     response_body_size_max: u32 = 512 * stdx.KiB,
+    expected_response_code: std.http.Status = .ok,
 };
 
 pub fn http_get(shell: *Shell, url: []const u8, options: HttpOptions) ![]const u8 {
@@ -1043,7 +1046,7 @@ fn http_request(
         assert(response_content_length == response_body_size);
     }
 
-    if (request.response.status != std.http.Status.ok) {
+    if (request.response.status != options.expected_response_code) {
         log.err("response: {s}", .{response_body});
         return error.ResponseWrongStatus;
     }
@@ -1053,10 +1056,10 @@ fn http_request(
 
 /// Converts an ISO8601 timestamp into seconds from the epoch by shelling out to the `date` util.
 pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8) !u64 {
-    return try std.fmt.parseInt(u64, try shell.exec_stdout(
+    return try stdx.parse_int(u64, try shell.exec_stdout(
         "date -d {datetime_iso8601} +%s",
         .{ .datetime_iso8601 = datetime_iso8601 },
-    ), 10);
+    ), .{});
 }
 
 pub fn unzip_executable(
@@ -1078,7 +1081,12 @@ pub fn unzip_executable(
     }
 }
 
-fn unix_to_dos_timestamp(instant: stdx.InstantUnix) struct { time: u16, date: u16 } {
+pub const DOSTimestamp = struct {
+    time: u16,
+    date: u16,
+};
+
+pub fn unix_to_dos_timestamp(instant: stdx.InstantUnix) DOSTimestamp {
     const date_time = instant.date_time();
     assert(date_time.year >= 1980 and date_time.year <= 2107);
 

@@ -128,9 +128,16 @@ pub const Duration = struct {
         assert(string_amount.len > 0);
         assert(string_remaining.len > 0);
 
-        const amount = std.fmt.parseInt(u64, string_amount, 10) catch |err| switch (err) {
+        const amount = stdx.parse_int(u64, string_amount, .{
+            .base = 10,
+            .allow_separators = true,
+        }) catch |err| switch (err) {
             error.Overflow => {
                 static_diagnostic.* = "integer overflow:";
+                return error.InvalidFlagValue;
+            },
+            error.LeadingZero => {
+                static_diagnostic.* = "leading zero disallowed:";
                 return error.InvalidFlagValue;
             },
             error.InvalidCharacter => unreachable,
@@ -191,6 +198,7 @@ test "Duration.parse_flag_value" {
             .{ "1h 2m", "missing value" },
             .{ "18446744073709551616ns", "integer overflow" },
             .{ "1844674407370955161s", "duration too large" },
+            .{ "0024h", "leading zero disallowed" },
         },
     });
 }

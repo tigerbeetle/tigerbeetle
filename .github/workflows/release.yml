@@ -4,6 +4,11 @@ permissions: {}
 on:
   workflow_dispatch:
 
+# Don't run release and release_validate simultaneously, to avoid races.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 16th, 2026).
 
@@ -57,7 +62,11 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: 3.13
-      - run: pip install build twine
+      - run: pip install twine
+
+      - uses: ruby/setup-ruby@97ecb7b512899eb71ab1bf2310a624c6f1589ac6 # v1.308.0
+        with:
+          ruby-version: '4.0'
 
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -75,6 +84,8 @@ jobs:
           TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   alert_failure:

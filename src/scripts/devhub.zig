@@ -100,7 +100,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
 
     const commit_timestamp_str =
         try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = cli_args.sha });
-    const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
+    const commit_timestamp = try stdx.parse_int(u64, commit_timestamp_str, .{});
 
     // Only build the TigerBeetle binary to test build speed and build size. Throw it away once
     // done, and use a release build from `zig-out/dist/` to run the benchmark.
@@ -227,7 +227,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             // timing: compact_mutable_suffix(tree)=136
             if (line.len != 0) {
                 _, const value_string = stdx.cut(line, "=").?;
-                stats_count += try std.fmt.parseInt(u32, value_string, 10);
+                stats_count += try stdx.parse_int(u32, value_string, .{});
             }
         }
         break :blk stats_count;
@@ -252,9 +252,11 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             _ = process.wait() catch {};
         }
 
-        var port_buffer: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
-        const port_buffer_len = try process.stdout.?.readAll(&port_buffer);
-        const port = try std.fmt.parseInt(u16, port_buffer[0 .. port_buffer_len - 1], 10);
+        const port: u16 = b: {
+            var buffer: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
+            const size = try process.stdout.?.readAll(&buffer);
+            break :b try stdx.parse_int(u16, buffer[0 .. size - 1], .{});
+        };
 
         // TODO: This sends a ping manually; once register connection speed has been fixed, this can
         // use the benchmark or repl via CLI.
@@ -393,7 +395,7 @@ fn get_measurement(
         return error.BadMeasurement;
     const value_string, _ = stdx.cut(rest, " " ++ unit) orelse return error.BadMeasurement;
 
-    return try std.fmt.parseInt(u64, value_string, 10);
+    return try stdx.parse_int(u64, value_string, .{});
 }
 
 fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {

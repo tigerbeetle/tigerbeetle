@@ -74,8 +74,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             statement: Parser.Statement,
         ) !void {
-            try repl.debug("Running command: {}.\n", .{statement.operation});
-            switch (statement.operation) {
+            try repl.debug("Running command: {}.\n", .{statement.command});
+            switch (statement.command) {
                 .none => {
                     // No input was parsed.
                     try repl.debug("No command was parsed, continuing.\n", .{});
@@ -93,8 +93,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .query_accounts,
                 .query_transfers,
                 .query_two_phase_transfers,
-                => |operation| {
-                    const state_machine_operation = operation.state_machine_op();
+                => |command| {
+                    const state_machine_operation = command.operation();
                     try repl.send(
                         state_machine_operation,
                         statement.arguments,
@@ -582,46 +582,18 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             const statement = Parser.parse_statement(
                 input,
-                &repl.terminal,
+                repl.terminal.stderr.any(),
                 arguments,
             ) catch |err| {
                 switch (err) {
                     // These are parsing errors, so the REPL should
                     // not continue to execute this statement but can
                     // still accept new statements.
-                    Parser.Error.IdentifierBad,
-                    Parser.Error.OperationBad,
-                    Parser.Error.ValueBad,
-                    Parser.Error.KeyValuePairBad,
-                    Parser.Error.KeyValuePairEqualMissing,
-                    Parser.Error.SyntaxMatchNone,
-                    Parser.Error.SliceOperationUnsupported,
-                    // TODO(zig): This will be more convenient to express
-                    // once https://github.com/ziglang/zig/issues/2473 is
-                    // in.
-                    => return,
+                    error.ParseError => return,
 
                     // An unexpected error for which we do
                     // want the stacktrace.
-                    error.AccessDenied,
-                    error.BrokenPipe,
-                    error.ConnectionResetByPeer,
-                    error.DeviceBusy,
-                    error.DiskQuota,
-                    error.FileTooBig,
-                    error.InputOutput,
-                    error.InvalidArgument,
-                    error.LockViolation,
-                    error.NoSpaceLeft,
-                    error.NotOpenForWriting,
-                    error.OperationAborted,
-                    error.OutOfMemory,
-                    error.SystemResources,
-                    error.Unexpected,
-                    error.WouldBlock,
-                    error.NoDevice,
-                    error.ProcessNotFound,
-                    => return err,
+                    else => return err,
                 }
             };
             try repl.do_statement(statement);
@@ -629,16 +601,18 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         fn display_help(repl: *Repl) !void {
             try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
-                \\  Hit enter after a semicolon to run a command.
-                \\  Ctrl+D to exit.
+                \\Press Ctrl+D to exit.
                 \\
                 \\Examples:
-                \\  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700;
-                \\  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
-                \\  lookup_accounts id=1;
-                \\  lookup_accounts id=1, id=2;
-                \\  get_account_transfers account_id=1 flags=debits|credits;
-                \\  get_account_balances account_id=1 flags=debits|credits;
+                \\  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700
+                \\  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=1_000 ledger=700 code=10
+                \\  lookup_accounts id=0xa1a2a3a4_b1b2_c1c2_d1d2_e1e2e3e4e5e6
+                \\  lookup_transfers id=1, id=2
+                \\  get_account_transfers timestamp_min=123 timestamp_max=456 account_id=1 flags=debits|credits
+                \\  get_account_balances timestamp_min=123 timestamp_max=456 account_id=1 flags=debits|credits
+                \\  query_accounts timestamp_min=123 timestamp_max=456
+                \\  query_transfers timestamp_min=123 timestamp_max=456
+                \\  query_two_phase_transfers flags=target_pending|reversed pending_status=posted limit=100
                 \\
                 \\
             , .{constants.semver});
@@ -751,7 +725,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                         const statement = Parser.parse_statement(
                             statement_string,
-                            &repl.terminal,
+                            repl.terminal.stderr.any(),
                             &repl.arguments,
                         ) catch |err| {
                             switch (err) {
@@ -759,39 +733,11 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 // is not an interactive command, we should
                                 // exit immediately. Parsing error info
                                 // has already been emitted to stderr.
-                                Parser.Error.IdentifierBad,
-                                Parser.Error.OperationBad,
-                                Parser.Error.ValueBad,
-                                Parser.Error.KeyValuePairBad,
-                                Parser.Error.KeyValuePairEqualMissing,
-                                Parser.Error.SyntaxMatchNone,
-                                Parser.Error.SliceOperationUnsupported,
-                                // TODO: This will be more convenient to express
-                                // once https://github.com/ziglang/zig/issues/2473 is
-                                // in.
-                                => std.posix.exit(1),
+                                error.ParseError => std.posix.exit(1),
 
                                 // An unexpected error for which we do
                                 // want the stacktrace.
-                                error.AccessDenied,
-                                error.BrokenPipe,
-                                error.ConnectionResetByPeer,
-                                error.DeviceBusy,
-                                error.DiskQuota,
-                                error.FileTooBig,
-                                error.InputOutput,
-                                error.InvalidArgument,
-                                error.LockViolation,
-                                error.NoSpaceLeft,
-                                error.NotOpenForWriting,
-                                error.OperationAborted,
-                                error.OutOfMemory,
-                                error.SystemResources,
-                                error.Unexpected,
-                                error.WouldBlock,
-                                error.NoDevice,
-                                error.ProcessNotFound,
-                                => return err,
+                                else => return err,
                             }
                         };
 
@@ -1067,7 +1013,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 reply_decoder.peek(),
             ) catch |err| {
                 const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
-                repl.fail("Error in callback: {any}", .{err}) catch return;
+                repl.fail("Error in callback: {any}\n", .{err}) catch return;
             };
         }
     };

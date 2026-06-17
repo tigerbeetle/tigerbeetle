@@ -45,9 +45,10 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .scalar)) 
             const offset: usize = if (std.ascii.isAlphabetic(token[0])) 1 else 0;
             // Negative unsigned values are computed relative to the maxInt.
             if (info.signedness == .unsigned and token[offset] == '-') {
-                return max - (std.fmt.parseInt(Data, token[offset + 1 ..], 10) catch unreachable);
+                const negative = stdx.parse_int(Data, token[offset + 1 ..], .{}) catch unreachable;
+                return max - negative;
             }
-            return std.fmt.parseInt(Data, token[offset..], 10) catch unreachable;
+            return stdx.parse_int(Data, token[offset..], .{}) catch unreachable;
         },
         .@"struct" => {
             var data: Data = undefined;

@@ -141,7 +141,7 @@ fn format_changelog_cut_single_merge(merges_left: *[]const u8) !?struct {
 
     const pr_string, merges_left.* = stdx.cut(merges_left.*, " from ") orelse
         return error.ParseMergeLog;
-    const pr = try std.fmt.parseInt(u16, pr_string, 10);
+    const pr = try stdx.parse_int(u16, pr_string, .{});
 
     _, merges_left.* = stdx.cut(merges_left.*, "\n    \n    ") orelse return error.ParseMergeLog;
 

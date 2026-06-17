@@ -1154,7 +1154,8 @@ const SeedRecord = struct {
                 if (std.mem.eql(u8, string, release_url)) return .release;
                 assert(std.mem.startsWith(u8, string, pull_url_prefix));
                 const pull_number_string = string[pull_url_prefix.len..];
-                const pull_number = std.fmt.parseInt(u32, pull_number_string, 10) catch unreachable;
+                const pull_number = stdx.parse_int(u32, pull_number_string, .{}) catch
+                    unreachable;
                 return .{ .pull = pull_number };
             }
         };

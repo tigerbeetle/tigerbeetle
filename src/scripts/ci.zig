@@ -192,8 +192,9 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     defer gpa.free(tigerbeetle_absolute_path);
 
     inline for (comptime std.enums.values(Language)) |language| {
-        if ((language_requested == language or language_requested == null) and
-            language != .ruby) // The published tigerbeetle gem is not ours.
+        if ((language == language_requested or language_requested == null) and
+            language != .ruby and // TODO Remove when Ruby client is published.
+            language != .rust) // Rust isn't published yet.
         {
             const ci = @field(LanguageCI, @tagName(language));
             try ci.validate_release(shell, gpa, .{
@@ -206,8 +207,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     // Check all the client releases to ensure the latest published release is what it should be.
     inline for (comptime std.enums.values(Language)) |language| {
         if ((language == language_requested or language_requested == null) and
-            language != .rust and // Rust isn't published yet.
-            language != .ruby) // The published tigerbeetle gem is not ours.
+            language != .ruby and // TODO Remove when Ruby client is published.
+            language != .rust) // Rust isn't published yet.
         {
             const ci = @field(LanguageCI, @tagName(language));
             const release_published_latest = try ci.release_published_latest(shell);

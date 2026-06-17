@@ -94,17 +94,16 @@ pub fn parse_seed(bytes: []const u8) u64 {
         // current commit hash as a seed --- that way, we run simulator on CI, we run it with
         // different, "random" seeds, but the failures remain reproducible just from the commit
         // hash!
-        const commit_hash = std.fmt.parseUnsigned(u160, bytes, 16) catch |err| switch (err) {
-            error.Overflow => unreachable,
-            error.InvalidCharacter => @panic("commit hash seed contains an invalid character"),
-        };
+        const commit_hash = stdx.parse_int(u160, bytes, .{
+            .base = 16,
+            .allow_leading_zero = true,
+        }) catch
+            @panic("commit hash seed invalid");
         return @truncate(commit_hash);
     }
 
-    return std.fmt.parseUnsigned(u64, bytes, 10) catch |err| switch (err) {
-        error.Overflow => @panic("seed exceeds a 64-bit unsigned integer"),
-        error.InvalidCharacter => @panic("seed contains an invalid character"),
-    };
+    return stdx.parse_int(u64, bytes, .{}) catch
+        @panic("seed invalid");
 }
 
 // Like `std.meta.DeclEnum`, but allows excluding specific things. Feed the result into
