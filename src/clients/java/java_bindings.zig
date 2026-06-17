@@ -248,7 +248,7 @@ fn emit_enum(
             \\    {[enum_name]s}(({[int_type]s}) {[value]s}){[separator]c}
             \\
         , .{
-            .enum_name = stdx.to_case(field.name, .pascal),
+            .enum_name = stdx.to_case(field.name, .PascalCase),
             .int_type = int_type,
             .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})
@@ -280,7 +280,7 @@ fn emit_enum(
             \\            case {[value]s}: return {[enum_name]s};
             \\
         , .{
-            .enum_name = stdx.to_case(field.name, .pascal),
+            .enum_name = stdx.to_case(field.name, .PascalCase),
             .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})
             else
@@ -342,7 +342,7 @@ fn emit_packed_enum(
             \\
         , .{
             .int_type = int_type,
-            .enum_name = stdx.to_case(field.name, .upper),
+            .enum_name = stdx.to_case(field.name, .UPPER_CASE),
             .value = i,
         });
     }
@@ -359,9 +359,9 @@ fn emit_packed_enum(
             \\
             \\
         , .{
-            .flag_name = stdx.to_case(field.name, .pascal),
+            .flag_name = stdx.to_case(field.name, .PascalCase),
             .int_type = int_type,
-            .enum_name = stdx.to_case(field.name, .upper),
+            .enum_name = stdx.to_case(field.name, .UPPER_CASE),
         });
     }
 
@@ -432,7 +432,7 @@ fn emit_batch(
             \\        int {[field_name]s} = {[offset]d};
             \\
         , .{
-            .field_name = stdx.to_case(field.name, .pascal),
+            .field_name = stdx.to_case(field.name, .PascalCase),
             .offset = offset,
         });
 
@@ -522,7 +522,7 @@ fn emit_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal),
+            .property = stdx.to_case(field.name, .PascalCase),
             .array_len = @typeInfo(field.type).array.len,
         });
     } else {
@@ -536,7 +536,7 @@ fn emit_batch_accessors(
         , .{
             .visibility = if (is_private) "" else "public ",
             .java_type = java_type(field.type),
-            .property = stdx.to_case(field.name, .pascal),
+            .property = stdx.to_case(field.name, .PascalCase),
             .batch_type = batch_type(field.type),
             .return_expression = comptime if (@typeInfo(field.type) == .@"enum")
                 get_mapped_type_name(field.type).? ++ ".fromValue(value)"
@@ -553,7 +553,7 @@ fn emit_batch_accessors(
         \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
         \\
     , .{
-        .param_name = stdx.to_case(field.name, .camel),
+        .param_name = stdx.to_case(field.name, .camelCase),
     });
 
     if (mapping.docs_link) |docs_link| {
@@ -584,8 +584,8 @@ fn emit_batch_accessors(
             \\
             \\
         , .{
-            .property = stdx.to_case(field.name, .pascal),
-            .param_name = stdx.to_case(field.name, .camel),
+            .property = stdx.to_case(field.name, .PascalCase),
+            .param_name = stdx.to_case(field.name, .camelCase),
             .visibility = if (is_private or is_read_only) "" else "public ",
             .array_len = @typeInfo(field.type).array.len,
         });
@@ -597,8 +597,8 @@ fn emit_batch_accessors(
             \\
             \\
         , .{
-            .property = stdx.to_case(field.name, .pascal),
-            .param_name = stdx.to_case(field.name, .camel),
+            .property = stdx.to_case(field.name, .PascalCase),
+            .param_name = stdx.to_case(field.name, .camelCase),
             .visibility = if (is_private or is_read_only) "" else "public ",
             .batch_type = batch_type(field.type),
             .java_type = java_type(field.type),
@@ -659,7 +659,7 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal),
+            .property = stdx.to_case(field.name, .PascalCase),
         });
     } else {
         // Get array:
@@ -694,7 +694,7 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal),
+            .property = stdx.to_case(field.name, .PascalCase),
         });
     }
 
@@ -734,7 +734,7 @@ fn emit_u128_batch_accessors(
         \\
     , .{
         .visibility = if (is_private) "" else "public ",
-        .property = stdx.to_case(field.name, .pascal),
+        .property = stdx.to_case(field.name, .PascalCase),
     });
 
     if (big_integer.contains(field.name)) {
@@ -746,7 +746,7 @@ fn emit_u128_batch_accessors(
             \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
             \\
         , .{
-            .param_name = stdx.to_case(field.name, .camel),
+            .param_name = stdx.to_case(field.name, .camelCase),
         });
 
         if (mapping.docs_link) |docs_link| {
@@ -773,8 +773,8 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private or is_read_only) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal),
-            .param_name = stdx.to_case(field.name, .camel),
+            .property = stdx.to_case(field.name, .PascalCase),
+            .param_name = stdx.to_case(field.name, .camelCase),
         });
     } else {
         // Set array:
@@ -786,7 +786,7 @@ fn emit_u128_batch_accessors(
             \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
             \\
         , .{
-            .param_name = stdx.to_case(field.name, .camel),
+            .param_name = stdx.to_case(field.name, .camelCase),
         });
 
         if (mapping.docs_link) |docs_link| {
@@ -813,8 +813,8 @@ fn emit_u128_batch_accessors(
             \\
         , .{
             .visibility = if (is_private or is_read_only) "" else "public ",
-            .property = stdx.to_case(field.name, .pascal),
-            .param_name = stdx.to_case(field.name, .camel),
+            .property = stdx.to_case(field.name, .PascalCase),
+            .param_name = stdx.to_case(field.name, .camelCase),
         });
     }
 
@@ -852,7 +852,7 @@ fn emit_u128_batch_accessors(
         \\
     , .{
         .visibility = if (is_private or is_read_only) "" else "public ",
-        .property = stdx.to_case(field.name, .pascal),
+        .property = stdx.to_case(field.name, .PascalCase),
     });
 
     // Set long without most significant bits
@@ -888,7 +888,7 @@ fn emit_u128_batch_accessors(
         \\
     , .{
         .visibility = if (is_private or is_read_only) "" else "public ",
-        .property = stdx.to_case(field.name, .pascal),
+        .property = stdx.to_case(field.name, .PascalCase),
     });
 }
 

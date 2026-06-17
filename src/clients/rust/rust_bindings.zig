@@ -119,7 +119,7 @@ fn emit_enum(
         }
 
         if (!skip) {
-            const field_name = stdx.to_case(field.name, .upper);
+            const field_name = stdx.to_case(field.name, .UPPER_CASE);
             if (@typeInfo(Type) == .@"enum") {
                 const int_value = @intFromEnum(@field(Type, field.name));
                 try buffer.writer().print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
