@@ -287,8 +287,15 @@ test IPAddress {
             const address = SocketAddress.to_std(.{ .ip = ip, .port = 0 });
             const address_std = try parse_std(text);
             if (!address.eql(address_std)) {
-                std.log.err("{} != {}", .{ address, address_std });
-                return error.TestUnexpectedResult;
+                if (address.any.family == std.posix.AF.INET and
+                    address_std.any.family == std.posix.AF.INET6 and
+                    std.mem.eql(u8, &IPAddress.IPv4_prefix_octets, address_std.in6.sa.addr[0..12]))
+                {
+                    // Std doesn't canonicalize IPv6-mapped IPv4 addresses.
+                } else {
+                    std.log.err("{} != {}", .{ address, address_std });
+                    return error.TestUnexpectedResult;
+                }
             }
 
             var buffer: [64]u8 = undefined;
@@ -396,6 +403,7 @@ test IPAddress {
             "0:0:0:0:0:0:0:1",
             "0:0:0:0:0:0:0:0",
             "Ff01::101",
+            "::ffff:c0a8:64e4",
         },
         .err = &.{
             "::d3:",
