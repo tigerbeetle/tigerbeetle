@@ -19,8 +19,12 @@ include = [
   "assets/lib/*/{*.a,*.lib}",
 ]
 
+[profile.release]
+overflow-checks = true
+
 [dependencies]
 bitflags = "2.6.0"
 
 [dev-dependencies]
 futures = { version = "0.3.31", default-features = false, features = ["executor"] }
+
