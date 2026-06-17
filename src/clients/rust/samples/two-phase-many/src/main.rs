@@ -1,50 +1,5 @@
 use tigerbeetle as tb;
 
-async fn assert_account_balances(
-    client: &tb::Client,
-    expected_accounts: &[tb::Account],
-    debug_msg: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let ids: Vec<u128> = expected_accounts.iter().map(|a| a.id).collect();
-    let found_accounts = client.lookup_accounts(&ids)?.await?;
-    assert_eq!(expected_accounts.len(), found_accounts.len(), "accounts");
-
-    for found_account in &found_accounts {
-        let mut requested = false;
-        for expected_account in expected_accounts {
-            if expected_account.id == found_account.id {
-                requested = true;
-                assert_eq!(
-                    expected_account.debits_posted, found_account.debits_posted,
-                    "account {} debits, {}",
-                    expected_account.id, debug_msg
-                );
-                assert_eq!(
-                    expected_account.credits_posted, found_account.credits_posted,
-                    "account {} credits, {}",
-                    expected_account.id, debug_msg
-                );
-                assert_eq!(
-                    expected_account.debits_pending, found_account.debits_pending,
-                    "account {} debits pending, {}",
-                    expected_account.id, debug_msg
-                );
-                assert_eq!(
-                    expected_account.credits_pending, found_account.credits_pending,
-                    "account {} credits pending, {}",
-                    expected_account.id, debug_msg
-                );
-            }
-        }
-
-        if !requested {
-            panic!("Unexpected account: {}", found_account.id);
-        }
-    }
-
-    Ok(())
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -378,6 +333,51 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         "after completing 5 pending transfers",
     )
     .await?;
+
+    Ok(())
+}
+
+async fn assert_account_balances(
+    client: &tb::Client,
+    expected_accounts: &[tb::Account],
+    debug_msg: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let ids: Vec<u128> = expected_accounts.iter().map(|a| a.id).collect();
+    let found_accounts = client.lookup_accounts(&ids)?.await?;
+    assert_eq!(expected_accounts.len(), found_accounts.len(), "accounts");
+
+    for found_account in &found_accounts {
+        let mut requested = false;
+        for expected_account in expected_accounts {
+            if expected_account.id == found_account.id {
+                requested = true;
+                assert_eq!(
+                    expected_account.debits_posted, found_account.debits_posted,
+                    "account {} debits, {}",
+                    expected_account.id, debug_msg
+                );
+                assert_eq!(
+                    expected_account.credits_posted, found_account.credits_posted,
+                    "account {} credits, {}",
+                    expected_account.id, debug_msg
+                );
+                assert_eq!(
+                    expected_account.debits_pending, found_account.debits_pending,
+                    "account {} debits pending, {}",
+                    expected_account.id, debug_msg
+                );
+                assert_eq!(
+                    expected_account.credits_pending, found_account.credits_pending,
+                    "account {} credits pending, {}",
+                    expected_account.id, debug_msg
+                );
+            }
+        }
+
+        if !requested {
+            panic!("Unexpected account: {}", found_account.id);
+        }
+    }
 
     Ok(())
 }
