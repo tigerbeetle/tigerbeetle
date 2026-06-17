@@ -996,11 +996,11 @@ fn parse_address(string: []const u8) !stdx.IPAddress {
     if (string[string.len - 1] == ':') return error.AddressHasMoreThanOneColon;
 
     const expect_v6 = string[0] == '[' and string[string.len - 1] == ']';
+    if (expect_v6 != (std.mem.indexOfScalar(u8, string, ':') != null)) return error.AddressInvalid;
     const ip = if (expect_v6)
         stdx.IPAddress.parse(string[1 .. string.len - 1]) catch return error.AddressInvalid
     else
         stdx.IPAddress.parse(string) catch return error.AddressInvalid;
-    if ((ip.family() == .IPv6) != expect_v6) return error.AddressInvalid;
     return ip;
 }
 
@@ -1084,6 +1084,13 @@ test parse_addresses {
                     0,
                     0,
                 ),
+            },
+        },
+        .{
+            // Test IPv6-mapped IPv4 address.
+            .raw = "[::ffff:7f00:1]:1234",
+            .addresses = &[_]std.net.Address{
+                std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 1234),
             },
         },
     };
