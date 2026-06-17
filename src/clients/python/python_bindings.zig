@@ -164,7 +164,7 @@ fn emit_enum(
         }
 
         if (!skip) {
-            const field_name = stdx.to_case(field.name, .upper);
+            const field_name = stdx.to_case(field.name, .UPPER_CASE);
             if (@typeInfo(Type) == .@"enum") {
                 const int_value = @intFromEnum(@field(Type, field.name));
                 buffer.print("    {s} = {s}\n", .{
@@ -316,7 +316,7 @@ fn emit_struct_dataclass(
                         // Enums - initialized with the default value.
                         buffer.print("{s}.{s}", .{
                             python_type,
-                            stdx.to_case(@tagName(@as(field.type, @enumFromInt(0))), .upper),
+                            stdx.to_case(@tagName(@as(field.type, @enumFromInt(0))), .UPPER_CASE),
                         });
                     } else {
                         // Simple integer types:
@@ -379,7 +379,7 @@ fn emit_method(
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
-            .uppercase_name = stdx.to_case(@tagName(operation), .upper),
+            .uppercase_name = stdx.to_case(@tagName(operation), .UPPER_CASE),
             .event_type_c = ctype_type_name(operation.EventType()),
             .result_type_c = ctype_type_name(operation.ResultType()),
         },

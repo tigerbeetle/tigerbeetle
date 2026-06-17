@@ -230,13 +230,13 @@ fn emit_enum(
         try emit_docs(buffer, mapping, field.name);
         if (is_packed_struct) {
             try buffer.writer().print("    {s} = 1 << {},\n\n", .{
-                stdx.to_case(field.name, .pascal),
+                stdx.to_case(field.name, .PascalCase),
                 i,
             });
         } else {
             const int_value = @intFromEnum(@field(Type, field.name));
             try buffer.writer().print("    {s} = {s},\n\n", .{
-                stdx.to_case(field.name, .pascal),
+                stdx.to_case(field.name, .PascalCase),
                 if (int_value == std.math.maxInt(@TypeOf(int_value)))
                     std.fmt.comptimePrint("0x{X}", .{int_value})
                 else
@@ -316,7 +316,7 @@ fn emit_struct(
                     \\
                     \\
                 , .{
-                    .name = stdx.to_case(field.name, .pascal),
+                    .name = stdx.to_case(field.name, .PascalCase),
                     .size = array.len * @sizeOf(array.child),
                     .len = array.len,
                     .child_type = dotnet_type(array.child),
@@ -338,8 +338,8 @@ fn emit_struct(
             ,
                 .{
                     if (mapping.visibility == .internal and !is_private) "public" else "private",
-                    stdx.to_case(field.name, .pascal),
-                    stdx.to_case(field.name, .camel),
+                    stdx.to_case(field.name, .PascalCase),
+                    stdx.to_case(field.name, .camelCase),
                 },
             ),
             else => try buffer.writer().print(
@@ -350,7 +350,7 @@ fn emit_struct(
                 .{
                     if (mapping.visibility == .internal and !is_private) "public" else "private",
                     dotnet_type(field.type),
-                    stdx.to_case(field.name, .camel),
+                    stdx.to_case(field.name, .camelCase),
                 },
             ),
         }
@@ -372,10 +372,10 @@ fn emit_struct(
                     \\
                 , .{
                     if (is_private) "internal" else "public",
-                    stdx.to_case(field.name, .pascal),
-                    stdx.to_case(field.name, .camel),
+                    stdx.to_case(field.name, .PascalCase),
+                    stdx.to_case(field.name, .camelCase),
                     if (is_read_only and !is_private) "internal " else "",
-                    stdx.to_case(field.name, .camel),
+                    stdx.to_case(field.name, .camelCase),
                 }),
                 else => try buffer.writer().print(
                     \\    {s} {s} {s} {{ get => {s}; {s}set => {s} = value; }}
@@ -384,10 +384,10 @@ fn emit_struct(
                 , .{
                     if (is_private) "internal" else "public",
                     dotnet_type(field.type),
-                    stdx.to_case(field.name, .pascal),
-                    stdx.to_case(field.name, .camel),
+                    stdx.to_case(field.name, .PascalCase),
+                    stdx.to_case(field.name, .camelCase),
                     if (is_read_only and !is_private) "internal " else "",
-                    stdx.to_case(field.name, .camel),
+                    stdx.to_case(field.name, .camelCase),
                 }),
             }
         }

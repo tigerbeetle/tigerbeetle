@@ -39,12 +39,12 @@ fn ruby_flags_name_from_type(comptime Type: type) ?[]const u8 {
 }
 
 fn c_operation_name(comptime operation: tb.Operation) []const u8 {
-    const upper_snake = stdx.to_case(@tagName(operation), .upper);
+    const upper_snake = stdx.to_case(@tagName(operation), .UPPER_CASE);
     return "TB_OPERATION_" ++ upper_snake;
 }
 
 fn c_init_status_name(comptime status: exports.tb_init_status) []const u8 {
-    const upper_snake = stdx.to_case(@tagName(status), .upper);
+    const upper_snake = stdx.to_case(@tagName(status), .UPPER_CASE);
     return "TB_INIT_" ++ upper_snake;
 }
 
@@ -139,7 +139,7 @@ fn emit_flags_module(
     inline for (@typeInfo(Type).@"struct".fields, 0..) |field, i| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-        const upper_snake = stdx.to_case(field.name, .upper);
+        const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
         buffer.print("    {s} = 1 << {d}\n", .{ upper_snake, i });
     }
     buffer.print("  end\n\n", .{});
@@ -161,7 +161,7 @@ fn emit_enum_module(
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
         }
         if (skip) continue;
-        const upper_snake = stdx.to_case(field.name, .upper);
+        const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
         const value: u64 = @intCast(@intFromEnum(@field(Type, field.name)));
         buffer.print("    {s} = {d}\n", .{ upper_snake, value });
     }
@@ -242,7 +242,7 @@ fn emit_rbs_constants_module(
             inline for (info.fields) |field| {
                 if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
                 if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-                const upper_snake = stdx.to_case(field.name, .upper);
+                const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
                 buffer.print("    {s}: Integer\n", .{upper_snake});
             }
         },
@@ -254,7 +254,7 @@ fn emit_rbs_constants_module(
                     skip = skip or comptime std.mem.eql(u8, sf, field.name);
                 }
                 if (skip) continue;
-                const upper_snake = stdx.to_case(field.name, .upper);
+                const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
                 buffer.print("    {s}: Integer\n", .{upper_snake});
             }
         },
