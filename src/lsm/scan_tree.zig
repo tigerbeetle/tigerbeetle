@@ -335,15 +335,18 @@ pub fn ScanTreeType(
             switch (self.state) {
                 .idle => {},
                 .seeking, .needs_data => {
+                    assert(self.merge_iterator != null);
+                    if (self.merge_iterator.?.key_popped) |key_popped| {
+                        if (self.direction.cmp(probe_key, .@"<=", key_popped)) {
+                            // No action if the probe key is behind the last produced key.
+                            return;
+                        }
+                    }
+
                     for (&self.levels) |*level| {
                         // Forwarding the `probe` to each level.
                         level.probe(probe_key);
                     }
-
-                    // It's not expected to probe a scan that already produced a key equals
-                    // or ahead the probe.
-                    assert(self.merge_iterator.?.key_popped == null or
-                        self.direction.cmp(self.merge_iterator.?.key_popped.?, .@"<", probe_key));
 
                     // Once the underlying streams have been changed, the merge iterator needs
                     // to reset its state, otherwise it may have dirty keys buffered.
