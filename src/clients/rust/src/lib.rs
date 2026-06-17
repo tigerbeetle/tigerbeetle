@@ -26,7 +26,7 @@
 //! // Connect to TigerBeetle
 //! let client = tb::Client::new(0, "127.0.0.1:3000")?;
 //!
-//! // Create accounts
+//! // Create accounts. Using TigerBeetle IDs is recommended.
 //! let account_id1 = tb::id();
 //! let account_id2 = tb::id();
 //!
@@ -49,9 +49,8 @@
 //!
 //! let account_results = client.create_accounts(&accounts)?.await?;
 //!
-//! // If no results are returned, then all input events were successful -
-//! // to save resources only unsuccessful inputs return results.
-//! assert_eq!(account_results.len(), 0);
+//! // A successful reply contains one result code for each account.
+//! assert_eq!(account_results.len(), 2);
 //!
 //! // Create a transfer between accounts
 //! let transfer_id = tb::id();
@@ -66,7 +65,7 @@
 //! }];
 //!
 //! let transfer_results = client.create_transfers(&transfers)?.await?;
-//! assert_eq!(transfer_results.len(), 0);
+//! assert_eq!(transfer_results.len(), 1);
 //!
 //! // Look up the accounts to see the transfer result
 //! let accounts = client.lookup_accounts(&[account_id1, account_id2])?.await?;
@@ -112,7 +111,7 @@
 //! can be paged by incrementing `timeout_max` to one greater than the highest
 //! timeout returned in the previous batch, and issuing a new query with
 //! otherwise the same filter. This process can be repeated until the server
-//! returns an unfull batch.
+//! returns a partial batch.
 //!
 //! [`get_account_transfers`]: `Client::get_account_transfers`
 //! [`get_account_balances`]: `Client::get_account_balances`
