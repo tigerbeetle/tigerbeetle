@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const exports = @import("tb_client.zig").exports;
 const c = @cImport(@cInclude("tb_client.h"));
-const stdx = @import("../../stdx/stdx.zig");
+const stdx = @import("stdx");
 
 fn to_snakecase(comptime input: []const u8) []const u8 {
     comptime var output: []const u8 = &.{};
