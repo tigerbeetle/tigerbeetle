@@ -4788,7 +4788,8 @@ pub fn ReplicaType(
                 for (
                     self.commit_mins[0..self.replica_count],
                     self.head_ops[0..self.replica_count],
-                ) |commit_min, op| {
+                ) |commit_min, op_head| {
+                    const op = @min(op_head, self.commit_min);
                     // Don't stall on account of replicas that are more than
                     // three checkpoints behind, they may be down/partitioned.
                     // Default to three checkpoints as in that case we are
