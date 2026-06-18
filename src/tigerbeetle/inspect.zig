@@ -386,6 +386,23 @@ fn print_size_count(output: std.io.AnyWriter, comptime size: u64, comptime count
     }
 }
 
+fn print_size_counts(
+    output: std.io.AnyWriter,
+    comptime size: u64,
+    comptime labels: []const []const u8,
+    comptime counts: []const u64,
+) !void {
+    const size_formatted = comptime if (size < 1024)
+        std.fmt.comptimePrint("{}B", .{size})
+    else
+        std.fmt.comptimePrint("{}", .{stdx.fmt_int_size_bin_exact(size)});
+    try output.print("{s<8}", .{size_formatted});
+    for (labels, counts) |label, count| {
+        try output.print(" {s}={}", .{ label, count });
+    }
+    try output.print("\n", .{});
+}
+
 fn print_objects(output: std.io.AnyWriter) !void {
     const Grooves = StateMachine.Forest.Grooves;
     inline for (std.meta.fields(Grooves)) |groove_field| {
@@ -404,10 +421,15 @@ fn print_objects(output: std.io.AnyWriter) !void {
         }
 
         try print_header(output, 0, ObjectTree.tree_name());
-        try print_size_count(output, size_total, 1);
+        try print_size_counts(
+            output,
+            size_total,
+            &.{ "table", "block" },
+            &.{ ObjectTree.Table.value_count_max, ObjectTree.Table.layout.block_value_count_max },
+        );
 
         try print_header(output, 1, "object");
-        try print_size_count(output, object_size, ObjectTree.Table.value_count_max);
+        try print_size_count(output, object_size, 1);
 
         inline for (std.meta.fields(Groove.IndexTrees)) |index_field| {
             const IndexTree = index_field.type;
