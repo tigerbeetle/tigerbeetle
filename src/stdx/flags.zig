@@ -546,7 +546,6 @@ pub fn parse_flag_value_fuzz(
 ) !void {
     comptime assert(T.parse_flag_value == parse_flag_value);
 
-    const test_count = 50_000;
     const string_size_max = 32;
 
     const gpa = std.testing.allocator;
@@ -599,7 +598,9 @@ pub fn parse_flag_value_fuzz(
     const alphabet = stdx.unique(corpus.items);
 
     var string_buffer: [string_size_max]u8 = @splat(0);
-    for (0..test_count) |_| {
+
+    var iterations: stdx.PRNG.FuzzIterations = .{};
+    while (iterations.more()) {
         const string_size = prng.range_inclusive(usize, 1, string_size_max);
         const string = string_buffer[0..string_size];
         assert(string.len > 0);

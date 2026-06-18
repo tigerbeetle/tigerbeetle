@@ -14,6 +14,7 @@
 //! - simplify and extend the API
 //! - remove dynamic-dispatch indirection (a minor bonus).
 
+const builtin = @import("builtin");
 const std = @import("std");
 const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
@@ -681,3 +682,29 @@ test "no floating point please" {
     assert(std.mem.indexOf(u8, file_text, "f" ++ "32") == null);
     assert(std.mem.indexOf(u8, file_text, "f" ++ "64") == null);
 }
+
+// Automatically determine a reasonable amount of iterations for a unit fuzz-test, based on time.
+pub const FuzzIterations = struct {
+    // Don't inject time for test-only code.
+    timer: ?std.time.Timer = null,
+    iteration: u32 = 0,
+
+    iterations_min: u32 = 10,
+    duration_max: stdx.Duration = .ms(100),
+
+    pub fn more(clock: *FuzzIterations) bool {
+        comptime assert(builtin.is_test);
+        if (clock.timer == null) {
+            clock.timer = std.time.Timer.start() catch @panic("timer failed");
+        }
+
+        if (clock.iteration > clock.iterations_min and
+            clock.timer.?.read() > clock.duration_max.ns)
+        {
+            return false;
+        }
+
+        clock.iteration += 1;
+        return true;
+    }
+};
