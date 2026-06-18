@@ -2,6 +2,7 @@ const std = @import("std");
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const assert = std.debug.assert;
+const stdx = vsr.stdx;
 
 const tb = vsr.tigerbeetle;
 
@@ -138,15 +139,6 @@ fn zig_to_python(comptime Type: type) []const u8 {
     }
 }
 
-fn to_uppercase(comptime input: []const u8) [input.len]u8 {
-    comptime var output: [input.len]u8 = undefined;
-    inline for (&output, 0..) |*char, i| {
-        char.* = input[i];
-        char.* -= 32 * @as(u8, @intFromBool(char.* >= 'a' and char.* <= 'z'));
-    }
-    return output;
-}
-
 fn emit_enum(
     buffer: *Buffer,
     comptime Type: type,
@@ -172,11 +164,11 @@ fn emit_enum(
         }
 
         if (!skip) {
-            const field_name = to_uppercase(field.name);
+            const field_name = stdx.to_case(field.name, .UPPER_CASE);
             if (@typeInfo(Type) == .@"enum") {
                 const int_value = @intFromEnum(@field(Type, field.name));
                 buffer.print("    {s} = {s}\n", .{
-                    @as([]const u8, &field_name),
+                    field_name,
                     if (int_value == std.math.maxInt(@TypeOf(int_value)))
                         std.fmt.comptimePrint("0x{X}", .{int_value})
                     else
@@ -185,7 +177,7 @@ fn emit_enum(
             } else {
                 // Packed structs.
                 buffer.print("    {s} = 1 << {}\n", .{
-                    @as([]const u8, &field_name),
+                    field_name,
                     i,
                 });
             }
@@ -324,7 +316,7 @@ fn emit_struct_dataclass(
                         // Enums - initialized with the default value.
                         buffer.print("{s}.{s}", .{
                             python_type,
-                            to_uppercase(@tagName(@as(field.type, @enumFromInt(0)))),
+                            stdx.to_case(@tagName(@as(field.type, @enumFromInt(0))), .UPPER_CASE),
                         });
                     } else {
                         // Simple integer types:
@@ -387,7 +379,7 @@ fn emit_method(
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
-            .uppercase_name = to_uppercase(@tagName(operation)),
+            .uppercase_name = stdx.to_case(@tagName(operation), .UPPER_CASE),
             .event_type_c = ctype_type_name(operation.EventType()),
             .result_type_c = ctype_type_name(operation.ResultType()),
         },
