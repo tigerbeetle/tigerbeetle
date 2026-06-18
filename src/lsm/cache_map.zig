@@ -186,6 +186,10 @@ pub fn CacheMapType(
             // When upserting into a scope:
             if (self.scope_is_active) {
                 if (old_value_maybe) |old_value| {
+                    // TODO: It might actually be a tombstone.
+                    // In that case, the rollback should preserve the tombstone in the stash.
+                    maybe(tombstone(&old_value));
+
                     // If it was updated, append the old value to the scope rollback log.
                     self.scope_rollback_log.appendAssumeCapacity(old_value);
                 } else {
@@ -271,7 +275,18 @@ pub fn CacheMapType(
 
             // We don't allow stale values, so we need to remove from the stash as well,
             // since both can have different versions with the same key.
-            const stash_removed: ?Value = self.stash_remove(key);
+            const stash_removed: ?Value = stash_removed: {
+                assert(self.stash.count() <= self.options.stash_value_count_max);
+                const tombstone_object = tombstone_from_key(key);
+                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
+
+                // Add a tombstone in the stash, indicating that the
+                // deletion happened and that the key should not be
+                // looked up in the immutable table or LSM tree.
+                defer entry.key_ptr.* = tombstone_object;
+
+                break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
+            };
 
             // Does not allow removing a key that is not in the cache.
             assert(cache_removed != null or stash_removed != null);
@@ -288,12 +303,10 @@ pub fn CacheMapType(
 
         fn stash_remove(self: *CacheMap, key: Key) ?Value {
             assert(self.stash.count() <= self.options.stash_value_count_max);
-
-            const tombstone_object = tombstone_from_key(key);
-            const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
-            defer entry.key_ptr.* = tombstone_object;
-
-            return if (entry.found_existing) entry.key_ptr.* else null;
+            return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
+                kv.key
+            else
+                null;
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
