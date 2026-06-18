@@ -290,7 +290,7 @@ fn inspect_metrics(output: std.io.AnyWriter) !void {
         try output.print("gauge: {s}(", .{field.name});
         if (field.type != void) {
             inline for (std.meta.fields(field.type), 0..) |data_field, i| {
-                if (i != 0) try output.print(", ");
+                if (i != 0) try output.print(", ", .{});
                 try output.print("{s}", .{data_field.name});
             }
         }
@@ -303,7 +303,7 @@ fn inspect_metrics(output: std.io.AnyWriter) !void {
         try output.print("timing: {s}(", .{field.name});
         if (field.type != void) {
             inline for (std.meta.fields(field.type), 0..) |data_field, i| {
-                if (i != 0) try output.print(", ");
+                if (i != 0) try output.print(", ", .{});
                 try output.print("{s}", .{data_field.name});
             }
         }
