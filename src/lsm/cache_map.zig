@@ -66,6 +66,19 @@ pub fn CacheMapType(
             name: []const u8,
         };
 
+        const RollbackLogAction = union(enum) {
+            /// The operation updated or deleted a value
+            /// that needs to be restored on rollback.
+            restore: Value,
+            /// The operation inserted a value over a _tombstone_
+            /// that needs to be restored on rollback.
+            restore_tombstone: Key,
+            /// The operation inserted a value that did not previously exist
+            /// and must be removed on rollback.
+            remove: Key,
+        };
+        const RollbackLog = std.ArrayListUnmanaged(RollbackLogAction);
+
         // The hierarchy for lookups is cache (if present) -> stash -> immutable table -> lsm.
         // Lower levels _may_ have stale values, provided the correct value exists
         // in one of the levels above.
@@ -77,7 +90,7 @@ pub fn CacheMapType(
         // Scopes allow you to perform operations on the CacheMap before either persisting or
         // discarding them.
         scope_is_active: bool = false,
-        scope_rollback_log: std.ArrayListUnmanaged(Value),
+        scope_rollback_log: RollbackLog,
 
         options: Options,
 
@@ -97,7 +110,7 @@ pub fn CacheMapType(
             try stash.ensureTotalCapacity(allocator, options.stash_value_count_max);
             errdefer stash.deinit(allocator);
 
-            var scope_rollback_log = try std.ArrayListUnmanaged(Value).initCapacity(
+            var scope_rollback_log: RollbackLog = try .initCapacity(
                 allocator,
                 options.scope_value_count_max,
             );
@@ -181,23 +194,21 @@ pub fn CacheMapType(
         }
 
         pub fn upsert(self: *CacheMap, value: *const Value) void {
-            const old_value_maybe = self.fetch_upsert(value);
+            const updated = self.fetch_upsert(value);
 
             // When upserting into a scope:
             if (self.scope_is_active) {
-                if (old_value_maybe) |old_value| {
-                    // TODO: It might actually be a tombstone.
-                    // In that case, the rollback should preserve the tombstone in the stash.
-                    maybe(tombstone(&old_value));
+                const rollback_action: RollbackLogAction = rollback_action: {
+                    const old_value = updated orelse
+                        break :rollback_action .{ .remove = key_from_value(value) };
 
-                    // If it was updated, append the old value to the scope rollback log.
-                    self.scope_rollback_log.appendAssumeCapacity(old_value);
-                } else {
-                    // If it was an insert, append a tombstone to the scope rollback log.
-                    const key = key_from_value(value);
-                    const key_tombstone = tombstone_from_key(key);
-                    self.scope_rollback_log.appendAssumeCapacity(key_tombstone);
-                }
+                    if (tombstone(&old_value)) {
+                        break :rollback_action .{ .restore_tombstone = key_from_value(value) };
+                    }
+
+                    break :rollback_action .{ .restore = old_value };
+                };
+                self.scope_rollback_log.appendAssumeCapacity(rollback_action);
             }
         }
 
@@ -275,29 +286,17 @@ pub fn CacheMapType(
 
             // We don't allow stale values, so we need to remove from the stash as well,
             // since both can have different versions with the same key.
-            const stash_removed: ?Value = stash_removed: {
-                assert(self.stash.count() <= self.options.stash_value_count_max);
-                const tombstone_object = tombstone_from_key(key);
-                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
-
-                // Add a tombstone in the stash, indicating that the
-                // deletion happened and that the key should not be
-                // looked up in the immutable table or LSM tree.
-                defer entry.key_ptr.* = tombstone_object;
-
-                break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
-            };
+            const stash_removed: ?Value = self.stash_tombstone(key);
 
             // Does not allow removing a key that is not in the cache.
             assert(cache_removed != null or stash_removed != null);
             maybe(cache_removed != null and stash_removed != null);
 
             if (self.scope_is_active) {
-                // TODO: Actually, does the fuzz catch this...
-                self.scope_rollback_log.appendAssumeCapacity(
-                    cache_removed orelse
+                self.scope_rollback_log.appendAssumeCapacity(.{
+                    .restore = cache_removed orelse
                         stash_removed orelse unreachable,
-                );
+                });
             }
         }
 
@@ -307,6 +306,17 @@ pub fn CacheMapType(
                 kv.key
             else
                 null;
+        }
+
+        /// Add a tombstone in the stash, indicating that the
+        /// deletion happened and that the key should not be
+        /// looked up in the immutable table or LSM tree.
+        fn stash_tombstone(self: *CacheMap, key: Key) ?Value {
+            const tombstone_object = tombstone_from_key(key);
+            const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
+            defer entry.key_ptr.* = tombstone_object;
+
+            return if (entry.found_existing) entry.key_ptr.* else null;
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -333,27 +343,38 @@ pub fn CacheMapType(
             while (i > 0) {
                 i -= 1;
 
-                const rollback_value = &self.scope_rollback_log.items[i];
-                if (tombstone(rollback_value)) {
-                    // Reverting an insert consists of a .remove call.
-                    // The value in here will be a tombstone indicating the original value didn't
-                    // exist.
-                    const key = key_from_value(rollback_value);
+                switch (self.scope_rollback_log.items[i]) {
+                    .restore => |*rollback_value| {
+                        // Reverting an update or delete
+                        // consists of an insert of the original value.
+                        assert(!tombstone(rollback_value));
+                        self.upsert(rollback_value);
+                    },
+                    .restore_tombstone => |key| {
+                        // Reverting an insert that overwrote a tombstone
+                        // consists of restoring the tombstone to the stash.
+                        const cache_removed: bool =
+                            if (self.cache) |*cache| cache.remove(key) != null else false;
 
-                    // A tombstone in the rollback log can only occur when the value doesn't exist
-                    // in _both_ the cache and stash on insert.
-                    const cache_removed: bool =
-                        if (self.cache) |*cache| cache.remove(key) != null else false;
+                        // The key should be in the stash iff it wasn't in the cache.
+                        if (self.stash_tombstone(key)) |*stash_old_value| {
+                            assert(!cache_removed or tombstone(stash_old_value));
+                        } else {
+                            assert(cache_removed);
+                        }
+                    },
+                    .remove => |key| {
+                        // Reverting an insert consists of removing the value.
+                        const cache_removed: bool =
+                            if (self.cache) |*cache| cache.remove(key) != null else false;
 
-                    // The key should be in the stash iff it wasn't in the cache.
-                    if (self.stash_remove(key)) |*stash_value| {
-                        assert(!cache_removed or tombstone(stash_value));
-                    } else {
-                        assert(cache_removed);
-                    }
-                } else {
-                    // Reverting an update or delete consists of an insert of the original value.
-                    self.upsert(rollback_value);
+                        // The key should be in the stash iff it wasn't in the cache.
+                        if (self.stash_remove(key)) |*stash_value| {
+                            assert(!cache_removed or tombstone(stash_value));
+                        } else {
+                            assert(cache_removed);
+                        }
+                    },
                 }
             }
 
@@ -435,7 +456,7 @@ test "cache_map: unit" {
         cache_map.get(1).?.*,
     );
 
-    // Test scope persisting
+    // Test scope persisting.
     cache_map.scope_open();
     cache_map.upsert(&.{ .key = 2, .value = 2, .tombstone = false });
     try testing.expectEqual(
@@ -448,7 +469,7 @@ test "cache_map: unit" {
         cache_map.get(2).?.*,
     );
 
-    // Test scope discard on updates
+    // Test scope discard on updates.
     cache_map.scope_open();
     cache_map.upsert(&.{ .key = 2, .value = 22, .tombstone = false });
     cache_map.upsert(&.{ .key = 2, .value = 222, .tombstone = false });
@@ -463,7 +484,7 @@ test "cache_map: unit" {
         cache_map.get(2).?.*,
     );
 
-    // Test scope discard on inserts
+    // Test scope discard on inserts.
     cache_map.scope_open();
     cache_map.upsert(&.{ .key = 3, .value = 3, .tombstone = false });
     try testing.expectEqual(
@@ -479,7 +500,7 @@ test "cache_map: unit" {
     assert(!cache_map.has(3));
     assert(cache_map.get(3) == null);
 
-    // Test scope discard on removes
+    // Test scope discard on removes.
     cache_map.scope_open();
     cache_map.remove(2);
     assert(!cache_map.has(2));
@@ -489,4 +510,24 @@ test "cache_map: unit" {
         TestTable.Value{ .key = 2, .value = 2, .tombstone = false },
         cache_map.get(2).?.*,
     );
+
+    // Test scope discard on a sequence of insert->remove->insert.
+    cache_map.upsert(&.{ .key = 4, .value = 4, .tombstone = false });
+    try testing.expectEqual(
+        TestTable.Value{ .key = 4, .value = 4, .tombstone = false },
+        cache_map.get(4).?.*,
+    );
+
+    cache_map.remove(4);
+    assert(!cache_map.has(4));
+    assert(cache_map.get(4) == null);
+    assert(cache_map.get_or_tombstone(4) == .tombstone);
+
+    cache_map.scope_open();
+    cache_map.upsert(&.{ .key = 4, .value = 4, .tombstone = false });
+    cache_map.scope_close(.discard);
+
+    assert(!cache_map.has(4));
+    assert(cache_map.get(4) == null);
+    assert(cache_map.get_or_tombstone(4) == .tombstone);
 }
