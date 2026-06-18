@@ -2,9 +2,10 @@
 
 Between 0.0.x and 0.x.y the TigerBeetle gem changed from a third-party client
 developed by [Anthony D](https://github.com/antstorm) to an official client
-maintained by TigerBeetle. While the overall API remains similar, some changes
-were made to provide an experience that's more consistent with the official
-clients for other languages.
+maintained by TigerBeetle. Thank you, Anthony!
+
+While the overall API remains similar, some changes were made to provide an
+experience that's more consistent with the official clients for other languages.
 
 - [Client changes](#client-changes)
   - [Connecting](#connecting)
