@@ -606,7 +606,6 @@ const Environment = struct {
         for (&query_specs, 0..) |*query_spec, i| {
             log.info("query_specs[{}]: {} {s}", .{ i, query_spec, @tagName(query_spec.direction) });
         }
-        const indexes_in_queries = collect_query_indexes(query_specs[0..]);
 
         for (0..commits_max) |_| {
             assert(env.state == .fuzzing);
@@ -629,7 +628,6 @@ const Environment = struct {
                     .update => if (!env.update_thing(
                         index_cardinality,
                         query_specs[0..],
-                        indexes_in_queries,
                     ))
                         try env.insert_thing(gpa, index_cardinality, query_specs[0..]),
                     .delete => if (!try env.delete_thing(query_specs[0..]))
@@ -782,16 +780,14 @@ const Environment = struct {
         env: *Environment,
         index_cardinality: [thing_index_count]u64,
         query_specs: []const QuerySpec,
-        indexes_in_queries: std.EnumSet(Index),
     ) bool {
-        const model_index = env.pick_live_index_for_mutation(query_specs) orelse return false;
+        const model_index = env.pick_live_index_for_mutation() orelse return false;
         assert(env.model_live.isSet(model_index));
 
         const old = &env.model.items[model_index];
         var new = env.build_updated_thing(
             old,
             index_cardinality,
-            indexes_in_queries,
         ) orelse return false;
         // Simulate what prefetch does in the real state machine: ensure the old object is in
         // the objects cache before calling update, which asserts its presence.
@@ -807,7 +803,7 @@ const Environment = struct {
     }
 
     fn delete_thing(env: *Environment, query_specs: []const QuerySpec) !bool {
-        const model_index = env.pick_live_index_for_mutation(query_specs) orelse return false;
+        const model_index = env.pick_live_index_for_mutation() orelse return false;
         assert(env.model_live.isSet(model_index));
 
         const thing: *const Thing = &env.model.items[model_index];
@@ -865,10 +861,7 @@ const Environment = struct {
         }
     }
 
-    fn pick_live_index_for_mutation(
-        env: *Environment,
-        query_specs: []const QuerySpec,
-    ) ?usize {
+    fn pick_live_index_for_mutation(env: *Environment) ?usize {
         const model_len = env.model.items.len;
         if (model_len == 0 or env.model_live.count() == 0) return null;
 
@@ -877,7 +870,7 @@ const Environment = struct {
         while (offset < model_len) : (offset += 1) {
             const index = (start + offset) % model_len;
             if (!env.model_live.isSet(index)) continue;
-            if (is_scan_safe(&env.model.items[index], query_specs)) return index;
+            return index;
         }
 
         return null;
@@ -887,11 +880,9 @@ const Environment = struct {
         env: *Environment,
         old: *const Thing,
         index_cardinality: [thing_index_count]u64,
-        indexes_in_queries: std.EnumSet(Index),
     ) ?Thing {
         var changeable: usize = 0;
         for (std.enums.values(Index)) |index| {
-            if (indexes_in_queries.contains(index)) continue;
             if (index_cardinality[@intFromEnum(index)] > 1) changeable += 1;
         }
         if (changeable == 0) return null;
@@ -906,7 +897,6 @@ const Environment = struct {
         while (changed < changes) {
             const index = env.pick_changeable_index(
                 index_cardinality,
-                indexes_in_queries,
                 &used,
             ) orelse break;
             const cardinality = index_cardinality[@intFromEnum(index)];
@@ -929,49 +919,23 @@ const Environment = struct {
     fn pick_changeable_index(
         env: *Environment,
         index_cardinality: [thing_index_count]u64,
-        indexes_in_queries: std.EnumSet(Index),
         used: *std.EnumSet(Index),
     ) ?Index {
         var attempts: usize = 0;
         while (attempts < thing_index_count * 2) : (attempts += 1) {
             const index = env.prng.enum_uniform(Index);
             if (used.contains(index)) continue;
-            if (indexes_in_queries.contains(index)) continue;
             if (index_cardinality[@intFromEnum(index)] <= 1) continue;
             return index;
         }
 
         for (std.enums.values(Index)) |index| {
             if (used.contains(index)) continue;
-            if (indexes_in_queries.contains(index)) continue;
             if (index_cardinality[@intFromEnum(index)] <= 1) continue;
             return index;
         }
 
         return null;
-    }
-
-    fn collect_query_indexes(query_specs: []const QuerySpec) std.EnumSet(Index) {
-        var used = std.EnumSet(Index).initEmpty();
-        for (query_specs) |query_spec| {
-            for (query_spec.query.const_slice()) |query_part| switch (query_part) {
-                .field => |field| used.insert(field.index),
-                .merge => {},
-            };
-        }
-        return used;
-    }
-
-    fn is_scan_safe(thing: *const Thing, query_specs: []const QuerySpec) bool {
-        for (query_specs) |query_spec| {
-            for (query_spec.query.const_slice()) |query_part| switch (query_part) {
-                .field => |field| {
-                    if (thing.get_index(field.index) == field.value) return false;
-                },
-                .merge => {},
-            };
-        }
-        return true;
     }
 
     fn scan_from_condition(
