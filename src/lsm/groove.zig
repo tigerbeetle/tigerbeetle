@@ -771,9 +771,10 @@ pub fn GrooveType(
                 // TableImmutable) as well as the maximum number of prefetches a bar may
                 // perform, excluding prefetches already accounted
                 // for by batch_value_count_limit.
+                // The ` * 2` mutliplier ensures that we can store tombstones as well.
                 .stash_value_count_max = constants.lsm_compaction_ops *
                     (options.tree_options_object.batch_value_count_limit +
-                        options.prefetch_entries_for_read_max),
+                        options.prefetch_entries_for_read_max) * 2,
 
                 // Scopes are limited to a single beat, so the maximum number of entries in
                 // a single scope is batch_value_count_limit (total – not per beat).
