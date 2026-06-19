@@ -3,9 +3,59 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.8
+
+Released: 2026-06-19
+
+### Safety And Performance
+
+- [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802)
+
+  Fix a bug in which the stash would overflow due to excess tombstones.
+
+- [#3798](https://github.com/tigerbeetle/tigerbeetle/pull/3798)
+
+  Fuzz scans over mutable secondary indexes, and fix an assertion.
+
+- [#3797](https://github.com/tigerbeetle/tigerbeetle/pull/3797)
+
+  Fix commit stall injection for clusters with 8 or more active clients.
+
+### Features
+
+- [#3787](https://github.com/tigerbeetle/tigerbeetle/pull/3787)
+
+  Prepare Ruby client for publishing.
+
+- [#3792](https://github.com/tigerbeetle/tigerbeetle/pull/3792)
+
+  Add gauge metric to record replica start time.
+
+### Internals
+
+- [#3795](https://github.com/tigerbeetle/tigerbeetle/pull/3795)
+
+  Add case conversion helpers to `stdx`.
+
+- [#3781](https://github.com/tigerbeetle/tigerbeetle/pull/3781)
+
+  Add `stdx.net` with IP address implementation.
+
+- [#3801](https://github.com/tigerbeetle/tigerbeetle/pull/3801)
+
+  Add `FuzzIterations` abstraction to control fuzzer smoke test duration.
+
+### TigerTracks 🎧
+
+- [The Fallen](https://www.youtube.com/watch?v=YsjHZXRGM1M)
+
 ## TigerBeetle 0.17.7
 
 Released: 2026-06-12
+
+Note: it is advisable to skip 0.17.6 and 0.17.7 and upgrade directly to 0.17.8 due to a potential
+crash. If you encounter the crash, it can be mitigated by temporarily increasing the object cache
+size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
 
 ### Safety And Performance
 
@@ -39,6 +89,10 @@ Released: 2026-06-12
 ## TigerBeetle 0.17.6
 
 Released: 2026-06-05
+
+Note: it is advisable to skip 0.17.6 and 0.17.7 and upgrade directly to 0.17.8 due to a potential
+crash. If you encounter the crash, it can be mitigated by temporarily increasing the object cache
+size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
 
 ### Safety And Performance
 
