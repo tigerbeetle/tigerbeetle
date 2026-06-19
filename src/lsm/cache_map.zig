@@ -290,7 +290,7 @@ pub fn CacheMapType(
             // We don't allow stale values, so we need to remove from the stash as well,
             // since both can have different versions with the same key.
             const stash_removed: ?Value = stash_removed: {
-                assert(self.stash.count() < self.options.stash_value_count_max);
+                assert(self.stash.count() <= self.options.stash_value_count_max);
 
                 const tombstone_object = tombstone_from_key(key);
                 const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
