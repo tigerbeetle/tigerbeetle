@@ -203,6 +203,9 @@ pub fn CacheMapType(
                         break :rollback_action .{ .remove = key_from_value(value) };
 
                     if (tombstone(&old_value)) {
+                        // Only unit tests and fuzzers call `remove`.
+                        // Tombstones should never be present in production code.
+                        assert(constants.verify);
                         break :rollback_action .{ .restore_tombstone = key_from_value(value) };
                     }
 
@@ -275,8 +278,8 @@ pub fn CacheMapType(
         /// Removes a key from cache, adding a tombstone to record the action.
         /// Invariant: The key must be present in cache.
         pub fn remove(self: *CacheMap, key: Key) void {
-            // The only thing that tests this in any depth is the cache_map fuzz itself.
-            // Make sure we aren't being called in regular code without another once over.
+            // Only unit tests and fuzzers call this function.
+            // Assert that it is not called from production code.
             comptime assert(constants.verify);
 
             const cache_removed: ?Value = if (self.cache) |*cache|
@@ -286,16 +289,30 @@ pub fn CacheMapType(
 
             // We don't allow stale values, so we need to remove from the stash as well,
             // since both can have different versions with the same key.
-            const stash_removed: ?Value = self.stash_tombstone(key);
+            const stash_removed: ?Value = stash_removed: {
+                assert(self.stash.count() < self.options.stash_value_count_max);
+
+                const tombstone_object = tombstone_from_key(key);
+                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
+
+                // Add a tombstone in the stash, indicating that the
+                // deletion happened and that the key should not be
+                // looked up in the immutable table or LSM tree.
+                defer entry.key_ptr.* = tombstone_object;
+
+                break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
+            };
 
             // Does not allow removing a key that is not in the cache.
             assert(cache_removed != null or stash_removed != null);
             maybe(cache_removed != null and stash_removed != null);
 
+            const old_value = cache_removed orelse stash_removed orelse unreachable;
+            // Cannot remove a value that has already been removed.
+            assert(!tombstone(&old_value));
             if (self.scope_is_active) {
                 self.scope_rollback_log.appendAssumeCapacity(.{
-                    .restore = cache_removed orelse
-                        stash_removed orelse unreachable,
+                    .restore = old_value,
                 });
             }
         }
@@ -306,17 +323,6 @@ pub fn CacheMapType(
                 kv.key
             else
                 null;
-        }
-
-        /// Add a tombstone in the stash, indicating that the
-        /// deletion happened and that the key should not be
-        /// looked up in the immutable table or LSM tree.
-        fn stash_tombstone(self: *CacheMap, key: Key) ?Value {
-            const tombstone_object = tombstone_from_key(key);
-            const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
-            defer entry.key_ptr.* = tombstone_object;
-
-            return if (entry.found_existing) entry.key_ptr.* else null;
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -353,15 +359,11 @@ pub fn CacheMapType(
                     .restore_tombstone => |key| {
                         // Reverting an insert that overwrote a tombstone
                         // consists of restoring the tombstone to the stash.
-                        const cache_removed: bool =
-                            if (self.cache) |*cache| cache.remove(key) != null else false;
-
-                        // The key should be in the stash iff it wasn't in the cache.
-                        if (self.stash_tombstone(key)) |*stash_old_value| {
-                            assert(!cache_removed or tombstone(stash_old_value));
-                        } else {
-                            assert(cache_removed);
-                        }
+                        if (constants.verify)
+                            // Only unit tests and fuzzers call `remove`.
+                            self.remove(key)
+                        else
+                            unreachable;
                     },
                     .remove => |key| {
                         // Reverting an insert consists of removing the value.
