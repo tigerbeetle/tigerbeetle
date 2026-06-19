@@ -313,13 +313,16 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove;
-                groove.prefetch_setup(getter._snapshot);
+                groove.prefetch_begin(getter._snapshot);
                 groove.prefetch_enqueue(getter._key);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 
             fn prefetch_callback(prefetch_context: *GrooveTransfers.PrefetchContext) void {
                 const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
+                const groove = context._groove;
+                groove.prefetch_finish();
+
                 assert(!context.finished);
                 context.finished = true;
             }
@@ -816,7 +819,7 @@ const Environment = struct {
                     const prefix_current: u128 = switch (params.index) {
                         .expires_at => index: {
                             assert(object.timeout != 0);
-                            const value = object.timeout_ns();
+                            const value = object.timestamp + object.timeout_ns();
                             assert(value >= params.min and value <= params.max);
                             break :index value;
                         },

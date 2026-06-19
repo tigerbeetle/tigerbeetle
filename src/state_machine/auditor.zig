@@ -140,16 +140,36 @@ pub const AccountingAuditor = struct {
         user_data_32: u32,
         code: u16,
 
-        accounts: QueryIntersectionState = .{},
-        transfers: QueryIntersectionState = .{},
+        accounts: AccountsIntersectionState = .{},
+        transfers: TransfersIntersectionState = .{},
     };
 
-    pub const QueryIntersectionState = struct {
+    pub const AccountsIntersectionState = struct {
         /// The number of objects recorded.
         count: u32 = 0,
         /// Timestamp of the first object recorded.
         timestamp_min: u64 = 0,
         /// Timestamp of the last object recorded.
+        timestamp_max: u64 = 0,
+    };
+
+    pub const TransfersIntersectionState = struct {
+        /// The number of objects recorded.
+        count: u32 = 0,
+        /// Timestamp of the first object recorded.
+        timestamp_min: u64 = 0,
+        /// Timestamp of the last object recorded.
+        timestamp_max: u64 = 0,
+        /// Two-phase counters.
+        two_phase: struct {
+            pending: TwoPhaseTransferIntersectionState = .{},
+            outcome: TwoPhaseTransferIntersectionState = .{},
+        } = .{},
+    };
+
+    pub const TwoPhaseTransferIntersectionState = struct {
+        count: u32 = 0,
+        timestamp_min: u64 = 0,
         timestamp_max: u64 = 0,
     };
 
@@ -696,6 +716,13 @@ pub const AccountingAuditor = struct {
         query_intersection.transfers.timestamp_max = timestamp;
 
         if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
+            const target_outcome = &query_intersection.transfers.two_phase.outcome;
+            target_outcome.count += 1;
+            if (target_outcome.timestamp_min == 0) {
+                target_outcome.timestamp_min = timestamp;
+            }
+            target_outcome.timestamp_max = timestamp;
+
             const p = self.pending_transfers.get(transfer.pending_id).?;
             const dr_state = &self.accounts_state[p.debit_account_index];
             const cr_state = &self.accounts_state[p.credit_account_index];
@@ -733,6 +760,13 @@ pub const AccountingAuditor = struct {
             const cr = &self.accounts[cr_index];
 
             if (transfer.flags.pending) {
+                const target_pending = &query_intersection.transfers.two_phase.pending;
+                target_pending.count += 1;
+                if (target_pending.timestamp_min == 0) {
+                    target_pending.timestamp_min = timestamp;
+                }
+                target_pending.timestamp_max = timestamp;
+
                 if (transfer.timeout > 0) {
                     self.pending_transfers.putAssumeCapacity(transfer.id, .{
                         .amount = transfer.amount,

@@ -82,22 +82,27 @@ test "repl integration" {
     , snap(@src(),
         \\{
         \\  "timestamp": "<snap:ignore>",
-        \\  "status": "tigerbeetle.CreateAccountStatus.created"
+        \\  "status": "created"
         \\}
         \\{
         \\  "timestamp": "<snap:ignore>",
-        \\  "status": "tigerbeetle.CreateAccountStatus.created"
+        \\  "status": "created"
         \\}
         \\
     ));
 
     try context.check(
-        \\create_transfers id=1 debit_account_id=1
-        \\  credit_account_id=2 amount=10 ledger=700 code=10
+        \\create_transfers
+        \\  id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10,
+        \\  id=2 debit_account_id=1 credit_account_id=2 amount=0 ledger=700 code=99 flags=pending
     , snap(@src(),
         \\{
         \\  "timestamp": "<snap:ignore>",
-        \\  "status": "tigerbeetle.CreateTransferStatus.created"
+        \\  "status": "created"
+        \\}
+        \\{
+        \\  "timestamp": "<snap:ignore>",
+        \\  "status": "created"
         \\}
         \\
     ));
@@ -236,6 +241,21 @@ test "repl integration" {
         \\  "flags": [],
         \\  "timestamp": "<snap:ignore>"
         \\}
+        \\{
+        \\  "id": "2",
+        \\  "debit_account_id": "1",
+        \\  "credit_account_id": "2",
+        \\  "amount": "0",
+        \\  "pending_id": "0",
+        \\  "user_data_128": "0",
+        \\  "user_data_64": "0",
+        \\  "user_data_32": "0",
+        \\  "timeout": "0",
+        \\  "ledger": "700",
+        \\  "code": "99",
+        \\  "flags": ["pending"],
+        \\  "timestamp": "<snap:ignore>"
+        \\}
         \\
     ));
 
@@ -248,6 +268,42 @@ test "repl integration" {
         \\  "credits_pending": "0",
         \\  "credits_posted": "0",
         \\  "timestamp": "<snap:ignore>"
+        \\}
+        \\{
+        \\  "debits_pending": "0",
+        \\  "debits_posted": "10",
+        \\  "credits_pending": "0",
+        \\  "credits_posted": "0",
+        \\  "timestamp": "<snap:ignore>"
+        \\}
+        \\
+    ));
+
+    try context.check(
+        \\query_two_phase_transfers code=99 ledger=700 pending_status=pending
+    , snap(@src(),
+        \\{
+        \\  "debit_account_id": "1",
+        \\  "credit_account_id": "2",
+        \\  "pending_id": "2",
+        \\  "pending_amount": "0",
+        \\  "pending_user_data_128": "0",
+        \\  "pending_user_data_64": "0",
+        \\  "pending_user_data_32": "0",
+        \\  "pending_timeout": "0",
+        \\  "ledger": "700",
+        \\  "pending_code": "99",
+        \\  "pending_flags": ["pending"],
+        \\  "pending_timestamp": "<snap:ignore>",
+        \\  "outcome_id": "0",
+        \\  "outcome_amount": "0",
+        \\  "outcome_user_data_128": "0",
+        \\  "outcome_user_data_64": "0",
+        \\  "outcome_user_data_32": "0",
+        \\  "outcome_code": "0",
+        \\  "outcome_flags": [],
+        \\  "outcome_timestamp": "0",
+        \\  "pending_status": "pending"
         \\}
         \\
     ));

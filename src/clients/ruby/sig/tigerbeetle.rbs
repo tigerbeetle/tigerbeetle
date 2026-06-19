@@ -78,6 +78,7 @@ module TigerBeetle
     QUERY_TRANSFERS: Integer
     CREATE_ACCOUNTS: Integer
     CREATE_TRANSFERS: Integer
+    QUERY_TWO_PHASE_TRANSFERS: Integer
   end
 
   module CreateAccountStatus

@@ -28,6 +28,7 @@ pub const Parser = struct {
         get_account_balances,
         query_accounts,
         query_transfers,
+        query_two_phase_transfers,
 
         pub fn operation(command: Command) StateMachine.Operation {
             return switch (command) {
@@ -40,6 +41,7 @@ pub const Parser = struct {
                 .get_account_balances => .get_account_balances,
                 .query_accounts => .query_accounts,
                 .query_transfers => .query_transfers,
+                .query_two_phase_transfers => .query_two_phase_transfers,
             };
         }
     };
@@ -171,18 +173,30 @@ pub const Parser = struct {
         comptime field: std.meta.FieldEnum(Object),
         value_string: []const u8,
     ) !void {
-        const Value = std.meta.FieldType(Object, field);
-
+        const Value = @FieldType(Object, @tagName(field));
         if (@hasField(Object, "flags") and field == .flags) {
             var flags_strings = std.mem.splitScalar(u8, value_string, '|');
             var validated_flags = std.mem.zeroInit(Value, .{});
             while (flags_strings.next()) |flag_string| {
                 const flag_to_validate_trimmed =
                     std.mem.trim(u8, flag_string, std.ascii.whitespace[0..]);
-                inline for (@typeInfo(Value).@"struct".fields) |known_flag_field| {
-                    if (std.mem.eql(u8, known_flag_field.name, flag_to_validate_trimmed)) {
-                        if (comptime !std.mem.eql(u8, known_flag_field.name, "padding")) {
-                            const flag_value = &@field(validated_flags, known_flag_field.name);
+
+                flags: inline for (@typeInfo(Value).@"struct".fields) |known_flag_field| {
+                    if (comptime std.mem.eql(
+                        u8,
+                        known_flag_field.name,
+                        "padding",
+                    )) comptime continue :flags;
+
+                    const flag_value = &@field(validated_flags, known_flag_field.name);
+
+                    // Bit-flags can be either bool or u1 enums.
+                    switch (@typeInfo(known_flag_field.type)) {
+                        .bool => if (std.mem.eql(
+                            u8,
+                            known_flag_field.name,
+                            flag_to_validate_trimmed,
+                        )) {
                             if (flag_value.*) {
                                 try parser.print_current_position();
                                 try parser.print_error(
@@ -192,8 +206,22 @@ pub const Parser = struct {
                                 return error.ParseError;
                             }
                             flag_value.* = true;
-                            break;
-                        }
+                            break :flags;
+                        },
+                        .@"enum" => |info| {
+                            comptime assert(info.tag_type == u1);
+                            inline for (info.fields) |variant| {
+                                if (std.mem.eql(
+                                    u8,
+                                    known_flag_field.name ++ "_" ++ variant.name,
+                                    flag_to_validate_trimmed,
+                                )) {
+                                    flag_value.* = @enumFromInt(variant.value);
+                                    break :flags;
+                                }
+                            }
+                        },
+                        else => comptime unreachable,
                     }
                 } else {
                     try parser.print_current_position();
@@ -214,13 +242,24 @@ pub const Parser = struct {
             return error.ParseError;
         }
 
-        @field(object, @tagName(field)) = parse_int(Value, value_string) catch {
-            try parser.print_current_position();
-            try parser.print_error(
-                "Invalid value \"{s}\"; expected {s} for key \"{s}\".\n",
-                .{ value_string, @typeName(Value), @tagName(field) },
-            );
-            return error.ParseError;
+        @field(object, @tagName(field)) = switch (@typeInfo(Value)) {
+            .int => parse_int(Value, value_string) catch {
+                try parser.print_current_position();
+                try parser.print_error(
+                    "Invalid value \"{s}\"; expected {s} for key \"{s}\".\n",
+                    .{ value_string, @typeName(Value), @tagName(field) },
+                );
+                return error.ParseError;
+            },
+            .@"enum" => std.meta.stringToEnum(Value, value_string) orelse {
+                try parser.print_current_position();
+                try parser.print_error(
+                    "Invalid enum \"{s}\"; expected {s} for key \"{s}\".\n",
+                    .{ value_string, @typeName(Value), @tagName(field) },
+                );
+                return error.ParseError;
+            },
+            else => unreachable,
         };
     }
 
@@ -464,6 +503,23 @@ fn object_default(comptime operation: StateMachine.Operation) ObjectType(operati
                 .reversed = false,
             },
         },
+        .query_two_phase_transfers => tb.TwoPhaseFilter{
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
+            .ledger = 0,
+            .code = 0,
+            .pending_status = .none,
+            .timestamp_min = 0,
+            .timestamp_max = 0,
+            .limit = StateMachine.Operation.query_two_phase_transfers.result_max(
+                constants.message_body_size_max,
+            ),
+            .flags = .{
+                .target = .pending,
+                .reversed = false,
+            },
+        },
         else => unreachable,
     };
 }
@@ -607,15 +663,45 @@ test "Parser: snap" {
                                 if (comptime std.mem.eql(u8, flag.name, "padding")) {
                                     assert(flag_value == 0);
                                 } else {
-                                    if (flag_value) {
-                                        if (separate) try body_formatted_writer.print("|", .{});
-                                        separate = true;
-                                        try body_formatted_writer.print("{s}", .{flag.name});
+                                    const Flag = @TypeOf(flag_value);
+                                    switch (@typeInfo(Flag)) {
+                                        .bool => if (flag_value) {
+                                            if (separate) try body_formatted_writer.print("|", .{});
+                                            separate = true;
+                                            try body_formatted_writer.print("{s}", .{flag.name});
+                                        },
+                                        .@"enum" => |info| {
+                                            comptime assert(info.tag_type == u1);
+                                            if (separate) try body_formatted_writer.print("|", .{});
+                                            separate = true;
+                                            try body_formatted_writer.print(
+                                                "{s}_{s}",
+                                                .{ flag.name, @tagName(flag_value) },
+                                            );
+                                        },
+                                        else => unreachable,
                                     }
                                 }
                             }
                         } else {
-                            try body_formatted_writer.print(" {s}={any}", .{ field.name, value });
+                            switch (@typeInfo(field.type)) {
+                                .int => try body_formatted_writer.print(
+                                    " {s}={}",
+                                    .{ field.name, value },
+                                ),
+                                .array => |info| {
+                                    comptime assert(info.child == u8);
+                                    try body_formatted_writer.print(
+                                        " {s}={s}",
+                                        .{ field.name, value },
+                                    );
+                                },
+                                .@"enum" => try body_formatted_writer.print(
+                                    " {s}={s}",
+                                    .{ field.name, @tagName(value) },
+                                ),
+                                else => comptime unreachable,
+                            }
                         }
                     }
                 }
@@ -722,6 +808,22 @@ test "Parser: snap" {
         \\query_accounts user_data_128=1000 user_data_64=100 user_data_32=10 ledger=1 code=2 timestamp_min=1 timestamp_max=9999 limit=10 flags=reversed
     ));
 
+    // query_two_phase_transfers
+    try t.check("query_two_phase_transfers user_data_128=1", snap(@src(),
+        \\query_two_phase_transfers user_data_128=1 limit=14
+    ));
+    try t.check(
+        \\query_two_phase_transfers
+        \\user_data_128=128 user_data_64=64 user_data_32=32
+        \\ledger=1 code=2
+        \\pending_status=expired
+        \\flags=target_outcome|reversed limit=10
+        \\timestamp_min=1 timestamp_max=9999;
+        \\
+    , snap(@src(),
+        \\query_two_phase_transfers user_data_128=128 user_data_64=64 user_data_32=32 ledger=1 code=2 pending_status=expired timestamp_min=1 timestamp_max=9999 limit=10 flags=target_outcome|reversed
+    ));
+
     // Unusual formatting.
     try t.check("create_transfers id = 1", snap(@src(),
         \\create_transfers id=1
@@ -765,7 +867,7 @@ test "Parser: snap" {
         \\create_trans
         \\^ Near here.
         \\
-        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers.
+        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, query_transfers, or query_two_phase_transfers.
         \\Got: "create_trans".
         \\
     ));
@@ -779,7 +881,7 @@ test "Parser: snap" {
         \\ create
         \\ ^ Near here.
         \\
-        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, or query_transfers.
+        \\Operation must be help, create_accounts, create_transfers, lookup_accounts, lookup_transfers, get_account_transfers, get_account_balances, query_accounts, query_transfers, or query_two_phase_transfers.
         \\Got: "create".
         \\
     ));
@@ -956,6 +1058,16 @@ test "Parser: snap" {
         \\query_transfers expects a single object, but received multiple.
         \\
     ));
+    try t.check("query_two_phase_transfers code=1, code=2", snap(@src(),
+        \\Fail near line 1, column 33:
+        \\
+        \\query_two_phase_transfers code=1, code=2
+        \\                                 ^ Near here.
+        \\
+        \\query_two_phase_transfers expects a single object, but received multiple.
+        \\
+    ));
+
     try t.check("create_transfers flags=foo", snap(@src(),
         \\Fail near line 1, column 26:
         \\

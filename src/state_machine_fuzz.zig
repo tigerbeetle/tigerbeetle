@@ -135,6 +135,7 @@ fn build_batch(
         .get_account_transfers, .get_account_balances => build_account_filter(prng, buffer),
         .query_accounts, .query_transfers => build_query_filter(prng, buffer),
         .get_change_events => build_get_change_events_filter(prng, buffer),
+        .query_two_phase_transfers => build_two_phase_query_filter(prng, buffer),
 
         .deprecated_lookup_accounts_unbatched,
         .deprecated_lookup_transfers_unbatched,
@@ -231,6 +232,45 @@ fn build_query_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
     };
 
     return @sizeOf(tb.QueryFilter);
+}
+
+fn build_two_phase_query_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
+    const filter: *tb.TwoPhaseFilter = filter: {
+        const slice = stdx.bytes_as_slice(
+            .inexact,
+            tb.TwoPhaseFilter,
+            buffer,
+        );
+        if (slice.len == 0) return 0;
+        break :filter &slice[0];
+    };
+    var reserved: [69]u8 = @splat(0);
+    if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
+        prng.fill(&reserved);
+    }
+
+    filter.* = .{
+        .user_data_128 = int_edge_biased(prng, u128),
+        .user_data_64 = int_edge_biased(prng, u64),
+        .user_data_32 = int_edge_biased(prng, u32),
+        .ledger = int_edge_biased(prng, u32),
+        .code = int_edge_biased(prng, u16),
+        .timestamp_min = int_edge_biased(prng, u64),
+        .timestamp_max = int_edge_biased(prng, u64),
+        .limit = int_edge_biased(prng, u32),
+        .pending_status = prng.enum_uniform(tb.TransferPendingStatus),
+        .reserved = reserved,
+        .flags = .{
+            .target = prng.enum_uniform(tb.TwoPhaseTarget),
+            .reversed = prng.boolean(),
+            .padding = if (prng.chance(.{ .numerator = 1, .denominator = 1000 }))
+                int_edge_biased(prng, u30)
+            else
+                0,
+        },
+    };
+
+    return @sizeOf(tb.TwoPhaseFilter);
 }
 
 fn build_get_change_events_filter(prng: *stdx.PRNG, buffer: []u8) u32 {

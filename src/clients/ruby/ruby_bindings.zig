@@ -54,6 +54,7 @@ fn operation_supported(comptime operation: tb.Operation) bool {
     return switch (operation) {
         .pulse,
         .get_change_events,
+        .query_two_phase_transfers,
         => false,
         else => true,
     };

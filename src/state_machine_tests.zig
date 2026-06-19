@@ -29,6 +29,10 @@ const QueryFilter = tb.QueryFilter;
 const ChangeEventsFilter = tb.ChangeEventsFilter;
 const ChangeEvent = tb.ChangeEvent;
 const ChangeEventType = tb.ChangeEventType;
+const TwoPhaseFilter = tb.TwoPhaseFilter;
+const TwoPhaseResult = tb.TwoPhaseResult;
+
+const amount_max = tb.amount_max;
 
 const StateMachineType = @import("state_machine.zig").StateMachineType;
 
@@ -55,6 +59,7 @@ pub const TestContext = struct {
         query_accounts,
         query_transfers,
         get_change_events,
+        query_two_phase_transfers,
 
         const VersionMap = std.EnumArray(Operation, StateMachine.Operation);
         /// Variations of operations supported by the state machine,
@@ -70,6 +75,7 @@ pub const TestContext = struct {
                 .query_accounts = .query_accounts,
                 .query_transfers = .query_transfers,
                 .get_change_events = .get_change_events,
+                .query_two_phase_transfers = .query_two_phase_transfers,
             }),
             .init(.{
                 .create_accounts = .deprecated_create_accounts_sparse,
@@ -81,6 +87,7 @@ pub const TestContext = struct {
                 .query_accounts = .query_accounts,
                 .query_transfers = .query_transfers,
                 .get_change_events = .get_change_events,
+                .query_two_phase_transfers = .query_two_phase_transfers,
             }),
             .init(.{
                 .create_accounts = .deprecated_create_accounts_unbatched,
@@ -92,6 +99,7 @@ pub const TestContext = struct {
                 .query_accounts = .deprecated_query_accounts_unbatched,
                 .query_transfers = .deprecated_query_transfers_unbatched,
                 .get_change_events = .get_change_events,
+                .query_two_phase_transfers = .query_two_phase_transfers,
             }),
         };
     };
@@ -359,6 +367,9 @@ const TestAction = union(enum) {
 
     get_change_events: TestGetChangeEventsFilter,
     get_change_events_result: TestGetChangeEventsResult,
+
+    query_two_phase_transfers: TestQueryTwoPhaseTransfersFilter,
+    two_phase_result: TestTwoPhaseResult,
 };
 
 const TestCreateAccount = struct {
@@ -497,6 +508,89 @@ const TestGetChangeEventsFilter = struct {
     timestamp_min_transfer_id: ?u128 = null,
     timestamp_max_transfer_id: ?u128 = null,
     limit: u32,
+};
+
+const TestQueryTwoPhaseTransfersFilter = struct {
+    user_data_128: u128,
+    user_data_64: u64,
+    user_data_32: u32,
+    ledger: u32,
+    code: u16,
+    timestamp_min_transfer_id: ?u128 = null,
+    timestamp_max_transfer_id: ?u128 = null,
+    limit: u32,
+    pending_status: enum { ALL, PEN, POS, VOI, EXP },
+    flags_target: enum { PEN, OUT },
+    flags_reversed: ?enum { REV } = null,
+};
+
+const TestTwoPhaseResult = struct {
+    pending_transfer_id: u128,
+    outcome_transfer_id: u128,
+    pending_status: enum { PEN, POS, VOI, EXP },
+
+    fn match(
+        self: *const TestTwoPhaseResult,
+        transfers: *std.AutoHashMap(u128, Transfer),
+        event: *const TwoPhaseResult,
+    ) bool {
+        const is_match = self.pending_transfer_id == event.pending_id and
+            self.outcome_transfer_id == event.outcome_id and
+            switch (self.pending_status) {
+                .PEN => event.pending_status == .pending,
+                .POS => event.pending_status == .posted,
+                .VOI => event.pending_status == .voided,
+                .EXP => event.pending_status == .expired,
+            };
+        if (!is_match) return false;
+
+        const pending: Transfer = transfers.get(event.pending_id).?;
+        assert(pending.id == event.pending_id);
+        assert(pending.debit_account_id == event.debit_account_id);
+        assert(pending.credit_account_id == event.credit_account_id);
+        assert(pending.amount == event.pending_amount);
+        assert(pending.pending_id == 0);
+        assert(pending.user_data_128 == event.pending_user_data_128);
+        assert(pending.user_data_64 == event.pending_user_data_64);
+        assert(pending.user_data_32 == event.pending_user_data_32);
+        assert(pending.timeout == event.pending_timeout);
+        assert(pending.ledger == event.ledger);
+        assert(pending.code == event.pending_code);
+        assert(pending.flags == event.pending_flags);
+
+        if (event.outcome_id == 0) {
+            switch (event.pending_status) {
+                .none => unreachable,
+                .pending => assert(event.outcome_timestamp == 0),
+                .expired => {
+                    assert(pending.timeout > 0);
+                    assert(pending.timeout + pending.timeout_ns() <= event.outcome_timestamp);
+                },
+                .posted, .voided => unreachable,
+            }
+        } else {
+            const outcome: Transfer = transfers.get(event.outcome_id).?;
+            switch (event.pending_status) {
+                .none, .pending, .expired => unreachable,
+                .posted => assert(outcome.flags.post_pending_transfer),
+                .voided => assert(outcome.flags.void_pending_transfer),
+            }
+            assert(outcome.id == event.outcome_id);
+            assert(outcome.debit_account_id == event.debit_account_id);
+            assert(outcome.credit_account_id == event.credit_account_id);
+            assert(outcome.amount == event.outcome_amount or
+                (outcome.amount == amount_max and event.outcome_amount == pending.amount));
+            assert(outcome.pending_id == pending.id);
+            assert(outcome.user_data_128 == event.outcome_user_data_128);
+            assert(outcome.user_data_64 == event.outcome_user_data_64);
+            assert(outcome.user_data_32 == event.outcome_user_data_32);
+            assert(outcome.timeout == 0);
+            assert(outcome.ledger == event.ledger);
+            assert(outcome.code == event.outcome_code);
+            assert(outcome.flags == event.outcome_flags);
+        }
+        return true;
+    }
 };
 
 const TestGetChangeEventsResult = struct {
@@ -1023,6 +1117,53 @@ fn check_version(
                 assert(operation.? == .get_change_events);
                 try reply.appendSlice(std.mem.asBytes(t));
             },
+            .query_two_phase_transfers => |f| {
+                assert(operation == null or operation.? == .query_two_phase_transfers);
+                operation = .query_two_phase_transfers;
+                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
+                    transfers.get(id).?.timestamp
+                else
+                    0;
+                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
+                    transfers.get(id).?.timestamp
+                else
+                    0;
+
+                const event = TwoPhaseFilter{
+                    .user_data_128 = f.user_data_128,
+                    .user_data_64 = f.user_data_64,
+                    .user_data_32 = f.user_data_32,
+                    .code = f.code,
+                    .ledger = f.ledger,
+                    .pending_status = switch (f.pending_status) {
+                        .ALL => .none,
+                        .PEN => .pending,
+                        .VOI => .voided,
+                        .POS => .posted,
+                        .EXP => .expired,
+                    },
+                    .flags = .{
+                        .target = switch (f.flags_target) {
+                            .PEN => .pending,
+                            .OUT => .outcome,
+                        },
+                        .reversed = f.flags_reversed == .REV,
+                    },
+                    .timestamp_min = timestamp_min,
+                    .timestamp_max = timestamp_max,
+                    .limit = @min(
+                        f.limit,
+                        tb.Operation.query_two_phase_transfers.event_max(
+                            constants.message_body_size_max,
+                        ),
+                    ),
+                };
+                try request.appendSlice(std.mem.asBytes(&event));
+            },
+            .two_phase_result => |*result| {
+                assert(operation.? == .query_two_phase_transfers);
+                try reply.appendSlice(std.mem.asBytes(result));
+            },
             .commit => |commit_operation| {
                 assert(operation == null or operation.? == commit_operation);
                 assert(!context.busy);
@@ -1068,6 +1209,22 @@ fn check_version(
                         try testing.expectEqual(results_expected.len, results_actual.len);
                         for (results_actual, results_expected) |*actual, *expected| {
                             try testing.expect(expected.match(&accounts, &transfers, actual));
+                        }
+                    },
+                    .query_two_phase_transfers => {
+                        const results_actual = stdx.bytes_as_slice(
+                            .exact,
+                            TwoPhaseResult,
+                            reply_actual,
+                        );
+                        const results_expected = stdx.bytes_as_slice(
+                            .exact,
+                            TestTwoPhaseResult,
+                            reply.items,
+                        );
+                        try testing.expectEqual(results_expected.len, results_actual.len);
+                        for (results_actual, results_expected) |*actual, *expected| {
+                            try testing.expect(expected.match(&transfers, actual));
                         }
                     },
                     .pulse => unreachable,
@@ -2908,6 +3065,136 @@ test "get_change_events" {
     );
 }
 
+test "query_two_phase_transfers" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created
+        \\ account A3  0  0  0  0  _  _  _ _ L2 C1   _   _   _ _ _ _ _ _ created
+        \\ account A4  0  0  0  0  _  _  _ _ L2 C1   _   _   _ _ _ _ _ _ created
+        \\ commit create_accounts
+
+        // Not pending.
+        \\ transfer  T1  A1 A2   10  _  U1000 U100 U10  _ L1 C1   _   _   _   _   _   _  _   _   _ _ _ created
+        \\ transfer  T2  A3 A4   10  _  U2000 U200 U20  _ L2 C2   _   _   _   _   _   _  _   _   _ _ _ created
+
+        // Pending phase:
+
+        // Timeout zero will never expire.
+        \\ transfer  T3  A1 A2   11  _  U1000 U100 U10  0 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ created
+        \\ transfer  T4  A3 A4   11  _  U2000 U200 U20  0 L2 C2   _ PEN   _   _   _   _  _   _   _ _ _ created
+        // Will be posted.
+        \\ transfer  T5  A1 A2   12  _  U1000 U100 U10  2 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ created
+        \\ transfer  T6  A3 A4   12  _  U2000 U200 U20  2 L2 C2   _ PEN   _   _   _   _  _   _   _ _ _ created
+        // Will be voided.
+        \\ transfer  T7  A1 A2   13  _  U1000 U100 U10  2 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ created
+        \\ transfer  T8  A3 A4   13  _  U2000 U200 U20  2 L2 C2   _ PEN   _   _   _   _  _   _   _ _ _ created
+        // Will expire.
+        \\ transfer  T9  A1 A2   14  _  U1000 U100 U10  1 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ created
+        \\ transfer T10  A3 A4   14  _  U2000 U200 U20  1 L2 C2   _ PEN   _   _   _   _  _   _   _ _ _ created
+        \\ commit create_transfers
+
+        // Bump the state machine time in +1s for testing the timeout expiration.
+        \\ tick 1 seconds
+
+        // Outcome phase:
+
+        // Voids T7 and T8.
+        \\ transfer  T17 A0 A0    0  T7 U1001 U101 U11  _ L0 C0   _   _   _ VOI   _   _  _   _   _ _ _ created
+        \\ transfer  T18 A0 A0    0  T8 U2001 U201 U21  _ L0 C0   _   _   _ VOI   _   _  _   _   _ _ _ created
+        // Posts T5 and T6.
+        \\ transfer  T15 A0 A0   -0  T5 U1001 U101 U11  _ L0 C0   _   _ POS   _   _   _  _   _   _ _ _ created
+        \\ transfer  T16 A0 A0   -0  T6 U2001 U201 U21  _ L0 C0   _   _ POS   _   _   _  _   _   _ _ _ created
+        \\ commit create_transfers
+
+        // Target = .pending:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L-0 ALL PEN _
+        \\ two_phase_result  T3  T0 PEN
+        \\ two_phase_result  T4  T0 PEN
+        \\ two_phase_result  T5 T15 POS
+        \\ two_phase_result  T6 T16 POS
+        \\ two_phase_result  T7 T17 VOI
+        \\ two_phase_result  T8 T18 VOI
+        \\ two_phase_result  T9  T0 EXP
+        \\ two_phase_result T10  T0 EXP
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .pending, limit = 2:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL PEN _
+        \\ two_phase_result  T3  T0 PEN
+        \\ two_phase_result  T4  T0 PEN
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .pending, limit = 2, reversed:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL PEN REV
+        \\ two_phase_result T10  T0 EXP
+        \\ two_phase_result  T9  T0 EXP
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L-0 ALL OUT _
+        \\ two_phase_result  T9  T0 EXP
+        \\ two_phase_result T10  T0 EXP
+        \\ two_phase_result  T7 T17 VOI
+        \\ two_phase_result  T8 T18 VOI
+        \\ two_phase_result  T5 T15 POS
+        \\ two_phase_result  T6 T16 POS
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, limit = 2:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL OUT _
+        \\ two_phase_result  T9  T0 EXP
+        \\ two_phase_result T10  T0 EXP
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, limit = 2, reversed:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L2 ALL OUT REV
+        \\ two_phase_result  T6 T16 POS
+        \\ two_phase_result  T5 T15 POS
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .pending, user_data, reversed:
+        \\ query_two_phase_transfers U1000 U100 U10 L0 C0 _ _ L-0 ALL PEN REV
+        \\ two_phase_result  T9  T0 EXP
+        \\ two_phase_result  T7 T17 VOI
+        \\ two_phase_result  T5 T15 POS
+        \\ two_phase_result  T3  T0 PEN
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, user_data, reversed:
+        \\ query_two_phase_transfers U2001 U201 U21 L0 C0 _ _ L-0 ALL OUT REV
+        \\ two_phase_result  T6 T16 POS
+        \\ two_phase_result  T8 T18 VOI
+        \\ commit query_two_phase_transfers
+        \\
+        \\ query_two_phase_transfers U2000 U200 U20 L0 C0 _ _ L-0 ALL OUT REV
+        \\ two_phase_result T10  T0 EXP // Expiry events are indexed by the pending fields.
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, code, ledger:
+        \\ query_two_phase_transfers U0 U0 U0 L2 C2 _ _ L-0 ALL OUT _
+        \\ two_phase_result T10  T0 EXP
+        \\ two_phase_result  T8 T18 VOI
+        \\ two_phase_result  T6 T16 POS
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .pending, pending_status = .pending:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L-0 PEN PEN _
+        \\ two_phase_result  T3  T0 PEN
+        \\ two_phase_result  T4  T0 PEN
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, pending_status = .posted:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L-0 POS OUT _
+        \\ two_phase_result  T5 T15 POS
+        \\ two_phase_result  T6 T16 POS
+        \\ commit query_two_phase_transfers
+        \\
+        // Target = .outcome, pending_status = .pending:
+        \\ query_two_phase_transfers U0 U0 U0 L0 C0 _ _ L-0 PEN OUT _
+        \\ commit query_two_phase_transfers
+    );
+}
+
 // Sanity test to check the maximum batch size.
 // For a comprehensive test of all operations, see the `input_valid` test.
 test "StateMachine: batch_elements_max" {
@@ -2987,6 +3274,12 @@ test "StateMachine: input_valid" {
     const operations = std.enums.values(TestContext.StateMachine.Operation);
     for (operations) |operation| {
         if (operation == .pulse) continue;
+
+        // For operations added after 0.17.0, the `limit` field is
+        // not capped by `input_valid`, so random inputs may fail.
+        // Query filters have dedicated tests.
+        if (operation == .query_two_phase_transfers) continue;
+
         const event_size = operation.event_size();
         maybe(event_size == 0);
 
@@ -3130,6 +3423,36 @@ test "StateMachine: query multi-batch input_valid" {
                     }
                     return buffer[0..body_encoder.finish()];
                 },
+                .query_two_phase_transfers => {
+                    var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
+                        .element_size = @sizeOf(TwoPhaseFilter),
+                    });
+                    if (limits.len == 0) body_encoder.add(0) else for (limits) |limit| {
+                        const batch: []u8 = body_encoder.writable().?;
+                        const filter: *TwoPhaseFilter = @alignCast(std.mem.bytesAsValue(
+                            TwoPhaseFilter,
+                            batch[0..@sizeOf(TwoPhaseFilter)],
+                        ));
+                        filter.* = .{
+                            .user_data_128 = 0,
+                            .user_data_64 = 0,
+                            .user_data_32 = 0,
+                            .code = 0,
+                            .ledger = 0,
+                            .timestamp_min = 0,
+                            .timestamp_max = 0,
+                            .pending_status = .none,
+                            .limit = limit,
+                            .flags = .{
+                                .target = .pending,
+                                .reversed = false,
+                            },
+                        };
+                        body_encoder.add(@sizeOf(TwoPhaseFilter));
+                    }
+                    return buffer[0..body_encoder.finish()];
+                },
+
                 else => unreachable,
             }
         }
@@ -3140,6 +3463,7 @@ test "StateMachine: query multi-batch input_valid" {
         .get_account_balances,
         .query_accounts,
         .query_transfers,
+        .query_two_phase_transfers,
     };
 
     for (operations) |operation| {
@@ -3178,6 +3502,7 @@ test "StateMachine: query multi-batch input_valid" {
             operation,
             build_input(operation, &.{ 1, 1, batch_max - 2 }, input),
         ));
+
         try std.testing.expect(context.state_machine.input_valid(
             operation,
             build_input(operation, &.{
@@ -3185,10 +3510,21 @@ test "StateMachine: query multi-batch input_valid" {
                 stdx.div_ceil(batch_max, 2),
             }, input),
         ));
+
+        // Limit cap:
+        const limit_cap: bool = switch (operation) {
+            .get_account_transfers,
+            .get_account_balances,
+            .query_accounts,
+            .query_transfers,
+            => true,
+            .query_two_phase_transfers => false,
+            else => unreachable,
+        };
         try std.testing.expect(context.state_machine.input_valid(
             operation,
             build_input(operation, &.{std.math.maxInt(u32)}, input),
-        ));
+        ) == limit_cap);
 
         // Invalid inputs:
         try std.testing.expect(!context.state_machine.input_valid(
