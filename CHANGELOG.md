@@ -146,6 +146,9 @@ size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
 
 ## TigerBeetle 0.17.5
 
+Note: it is advisable to skip 0.17.5 and upgrade directly to 0.17.8 due to a potential crash on
+upgrade.
+
 Released: 2026-05-29
 
 ### Safety And Performance
