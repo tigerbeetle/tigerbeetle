@@ -73,7 +73,7 @@ jobs:
           path: ./zig/cache
           key: ${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('./zig/download.sh') }}
       - run: ./zig/download.sh
-      - run: ./zig/zig build scripts -- release --build --publish --sha=${{ github.sha }}
+      - run: ./zig/zig build --summary all scripts -- release --build --publish --sha=${{ github.sha }}
         env:
           NUGET_KEY: ${{ secrets.NUGET_KEY }}
           TIGERBEETLE_GO_PAT: ${{ secrets.TIGERBEETLE_GO_PAT }}

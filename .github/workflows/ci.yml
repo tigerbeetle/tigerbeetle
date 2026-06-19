@@ -33,7 +33,7 @@ jobs:
       - run: shellcheck ./zig/download.sh
       - shell: pwsh
         run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
-      - run: ./zig/download.ps1 && ./zig/zig build ci -- smoke
+      - run: ./zig/download.ps1 && ./zig/zig build --summary all ci -- smoke
 
   test:
     strategy:
@@ -53,14 +53,14 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - *checkout
       - *cache
-      - run: ./zig/download.ps1 && ./zig/zig build ci -- test
+      - run: ./zig/download.ps1 && ./zig/zig build --summary all ci -- test
 
   test_aof:
     runs-on: ubuntu-latest
     steps:
       - *checkout
       - *cache
-      - run: ./zig/download.ps1 && ./zig/zig build ci -- aof
+      - run: ./zig/download.ps1 && ./zig/zig build --summary all ci -- aof
 
   clients:
     strategy:
@@ -160,7 +160,7 @@ jobs:
         uses: ruby/setup-ruby@97ecb7b512899eb71ab1bf2310a624c6f1589ac6 # v1.308.0
         with: { ruby-version: "${{ matrix.language_version }}" }
 
-      - run: ./zig/download.ps1 && ./zig/zig build ci -- ${{ matrix.language }}
+      - run: ./zig/download.ps1 && ./zig/zig build --summary all ci -- ${{ matrix.language }}
 
   devhub:
     runs-on: ubuntu-22.04
@@ -179,7 +179,7 @@ jobs:
       # Dummy devhub run - checks that all the devhub tests pass in CI. They are run again, in main
       # once merged. Kcov is skipped to avoid adding to the pipeline time.
       - if: github.ref != 'refs/heads/main'
-        run: sudo -E ./zig/zig build ci -- devhub-dry-run
+        run: sudo -E ./zig/zig build --summary all ci -- devhub-dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Not providing DEVHUBDB_PAT and NYRKIO_TOKEN stops devhub from uploading its results, but
@@ -187,7 +187,7 @@ jobs:
 
       # Run under sudo to enable memory locking for accurate RSS stats.
       - if: github.ref == 'refs/heads/main'
-        run: sudo -E ./zig/zig build ci -- devhub
+        run: sudo -E ./zig/zig build --summary all ci -- devhub
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
