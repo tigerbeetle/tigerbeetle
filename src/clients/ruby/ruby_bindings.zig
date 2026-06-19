@@ -438,7 +438,10 @@ fn emit_c_header_preamble(buffer: *Buffer) void {
         \\#include <string.h>
         \\
         \\static inline void rb_tb_pack_u128(VALUE v, void *dst) {
-        \\    rb_integer_pack(v, dst, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
+        \\    int status = rb_integer_pack(v, dst, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
+        \\    if (status != 0 && status != 1) {
+        \\        rb_raise(rb_eRangeError, "integer must be between 0 and 2**128 - 1");
+        \\    }
         \\}
         \\
         \\static inline VALUE rb_tb_unpack_u128(const void *src) {
