@@ -1194,6 +1194,53 @@ pub fn term_from_status(status: u32) std.process.Child.Term {
         Term{ .Unknown = status };
 }
 
+/// Converts a snake_case identifier to another identifier case at comptime.
+pub fn to_case(
+    comptime snake_case: []const u8,
+    comptime case: enum { camelCase, @"kebab-case", PascalCase, UPPER_CASE },
+) []const u8 {
+    return comptime blk: {
+        var output: [snake_case.len]u8 = undefined;
+        switch (case) {
+            .@"kebab-case" => {
+                for (snake_case, 0..) |byte, index| output[index] = if (byte == '_') '-' else byte;
+                break :blk comptime_slice(&output, snake_case.len);
+            },
+            .UPPER_CASE => {
+                const len = std.ascii.upperString(output[0..], snake_case).len;
+                break :blk comptime_slice(&output, len);
+            },
+            .camelCase, .PascalCase => {
+                var len: usize = 0;
+                var iterator = std.mem.tokenizeScalar(u8, snake_case, '_');
+                while (iterator.next()) |word| {
+                    _ = std.ascii.lowerString(output[len..], word);
+                    output[len] = std.ascii.toUpper(output[len]);
+                    len += word.len;
+                }
+
+                output[0] = switch (case) {
+                    .camelCase => std.ascii.toLower(output[0]),
+                    .PascalCase => std.ascii.toUpper(output[0]),
+                    .@"kebab-case", .UPPER_CASE => unreachable,
+                };
+
+                break :blk comptime_slice(&output, len);
+            },
+        }
+    };
+}
+
+test "to_case" {
+    try std.testing.expectEqualStrings("createAccounts", to_case("create_accounts", .camelCase));
+    try std.testing.expectEqualStrings("CreateTransfers", to_case("create_transfers", .PascalCase));
+    try std.testing.expectEqualStrings("user-data-128", to_case("user_data_128", .@"kebab-case"));
+    try std.testing.expectEqualStrings(
+        "GET_ACCOUNT_BALANCES",
+        to_case("get_account_balances", .UPPER_CASE),
+    );
+}
+
 comptime {
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");

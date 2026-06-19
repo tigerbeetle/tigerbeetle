@@ -94,22 +94,19 @@ fn ScanMergeType(
             }
 
             fn probe(self: *MergeScanStream, timestamp: u64) void {
-                if (self.current != null and
-                    switch (self.scan.direction()) {
-                        .ascending => self.current.? >= timestamp,
-                        .descending => self.current.? <= timestamp,
-                    })
-                {
-                    // The scan may be in a key ahead of the probe key.
-                    // E.g. `WHERE P AND (A OR B) ORDER BY ASC`:
-                    //  - `P` yields key 2, which is the probe key;
-                    //  - `A` yields key 1;
-                    //  - `B` yields key 10
-                    //  - `KWayMerge(A,B)` yields key 1 and it is probed with key 2 from `P`;
-                    //  - `A` needs to move to a key >= 2;
-                    //  - `B` is already positioned at key >= 2, no probing is required;
-                    assert(self.scan.state() == .seeking);
-                    return;
+                if (self.current) |current| {
+                    if (self.scan.direction().cmp(timestamp, .@"<=", current)) {
+                        // The scan may be in a key ahead of the probe key.
+                        // E.g. `WHERE P AND (A OR B) ORDER BY ASC`:
+                        //  - `P` yields key 2, which is the probe key;
+                        //  - `A` yields key 1;
+                        //  - `B` yields key 10
+                        //  - `KWayMerge(A,B)` yields key 1 and it is probed with key 2 from `P`;
+                        //  - `A` needs to move to a key >= 2;
+                        //  - `B` is already positioned at key >= 2, no probing is required;
+                        assert(self.scan.state() == .seeking);
+                        return;
+                    }
                 }
 
                 self.current = null;

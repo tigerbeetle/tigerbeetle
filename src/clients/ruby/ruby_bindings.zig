@@ -5,6 +5,7 @@ const generator_options = @import("ruby_bindings_options");
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 const tb = vsr.tigerbeetle;
+const stdx = vsr.stdx;
 
 const flag_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
@@ -29,15 +30,6 @@ const Buffer = struct {
     }
 };
 
-fn to_upper_snake(comptime input: []const u8) [input.len]u8 {
-    comptime var output: [input.len]u8 = undefined;
-    inline for (&output, 0..) |*c, i| {
-        c.* = input[i];
-        c.* -= 32 * @as(u8, @intFromBool(c.* >= 'a' and c.* <= 'z'));
-    }
-    return output;
-}
-
 fn ruby_flags_name_from_type(comptime Type: type) ?[]const u8 {
     comptime for (flag_mappings) |mapping| {
         const ZigType, const ruby_name = mapping;
@@ -47,12 +39,12 @@ fn ruby_flags_name_from_type(comptime Type: type) ?[]const u8 {
 }
 
 fn c_operation_name(comptime operation: tb.Operation) []const u8 {
-    const upper_snake = to_upper_snake(@tagName(operation));
+    const upper_snake = stdx.to_case(@tagName(operation), .UPPER_CASE);
     return "TB_OPERATION_" ++ upper_snake;
 }
 
 fn c_init_status_name(comptime status: exports.tb_init_status) []const u8 {
-    const upper_snake = to_upper_snake(@tagName(status));
+    const upper_snake = stdx.to_case(@tagName(status), .UPPER_CASE);
     return "TB_INIT_" ++ upper_snake;
 }
 
@@ -148,8 +140,8 @@ fn emit_flags_module(
     inline for (@typeInfo(Type).@"struct".fields, 0..) |field, i| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-        const upper_snake = to_upper_snake(field.name);
-        buffer.print("    {s} = 1 << {d}\n", .{ @as([]const u8, &upper_snake), i });
+        const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
+        buffer.print("    {s} = 1 << {d}\n", .{ upper_snake, i });
     }
     buffer.print("  end\n\n", .{});
 }
@@ -170,9 +162,9 @@ fn emit_enum_module(
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
         }
         if (skip) continue;
-        const upper_snake = to_upper_snake(field.name);
+        const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
         const value: u64 = @intCast(@intFromEnum(@field(Type, field.name)));
-        buffer.print("    {s} = {d}\n", .{ @as([]const u8, &upper_snake), value });
+        buffer.print("    {s} = {d}\n", .{ upper_snake, value });
     }
     buffer.print("  end\n\n", .{});
 }
@@ -251,8 +243,8 @@ fn emit_rbs_constants_module(
             inline for (info.fields) |field| {
                 if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
                 if (comptime std.mem.eql(u8, field.name, "padding")) continue;
-                const upper_snake = to_upper_snake(field.name);
-                buffer.print("    {s}: Integer\n", .{@as([]const u8, &upper_snake)});
+                const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
+                buffer.print("    {s}: Integer\n", .{upper_snake});
             }
         },
         .@"enum" => |info| {
@@ -263,8 +255,8 @@ fn emit_rbs_constants_module(
                     skip = skip or comptime std.mem.eql(u8, sf, field.name);
                 }
                 if (skip) continue;
-                const upper_snake = to_upper_snake(field.name);
-                buffer.print("    {s}: Integer\n", .{@as([]const u8, &upper_snake)});
+                const upper_snake = stdx.to_case(field.name, .UPPER_CASE);
+                buffer.print("    {s}: Integer\n", .{upper_snake});
             }
         },
         else => @compileError("unsupported RBS constants module type: " ++ @typeName(Type)),

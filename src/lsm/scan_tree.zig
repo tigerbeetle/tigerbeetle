@@ -338,7 +338,7 @@ pub fn ScanTreeType(
                     assert(self.merge_iterator != null);
                     if (self.merge_iterator.?.key_popped) |key_popped| {
                         if (self.direction.cmp(probe_key, .@"<=", key_popped)) {
-                            // No action if the probe key is behind the last produced key.
+                            // The iterator may be in a key ahead of the probe key.
                             return;
                         }
                     }

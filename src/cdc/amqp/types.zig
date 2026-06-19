@@ -189,24 +189,19 @@ pub const QueueDeclareArguments = struct {
                         if (@field(arguments, field.name)) |value| {
                             const FieldType = @TypeOf(value);
                             // Keys are follow the pattern "x-max-length":
-                            const key = comptime "x-" ++ kebab_case(field.name);
+                            const key = comptime "x-" ++
+                                vsr.stdx.to_case(field.name, .@"kebab-case");
                             switch (FieldType) {
                                 []const u8 => encoder.put(key, .{ .string = value }),
                                 QueueOverflow => encoder.put(key, .{ .string = switch (value) {
-                                    inline else => |tag| comptime "" ++ kebab_case(@tagName(tag)),
+                                    inline else => |tag| comptime "" ++
+                                        vsr.stdx.to_case(@tagName(tag), .@"kebab-case"),
                                 } }),
                                 bool => encoder.put(key, .{ .boolean = value }),
                                 u32 => encoder.put(key, .{ .uint32 = value }),
                                 else => comptime unreachable,
                             }
                         }
-                    }
-                }
-                fn kebab_case(comptime key: []const u8) []const u8 {
-                    comptime {
-                        var buffer: [key.len]u8 = @as(*const [key.len]u8, @ptrCast(key)).*;
-                        std.mem.replaceScalar(u8, &buffer, '_', '-');
-                        return &buffer;
                     }
                 }
             }.write,
