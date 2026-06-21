@@ -692,7 +692,7 @@ fn publish(
         var it = std.mem.splitScalar(u8, tags_exiting, '\n');
         while (it.next()) |tag_existing| {
             assert(std.mem.trim(u8, tag_existing, " \t\n\r").len == tag_existing.len);
-            if (std.mem.eql(u8, tag_existing, info.release_triple)) {
+            if (std.mem.eql(u8, tag_existing, info.tag)) {
                 tag_exists = true;
             }
             if (std.mem.eql(u8, tag_existing, info.tag_multiversion)) {
