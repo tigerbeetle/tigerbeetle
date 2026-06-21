@@ -431,10 +431,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .batch_value_count_max = tree_values_count_max.transfers,
                 .primary_key = "id",
                 .primary_key_orphaned = true,
-                .unique_keys = &[_][:0]const u8{
-                    "id",
-                    "pending_id",
-                },
+                .unique_keys = &[_][:0]const u8{"id"},
                 .ignored = &[_][:0]const u8{ "timeout", "flags" },
                 .optional = &[_][:0]const u8{
                     "pending_id",
@@ -500,7 +497,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .batch_value_count_max = tree_values_count_max.account_events,
                 .primary_key = "timestamp",
                 .primary_key_orphaned = false,
-                .unique_keys = &[_][:0]const u8{"transfer_pending_id_expired"},
+                .unique_keys = &[_][:0]const u8{},
                 .ignored = &[_][:0]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
