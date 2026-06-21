@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 2147483647
           fetch-tags: true # Fetch full history for tidy.
-          ref: release # Use the 'release' branch even if triggered manually
+          # ref: release # Use the 'release' branch even if triggered manually
 
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with:
