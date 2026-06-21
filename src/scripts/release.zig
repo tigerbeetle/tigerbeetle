@@ -59,8 +59,10 @@ const VersionInfo = struct {
     commit_timestamp: stdx.InstantUnix,
 };
 
-pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args_original: CLIArgs) !void {
     _ = gpa;
+    var cli_args = cli_args_original;
+    cli_args.language = .zig;
 
     const languages = if (cli_args.language) |language|
         LanguageSet.initOne(language)
@@ -120,7 +122,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(release.value >
         (try multiversion.Release.parse(first_multiversion_release)).value);
 
-    const version_info = VersionInfo{
+    var version_info = VersionInfo{
         .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release.triple()),
         .release_triple_client_min = @import("vsr_options").release_client_min,
         .tag = try shell.fmt(
@@ -138,7 +140,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     // Typically GitHub tag matches the release triple in the binary exactly. For exceptional
     // hot-fix releases, the tag can be different. To make a hot-fix release, set the tag manually
     // here and remove the assert.
-    assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+    // assert(std.mem.eql(u8, version_info.release_triple, version_info.tag));
+    version_info.tag_multiversion = "0.17.6-1";
+    version_info.tag = "0.17.7-1";
 
     log.info("release={s} sha={s}", .{ version_info.release_triple, version_info.commit_sha });
     if (!std.mem.eql(u8, version_info.release_triple, version_info.tag)) {
@@ -629,7 +633,7 @@ fn publish(
         var it = std.mem.splitScalar(u8, tags_exiting, '\n');
         while (it.next()) |tag_existing| {
             assert(std.mem.trim(u8, tag_existing, " \t\n\r").len == tag_existing.len);
-            if (std.mem.eql(u8, tag_existing, info.release_triple)) {
+            if (std.mem.eql(u8, tag_existing, info.tag)) {
                 tag_exists = true;
             }
             if (std.mem.eql(u8, tag_existing, info.tag_multiversion)) {
@@ -764,12 +768,12 @@ fn publish(
 
     if (languages.contains(.zig)) {
         try shell.exec(
-            \\gh release edit --draft=false --latest=true
+            \\gh release edit --draft=false --latest=false --prerelease=true
             \\  {tag}
         , .{ .tag = info.tag });
 
         // Build our docs last so that if it fails everything else is still released.
-        try publish_docs(shell, info);
+        // try publish_docs(shell, info);
     }
 }
 
