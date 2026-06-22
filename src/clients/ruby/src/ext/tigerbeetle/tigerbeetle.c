@@ -101,7 +101,7 @@ static VALUE rb_tb_request_result(VALUE self) {
         }
     }
 
-    return rb_ary_new_from_args(2, UINT2NUM(req->status), result);
+    return rb_ary_new_from_args(2, RB_UINT2NUM(req->status), result);
 }
 
 static void rb_tb_write_completion(int fd, rb_tb_request_t *req) {
@@ -187,7 +187,7 @@ static VALUE rb_tb_client_initialize(
     const char *addr = StringValueCStr(addresses_rb);
     uint32_t addr_len = (uint32_t)RSTRING_LEN(addresses_rb);
 
-    int completion_fd = NUM2INT(completion_fd_rb);
+    int completion_fd = RB_NUM2INT(completion_fd_rb);
 
     TB_INIT_STATUS status = tb_client_init(
         client, cluster_id_bytes, addr, addr_len, (uintptr_t)completion_fd, rb_tb_on_completion
@@ -232,7 +232,7 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
     tb_client_t *client;
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
-    TB_OPERATION operation = (TB_OPERATION)NUM2INT(operation_rb);
+    TB_OPERATION operation = (TB_OPERATION)RB_NUM2INT(operation_rb);
     long count = RARRAY_LEN(items_rb);
 
     rb_tb_request_t *req = malloc(sizeof(rb_tb_request_t));
@@ -290,12 +290,12 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
 static VALUE rb_tb_request_id(VALUE self) {
     rb_tb_request_t *req;
     TypedData_Get_Struct(self, rb_tb_request_t, &rb_tb_request_type, req);
-    return ULL2NUM((unsigned long long)(uintptr_t)req);
+    return RB_ULL2NUM((unsigned long long)(uintptr_t)req);
 }
 
 static void rb_tb_init_native_client(VALUE mTigerBeetle) {
-    rb_define_const(mTigerBeetle, "PACKET_OK", INT2NUM(TB_PACKET_OK));
-    rb_define_const(mTigerBeetle, "PACKET_CLIENT_SHUTDOWN", INT2NUM(TB_PACKET_CLIENT_SHUTDOWN));
+    rb_define_const(mTigerBeetle, "PACKET_OK", RB_INT2NUM(TB_PACKET_OK));
+    rb_define_const(mTigerBeetle, "PACKET_CLIENT_SHUTDOWN", RB_INT2NUM(TB_PACKET_CLIENT_SHUTDOWN));
 
     VALUE cNativeClient = rb_define_class_under(mTigerBeetle, "NativeClient", rb_cObject);
     rb_define_alloc_func(cNativeClient, rb_tb_client_alloc);

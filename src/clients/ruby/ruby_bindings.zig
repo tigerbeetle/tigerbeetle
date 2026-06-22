@@ -482,10 +482,10 @@ fn emit_c_num_from_ruby(
 ) void {
     const bits = comptime int_bits(FieldType);
     switch (bits) {
-        8 => buffer.print("NUM2CHR({s})", .{ruby_value}),
-        16 => buffer.print("NUM2USHORT({s})", .{ruby_value}),
-        32 => buffer.print("NUM2UINT({s})", .{ruby_value}),
-        64 => buffer.print("NUM2ULL({s})", .{ruby_value}),
+        8 => buffer.print("RB_NUM2CHR({s})", .{ruby_value}),
+        16 => buffer.print("RB_NUM2USHORT({s})", .{ruby_value}),
+        32 => buffer.print("RB_NUM2UINT({s})", .{ruby_value}),
+        64 => buffer.print("RB_NUM2ULL({s})", .{ruby_value}),
         else => @compileError("unsupported Ruby numeric field"),
     }
 }
@@ -497,8 +497,8 @@ fn emit_c_value_from_field(
 ) void {
     const bits = comptime int_bits(FieldType);
     switch (bits) {
-        8, 16, 32 => buffer.print("UINT2NUM({s})", .{field_expr}),
-        64 => buffer.print("ULL2NUM({s})", .{field_expr}),
+        8, 16, 32 => buffer.print("RB_UINT2NUM({s})", .{field_expr}),
+        64 => buffer.print("RB_ULL2NUM({s})", .{field_expr}),
         128 => buffer.print("rb_tb_unpack_u128(&{s})", .{field_expr}),
         else => @compileError("unsupported C numeric field"),
     }
