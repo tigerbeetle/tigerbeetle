@@ -7,7 +7,24 @@ to receive notifications about breaking changes!
 
 Released: 2026-06-19
 
+This release fixes a schema change bug introduced in 0.17.5, that would cause crashes when
+attempting to upgrade to 0.17.5 - 0.17.7 from 0.17.4 and below if pending transfers were
+present on the cluster. See [#3808](https://github.com/tigerbeetle/tigerbeetle/issues/3808).
+
+If you are upgrading from 0.17.4, or attempting to upgrade from a currently crashed cluster on
+0.17.5 - 0.17.7, no special consideration is needed, and you may upgrade directly to 0.17.8.
+
+If you are upgrading from either a fresh or upgraded cluster on 0.17.5 - 0.17.7, and have used
+pending transfers, you can run the script
+[here](https://github.com/tigerbeetle/tigerbeetle/issues/3808#issuecomment-4771439967) to check
+if you have any blocks that are on the incorrect schema. If you do, please file an issue on GitHub,
+otherwise it's safe to upgrade to 0.17.8.
+
 ### Safety And Performance
+
+- [a299a](https://github.com/tigerbeetle/tigerbeetle/commit/a299a7d3f7c98793f4c84ee743062bdc720f79ac)
+
+  Fix the headline compatibility bug.
 
 - [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802)
 
@@ -53,9 +70,10 @@ Released: 2026-06-19
 
 Released: 2026-06-12
 
-Note: it is advisable to skip 0.17.6 and 0.17.7 and upgrade directly to 0.17.8 due to a potential
-crash. If you encounter the crash, it can be mitigated by temporarily increasing the object cache
-size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
+Note: it is advisable to skip 0.17.5 - 0.17.7 and upgrade directly to 0.17.8 due to 2 potential
+crashes:
+* One can be mitigated by temporarily increasing the object cache, see [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
+* The other can be mitigated by upgrading to 0.17.8, see [#3808](https://github.com/tigerbeetle/tigerbeetle/issues/3808).
 
 ### Safety And Performance
 
@@ -90,9 +108,10 @@ size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
 
 Released: 2026-06-05
 
-Note: it is advisable to skip 0.17.6 and 0.17.7 and upgrade directly to 0.17.8 due to a potential
-crash. If you encounter the crash, it can be mitigated by temporarily increasing the object cache
-size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
+Note: it is advisable to skip 0.17.5 - 0.17.7 and upgrade directly to 0.17.8 due to 2 potential
+crashes:
+* One can be mitigated by temporarily increasing the object cache, see [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
+* The other can be mitigated by upgrading to 0.17.8, see [#3808](https://github.com/tigerbeetle/tigerbeetle/issues/3808).
 
 ### Safety And Performance
 
@@ -147,6 +166,11 @@ size. See [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
 ## TigerBeetle 0.17.5
 
 Released: 2026-05-29
+
+Note: it is advisable to skip 0.17.5 - 0.17.7 and upgrade directly to 0.17.8 due to 2 potential
+crashes:
+* One can be mitigated by temporarily increasing the object cache, see [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802).
+* The other can be mitigated by upgrading to 0.17.8, see [#3808](https://github.com/tigerbeetle/tigerbeetle/issues/3808).
 
 ### Safety And Performance
 
