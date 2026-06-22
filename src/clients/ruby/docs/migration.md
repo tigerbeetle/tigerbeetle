@@ -112,6 +112,33 @@ filter = TigerBeetle::AccountFilter.new(
 transfers = client.get_account_transfers(filter)
 ```
 
+### Timestamp attributes
+
+All timestamp attributes have changed type from `Time` to `Integer` representing
+nanoseconds since UNIX epoch.
+
+```rb
+# Before
+account.timestamp
+# => 2026-06-22 11:49:05 1382929/2097152 +0100
+
+# After
+account.timestamp
+# => 1782125345659431936
+```
+
+Affected attributes:
+
+```
+TigerBeetle::Account#timestamp
+TigerBeetle::AccountBalance#timestamp
+TigerBeetle::AccountFilter#timestamp_min
+TigerBeetle::AccountFilter#timestamp_max
+TigerBeetle::QueryFilter#timestamp_min
+TigerBeetle::QueryFilter#timestamp_max
+TigerBeetle::Transfer#timestamp
+```
+
 ### Returned objects
 
 Returned objects have changed from `FFI::Struct`/`Struct`-style objects to
