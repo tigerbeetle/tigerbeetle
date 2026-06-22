@@ -9,9 +9,6 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Remove once this is the default (June 16th, 2026).
-
 jobs:
   release:
     runs-on: ubuntu-latest
