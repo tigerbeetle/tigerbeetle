@@ -997,11 +997,9 @@ fn parse_address(string: []const u8) !stdx.IPAddress {
 
     const expect_v6 = string[0] == '[' and string[string.len - 1] == ']';
     if (expect_v6 != (std.mem.indexOfScalar(u8, string, ':') != null)) return error.AddressInvalid;
-    const ip = if (expect_v6)
-        stdx.IPAddress.parse(string[1 .. string.len - 1]) catch return error.AddressInvalid
-    else
-        stdx.IPAddress.parse(string) catch return error.AddressInvalid;
-    return ip;
+
+    const string_inner = if (expect_v6) string[1 .. string.len - 1] else string;
+    return stdx.IPAddress.parse(string_inner) catch error.AddressInvalid;
 }
 
 test parse_addresses {
