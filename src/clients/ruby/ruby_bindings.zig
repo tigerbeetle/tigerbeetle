@@ -117,17 +117,6 @@ fn int_bits(comptime Type: type) comptime_int {
     };
 }
 
-fn c_uint_type(comptime bits: comptime_int) []const u8 {
-    return switch (bits) {
-        8 => "uint8_t",
-        16 => "uint16_t",
-        32 => "uint32_t",
-        64 => "uint64_t",
-        128 => "tb_uint128_t",
-        else => @compileError("unsupported integer width"),
-    };
-}
-
 fn field_reserved(comptime field_name: []const u8) bool {
     if (comptime std.mem.eql(u8, field_name, "reserved")) return true;
     if (comptime std.mem.eql(u8, field_name, "padding")) return true;
@@ -493,7 +482,9 @@ fn emit_c_num_from_ruby(
 ) void {
     const bits = comptime int_bits(FieldType);
     switch (bits) {
-        8, 16, 32 => buffer.print("({s})NUM2UINT({s})", .{ c_uint_type(bits), ruby_value }),
+        8 => buffer.print("NUM2CHR({s})", .{ruby_value}),
+        16 => buffer.print("NUM2USHORT({s})", .{ruby_value}),
+        32 => buffer.print("NUM2UINT({s})", .{ruby_value}),
         64 => buffer.print("NUM2ULL({s})", .{ruby_value}),
         else => @compileError("unsupported Ruby numeric field"),
     }

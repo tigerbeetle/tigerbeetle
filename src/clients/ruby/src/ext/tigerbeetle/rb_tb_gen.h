@@ -123,13 +123,13 @@ static void rb_tb_serialize_get_account_transfers(VALUE items_rb, uint8_t *buf, 
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@account_id")), &item->account_id);
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@user_data_128")), &item->user_data_128);
         item->user_data_64 = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@user_data_64")));
-        item->user_data_32 = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
-        item->code = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@code")));
+        item->user_data_32 = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
+        item->code = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@code")));
         memset(item->reserved, 0, sizeof(item->reserved));
         item->timestamp_min = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_min")));
         item->timestamp_max = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_max")));
-        item->limit = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
-        item->flags = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
+        item->limit = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
+        item->flags = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
     }
 }
 
@@ -168,13 +168,13 @@ static void rb_tb_serialize_get_account_balances(VALUE items_rb, uint8_t *buf, l
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@account_id")), &item->account_id);
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@user_data_128")), &item->user_data_128);
         item->user_data_64 = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@user_data_64")));
-        item->user_data_32 = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
-        item->code = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@code")));
+        item->user_data_32 = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
+        item->code = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@code")));
         memset(item->reserved, 0, sizeof(item->reserved));
         item->timestamp_min = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_min")));
         item->timestamp_max = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_max")));
-        item->limit = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
-        item->flags = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
+        item->limit = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
+        item->flags = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
     }
 }
 
@@ -206,14 +206,14 @@ static void rb_tb_serialize_query_accounts(VALUE items_rb, uint8_t *buf, long co
         tb_query_filter_t *item = &items[i];
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@user_data_128")), &item->user_data_128);
         item->user_data_64 = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@user_data_64")));
-        item->user_data_32 = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
-        item->ledger = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
-        item->code = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@code")));
+        item->user_data_32 = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
+        item->ledger = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
+        item->code = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@code")));
         memset(item->reserved, 0, sizeof(item->reserved));
         item->timestamp_min = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_min")));
         item->timestamp_max = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_max")));
-        item->limit = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
-        item->flags = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
+        item->limit = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
+        item->flags = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
     }
 }
 
@@ -251,14 +251,14 @@ static void rb_tb_serialize_query_transfers(VALUE items_rb, uint8_t *buf, long c
         tb_query_filter_t *item = &items[i];
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@user_data_128")), &item->user_data_128);
         item->user_data_64 = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@user_data_64")));
-        item->user_data_32 = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
-        item->ledger = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
-        item->code = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@code")));
+        item->user_data_32 = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
+        item->ledger = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
+        item->code = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@code")));
         memset(item->reserved, 0, sizeof(item->reserved));
         item->timestamp_min = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_min")));
         item->timestamp_max = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp_max")));
-        item->limit = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
-        item->flags = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
+        item->limit = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@limit")));
+        item->flags = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
     }
 }
 
@@ -301,11 +301,11 @@ static void rb_tb_serialize_create_accounts(VALUE items_rb, uint8_t *buf, long c
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@credits_posted")), &item->credits_posted);
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@user_data_128")), &item->user_data_128);
         item->user_data_64 = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@user_data_64")));
-        item->user_data_32 = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
+        item->user_data_32 = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
         item->reserved = 0;
-        item->ledger = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
-        item->code = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@code")));
-        item->flags = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
+        item->ledger = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
+        item->code = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@code")));
+        item->flags = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@flags")));
         item->timestamp = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp")));
     }
 }
@@ -339,11 +339,11 @@ static void rb_tb_serialize_create_transfers(VALUE items_rb, uint8_t *buf, long 
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@pending_id")), &item->pending_id);
         rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@user_data_128")), &item->user_data_128);
         item->user_data_64 = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@user_data_64")));
-        item->user_data_32 = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
-        item->timeout = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@timeout")));
-        item->ledger = (uint32_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
-        item->code = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@code")));
-        item->flags = (uint16_t)NUM2UINT(rb_ivar_get(item_rb, rb_intern("@flags")));
+        item->user_data_32 = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@user_data_32")));
+        item->timeout = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@timeout")));
+        item->ledger = NUM2UINT(rb_ivar_get(item_rb, rb_intern("@ledger")));
+        item->code = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@code")));
+        item->flags = NUM2USHORT(rb_ivar_get(item_rb, rb_intern("@flags")));
         item->timestamp = NUM2ULL(rb_ivar_get(item_rb, rb_intern("@timestamp")));
     }
 }
