@@ -12,6 +12,8 @@ const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
 
+pub const TimeSim = @import("testing/time.zig").TimeSim;
+
 pub const Time = struct {
     context: *anyopaque,
     vtable: *const VTable,
