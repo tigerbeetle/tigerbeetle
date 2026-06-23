@@ -109,8 +109,16 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
+}) !void {
+    _ = shell;
+    _ = gpa;
+    _ = options;
+}
+
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
@@ -133,13 +141,13 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
     // NuGet may take a few minutes to make the new package available for download.
     for (0..9) |_| {
-        if (try nuget_install(shell, .{ .version = options.version }) == .ok) break;
+        if (try nuget_install(shell, .{ .version = options.release }) == .ok) break;
         log.warn("waiting for 5 minutes for the {s} version to appear in nuget.org", .{
-            options.version,
+            options.release,
         });
         std.time.sleep(5 * std.time.ns_per_min);
     } else {
-        switch (try nuget_install(shell, .{ .version = options.version })) {
+        switch (try nuget_install(shell, .{ .version = options.release })) {
             .ok => {},
             .retry => |err| {
                 log.err("package is not available in nuget.org", .{});

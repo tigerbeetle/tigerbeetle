@@ -74,8 +74,52 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec("python3 -m mypy . --strict", .{});
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
+}) !void {
+    const PyPIPackage = struct {
+        urls: []const struct {
+            filename: []const u8,
+            url: []const u8,
+        },
+    };
+
+    const response_body = try shell.http_get(try shell.fmt(
+        "https://pypi.org/pypi/tigerbeetle/{s}/json",
+        .{options.release},
+    ), .{});
+    const pypi_package = try std.json.parseFromSliceLeaky(
+        PyPIPackage,
+        shell.arena.allocator(),
+        response_body,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    assert(pypi_package.urls.len == 1);
+
+    const wheel_size_max = 8 * stdx.MiB;
+    const wheel_filename = try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{options.release});
+    assert(std.mem.eql(u8, pypi_package.urls[0].filename, wheel_filename));
+    const wheel_url = pypi_package.urls[0].url;
+
+    const wheel_published = try shell.http_get(
+        wheel_url,
+        .{ .response_body_size_max = wheel_size_max },
+    );
+    const wheel_local = try shell.cwd.readFileAlloc(
+        gpa,
+        try shell.fmt("zig-out/dist/python/{s}", .{wheel_filename}),
+        wheel_size_max,
+    );
+    defer gpa.free(wheel_local);
+
+    if (!std.mem.eql(u8, wheel_published, wheel_local)) {
+        std.debug.panic("tigerbeetle python package doesn't match local build", .{});
+    }
+}
+
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
@@ -84,21 +128,21 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.exec("python3 -m venv {tmp_dir}", .{ .tmp_dir = tmp_dir });
 
     for (0..9) |_| {
-        if (shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
+        if (shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={release}", .{
             .tmp_dir = tmp_dir,
-            .version = options.version,
+            .release = options.release,
         })) {
             break;
         } else |_| {
             log.warn("waiting for 5 minutes for the {s} version to appear in PyPi", .{
-                options.version,
+                options.release,
             });
             std.time.sleep(5 * std.time.ns_per_min);
         }
     } else {
-        shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={version}", .{
+        shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={release}", .{
             .tmp_dir = tmp_dir,
-            .version = options.version,
+            .release = options.release,
         }) catch |err| {
             log.err("package is not available in PyPi", .{});
             return err;

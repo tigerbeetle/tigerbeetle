@@ -53,8 +53,16 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
-pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
-    version: []const u8,
+pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
+}) !void {
+    _ = shell;
+    _ = gpa;
+    _ = options;
+}
+
+pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
@@ -64,19 +72,19 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.env.put("GEM_PATH", tmp_dir);
 
     for (0..9) |_| {
-        if (shell.exec("gem install tigerbeetle -v {version}", .{
-            .version = options.version,
+        if (shell.exec("gem install tigerbeetle -v {release}", .{
+            .release = options.release,
         })) {
             break;
         } else |_| {
             log.warn("waiting for 5 minutes for the {s} version to appear in RubyGems", .{
-                options.version,
+                options.release,
             });
             std.time.sleep(5 * std.time.ns_per_min);
         }
     } else {
-        shell.exec("gem install tigerbeetle -v {version}", .{
-            .version = options.version,
+        shell.exec("gem install tigerbeetle -v {release}", .{
+            .release = options.release,
         }) catch |err| {
             log.err("package is not available in RubyGems", .{});
             return err;

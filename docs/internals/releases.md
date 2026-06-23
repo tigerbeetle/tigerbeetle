@@ -99,18 +99,11 @@ The motivation for specific steps follows after.
 
 ### Error Handling
 
-If the release failed completely (nothing was published), it is safe to re-run the release GitHub
-Actions job.
-
-More likely, the release was partially successful: e.g., the Node.js package was uploaded, but
-uploading the Java package failed. This is not a problem --- the replica release on GitHub will remain a draft in
-this case. To retry the release, increment the version number of the latest changelog entry alongside
-any changes to fix the release process, push the new commit to the `release` branch, and trigger a new release
-workflow (step 2). The _old_ version number will be irrevocably burned. There will be an intentional
-gap in the changelog sequence. The newly added changes in the `release` branch must be added to the
-`main` branch as well in order for CI to work correctly. From the time the release is published
-until the `main` branch is updated, all CI runs will fail. When a release with the new version number
-is fully released, delete the draft release on GitHub.
+The release process is idempotent for client packages: the release script checks whether each
+package version is already published and skips re-publishing if so. This means it is safe to re-run
+the release workflow, whether the release failed completely or only partially (e.g., the Node.js
+package was uploaded but the Java package failed). Fix any underlying issue, delete the release
+draft, and re-trigger the workflow. No version number will be burned.
 
 It could also be the case that a release was successful, but some issue with the code is discovered
 and a quick fix is necessary. The preferred approach is to do a normal fix-forward release. While
@@ -125,29 +118,9 @@ adjust `version_info.release_triple` manually in `release.zig`.
 
 ### Validation Error Handling
 
-Sometimes, the release is perfectly fine, but the validation code is broken (e.g., a bug in a
-client's `validate_release`). This is the code that runs on a timer, and rebuilds the last released
-tag to compare it to the artifacts published.
-
-This workflow is triggered by `release_validate.yml` from the `main` branch, but once the workflow
-is running, it:
-
-- switches to the release branch,
-- and checks out the last published tag.
-
-That means that the code that is built and run by default will be from the broken release, and so
-it'll be pinned in time as broken. Pushing a fix to `main` or `release` *will not* fix the problem.
-
-Instead, create a new branch with the fix for the validation code. This should be branched straight
-off of the release tag. Then:
-
-- modify `release_validate.yml`'s `actions/checkout` to check out your branch and fetch full git
-  history,
-- remove the `run` that changes to the last release tag, and,
-- hard-code the `git_sha` of the last release in `src/scripts/ci.zig`.
-
-The last step is needed, since otherwise the compiled binary hashes won't match and validation will
-fail.
+If validation fails due to a bug in the validation code itself (e.g., a client's
+`validate_release`), fixing it on `main` is enough: `release_validate.yml` runs validation from
+`main` against a check out of the last released tag.
 
 ## What Is a Release?
 

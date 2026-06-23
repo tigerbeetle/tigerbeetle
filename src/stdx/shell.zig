@@ -1030,8 +1030,16 @@ fn http_request(
     try request.finish();
     try request.wait();
 
-    const response_body_buffer_size = request.response.content_length orelse
-        options.response_body_size_max;
+    // If the response is compressed, content_length is the compressed size, not the decoded size.
+    const compressed = request.response.transfer_compression != .identity;
+    const response_body_buffer_size: usize = blk: {
+        if (!compressed) {
+            if (request.response.content_length) |response_content_length| {
+                break :blk response_content_length;
+            }
+        }
+        break :blk options.response_body_size_max;
+    };
 
     if (response_body_buffer_size > options.response_body_size_max) {
         return error.ResponseTooLarge;
@@ -1042,8 +1050,10 @@ fn http_request(
     assert(response_body_size <= options.response_body_size_max);
     const response_body = response_body_buffer[0..response_body_size];
 
-    if (request.response.content_length) |response_content_length| {
-        assert(response_content_length == response_body_size);
+    if (!compressed) {
+        if (request.response.content_length) |response_content_length| {
+            assert(response_content_length == response_body_size);
+        }
     }
 
     if (request.response.status != options.expected_response_code) {
