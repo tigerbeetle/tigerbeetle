@@ -152,6 +152,10 @@ ready" button on GitHub. To reduce the number of round-trips, "merge when ready"
 before the review is completed: a PR will then be merged automatically once an approving review is
 submitted.
 
+Important exception: if a change potentially has non-trivial version compatibility implications (you
+need to think at all about versions `v` and `v+1`), it should have one additional reviewer, whose
+job is to find upgrade bugs.
+
 To synchronize the state of the pull request, rebase the pull request on top of main branch. You
 don't need to proactively synchronize pull requests with main: merge queue runs the tests on the
 merge commit from the PR branch into main.
