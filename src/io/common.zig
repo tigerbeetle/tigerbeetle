@@ -31,20 +31,30 @@ pub const NextTickSource = enum { lsm, vsr };
 
 pub fn listen(
     fd: posix.socket_t,
-    address: std.net.Address,
+    address: stdx.SocketAddress,
     options: ListenOptions,
-) !std.net.Address {
+) !stdx.SocketAddress {
+    const address_std = address.to_std();
     try setsockopt(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
-    try posix.bind(fd, &address.any, address.getOsSockLen());
+    try posix.bind(fd, &address_std.any, address_std.getOsSockLen());
 
     // Resolve port 0 to an actual port picked by the OS.
-    var address_resolved: std.net.Address = .{ .any = undefined };
+    var address_resolved_std: std.net.Address = .{ .any = undefined };
     var addrlen: posix.socklen_t = @sizeOf(std.net.Address);
-    try posix.getsockname(fd, &address_resolved.any, &addrlen);
-    assert(address_resolved.getOsSockLen() == addrlen);
-    assert(address_resolved.any.family == address.any.family);
+    try posix.getsockname(fd, &address_resolved_std.any, &addrlen);
+    assert(address_resolved_std.getOsSockLen() == addrlen);
+    assert(address_resolved_std.any.family == address_std.any.family);
 
     try posix.listen(fd, options.backlog);
+
+    const address_resolved = stdx.SocketAddress.from_std(address_resolved_std) catch |err|
+        switch (err) {
+            error.UnsupportedFamily => unreachable,
+        };
+
+    assert(address.ip.family() == address_resolved.ip.family());
+    assert(std.meta.eql(address.ip, address_resolved.ip));
+    if (address.port != address_resolved.port) assert(address.port == 0);
 
     return address_resolved;
 }

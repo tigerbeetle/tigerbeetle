@@ -86,7 +86,7 @@ pub fn command_benchmark(
     }
 
     const addresses = if (args.addresses) |*addresses|
-        addresses.const_slice()
+        addresses.slice()
     else
         &.{tigerbeetle_process.?.address};
     try benchmark_load.main(allocator, io, time, addresses, args);
@@ -140,7 +140,7 @@ fn format(allocator: std.mem.Allocator, options: struct {
 
 const TigerBeetleProcess = struct {
     child: std.process.Child,
-    address: std.net.Address,
+    address: stdx.SocketAddress,
 
     fn deinit(self: *TigerBeetleProcess) std.process.Child.ResourceUsageStatistics {
         // Although we could just kill the child here, let's exercise the "normal" termination logic
@@ -222,7 +222,10 @@ fn start(allocator: std.mem.Allocator, options: struct {
         break :port try stdx.parse_int(u16, port_buf[0 .. port_buf_len - 1], .{});
     };
 
-    const address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
+    const address: stdx.SocketAddress = .{
+        .ip = .@"127.0.0.1",
+        .port = port,
+    };
 
     return .{ .child = child, .address = address };
 }

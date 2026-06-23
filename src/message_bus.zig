@@ -87,13 +87,13 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub const Options = struct {
-            configuration: []const Address,
+            configuration: []const stdx.SocketAddress,
             io: *IO,
             trace: ?*Tracer,
             clients_limit: ?u32 = null,
             time: Time,
         };
-        const Address = std.net.Address;
+        const Address = stdx.SocketAddress;
         const MessageBus = @This();
 
         /// Initialize the MessageBus for the given configuration and replica/client process.
@@ -258,7 +258,7 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.* = undefined;
         }
 
-        fn init_tcp(io: *IO, process: vsr.ProcessType, family: u32) !IO.socket_t {
+        fn init_tcp(io: *IO, process: vsr.ProcessType, family: stdx.IPAddress.Family) !IO.socket_t {
             return try io.open_socket_tcp(family, .{
                 .rcvbuf = constants.tcp_rcvbuf,
                 .sndbuf = switch (process) {
@@ -281,7 +281,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.accept_address == null);
 
             const address = bus.replicas_addresses[bus.process.replica];
-            const fd = try init_tcp(bus.io, .replica, address.any.family);
+            const fd = try init_tcp(bus.io, .replica, address.ip.family());
             errdefer bus.io.close_socket(fd);
 
             const accept_address = try bus.io.listen(fd, address, .{
@@ -510,7 +510,7 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .free);
             assert(connection.fd == null);
 
-            const family = bus.replicas_addresses[replica].any.family;
+            const family = bus.replicas_addresses[replica].ip.family();
             connection.fd = init_tcp(bus.io, bus.process, family) catch |err| {
                 log.err("{}: connect_to_replica: init_tcp error={s}", .{
                     bus.id,

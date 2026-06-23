@@ -167,7 +167,7 @@ pub const Options = struct {
         log,
         udp: struct {
             io: *IO,
-            address: std.net.Address,
+            address: stdx.SocketAddress,
         },
     } = .log,
     log_trace: bool = true,

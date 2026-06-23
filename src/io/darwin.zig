@@ -427,7 +427,7 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
     ) void {
         self.submit(
             context,
@@ -436,7 +436,7 @@ pub const IO = struct {
             .connect,
             .{
                 .socket = socket,
-                .address = address,
+                .address = address.to_std(),
                 .initiated = false,
             },
             struct {
@@ -911,9 +911,13 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+    pub fn open_socket_tcp(
+        self: *IO,
+        family: stdx.IPAddress.Family,
+        options: TCPOptions,
+    ) !socket_t {
         const fd = try self.open_socket(
-            family,
+            family.to_std(),
             posix.SOCK.STREAM | posix.SOCK.NONBLOCK,
             posix.IPPROTO.TCP,
         );
@@ -924,9 +928,9 @@ pub const IO = struct {
     }
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+    pub fn open_socket_udp(self: *IO, family: stdx.IPAddress.Family) !socket_t {
         return try self.open_socket(
-            family,
+            family.to_std(),
             posix.SOCK.DGRAM | posix.SOCK.NONBLOCK,
             posix.IPPROTO.UDP,
         );
@@ -960,10 +964,10 @@ pub const IO = struct {
     pub fn listen(
         _: *IO,
         fd: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
         options: ListenOptions,
-    ) !std.net.Address {
-        return common.listen(fd, address, options);
+    ) !stdx.SocketAddress {
+        return try common.listen(fd, address, options);
     }
 
     pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {

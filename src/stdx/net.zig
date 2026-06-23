@@ -24,11 +24,23 @@ pub const IPAddress = extern struct {
     // - Natural alignment to allow re-interpreting as u128.
     big: [16]u8 align(16),
 
-    const Family = enum { IPv4, IPv6 };
+    pub const Family = enum {
+        IPv4,
+        IPv6,
+
+        pub fn to_std(f: Family) u32 {
+            return switch (f) {
+                .IPv4 => std.posix.AF.INET,
+                .IPv6 => std.posix.AF.INET6,
+            };
+        }
+    };
 
     const IPv4_prefix: u128 = 0x0000_0000_0000_0000_0000_FFFF_0000_0000;
     const IPv4_prefix_octets: [12]u8 =
         @as([16]u8, @bitCast(std.mem.nativeToBig(u128, IPv4_prefix)))[0..12].*;
+
+    pub const @"127.0.0.1" = parse("127.0.0.1") catch unreachable;
 
     comptime {
         // The code is endianness-clean, aspirationally. Audit before running on your PowerPC!
@@ -275,8 +287,15 @@ test IPAddress {
             const address = SocketAddress.to_std(.{ .ip = ip, .port = 0 });
             const address_std = try parse_std(text);
             if (!address.eql(address_std)) {
-                std.log.err("{} != {}", .{ address, address_std });
-                return error.TestUnexpectedResult;
+                if (address.any.family == std.posix.AF.INET and
+                    address_std.any.family == std.posix.AF.INET6 and
+                    std.mem.eql(u8, &IPAddress.IPv4_prefix_octets, address_std.in6.sa.addr[0..12]))
+                {
+                    // Std doesn't canonicalize IPv6-mapped IPv4 addresses.
+                } else {
+                    std.log.err("{} != {}", .{ address, address_std });
+                    return error.TestUnexpectedResult;
+                }
             }
 
             var buffer: [64]u8 = undefined;
@@ -384,6 +403,7 @@ test IPAddress {
             "0:0:0:0:0:0:0:1",
             "0:0:0:0:0:0:0:0",
             "Ff01::101",
+            "::ffff:c0a8:64e4",
         },
         .err = &.{
             "::d3:",
