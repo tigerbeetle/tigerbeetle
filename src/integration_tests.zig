@@ -269,13 +269,14 @@ test "benchmark/inspect smoke" {
     defer shell.destroy();
 
     try shell.exec(
-        "{tigerbeetle} benchmark" ++
-            " --transfer-count=10_000" ++
-            " --transfer-batch-count=10" ++
-            " --validate" ++
-            " --trace={trace_file}" ++
-            " --statsd=127.0.0.1:65535" ++
-            " --file={data_file}",
+        \\{tigerbeetle} benchmark
+        \\    --transfer-count=10_000
+        \\    --transfer-batch-count=10
+        \\    --validate --id-order=sequential
+        \\    --trace={trace_file}
+        \\    --statsd=127.0.0.1:65535
+        \\    --file={data_file}"
+    ,
         .{
             .tigerbeetle = tigerbeetle,
             .trace_file = trace_file,

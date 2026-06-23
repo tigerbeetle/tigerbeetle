@@ -172,8 +172,11 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     // `--log-debug-replica` is explicitly enabled, to measure the performance hit from debug
     // logging and count the log lines.
     const benchmark_result, const benchmark_stderr = try shell.exec_stdout_stderr(
-        "./tigerbeetle benchmark --validate --checksum-performance --log-debug-replica " ++
-            "--file=datafile-devhub",
+        \\./tigerbeetle benchmark
+        \\    --validate --id-order=sequential
+        \\    --checksum-performance --log-debug-replica
+        \\    --file=datafile-devhub
+    ,
         .{},
     );
 
