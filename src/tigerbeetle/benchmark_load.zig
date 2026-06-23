@@ -1,14 +1,25 @@
-//! Start TigerBeetle clients to run a workload (described below) against a cluster while measuring
-//! observed latencies and throughput.
+//! Start TigerBeetle clients to run a workload against a cluster, measuring latency and throughput.
 //!
-//! The benchmark only generates valid data -- i.e., all accounts/transfers succeed.
+//! Workload Design:
 //!
-//! Workload steps:
-//! 1. Create accounts.
-//! 2. Create transfers.
-//! 3. Query account transfers (`get_account_transfers`).
-//! 4. Lookup accounts (when verification is enabled).
-//! 5. Lookup transfers (when verification is enabled).
+//! Without arguments, `tigerbeetle benchmark` runs the "canonical workload", representative of the
+//! expected real-world workload. It outputs two numbers, throughput and latency. Performance is
+//! multidimensional and parametric, so treat this as a lossy compression problem:
+//!
+//!     What is the most important to communicate given zero inputs and two outputs?
+//!
+//! This deafault behavior matters for use cases of quickly assessing particular hardware or a code
+//! change, it optimizes for human comprehension. The canonical workload isn't fixed, and default
+//! benchmark numbers are not necessarily comparable across different TigerBeetle versions.
+//!
+//! For debugging performance, it is useful to be able to simulate a wide variety of workloads, so
+//! `tigerbeetle benchmark` accepts a wide variety of arguments to override defaults.
+//!
+//! While TigerBeetle is optimized primarily for OLTP with extreme contention and almost exclusively
+//! read-modify-writes, it supports other workload profiles as well. Introduce symbolic names for
+//! workload kinds (e.g. `--read-heavy`), which desugar into low-level values of parameters, to
+//! capture our evolving understanding of real-world load patterns.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
