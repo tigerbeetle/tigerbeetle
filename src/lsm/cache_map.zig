@@ -293,14 +293,21 @@ pub fn CacheMapType(
                 assert(self.stash.count() <= self.options.stash_value_count_max);
 
                 const tombstone_object = tombstone_from_key(key);
+                if (self.stash.getKeyPtr(tombstone_object)) |stash_value| {
+                    const old_value = stash_value.*;
+                    stash_value.* = tombstone_object;
+                    break :stash_removed old_value;
+                }
+
+                assert(self.stash.count() < self.options.stash_value_count_max);
                 const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
+                assert(!entry.found_existing);
 
                 // Add a tombstone in the stash, indicating that the
                 // deletion happened and that the key should not be
                 // looked up in the immutable table or LSM tree.
-                defer entry.key_ptr.* = tombstone_object;
-
-                break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
+                entry.key_ptr.* = tombstone_object;
+                break :stash_removed null;
             };
 
             // Does not allow removing a key that is not in the cache.
