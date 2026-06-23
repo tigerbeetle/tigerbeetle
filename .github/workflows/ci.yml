@@ -53,6 +53,16 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - *checkout
       - *cache
+      - &select_xcode
+        # TODO(Zig): Xcode >26.3 breaks linking with Zig 0.14.1.
+        # Pin to Xcode 26.3 when it's available. Remove once we upgrade Zig.
+        # See https://codeberg.org/ziglang/zig/issues/31658
+        if: matrix.os == 'macos-latest'
+        run: |
+          if [ -d /Applications/Xcode_26.3.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.3.app
+          fi
+          xcodebuild -version
       - run: ./zig/download.ps1 && ./zig/zig build --summary all ci -- test
 
   test_aof:
@@ -122,6 +132,7 @@ jobs:
         run: | # Allow unshare for vortex.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - *select_xcode
       - if: matrix.language == 'dotnet'
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
         with: { dotnet-version: "${{ matrix.language_version }}" }
