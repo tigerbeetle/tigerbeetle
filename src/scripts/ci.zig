@@ -211,7 +211,8 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
     inline for (comptime std.enums.values(Language)) |language| {
         if ((language_requested == language or language_requested == null) and
-            language != .ruby) // The published tigerbeetle gem is not ours.
+            language != .ruby and // The published tigerbeetle gem is not ours.
+            language != .rust) // Rust isn't published yet.
         {
             const ci = @field(LanguageCI, @tagName(language));
 
