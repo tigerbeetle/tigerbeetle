@@ -275,7 +275,7 @@ test "benchmark/inspect smoke" {
         \\    --validate --id-order=sequential
         \\    --trace={trace_file}
         \\    --statsd=127.0.0.1:65535
-        \\    --file={data_file}"
+        \\    --file={data_file}
     ,
         .{
             .tigerbeetle = tigerbeetle,
