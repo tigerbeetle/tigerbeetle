@@ -8,8 +8,8 @@
 //!
 //!     What is the most important to communicate given zero inputs and two outputs?
 //!
-//! This deafault behavior matters for use cases of quickly assessing particular hardware or a code
-//! change, it optimizes for human comprehension. The canonical workload isn't fixed, and default
+//! This default behavior matters for quickly assessing particular hardware or code changes, and it
+//! optimizes for human comprehension. The canonical workload isn't fixed, and default
 //! benchmark numbers are not necessarily comparable across different TigerBeetle versions.
 //!
 //! For debugging performance, it is useful to be able to simulate a wide variety of workloads, so
