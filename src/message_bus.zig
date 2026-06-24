@@ -11,20 +11,173 @@ const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const RingBufferType = stdx.RingBufferType;
 const MessagePool = @import("message_pool.zig").MessagePool;
-const MessageNetwork = MessagePool.Message.Network;
-const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
+const Message = MessagePool.Message;
 const Header = vsr.Header;
+const HeaderEncrypted = vsr.HeaderEncrypted;
 const QueueType = @import("./queue.zig").QueueType;
 const Tracer = vsr.trace.Tracer;
-const KeyExchange = @import("encryption.zig").KeyExchangeInsecure;
+const encryption = @import("encryption.zig");
+const KeyExchange = encryption.KeyExchangeInsecure;
+const Peer = vsr.Peer;
+
+const RecvState = struct {
+    /// This is the buffer that contains data received from the network.
+    buffer: []u8 = &.{},
+    advanced_size: u32 = 0,
+    consumed_size: u32 = 0,
+    message_size: ?u32 = null,
+    outstanding: bool = false,
+
+    fn slice(recv: *RecvState) []u8 {
+        assert(recv.outstanding == false);
+        // Can we actually assert this?
+        assert(recv.advanced_size < recv.buffer.len);
+        recv.outstanding = true;
+        return recv.buffer[recv.advanced_size..];
+    }
+
+    fn advance(recv: *RecvState, size: u32) void {
+        assert(recv.outstanding == true);
+        assert(recv.advanced_size + size <= recv.buffer.len);
+        assert(size > 0);
+
+        recv.outstanding = false;
+        recv.advanced_size += size;
+    }
+
+    fn peek_header(recv: *RecvState) ?HeaderEncrypted {
+        assert(recv.advanced_size >= recv.consumed_size);
+        assert(recv.buffer.len >= recv.advanced_size);
+        assert(!recv.outstanding);
+        assert(recv.message_size == null);
+
+        if (recv.advanced_size - recv.consumed_size < @sizeOf(HeaderEncrypted)) {
+            return null;
+        }
+
+        const header_bytes = recv.buffer[recv.consumed_size..][0..@sizeOf(HeaderEncrypted)];
+        var header_encrypted: HeaderEncrypted = undefined;
+        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&header_encrypted), header_bytes);
+
+        return header_encrypted;
+    }
+
+    fn pop_message(recv: *RecvState) ?[]const u8 {
+        assert(recv.advanced_size >= recv.consumed_size);
+        assert(recv.buffer.len >= recv.advanced_size);
+        assert(!recv.outstanding);
+
+        if (recv.message_size == null) {
+            return null;
+        }
+
+        const size = recv.message_size.?;
+
+        if (recv.advanced_size - recv.consumed_size < size) {
+            return null;
+        }
+
+        assert(recv.consumed_size + size <= recv.advanced_size);
+
+        const message = recv.buffer[recv.consumed_size..][0..size];
+
+        recv.consumed_size += size;
+        return message;
+    }
+
+    fn copy_left(recv: *RecvState) void {
+        assert(recv.advanced_size >= recv.consumed_size);
+        assert(recv.message_size != null);
+        assert(!recv.outstanding);
+
+        const consumed = recv.consumed_size;
+        assert(consumed > 0);
+
+        stdx.copy_left(
+            .inexact,
+            u8,
+            recv.buffer[0..],
+            recv.buffer[consumed..recv.advanced_size],
+        );
+
+        recv.* = .{
+            .buffer = recv.buffer,
+            .advanced_size = recv.advanced_size - consumed,
+            .consumed_size = 0,
+            .message_size = null,
+            .outstanding = false,
+        };
+    }
+};
+
+const SendState = struct {
+    /// This is the buffer that contains data to be written to the network.
+    buffer: []u8 = &.{},
+    /// Number of bytes of the current message that have already been sent.
+    progress: u32 = 0,
+    /// Number of bytes requested to send via this connection.
+    requested: u32 = 0,
+};
+
+pub const MessageNetwork = struct {
+    context: ?*anyopaque,
+    buffer: []u8,
+};
+
+pub const HeaderCallbackResult = struct {
+    message_size: u32,
+};
+
+// TODO: revisit and think about if this should indicate if a handshake is completed.
+pub const MessageCallbackResult = struct {
+    peer: Peer,
+};
 
 pub fn MessageBusType(comptime IO: type) type {
-    // Slice points to a subslice of send_queue_buffer.
-    const SendQueue = RingBufferType(*MessageNetwork, .slice);
-
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
         client: u128,
+    };
+
+    const Connection = struct {
+        state: enum {
+            /// The connection is not in use, with peer set to `.unknown`.
+            free,
+            /// The connection has been reserved for an in progress accept operation,
+            /// with peer set to `.unknown`.
+            accepting,
+            /// The peer is a replica and a connect operation has been started
+            /// but not yet completed.
+            connecting,
+            /// The peer is fully connected and may be a client, replica, or unknown.
+            connected,
+            /// The connection is being terminated but cleanup has not yet finished.
+            terminating,
+        } = .free,
+        /// This is guaranteed to be valid only while state is connected.
+        /// It will be reset to null during the shutdown process and is always null if the
+        /// connection is unused
+        fd: ?IO.socket_t = null,
+
+        /// This completion is used for all recv operations.
+        /// It is also used for the initial connect when establishing a replica connection.
+        recv_completion: IO.Completion = undefined,
+
+        recv: RecvState = .{},
+
+        /// True exactly when the recv_completion has been submitted to the IO abstraction
+        /// but the callback has not yet been run.
+        recv_submitted: bool = false,
+
+        /// This completion is used for all send operations.
+        send_completion: IO.Completion = undefined,
+        /// True exactly when the send_completion has been submitted to the IO abstraction
+        /// but the callback has not yet been run.
+        send_submitted: bool = false,
+
+        send: SendState = .{},
+
+        peer: Peer = .unknown,
     };
 
     return struct {
@@ -47,30 +200,30 @@ pub fn MessageBusType(comptime IO: type) type {
         /// This is non-null exactly when an accept operation is submitted.
         accept_connection: ?*Connection = null,
 
-        /// The function used to decrypt the header and return it's size.
-        decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
-
-        /// The callback to be called when a message is received.
-        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
-
         /// SendQueue storage shared by all connections.
-        send_queue_buffer: []*MessageNetwork,
+        send_buffers: []u8,
+        recv_buffers: []u8,
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.state != .free).
         connections_used: u32 = 0,
-        connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
-            .name = null,
-        }),
-        resume_receive_next_tick: IO.Completion = undefined,
-        resume_receive_submitted: bool = false,
+
+        header_callback: *const fn (
+            context: *anyopaque,
+            header: HeaderEncrypted,
+        ) anyerror!u32,
+
+        message_callback: *const fn (
+            context: *anyopaque,
+            message: []const u8,
+        ) anyerror!Peer,
 
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
         replicas: []?*Connection,
         replicas_addresses: []Address,
         /// The number of outgoing `connect()` attempts for a given replica:
-        /// Reset to zero after a successful `on_connect()`.
+        /// Reset to zero after a successful `connect_callback()`.
         replicas_connect_attempts: []u64,
 
         /// Map from client id to the currently active connection for that client.
@@ -78,6 +231,8 @@ pub fn MessageBusType(comptime IO: type) type {
         /// efficient and to ensure old client connections are dropped if a new one
         /// is established.
         clients: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
+
+        handshakes: std.AutoHashMapUnmanaged(u128, *Connection) = .{},
 
         /// Used to apply jitter when calculating exponential backoff:
         /// Seeded with the process' replica index or client ID.
@@ -104,8 +259,14 @@ pub fn MessageBusType(comptime IO: type) type {
             allocator: mem.Allocator,
             process_id: ProcessID,
             message_pool: *MessagePool,
-            decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
-            on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+            header_callback: *const fn (
+                context: *anyopaque,
+                header: HeaderEncrypted,
+            ) anyerror!u32,
+            message_callback: *const fn (
+                context: *anyopaque,
+                message: []const u8,
+            ) anyerror!Peer,
             options: Options,
         ) !MessageBus {
             switch (process_id) {
@@ -120,38 +281,44 @@ pub fn MessageBusType(comptime IO: type) type {
                 .client => @intCast(options.configuration.len),
             };
 
-            const send_queue_max = switch (process_id) {
-                .replica => constants.connection_send_queue_max_replica,
-                .client => constants.connection_send_queue_max_client,
-            };
+            const send_buffer_size = 2 * constants.message_size_max;
 
-            const send_queue_buffer = try allocator.alloc(
-                *MessageNetwork,
-                connections_max * send_queue_max,
+            const send_buffers = try allocator.alloc(
+                u8,
+                connections_max * send_buffer_size,
             );
-            @memset(send_queue_buffer, undefined);
-            errdefer allocator.free(send_queue_buffer);
+            errdefer allocator.free(send_buffers);
+
+            const recv_buffers = try allocator.alloc(
+                u8,
+                connections_max * constants.message_size_max,
+            );
+            errdefer allocator.free(send_buffers);
 
             const connections = try allocator.alloc(Connection, connections_max);
             errdefer allocator.free(connections);
+
             for (connections, 0..) |*connection, index| {
-                connection.* = .{
-                    .send_queue = .{
-                        .buffer = send_queue_buffer[index * send_queue_max ..][0..send_queue_max],
-                    },
-                };
+                const send_buffer = send_buffers[index * send_buffer_size ..];
+                const recv_buffer = recv_buffers[index * constants.message_size_max ..];
+                connection.* = .{};
+                connection.send.buffer = send_buffer[0..send_buffer_size];
+                connection.recv.buffer = recv_buffer[0..constants.message_size_max];
             }
 
             const replicas = try allocator.alloc(?*Connection, options.configuration.len);
             errdefer allocator.free(replicas);
+
             @memset(replicas, null);
 
             const replicas_addresses = try allocator.alloc(Address, options.configuration.len);
             errdefer allocator.free(replicas_addresses);
+
             stdx.copy_disjoint(.exact, Address, replicas_addresses, options.configuration);
 
             const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
+
             @memset(replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_id) {
@@ -167,10 +334,11 @@ pub fn MessageBusType(comptime IO: type) type {
                     .replica => |index| @as(u128, index),
                     .client => |id| id,
                 },
-                .decrypt_header = decrypt_header,
-                .on_messages_callback = on_messages_callback,
-                .send_queue_buffer = send_queue_buffer,
+                .send_buffers = send_buffers,
+                .recv_buffers = recv_buffers,
                 .connections = connections,
+                .header_callback = header_callback,
+                .message_callback = message_callback,
                 .replicas = replicas,
                 .replicas_addresses = replicas_addresses,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -205,7 +373,9 @@ pub fn MessageBusType(comptime IO: type) type {
                     // `.accepting` would need different handling (no fd yet); only client-side
                     // bus shutdown is supported today, and clients never accept.
                     .accepting => assert(bus.process == .replica),
-                    .connecting, .connected, .authorized => {
+                    .connecting,
+                    .connected,
+                    => {
                         bus.terminate(connection, .shutdown);
                     },
                 }
@@ -227,36 +397,19 @@ pub fn MessageBusType(comptime IO: type) type {
                 bus.io.close_socket(fd);
             }
 
-            const send_queue_max = switch (bus.process) {
-                .replica => constants.connection_send_queue_max_replica,
-                .client => constants.connection_send_queue_max_client,
-            };
-            var send_queue_buffer_previous: ?[]*MessageNetwork = null;
             for (bus.connections) |*connection| {
                 if (connection.fd) |fd| {
                     bus.io.close_socket(fd);
                 }
-
-                if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
-                connection.recv_buffer = null;
-                while (connection.send_queue.pop()) |message| bus.unref(message);
-
-                assert(connection.send_queue.buffer.len == send_queue_max);
-                if (send_queue_buffer_previous) |previous| {
-                    assert(connection.send_queue.buffer.ptr == previous.ptr + previous.len);
-                } else {
-                    assert(connection.send_queue.buffer.ptr == bus.send_queue_buffer.ptr);
-                }
-                send_queue_buffer_previous = connection.send_queue.buffer;
             }
-            assert(bus.send_queue_buffer.ptr + bus.send_queue_buffer.len ==
-                send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
 
             allocator.free(bus.replicas_connect_attempts);
             allocator.free(bus.replicas_addresses);
             allocator.free(bus.replicas);
             allocator.free(bus.connections);
-            allocator.free(bus.send_queue_buffer);
+            allocator.free(bus.send_buffers);
+            allocator.free(bus.recv_buffers);
+
             bus.* = undefined;
         }
 
@@ -298,27 +451,6 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(bus.process == .replica);
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
-        }
-
-        pub fn trace_gauge(bus: *MessageBus) void {
-            if (bus.trace) |trace| {
-                var counts = std.enums.EnumArray(std.meta.Tag(vsr.Peer), u32).initFill(0);
-                for (bus.connections) |*connection| {
-                    if (connection.state == .connected) {
-                        counts.getPtr(connection.peer).* += 1;
-                    }
-                }
-
-                var counts_iterator = counts.iterator();
-                while (counts_iterator.next()) |entry| {
-                    trace.gauge(
-                        .{ .message_bus_connections = .{ .peer = entry.key } },
-                        entry.value.*,
-                    );
-                }
-
-                trace.gauge(.message_bus_connections_max, bus.connections.len);
-            }
         }
 
         // The same as tick, but asserts a client and avoids accept, allowing Zig's lazy semantics
@@ -378,15 +510,17 @@ pub fn MessageBusType(comptime IO: type) type {
             result: IO.AcceptError!IO.socket_t,
         ) void {
             assert(bus.process == .replica);
+            std.log.info("accept_callback: on replica: {d}", .{bus.process.replica});
 
             assert(bus.accept_connection != null);
             const connection: *Connection = bus.accept_connection.?;
             bus.accept_connection = null;
 
-            assert(connection.peer == .unknown);
             assert(connection.fd == null);
             assert(connection.state == .accepting);
-            defer assert(connection.state == .connected or connection.state == .free);
+            defer assert(connection.state == .connected or
+                connection.state == .free or
+                connection.state == .terminating);
 
             if (result) |fd| {
                 connection.state = .connected;
@@ -394,21 +528,13 @@ pub fn MessageBusType(comptime IO: type) type {
                 bus.connections_used += 1;
 
                 bus.assert_connection_initial_state(connection);
-                assert(connection.recv_buffer == null);
-                connection.recv_buffer = MessageBuffer.init(bus, bus.decrypt_header, bus.pool);
                 bus.recv(connection);
-                connection.key_exchange = .init(
-                    .responder,
-                    bus.process.replica,
-                    .replica,
-                );
                 // Don't start send loop yet --- on accept, we don't know which peer this is.
-                assert(connection.send_queue.empty());
                 assert(connection.state == .connected);
             } else |err| {
                 connection.state = .free;
                 // TODO: some errors should probably be fatal
-                log.warn("{}: on_accept: {}", .{ bus.id, err });
+                log.warn("{}: accept_callback: {}", .{ bus.id, err });
             }
         }
 
@@ -451,12 +577,13 @@ pub fn MessageBusType(comptime IO: type) type {
             log.info("{}: connect_to_replica: no free connection, disconnecting a client", .{
                 bus.id,
             });
-            for (bus.connections) |*connection| {
-                if (connection.peer == .client) {
-                    bus.terminate(connection, .shutdown);
-                    return;
-                }
-            }
+            // TODO: revisit
+            // for (bus.connections) |*connection| {
+            //     if (connection.peer == .known and connection.peer.known.peer == .client) {
+            //         bus.terminate(connection, .shutdown);
+            //         return;
+            //     }
+            // }
 
             log.info("{}: connect_to_replica: no free connection, disconnecting unknown peer", .{
                 bus.id,
@@ -508,9 +635,8 @@ pub fn MessageBusType(comptime IO: type) type {
             );
             attempts.* += 1;
 
-            log.debug("{}: connect_to_replica: connecting to={} after={}ms", .{
+            log.debug("{}: connect_to_replica: connecting after={}ms", .{
                 bus.id,
-                connection.peer.replica,
                 ms,
             });
 
@@ -545,14 +671,14 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .connecting);
             result catch unreachable;
 
-            log.debug("{}: on_connect_with_exponential_backoff: to={}", .{
+            log.debug("{}: connect_callback_with_exponential_backoff: ", .{
                 bus.id,
-                connection.peer.replica,
             });
 
             assert(!connection.recv_submitted);
             connection.recv_submitted = true;
 
+            assert(connection.peer == .replica);
             bus.io.connect(
                 *MessageBus,
                 bus,
@@ -583,52 +709,33 @@ pub fn MessageBusType(comptime IO: type) type {
             connection.state = .connected;
 
             result catch |err| {
-                log.warn("{}: on_connect: error to={} {}", .{
+                log.warn("{}: connect_callback: error {}", .{
                     bus.id,
-                    connection.peer.replica,
                     err,
                 });
                 bus.terminate(connection, .no_shutdown);
                 return;
             };
 
-            log.info("{}: on_connect: connected to={}", .{ bus.id, connection.peer.replica });
+            log.info("{}: connect_callback: connected", .{bus.id});
+            assert(connection.peer == .replica);
             bus.replicas_connect_attempts[connection.peer.replica] = 0;
 
             bus.assert_connection_initial_state(connection);
-            assert(connection.recv_buffer == null);
-            connection.recv_buffer = MessageBuffer.init(bus, bus.decrypt_header, bus.pool);
-            connection.key_exchange = .init(
-                .initiator,
-                bus.process.replica,
-                .replica,
-            );
-            const action = connection.key_exchange.?.feed(null);
-            bus.recv(connection);
-            switch (action) {
-                .send => |msg| {
-                    const message_network = create_message_with_body(bus.pool, std.mem.asBytes(&msg));
-                    defer bus.pool.unref(message_network);
 
-                    bus.send_message(connection, message_network);
-                },
-                else => unreachable,
-            }
             assert(connection.state == .connected);
         }
 
         fn assert_connection_initial_state(bus: *MessageBus, connection: *Connection) void {
             assert(bus.connections_used > 0);
 
-            assert(connection.peer == .unknown or connection.peer == .replica);
             assert(connection.state == .connected);
             assert(connection.fd != null);
 
             assert(connection.recv_submitted == false);
-            assert(connection.recv_buffer == null);
 
             assert(connection.send_submitted == false);
-            assert(connection.send_progress == 0);
+            assert(connection.send.progress == 0);
         }
 
         /// The recv loop.
@@ -637,7 +744,6 @@ pub fn MessageBusType(comptime IO: type) type {
         fn recv(bus: *MessageBus, connection: *Connection) void {
             assert(connection.state == .connected);
             assert(connection.fd != null);
-            assert(connection.recv_buffer != null);
 
             assert(!connection.recv_submitted);
             connection.recv_submitted = true;
@@ -648,10 +754,13 @@ pub fn MessageBusType(comptime IO: type) type {
                 recv_callback,
                 &connection.recv_completion,
                 connection.fd.?,
-                connection.recv_buffer.?.recv_slice(),
+                connection.recv.slice(),
             );
         }
 
+        /// Attempt moving messages from recv buffer into replica for processing. Called when recv
+        /// syscall completes, or when a replica signals readiness to consume previously suspended
+        /// messages.
         fn recv_callback(
             bus: *MessageBus,
             completion: *IO.Completion,
@@ -668,407 +777,191 @@ pub fn MessageBusType(comptime IO: type) type {
             }
             assert(connection.state == .connected);
             const bytes_received = result catch |err| {
-                // TODO: maybe don't need to close on *every* error
-                log.warn("{}: on_recv: from={} {}", .{ bus.id, connection.peer, err });
+                // On any error the framing becomes unknown.
+                // The only winning move is not to play.
+                log.warn("{}: recv_callback: read error {}", .{ bus.id, err });
                 bus.terminate(connection, .shutdown);
                 return;
             };
+
+            std.log.info("recv_callback: received {d} bytes", .{bytes_received});
+
             // No bytes received means that the peer closed its side of the connection.
             if (bytes_received == 0) {
-                log.info("{}: on_recv: from={} orderly shutdown", .{ bus.id, connection.peer });
+                log.info("{}: recv_callback: orderly shutdown", .{bus.id});
                 bus.terminate(connection, .no_shutdown);
                 return;
             }
-            assert(bytes_received <= constants.message_size_max);
-            assert(connection.recv_buffer != null);
-            connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
 
-            blk: {
-                if (connection.key_exchange) |*kex| {
-                    const buffer = &connection.recv_buffer.?;
-                    if (buffer.has_message()) {
-                        while (buffer.next_header()) |header| {
-                            assert(header.valid_checksum());
-                            const message = buffer.consume_message(bus.pool, &header);
-                            defer bus.unref(message);
+            assert(bytes_received <= connection.recv.buffer.len);
 
-                            const kex_message = std.mem.bytesToValue(
-                                KeyExchange.KeyExchangeMessage,
-                                message.body_used(),
-                            );
-                            switch (kex_message.peer_type) {
-                                .replica => {
-                                    connection.peer = .{
-                                        .replica = @intCast(kex_message.peer_id),
-                                    };
-                                },
-                                else => unreachable,
-                            }
+            connection.recv.advance(@intCast(bytes_received));
 
-                            const action = kex.feed(kex_message);
-                            switch (action) {
-                                .send => |msg| {
-                                    const message_network = create_message_with_body(
-                                        bus.pool,
-                                        std.mem.asBytes(&msg),
-                                    );
-                                    defer bus.pool.unref(message_network);
-
-                                    bus.send_message(connection, message_network);
-
-                                    const action_done = kex.feed(null);
-                                    assert(action_done == .done);
-                                    connection.key_exchange = null;
-                                    connection.key_exchange_result = action_done.done;
-                                    break :blk;
-                                },
-                                .recv => {},
-                                .done => |key_exchange_result| {
-                                    connection.key_exchange = null;
-                                    connection.key_exchange_result = key_exchange_result;
-                                    break :blk;
-                                },
-                                .terminate => {
-                                    log.warn(
-                                        "{}: on_recv: from={} terminating connection: invalid key exchange",
-                                        .{
-                                            bus.id,
-                                            connection.peer,
-                                        },
-                                    );
-                                    bus.terminate(connection, .no_shutdown);
-                                    return;
-                                },
-                            }
-
-                            std.log.info("received KEX message: {}", .{message.metadata});
-                        }
-                    }
-
-                    if (connection.recv_buffer.?.invalid) |reason| {
-                        log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
-                            bus.id,
-                            connection.peer,
-                            @tagName(reason),
-                        });
-                        bus.terminate(connection, .no_shutdown);
+            if (connection.recv.message_size == null) {
+                if (connection.recv.peek_header()) |header_encrypted| {
+                    const message_size = bus.header_callback(bus, header_encrypted) catch |err| {
+                        log.warn("{}: recv_callback: err {}", .{ bus.id, err });
+                        bus.terminate(connection, .shutdown);
                         return;
-                    }
-
-                    if (connection.recv_buffer.?.has_message()) {
-                        maybe(connection.state == .terminating);
-                        bus.connections_suspended.push(connection);
-                    } else {
-                        if (connection.state == .terminating) {
-                            bus.terminate_join(connection);
-                        } else {
-                            bus.recv(connection);
-                        }
-                    }
-
-                    return;
+                    };
+                    connection.recv.message_size = message_size;
                 }
             }
 
-            switch (bus.process) {
-                // Replicas may forward messages from clients or from other replicas so we
-                // may receive messages from a peer before we know who they are:
-                // This has the same effect as an asymmetric network where, for a short time
-                // bounded by the time it takes to ping, we can hear from a peer before we
-                // can send back to them.
-                .replica => {
-                    while (connection.recv_buffer.?.next_header()) |header| {
-                        if (bus.recv_update_peer(connection, header.peer_type())) {
-                            connection.recv_buffer.?.suspend_message(&header);
-                        } else {
-                            log.warn("{}: on_recv: invalid peer transition {any} -> {any}", .{
+            if (connection.recv.pop_message()) |message| {
+                const peer = bus.message_callback(bus, message) catch |err| {
+                    log.warn("{}: recv_callback: {}", .{ bus.id, err });
+                    bus.terminate(connection, .shutdown);
+                    return;
+                };
+
+                switch (peer) {
+                    .replica => |replica_idx| {
+                        if (replica_idx >= constants.replicas_max) {
+                            log.warn("{}: recv_callback: illegal replica id: {d}", .{
                                 bus.id,
-                                connection.peer,
-                                header.peer_type(),
+                                replica_idx,
                             });
-                            connection.recv_buffer.?.invalidate(.misdirected);
+                            bus.terminate(connection, .shutdown);
+                            return;
                         }
-                    }
-                },
-                // The client connects only to replicas and should set peer when connecting:
-                .client => assert(connection.peer == .replica),
+                    },
+                    else => {},
+                }
+
+                switch (connection.peer.transition(peer)) {
+                    .update => {
+                        connection.peer = peer;
+                        switch (connection.peer) {
+                            .client => |client_id| {
+                                const client_gop = bus.clients.getOrPutAssumeCapacity(client_id);
+                                client_gop.value_ptr.* = connection;
+                            },
+                            .replica => |replica_idx| {
+                                assert(replica_idx < constants.replicas_max);
+                                bus.replicas[replica_idx] = connection;
+                            },
+                            else => {},
+                        }
+                    },
+                    .retain => {},
+                    .reject => {
+                        log.warn("{}: recv_callback: bad peer transition", .{bus.id});
+                        bus.terminate(connection, .shutdown);
+                    },
+                }
+
+                connection.recv.copy_left();
             }
-            bus.recv_buffer_drain(connection);
+
+            bus.recv(connection);
         }
 
-        fn recv_update_peer(bus: *MessageBus, connection: *Connection, peer: vsr.Peer) bool {
+        pub fn send_message_to_client(
+            bus: *MessageBus,
+            client_id: u128,
+            size: u32,
+        ) ?[]u8 {
             assert(bus.process == .replica);
             assert(bus.clients.capacity() > 0);
 
-            assert(bus.connections_used > 0);
-
-            assert(connection.state == .connected);
-            assert(connection.fd != null);
-            assert(connection.recv_buffer != null);
-
-            switch (vsr.Peer.transition(connection.peer, peer)) {
-                .retain => return true,
-                .reject => return false,
-                .update => {},
+            if (bus.clients.get(client_id)) |connection| {
+                return bus.send_message(connection, size);
+            } else {
+                log.warn(
+                    "{}: send_message_to_client: no connection to={}",
+                    .{ bus.id, client_id },
+                );
+                return null;
             }
-
-            switch (peer) {
-                .replica => |replica_index| {
-                    if (replica_index >= bus.replicas_addresses.len) return false;
-
-                    // Allowed transitions:
-                    // * unknown        → replica
-                    // * client_likely  → replica
-                    assert(connection.peer == .unknown or connection.peer == .client_likely);
-
-                    // If there is a connection to this replica, terminate and replace it.
-                    if (bus.replicas[replica_index]) |old| {
-                        assert(old != connection);
-                        assert(old.peer == .replica);
-                        assert(old.peer.replica == replica_index);
-                        assert(old.state != .free);
-                        if (old.state != .terminating) bus.terminate(old, .shutdown);
-                    }
-
-                    switch (connection.peer) {
-                        .unknown => {},
-                        // If this connection was misclassified to a client due to a forwarded
-                        // request message (see `peer_type` in message_header.zig), it may
-                        // reside in the clients map. If so, it must be popped and mapped to the
-                        // correct replica.
-                        .client_likely => |existing| {
-                            if (bus.clients.get(existing)) |existing_connection| {
-                                if (existing_connection == connection) {
-                                    assert(bus.clients.remove(existing));
-                                }
-                            }
-                        },
-                        .replica, .client => unreachable,
-                    }
-
-                    bus.replicas[replica_index] = connection;
-                    log.info("{}: set_and_verify_peer: connection from replica={}", .{
-                        bus.id,
-                        replica_index,
-                    });
-                },
-                .client => |client_id| {
-                    assert(client_id != 0);
-
-                    // Allowed transitions:
-                    // * unknown        → client
-                    // * client_likely  → client
-                    assert(connection.peer == .unknown or connection.peer == .client_likely);
-
-                    if (connection.peer == .client_likely) {
-                        assert(connection.peer.client_likely == client_id);
-                    }
-
-                    // If there is a connection to this client, terminate and replace it.
-                    const result = bus.clients.getOrPutAssumeCapacity(client_id);
-                    if (result.found_existing) {
-                        const old = result.value_ptr.*;
-                        assert(old.state == .connected or old.state == .terminating);
-                        if (connection.peer == .unknown) assert(old != connection);
-
-                        switch (old.peer) {
-                            .client, .client_likely => |client| {
-                                assert(client == client_id);
-                            },
-                            .unknown, .replica => unreachable,
-                        }
-
-                        if (old != connection and old.state != .terminating) {
-                            bus.terminate(old, .shutdown);
-                        }
-                    }
-
-                    result.value_ptr.* = connection;
-                    log.info("{}: set_and_verify_peer: connection from client={}", .{
-                        bus.id,
-                        client_id,
-                    });
-                },
-
-                .client_likely => |client_id| {
-                    assert(client_id != 0);
-                    switch (connection.peer) {
-                        .unknown => {
-                            // If the peer transitions from unknown -> client_likely, either
-                            // a replica or a client may be sending a request message. Instead
-                            // of terminating an existing connection and replacing it, if one
-                            // exists in the client map, we wait for it to get resolved to
-                            // either a replica or a client.
-                            const result =
-                                bus.clients.getOrPutAssumeCapacity(client_id);
-                            if (!result.found_existing) {
-                                result.value_ptr.* = connection;
-                                log.info("{}: set_and_verify_peer: connection from " ++
-                                    "client_likely={}", .{ bus.id, client_id });
-                            }
-                        },
-                        .replica, .client, .client_likely => unreachable,
-                    }
-                },
-                .unknown => {},
-            }
-
-            connection.peer = peer;
-
-            return true;
         }
 
-        /// Attempt moving messages from recv buffer into replica for processing. Called when recv
-        /// syscall completes, or when a replica signals readiness to consume previously suspended
-        /// messages.
-        fn recv_buffer_drain(bus: *MessageBus, connection: *Connection) void {
-            assert(connection.recv_buffer != null);
+        pub fn send_message_handshake(
+            bus: *MessageBus,
+            handshake_id: u128,
+            size: u32,
+        ) ?[]u8 {
+            assert(bus.process == .replica);
+            assert(bus.clients.capacity() > 0);
 
-            if (connection.recv_buffer.?.has_message()) {
-                bus.on_messages_callback(bus, &connection.recv_buffer.?);
-            }
-
-            if (connection.recv_buffer.?.invalid) |reason| {
-                log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
-                    bus.id,
-                    connection.peer,
-                    @tagName(reason),
-                });
-                bus.terminate(connection, .no_shutdown);
-                return;
-            }
-
-            if (connection.recv_buffer.?.has_message()) {
-                maybe(connection.state == .terminating);
-                bus.connections_suspended.push(connection);
+            if (bus.clients.get(handshake_id)) |connection| {
+                return bus.send_message(connection, size);
             } else {
-                if (connection.state == .terminating) {
-                    bus.terminate_join(connection);
-                } else {
-                    bus.recv(connection);
-                }
+                log.warn(
+                    "{}: send_message_to_handshake: no connection to={}",
+                    .{ bus.id, handshake_id },
+                );
+                return null;
             }
         }
 
         pub fn send_message_to_replica(
             bus: *MessageBus,
             replica: u8,
-            message: *MessageNetwork,
-        ) void {
+            size: u32,
+        ) ?[]u8 {
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (bus.process == .replica) assert(replica != bus.process.replica);
 
             if (bus.replicas[replica]) |connection| {
-                bus.send_message(connection, message);
+                return bus.send_message(connection, size);
             } else {
-                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
+                log.warn("{}: send_message_to_replica: no connection to={}", .{
                     bus.id,
                     replica,
-                    message.header,
                 });
+                return null;
             }
         }
 
-        /// Try to send the message to the client with the given id.
-        /// If the client is not currently connected, the message is silently dropped.
-        pub fn send_message_to_client(
+        fn send_message(
             bus: *MessageBus,
-            client_id: u128,
-            message: *MessageNetwork,
-        ) void {
-            assert(bus.process == .replica);
-            assert(bus.clients.capacity() > 0);
-
-            if (bus.clients.get(client_id)) |connection| {
-                bus.send_message(connection, message);
-            } else {
-                log.debug(
-                    "{}: send_message_to_client: no connection to={}",
-                    .{ bus.id, client_id },
-                );
-            }
-        }
-
-        /// Add a message to the connection's send queue, starting a send operation
-        /// if the queue was previously empty.
-        fn send_message(bus: *MessageBus, connection: *Connection, message: *MessageNetwork) void {
-            assert(connection.peer != .unknown);
-
-            switch (connection.state) {
-                .connected, .connecting => {},
-                .terminating => return,
-                .free, .accepting, .authorized => unreachable,
-            }
-            if (connection.send_queue.full()) {
-                log.info("{}: send_message: to={} queue full, dropping command={s}", .{
+            connection: *Connection,
+            size: u32,
+        ) ?[]u8 {
+            if (size > connection.send.buffer.len - connection.send.requested) {
+                log.debug("{}: acquire: out of memory for connection to={}", .{
                     bus.id,
                     connection.peer,
-                    @tagName(message.header.command),
                 });
-                return;
+                return null;
             }
-            connection.send_queue.push_assume_capacity(message.ref());
-            // If the connection has not yet been established we can't send yet.
-            // Instead on_connect() will call send().
-            if (connection.state == .connecting) {
-                assert(connection.peer == .replica);
-                return;
+
+            const buffer = connection.send.buffer[connection.send.requested..];
+            connection.send.requested += size;
+
+            if (!connection.send_submitted) {
+                bus.issue_send(connection);
             }
-            // If there is no send operation currently in progress, start one.
-            if (!connection.send_submitted) bus.send(connection);
+
+            return buffer[0..size];
         }
 
         /// Send loop.
         ///
         /// Kickstarted by `connect` and loops onto itself until all enqueue messages are sent.
         /// `accept` doesn't start the send loop because it doesn't know the identity of the peer.
-        fn send(bus: *MessageBus, connection: *Connection) void {
-            assert(connection.peer != .unknown);
+        fn issue_send(bus: *MessageBus, connection: *Connection) void {
             assert(connection.state == .connected);
             assert(connection.fd != null);
             assert(!connection.send_submitted);
 
-            bus.send_now(connection);
+            if (connection.send.requested == connection.send.progress) {
+                connection.send.requested = 0;
+                connection.send.progress = 0;
+                return;
+            }
 
-            const message = connection.send_queue.head() orelse
-                return; // Nothing more to send, break out of the send loop.
             connection.send_submitted = true;
+
             bus.io.send(
                 *MessageBus,
                 bus,
                 send_callback,
                 &connection.send_completion,
                 connection.fd.?,
-                message.buffer[connection.send_progress..message.size()],
+                connection.send.buffer[connection.send.progress..connection.send.requested],
             );
-        }
-
-        // Optimization/fast path: try to immediately copy the send queue over to the in-kernel
-        // send buffer, falling back to asynchronous send if that's not possible.
-        fn send_now(bus: *MessageBus, connection: *Connection) void {
-            assert(connection.state == .connected);
-            assert(connection.fd != null);
-            assert(!connection.send_submitted);
-
-            for (0..connection.send_queue.count) |_| {
-                const message = connection.send_queue.head().?;
-                assert(connection.send_progress < message.size());
-                const write_size = bus.io.send_now(
-                    connection.fd.?,
-                    message.buffer[connection.send_progress..message.size()],
-                ) orelse return;
-                assert(write_size <= constants.message_size_max);
-                connection.send_progress += @intCast(write_size);
-                assert(connection.send_progress <= message.size());
-                if (connection.send_progress == message.size()) {
-                    _ = connection.send_queue.pop();
-                    bus.unref(message);
-                    connection.send_progress = 0;
-                } else {
-                    assert(connection.send_progress < message.size());
-                    return;
-                }
-            }
         }
 
         fn send_callback(
@@ -1081,32 +974,50 @@ pub fn MessageBusType(comptime IO: type) type {
             );
             assert(connection.send_submitted);
             connection.send_submitted = false;
-            assert(connection.peer != .unknown);
+
             if (connection.state == .terminating) {
                 bus.terminate_join(connection);
                 return;
             }
             assert(connection.state == .connected);
+
             const write_size = result catch |err| {
                 // TODO: maybe don't need to close on *every* error
-                log.warn("{}: on_send: to={} {}", .{
+                log.warn("{}: send_callback: {}", .{
                     bus.id,
-                    connection.peer,
                     err,
                 });
                 bus.terminate(connection, .shutdown);
                 return;
             };
+
+            std.log.info("send_callback: sent {d} bytes", .{write_size});
+
             assert(write_size <= constants.message_size_max);
-            connection.send_progress += @intCast(write_size);
-            assert(connection.send_progress <= connection.send_queue.head().?.size());
-            // If the message has been fully sent, move on to the next one.
-            if (connection.send_progress == connection.send_queue.head().?.size()) {
-                connection.send_progress = 0;
-                const message = connection.send_queue.pop().?;
-                bus.unref(message);
+            connection.send.progress += @intCast(write_size);
+            assert(connection.send.progress <= connection.send.requested);
+
+            // If all bytes have been sent, reset the state.
+            if (connection.send.progress == connection.send.requested) {
+                connection.send.progress = 0;
+                connection.send.requested = 0;
+                return;
             }
-            bus.send(connection);
+
+            // Otherwise, left align the send buffer and submit another send.
+            assert(connection.send.requested > connection.send.progress);
+            const remaining_size = connection.send.requested - connection.send.progress;
+
+            stdx.copy_left(
+                .exact,
+                u8,
+                connection.send.buffer[0..remaining_size],
+                connection.send.buffer[connection.send.progress..][0..remaining_size],
+            );
+
+            connection.send.requested -= connection.send.progress;
+            connection.send.progress = 0;
+            bus.issue_send(connection);
         }
 
         /// Clean up an active connection and reset it to its initial, unused, state.
@@ -1171,9 +1082,6 @@ pub fn MessageBusType(comptime IO: type) type {
             // Even if there's no active physical IO in progress, we want to wait until all
             // messages already received are consumed, to prevent graceful termination of
             // connection from dropping messages.
-            if (connection.recv_buffer) |*receive_buffer| {
-                if (receive_buffer.has_message()) return;
-            }
 
             bus.terminate_close(connection);
         }
@@ -1182,17 +1090,12 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .terminating);
             assert(!connection.recv_submitted);
             assert(!connection.send_submitted);
-            if (connection.recv_buffer) |receive_buffer| assert(!receive_buffer.has_message());
             assert(connection.fd != null);
 
             connection.send_submitted = true;
             connection.recv_submitted = true;
+
             // We can free resources now that there is no longer any I/O in progress.
-            while (connection.send_queue.pop()) |message| {
-                bus.unref(message);
-            }
-            if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
-            connection.recv_buffer = null;
             const fd = connection.fd.?;
             connection.fd = null;
             // It's OK to use the send completion here as we know that no send
@@ -1217,16 +1120,13 @@ pub fn MessageBusType(comptime IO: type) type {
             assert(connection.state == .terminating);
             assert(connection.recv_submitted);
             assert(connection.send_submitted);
-            assert(connection.recv_buffer == null);
-            assert(connection.send_queue.empty());
+            // TODO add assertions
             assert(connection.fd == null);
-            assert(!bus.connections_suspended.contains(connection));
 
             result catch |err| {
-                log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
+                log.warn("{}: on_close:  {}", .{ bus.id, err });
             };
 
-            // Reset the connection to its initial state.
             switch (connection.peer) {
                 .unknown => {},
                 .client, .client_likely => |client_id| {
@@ -1252,13 +1152,19 @@ pub fn MessageBusType(comptime IO: type) type {
                         stdx.maybe(bus.replicas[replica] == null);
                     }
                 },
-            }
-            bus.connections_used -= 1;
-            connection.* = .{
-                .send_queue = .{
-                    .buffer = connection.send_queue.buffer,
+                .handshaking => |handshake_id| {
+                    _ = handshake_id;
+                    // TODO: same as client
                 },
-            };
+            }
+
+            // Reset the connection to its initial state.
+            bus.connections_used -= 1;
+            const send_buffer = connection.send.buffer;
+            const recv_buffer = connection.recv.buffer;
+            connection.* = .{};
+            connection.send.buffer = send_buffer;
+            connection.recv.buffer = recv_buffer;
         }
 
         pub fn get_message(
@@ -1274,103 +1180,24 @@ pub fn MessageBusType(comptime IO: type) type {
         pub fn unref(bus: *MessageBus, message: anytype) void {
             bus.pool.unref(message);
         }
-
-        pub fn resume_needed(bus: *MessageBus) bool {
-            if (bus.connections_suspended.empty()) return false;
-            if (bus.resume_receive_submitted) return false;
-            return true;
-        }
-
-        pub fn resume_receive(bus: *MessageBus) void {
-            if (!bus.resume_needed()) return;
-
-            bus.resume_receive_submitted = true;
-            bus.io.next_tick(
-                *MessageBus,
-                bus,
-                ready_to_receive_callback,
-                &bus.resume_receive_next_tick,
-                .vsr,
-            );
-        }
-
-        fn ready_to_receive_callback(
-            bus: *MessageBus,
-            _: *IO.Completion,
-            _: IO.NextTickResult,
-        ) void {
-            assert(bus.resume_receive_submitted);
-            bus.resume_receive_submitted = false;
-            maybe(bus.connections_suspended.empty());
-
-            // Steal the queue to avoid an infinite loop.
-            var connections_suspended = bus.connections_suspended;
-            bus.connections_suspended.reset();
-
-            while (connections_suspended.pop()) |connection| {
-                assert(connection.recv_buffer != null);
-                assert(connection.recv_buffer.?.advance_size >= @sizeOf(vsr.Header));
-                assert(connection.recv_buffer.?.has_message());
-                bus.recv_buffer_drain(connection);
-            }
-        }
-
-        /// Used to send/receive messages to/from a client or fellow replica.
-        const Connection = struct {
-            /// The peer is determined by inspecting all message headers received on this
-            /// connection. If the peer changes unexpectedly (for example, due to a misdirected
-            /// message), we terminate the connection.
-            peer: vsr.Peer = .unknown,
-
-            key_exchange: ?KeyExchange = null,
-
-            key_exchange_result: ?KeyExchange.KeyExchangeResult = null,
-
-            state: enum {
-                /// The connection is not in use, with peer set to `.unknown`.
-                free,
-                /// The connection has been reserved for an in progress accept operation,
-                /// with peer set to `.unknown`.
-                accepting,
-                /// The peer is a replica and a connect operation has been started
-                /// but not yet completed.
-                connecting,
-                /// The peer is fully connected and may be a client, replica, or unknown.
-                connected,
-                authorized,
-                /// The connection is being terminated but cleanup has not yet finished.
-                terminating,
-            } = .free,
-            /// This is guaranteed to be valid only while state is connected.
-            /// It will be reset to null during the shutdown process and is always null if the
-            /// connection is unused (i.e. peer == .unknown).
-            fd: ?IO.socket_t = null,
-
-            /// This completion is used for all recv operations.
-            /// It is also used for the initial connect when establishing a replica connection.
-            recv_completion: IO.Completion = undefined,
-            /// True exactly when the recv_completion has been submitted to the IO abstraction
-            /// but the callback has not yet been run.
-            recv_submitted: bool = false,
-            recv_buffer: ?MessageBuffer = null,
-
-            /// This completion is used for all send operations.
-            send_completion: IO.Completion = undefined,
-            /// True exactly when the send_completion has been submitted to the IO abstraction
-            /// but the callback has not yet been run.
-            send_submitted: bool = false,
-            /// Number of bytes of the current message that have already been sent.
-            send_progress: u32 = 0,
-            /// The queue of messages to send to the client or replica peer.
-            send_queue: SendQueue,
-            /// For connections_suspended.
-            link: QueueType(Connection).Link = .{},
-        };
     };
 }
 
-fn create_message_with_body(message_pool: *MessagePool, body: []const u8) *MessageNetwork {
-    assert(body.len <= constants.message_body_size_max);
+fn create_message_from_command(message_pool: *MessagePool, prng: *stdx.PRNG, comptime command: vsr.Command) *Message {
+    const message = message_pool.get_message(command).base();
+
+    const message_header: *vsr.Header =
+        @alignCast(std.mem.bytesAsValue(vsr.Header, message.buffer[0..@sizeOf(vsr.Header)]));
+
+    message_header.* = random_header(prng, command);
+
+    message.header.set_checksum_body(&.{});
+    message.header.set_checksum();
+    return message;
+}
+
+fn create_message_with_body(message_pool: *MessagePool, body: []const u8) *Message {
+    assert(body.len <= constants.message_message_size_max);
     const message = message_pool.get_message(.reserved).base();
 
     const message_header: *vsr.Header =
@@ -1399,7 +1226,7 @@ fn create_message_with_body(message_pool: *MessagePool, body: []const u8) *Messa
             .reserved_command = @splat(0),
         };
 
-    const message_network: *MessageNetwork = @ptrCast(message);
+    const message_network: *Message = @ptrCast(message);
     message_network.metadata = .{
         .size_value = message.header.size,
         .command_value = message.header.command,
@@ -1432,10 +1259,17 @@ fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
 }
 
 test "MessageBus unit test" {
-    std.testing.log_level = .info;
+    std.testing.log_level = .debug;
     const IO = @import("message_bus_fuzz.zig").IO;
     const MessageBus = MessageBusType(IO);
     const gpa = std.testing.allocator;
+
+    const Parent = struct {
+        message_pool: *MessagePool,
+        session: *encryption.EncryptionTransit,
+        header: ?Header,
+        bus: MessageBus,
+    };
 
     var message_pool = try MessagePool.init_capacity(gpa, 128);
     defer message_pool.deinit(gpa);
@@ -1465,34 +1299,51 @@ test "MessageBus unit test" {
         try std.net.Address.parseIp4("127.0.0.1", 3001),
     };
 
-    const cb1 = struct {
-        fn decrypt_header(context: ?*anyopaque, header: *const Header) anyerror!Header {
-            _ = context;
-            if (!header.valid_checksum()) {
-                return error.InvalidHeader;
-            }
-            return header.*;
-        }
-    }.decrypt_header;
+    const header_callback = struct {
+        fn header_callback(context: *anyopaque, header: HeaderEncrypted) anyerror!HeaderCallbackResult {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const parent: *Parent = @fieldParentPtr("bus", message_bus);
+            std.log.info("received header {} for context {*}", .{ header, context });
+            const session = parent.session;
+            assert(session.established());
 
-    const cb2 = struct {
-        fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-            while (buffer.next_header()) |header| {
-                assert(header.valid_checksum());
-                const message = buffer.consume_message(message_bus.pool, &header);
-                defer message_bus.unref(message);
+            const header_decrypted = try session.decrypt_header(&header);
+            parent.header = header_decrypted;
 
-                std.log.info("received message: {}", .{message.metadata});
-            }
+            return .{ .peer = session.other(), .message_size = @sizeOf(HeaderEncrypted) };
         }
-    }.on_messages_callback;
+    }.header_callback;
+
+    const message_callback = struct {
+        pub fn message_callback(
+            context: *anyopaque,
+            body_encrypted: []const u8,
+        ) anyerror!MessageCallbackResult {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const parent: *Parent = @fieldParentPtr("bus", message_bus);
+            const session = parent.session;
+            assert(session.established());
+            assert(parent.header != null);
+
+            const message = parent.message_pool.get_message(null);
+            defer parent.message_pool.unref(message);
+
+            try session.decrypt_body(message, &parent.header.?, body_encrypted);
+
+            std.log.info("Decrypted body", .{});
+            parent.header = null;
+        }
+    }.message_callback;
+
+    var session1 = encryption.EncryptionTransit.connect(.{ .self_id = 0, .self_peer = .replica, .other_id = 1, .other_peer = .replica });
+    var session2 = encryption.EncryptionTransit.accept(session1.routing_id, 1, .replica);
 
     var bus1 = try MessageBus.init(
         gpa,
         .{ .replica = 0 },
         &message_pool,
-        cb1,
-        cb2,
+        header_callback,
+        message_callback,
         .{
             .configuration = configuration,
             .io = &io,
@@ -1506,8 +1357,8 @@ test "MessageBus unit test" {
         gpa,
         .{ .replica = 1 },
         &message_pool,
-        cb1,
-        cb2,
+        header_callback,
+        message_callback,
         .{
             .configuration = configuration,
             .io = &io,
@@ -1517,28 +1368,45 @@ test "MessageBus unit test" {
     );
     defer bus2.deinit(gpa);
 
-    const message = message_pool.get_message(.reserved).base();
-    defer message_pool.unref(message);
-
-    const message_header: *vsr.Header =
-        @alignCast(std.mem.bytesAsValue(vsr.Header, message.buffer[0..@sizeOf(vsr.Header)]));
-
-    const message_body_size: u32 = prng.int_inclusive(u32, constants.message_body_size_max);
-    const message_body = message.buffer[@sizeOf(vsr.Header)..][0..message_body_size];
-
-    message_header.* = random_header(&prng, .prepare);
-    message_header.size += message_body_size;
-    prng.fill(message_body);
-
-    const message_network: *MessageNetwork = @ptrCast(message);
-    message_network.metadata = .{
-        .size_value = message.header.size,
-        .command_value = message.header.command,
+    const parent1: Parent = .{
+        .message_pool = &message_pool,
+        .session = &session1,
+        .header = null,
+        .bus = bus1,
     };
 
-    message_network.header.set_checksum_body(message_network.body_used());
-    message_network.header.set_checksum();
-    message_network.header = undefined;
+    const parent2: Parent = .{
+        .message_pool = &message_pool,
+        .session = &session2,
+        .header = null,
+        .bus = bus2,
+    };
+
+    _ = parent1;
+    _ = parent2;
+
+    var step = session1.handshake(null);
+    var is_one: bool = false;
+    while (!session1.established() or !session2.established()) {
+        switch (step.status) {
+            .handshaking, .established => {},
+            .failed => unreachable,
+        }
+
+        if (is_one) {
+            step = session1.handshake(step.send);
+        } else {
+            step = session2.handshake(step.send);
+        }
+        is_one = !is_one;
+    }
+
+    std.log.info("session1 key id: {x}", .{session1.state.established.key_id});
+    std.log.info("session1 key_send_header : {any}", .{session1.state.established.key_send_header});
+    std.log.info("session1 key_recv_header : {any}", .{session1.state.established.key_recv_header});
+    std.log.info("session2 key id: {x}", .{session2.state.established.key_id});
+    std.log.info("session2 key_send_header : {any}", .{session2.state.established.key_send_header});
+    std.log.info("session2 key_recv_header : {any}", .{session2.state.established.key_recv_header});
 
     try bus1.listen();
     try bus2.listen();
@@ -1549,11 +1417,161 @@ test "MessageBus unit test" {
         bus2.tick();
     }
 
-    bus1.send_message_to_replica(1, message_network);
+    const message = create_message_from_command(&message_pool, &prng, .ping);
+    defer message_pool.unref(message);
+
+    const message_network = bus1.send_message_to_replica(1, message.header.size) orelse unreachable;
+
+    session1.encrypt_message(message_network.buffer, message);
+
+    const header_encrypted: *HeaderEncrypted = @alignCast(std.mem.bytesAsValue(HeaderEncrypted, message_network.buffer[0..@sizeOf(HeaderEncrypted)]));
+    std.log.info("header after encryption: {}", .{header_encrypted});
+
+    bus1.send(message_network);
 
     for (0..1000) |_| {
         try io.run();
         bus1.tick();
         bus2.tick();
+    }
+}
+
+test "RecvState fuzz" {
+    // Generate a byte buffer with a bunch of prepares side-by-side.
+    // Optionally corrupt a single bit in the buffer.
+    // Feed the buffer in chunks of varying length to the MessageBuffer, verify that all messages
+    // are received unless a fault is detected.
+    const messages_max = 100;
+
+    var prng = stdx.PRNG.from_seed_testing();
+    const gpa = std.testing.allocator;
+
+    var buffer: []u8 = try gpa.alloc(u8, 5 * constants.message_size_max);
+    defer gpa.free(buffer);
+
+    blk: for (0..100) |_| {
+        var fault = prng.boolean();
+        var total_size: u32 = 0;
+        var headers: stdx.BoundedArrayType(Header.Prepare, messages_max) = .{};
+        for (0..messages_max) |idx| {
+            const message_size: u32 = switch (prng.chances(.{
+                .min = 10,
+                .max = 10,
+                .random = 80,
+            })) {
+                .min => @sizeOf(Header),
+                .max => constants.message_size_max,
+                .random => prng.range_inclusive(u32, @sizeOf(Header), constants.message_size_max),
+            };
+
+            if (total_size + message_size > buffer.len) {
+                break;
+            }
+
+            var header: vsr.Header.Prepare = .{
+                .cluster = 1,
+                .view = 1,
+                .command = .prepare,
+                .parent = prng.int(u128),
+                .request_checksum = prng.int(u128),
+                .checkpoint_id = prng.int(u128),
+                .client = 1,
+                .commit = 10,
+                .timestamp = 999,
+                .request = 1,
+                .operation = .register,
+                .release = vsr.Release.minimum,
+                .op = idx,
+                .size = message_size,
+            };
+            const body = buffer[total_size..][@sizeOf(Header)..header.size];
+            prng.fill(body);
+            header.set_checksum_body(body);
+            header.set_checksum();
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                buffer[total_size..][0..@sizeOf(Header)],
+                std.mem.asBytes(&header),
+            );
+            total_size += header.size;
+            headers.push(header);
+        }
+
+        if (fault) {
+            // const valid_header = std.mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]).*;
+            const byte_index = prng.index(buffer[0..@sizeOf(Header)]);
+            const bit_index = prng.int_inclusive(u3, 7);
+            buffer[byte_index] ^= @as(u8, 1) << bit_index;
+            const invalid_header: Header = std.mem.bytesAsValue(
+                Header,
+                buffer[0..@sizeOf(Header)],
+            ).*;
+            if (invalid_header.valid_checksum_zeros()) {
+                fault = false;
+            }
+        }
+
+        var recv_buffer: [constants.message_size_max]u8 = undefined;
+        var recv_state = RecvState{ .buffer = &recv_buffer };
+
+        var header_last: ?vsr.Header.Prepare = null;
+        var recv_size: u32 = 0;
+
+        while (headers.count() > 0) {
+            if (recv_size < total_size) {
+                const recv_slice = recv_state.slice();
+                const chunk_size = @min(
+                    prng.range_inclusive(u32, 1, @intCast(recv_slice.len)),
+                    total_size - recv_size,
+                );
+                stdx.copy_disjoint(
+                    .exact,
+                    u8,
+                    recv_slice[0..chunk_size],
+                    buffer[recv_size..][0..chunk_size],
+                );
+                recv_state.advance(chunk_size);
+                recv_size += chunk_size;
+            }
+
+            if (recv_state.message_size == null) {
+                if (recv_state.peek_header()) |header| {
+                    const header_decrypted: vsr.Header.Prepare = std.mem.bytesAsValue(
+                        vsr.Header.Prepare,
+                        std.mem.asBytes(&header),
+                    ).*;
+                    if (header_decrypted.header_key_id != 0 or
+                        header_decrypted.header_nonce != 0 or
+                        header_decrypted.body_nonce != 0 or
+                        !header_decrypted.valid_checksum())
+                    {
+                        assert(fault);
+                        continue :blk;
+                    }
+                    recv_state.message_size = header_decrypted.size;
+                }
+            }
+
+            if (recv_state.pop_message()) |message| {
+                const header_decrypted: vsr.Header.Prepare = std.mem.bytesAsValue(
+                    vsr.Header.Prepare,
+                    message[0..@sizeOf(HeaderEncrypted)],
+                ).*;
+
+                if (!header_decrypted.valid_checksum_body(message[@sizeOf(HeaderEncrypted)..])) {
+                    assert(fault);
+                    continue :blk;
+                }
+
+                const header_expected = headers.ordered_remove(0);
+
+                try std.testing.expectEqual(header_expected, header_decrypted);
+
+                recv_state.copy_left();
+                header_last = null;
+            }
+        }
+        assert(!fault);
     }
 }

@@ -1,11 +1,13 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("../../vsr.zig");
+const constants = @import("../../constants.zig");
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
-const MessageNetwork = MessagePool.Message.Network;
-const MessageBuffer = @import("../../message_buffer.zig").MessageBuffer;
+const MessageNetwork = @import("../../message_bus.zig").MessageNetwork;
+const HeaderCallbackResult = @import("../../message_bus.zig").HeaderCallbackResult;
 const Header = vsr.Header;
+const HeaderEncrypted = vsr.HeaderEncrypted;
 const ProcessType = vsr.ProcessType;
 
 const Network = @import("network.zig").Network;
@@ -21,70 +23,63 @@ pub const MessageBus = struct {
 
     process: Process,
 
-    buffer: ?MessageBuffer,
-    suspended: bool = false,
     resume_scheduled: bool = false,
-    /// The callback to be called when a message is received.
-    decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
-    on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+    header_callback: *const fn (
+        context: *anyopaque,
+        header: HeaderEncrypted,
+    ) anyerror!u32,
+
+    message_callback: *const fn (
+        context: *anyopaque,
+        message: []const u8,
+    ) anyerror!vsr.Peer,
+
+    recv_buffer: []u8,
+    recv_size: u32 = 0,
 
     pub const Options = struct {
         network: *Network,
     };
 
     pub fn init(
-        _: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         process: Process,
         message_pool: *MessagePool,
-        decrypt_header: *const fn (context: ?*anyopaque, header: *const Header) anyerror!Header,
-        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+        header_callback: *const fn (
+            context: *anyopaque,
+            header: HeaderEncrypted,
+        ) anyerror!u32,
+        message_callback: *const fn (
+            context: *anyopaque,
+            message: []const u8,
+        ) anyerror!vsr.Peer,
         options: Options,
     ) !MessageBus {
+        const recv_buffer = try gpa.alloc(u8, constants.message_size_max);
+        errdefer gpa.free(recv_buffer);
+
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
             .process = process,
-            .decrypt_header = decrypt_header,
-            .buffer = null,
-            .on_messages_callback = on_messages_callback,
+            .header_callback = header_callback,
+            .message_callback = message_callback,
+            .recv_buffer = recv_buffer,
         };
     }
 
-    pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
-        if (bus.buffer != null) {
-            bus.buffer.?.deinit(bus.pool);
-            bus.buffer = null;
-        }
+    pub fn deinit(bus: *MessageBus, gpa: std.mem.Allocator) void {
         bus.resume_scheduled = false;
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
+        gpa.free(bus.recv_buffer);
     }
 
     pub fn trace_gauge(_: *MessageBus) void {}
 
-    pub fn listen(bus: *MessageBus) !void {
-        // FIXTHIS: Find better place for init,
-        // this requires adding a listen call in replica_test.zig
-        if (bus.buffer == null) {
-            bus.buffer = MessageBuffer.init(
-                bus,
-                bus.decrypt_header,
-                bus.pool,
-            );
-        }
-    }
+    pub fn listen(_: *MessageBus) !void {}
 
-    pub fn tick(bus: *MessageBus) void {
-        // FIXTHIS: Find better place for init,
-        // this requires adding a listen call in replica_test.zig
-        if (bus.buffer == null) {
-            bus.buffer = MessageBuffer.init(
-                bus,
-                bus.decrypt_header,
-                bus.pool,
-            );
-        }
-    }
+    pub fn tick(_: *MessageBus) void {}
 
     pub fn tick_client(bus: *MessageBus) void {
         bus.tick();
@@ -104,37 +99,45 @@ pub const MessageBus = struct {
         bus.pool.unref(message);
     }
 
-    pub fn resume_needed(bus: *MessageBus) bool {
-        return bus.suspended;
-    }
-
-    pub fn resume_receive(bus: *MessageBus) void {
-        bus.suspended = false;
-        bus.resume_scheduled = true;
-    }
-
-    pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *MessageNetwork) void {
-        // Messages sent by a process to itself should never be passed to the message bus
-        if (bus.process == .replica) assert(replica != bus.process.replica);
-
-        bus.network.send_message(message, .{
-            .source = bus.process,
-            .target = .{ .replica = replica },
-        });
-    }
-
-    /// Try to send the message to the client with the given id.
-    /// If the client is not currently connected, the message is silently dropped.
     pub fn send_message_to_client(
         bus: *MessageBus,
-        client_id: u128,
-        message: *MessageNetwork,
-    ) void {
-        assert(bus.process == .replica);
+        client: u128,
+        size: u32,
+    ) ?[]u8 {
+        _ = bus;
+        _ = client;
+        _ = size;
+        return null;
+        // assert(bus.process == .replica);
+        //
+        // bus.network.send_message(message, .{
+        //     .source = bus.process,
+        //     .target = .{ .client = client_id },
+        // });
+    }
+    pub fn send_message_handshake(
+        _: *MessageBus,
+        _: u128,
+        _: u32,
+    ) ?[]u8 {
+        return null;
+    }
 
-        bus.network.send_message(message, .{
-            .source = bus.process,
-            .target = .{ .client = client_id },
-        });
+    pub fn send_message_to_replica(
+        bus: *MessageBus,
+        replica: u8,
+        size: u32,
+    ) ?[]u8 {
+        _ = bus;
+        _ = replica;
+        _ = size;
+        return null;
+        // Messages sent by a process to itself should never be passed to the message bus
+        // if (bus.process == .replica) assert(replica != bus.process.replica);
+        //
+        // bus.network.send_message(message, .{
+        //     .source = bus.process,
+        //     .target = .{ .replica = replica },
+        // });
     }
 };

@@ -31,7 +31,7 @@ comptime {
     _ = @import("lsm/tree.zig");
     _ = @import("lsm/unique_key.zig");
     _ = @import("lsm/zig_zag_merge.zig");
-    _ = @import("message_buffer.zig");
+    _ = @import("message_bus.zig");
     _ = @import("multiversion.zig");
     _ = @import("queue.zig");
     _ = @import("repl/completion.zig");

@@ -9,7 +9,7 @@ const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
-const MessageNetwork = MessagePool.Message.Network;
+const MessageNetwork = MessagePool.Message;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Process = @import("message_bus.zig").Process;
@@ -114,11 +114,8 @@ pub const Network = struct {
         var advanced = false;
         for (network.buses.items) |bus| {
             if (bus.resume_scheduled) {
+                // FIXME
                 bus.resume_scheduled = false;
-                bus.on_messages_callback(bus, &bus.buffer.?);
-                if (bus.buffer.?.has_message()) {
-                    bus.suspended = true;
-                }
                 advanced = true;
             }
         }
@@ -232,7 +229,7 @@ pub const Network = struct {
         log.debug("send_message: {} > {}: {}", .{
             path.source,
             path.target,
-            message.metadata.command(),
+            message.header.command,
         });
 
         // TODO: figure out if you can reintroduce these asserts
@@ -243,7 +240,7 @@ pub const Network = struct {
         //         // as it is useful for the production MessageBus. Specifically, a replica that
         //         // receives a request from a client can immediately cache the connection in the
         //         // client map, instead of waiting for an infrequent PingClient message to do so.
-        //         assert(message.metadata.command() == .request);
+        //         assert(message.header.command == .request);
         //         if (path.source == .client) assert(path.source.client == client_id);
         //     },
         //     .client => |client_id| assert(std.meta.eql(path.source, .{ .client = client_id })),
@@ -285,7 +282,7 @@ pub const Network = struct {
     }
 
     fn packet_command(_: *PacketSimulator, message: *MessageNetwork) vsr.Command {
-        return message.metadata.command();
+        return message.header.command;
     }
 
     fn packet_clone(_: *PacketSimulator, message: *MessageNetwork) *MessageNetwork {
@@ -312,7 +309,7 @@ pub const Network = struct {
             log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
                 process_path.source,
                 process_path.target,
-                message.metadata.command(),
+                message.header.command,
             });
             return;
         }
@@ -320,19 +317,18 @@ pub const Network = struct {
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
             process_path.target,
-            message.metadata.command(),
+            message.header.command,
         });
 
-        const target_bus = network.buses.items[path.target];
-        assert(target_bus.buffer != null);
+        const target_bus: *MessageBus = network.buses.items[path.target];
 
-        if (target_bus.buffer.?.receive_size + message.metadata.size() >
-            constants.message_size_max)
+        if (target_bus.recv_size + message.header.size >
+            target_bus.recv_buffer.len)
         {
             log.debug("deliver_message: {} > {}: {} (dropped; buffer is full)", .{
                 process_path.source,
                 process_path.target,
-                message.metadata.command(),
+                message.header.command,
             });
             return;
         }
@@ -340,21 +336,20 @@ pub const Network = struct {
         stdx.copy_disjoint(
             .inexact,
             u8,
-            target_bus.buffer.?.recv_slice(),
-            message.buffer[0..message.metadata.size()],
+            target_bus.recv_buffer[target_bus.recv_size..],
+            message.buffer[0..message.header.size],
         );
-        target_bus.buffer.?.recv_advance(@intCast(message.metadata.size()));
-        target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
-        assert(target_bus.buffer != null);
-        if (target_bus.buffer.?.invalid) |msg| {
-            std.log.err("INVALID: {}", .{msg});
-        }
-        assert(target_bus.buffer.?.invalid == null);
-        maybe(target_bus.buffer.?.receive_size > 0);
-        maybe(target_bus.buffer.?.process_size > 0);
-        if (target_bus.buffer.?.has_message()) {
-            target_bus.suspended = true;
-        }
+
+        target_bus.recv_size += @as(u32, @intCast(message.header.size));
+
+        const header: vsr.HeaderEncrypted = undefined;
+
+        const result = target_bus.header_callback(target_bus, header) catch |err| {
+            std.log.err("err: {}", .{err});
+            return;
+        };
+
+        _ = result;
     }
 
     fn raw_process_to_process(raw: u128) Process {

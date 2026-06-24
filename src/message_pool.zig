@@ -111,23 +111,6 @@ pub const Options = union(vsr.ProcessType) {
 /// A pool of reference-counted Messages, memory for which is allocated only once during
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
-    pub const Metadata = extern struct {
-        size_value: u64 = 0,
-        // for testing only
-        command_value: vsr.Command = .reserved,
-
-        pub fn size(self: *const Metadata) u64 {
-            assert(self.size_value != 0);
-            return self.size_value;
-        }
-
-        pub fn command(self: *const Metadata) vsr.Command {
-            // TODO: can it be reserved?
-            assert(self.command_value != .reserved);
-            return self.command_value;
-        }
-    };
-
     pub const Message = extern struct {
         pub const Reserved = CommandMessageType(.reserved);
         pub const Ping = CommandMessageType(.ping);
@@ -150,7 +133,7 @@ pub const MessagePool = struct {
         pub const Eviction = CommandMessageType(.eviction);
         pub const RequestBlocks = CommandMessageType(.request_blocks);
         pub const Block = CommandMessageType(.block);
-        pub const Network = MessageNetwork;
+        pub const Handshake = CommandMessageType(.handshake);
         pub const Storage = MessageStorage;
 
         // TODO Avoid the extra level of indirection.
@@ -159,7 +142,6 @@ pub const MessagePool = struct {
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32 = 0,
         link: FreeList.Link,
-        metadata: Metadata = .{},
 
         /// Increment the reference count of the message and return the same pointer passed.
         pub fn ref(message: *Message) *Message {
@@ -211,13 +193,10 @@ pub const MessagePool = struct {
         pub fn swap_content(message: *Message, other: *Message) void {
             const header = message.header;
             const buffer = message.buffer;
-            const metadata = message.metadata;
             message.header = other.header;
             message.buffer = other.buffer;
-            message.metadata = other.metadata;
             other.header = header;
             other.buffer = buffer;
-            other.metadata = metadata;
         }
     };
 
@@ -259,7 +238,6 @@ pub const MessagePool = struct {
                 .header = undefined,
                 .buffer = buffer,
                 .link = .{},
-                .metadata = .{},
             };
             free_list.push(message);
         }
@@ -302,18 +280,11 @@ pub const MessagePool = struct {
         }
     }
 
-    /// Get an unused MessageNetwork with a buffer of constants.message_size_max.
-    /// The returned message has exactly one reference.
-    pub fn get_message_network(pool: *MessagePool) *Message.Network {
-        return @ptrCast(pool.get_message_base());
-    }
-
     fn get_message_base(pool: *MessagePool) *Message {
         const message = pool.free_list.pop().?;
         assert(message.link.next == null);
         message.header = mem.bytesAsValue(Header, message.buffer[0..@sizeOf(Header)]);
         assert(message.references == 0);
-        assert(message.metadata.size_value == 0);
 
         message.references = 1;
         return message;
@@ -341,63 +312,11 @@ pub const MessagePool = struct {
         message.references -= 1;
         if (message.references == 0) {
             message.header = undefined;
-            message.metadata = .{};
             if (constants.verify) {
                 @memset(message.buffer, undefined);
             }
             pool.free_list.push(message);
         }
-    }
-};
-
-const MessageNetwork = extern struct {
-    const Message = MessagePool.Message;
-
-    // The underlying structure of Message and EncryptedMessage should be identical, so that their
-    // memory can be cast back-and-forth.
-    comptime {
-        assert(@sizeOf(Message) == @sizeOf(MessageNetwork));
-
-        for (
-            std.meta.fields(Message),
-            std.meta.fields(MessageNetwork),
-        ) |message_field, command_message_field| {
-            assert(std.mem.eql(u8, message_field.name, command_message_field.name));
-            assert(@sizeOf(message_field.type) == @sizeOf(command_message_field.type));
-            assert(@offsetOf(Message, message_field.name) ==
-                @offsetOf(MessageNetwork, command_message_field.name));
-        }
-    }
-
-    /// Points into `buffer`.
-    header: *Header,
-    buffer: *align(constants.sector_size) [constants.message_size_max]u8,
-    references: u32,
-    link: MessagePool.FreeList.Link,
-    metadata: MessagePool.Metadata = .{},
-
-    pub fn base(message: *MessageNetwork) *Message {
-        return @ptrCast(message);
-    }
-
-    pub fn get_header_encrypted(message: *const MessageNetwork) *Header {
-        return mem.bytesAsValue(Header, message.buffer[0..@sizeOf(Header)]);
-    }
-
-    pub fn base_const(message: *const MessageNetwork) *const Message {
-        return @ptrCast(message);
-    }
-
-    pub fn ref(message: *MessageNetwork) *MessageNetwork {
-        return @ptrCast(message.base().ref());
-    }
-
-    pub fn body_used(message: *const MessageNetwork) []align(@sizeOf(Header)) u8 {
-        return message.buffer[@sizeOf(Header)..message.size()];
-    }
-
-    pub fn size(message: *const MessageNetwork) u64 {
-        return message.metadata.size();
     }
 };
 
@@ -426,7 +345,11 @@ const MessageStorage = extern struct {
     buffer: *align(constants.sector_size) [constants.message_size_max]u8,
     references: u32,
     link: MessagePool.FreeList.Link,
-    metadata: MessagePool.Metadata = .{},
+    metadata: struct {
+        pub fn size() usize {
+            return 0;
+        }
+    } = .{},
 
     pub fn base(message: *MessageStorage) *Message {
         return @ptrCast(message);
@@ -474,7 +397,6 @@ fn CommandMessageType(comptime command: vsr.Command) type {
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32,
         link: MessagePool.FreeList.Link,
-        metadata: MessagePool.Metadata = .{},
 
         pub fn base(message: *CommandMessage) *Message {
             return @ptrCast(message);

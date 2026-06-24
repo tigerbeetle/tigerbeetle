@@ -12,7 +12,6 @@ pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");
 pub const stack = @import("stack.zig");
-pub const message_buffer = @import("message_buffer.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
 pub const state_machine = @import("state_machine.zig");
@@ -68,6 +67,7 @@ pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
+pub const HeaderEncrypted = @import("vsr/message_header.zig").HeaderEncrypted;
 pub const FreeSet = @import("vsr/free_set.zig").FreeSet;
 pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").CheckpointTrailerType;
 pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
@@ -90,6 +90,7 @@ pub const Peer = union(enum) {
     replica: u8,
     client: u128,
     client_likely: u128,
+    handshaking: u128,
 
     pub fn transition(old: Peer, new: Peer) enum { retain, update, reject } {
         return switch (old) {
@@ -105,18 +106,28 @@ pub const Peer = union(enum) {
                 .client => if (old.client_likely == new.client) .update else .reject,
                 .replica => .update,
                 .unknown => .retain,
+                .handshaking => .reject,
             },
 
             .replica => switch (new) {
                 .replica => if (std.meta.eql(old, new)) .retain else .reject,
                 .client => .reject,
                 .client_likely, .unknown => .retain,
+                .handshaking => .reject,
             },
             .client => switch (new) {
                 .client => if (std.meta.eql(old, new)) .retain else .reject,
                 .client_likely => if (old.client == new.client_likely) .retain else .reject,
                 .replica => .reject,
                 .unknown => .retain,
+                .handshaking => .reject,
+            },
+            .handshaking => switch (new) {
+                .client => .update,
+                .replica => .update,
+                .handshaking => .retain,
+                .client_likely => .reject,
+                .unknown => .reject,
             },
         };
     }
@@ -260,6 +271,8 @@ pub const Command = enum(u8) {
     block = 20,
 
     view = 24,
+
+    handshake = 25,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
     deprecated_12 = 12, // .view without checkpoint

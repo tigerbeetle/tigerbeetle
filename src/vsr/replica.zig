@@ -18,7 +18,6 @@ const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPSType = stdx.IOPSType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
@@ -27,12 +26,13 @@ const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
 const encryption = @import("../encryption.zig");
-const EncryptionTransit = encryption.EncryptionTransit;
+const EncryptionTransitContext = encryption.EncryptionTransitContext;
 
 const marks = @import("../testing/marks.zig");
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
+const HeaderEncrypted = vsr.HeaderEncrypted;
 const Timeout = vsr.Timeout;
 const Command = vsr.Command;
 const Version = vsr.Version;
@@ -626,8 +626,7 @@ pub fn ReplicaType(
         aof: ?*AOF,
         aof_recovery: bool,
 
-        encryption_transit: EncryptionTransit,
-        encryptions_transit: [constants.replicas_max]EncryptionTransit,
+        encryption_transit_context: EncryptionTransitContext,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -1301,22 +1300,21 @@ pub fn ReplicaType(
                 allocator,
                 .{ .replica = options.replica_index },
                 message_pool,
-                Replica.decrypt_header,
-                Replica.on_messages_from_bus,
+                Replica.header_callback,
+                Replica.message_callback,
                 options.message_bus_options,
             );
             errdefer self.message_bus.deinit(allocator);
 
             try self.message_bus.listen();
 
-            var encryptions_transit: [constants.replicas_max]EncryptionTransit = @splat(undefined);
-            for (0..constants.replicas_max) |idx| {
-                encryptions_transit[idx] = .init(
-                    @as([32]u8, @splat(1)),
-                    encryption.Peer.replica(1),
-                    encryption.Peer.replica(replica_index),
-                );
-            }
+            var encryption_transit_context = try EncryptionTransitContext.init(allocator, .{
+                .self_id = replica_index,
+                .self_peer = .replica,
+                .clients_max = constants.clients_max,
+                .replicas_max = constants.replicas_max,
+            });
+            errdefer encryption_transit_context.deinit(allocator);
 
             self.* = .{
                 .static_allocator = self.static_allocator,
@@ -1471,12 +1469,7 @@ pub fn ReplicaType(
                 .test_context = self.test_context,
                 .aof = options.aof,
                 .aof_recovery = options.aof_recovery,
-                .encryption_transit = .init(
-                    @as([32]u8, @splat(1)),
-                    encryption.Peer.replica(1),
-                    encryption.Peer.replica(1),
-                ),
-                .encryptions_transit = encryptions_transit,
+                .encryption_transit_context = encryption_transit_context,
             };
 
             log.info("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
@@ -1494,6 +1487,8 @@ pub fn ReplicaType(
         /// This does not deinitialize the Storage or Time.
         pub fn deinit(self: *Replica, allocator: Allocator) void {
             self.static_allocator.transition_from_static_to_deinit();
+
+            self.encryption_transit_context.deinit(allocator);
 
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
@@ -1537,6 +1532,94 @@ pub fn ReplicaType(
             }
         }
 
+        pub fn header_callback(
+            context: *anyopaque,
+            header: HeaderEncrypted,
+        ) anyerror!u32 {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
+
+            if (EncryptionTransitContext.handshake_message_size(&header)) |message_size| {
+                return message_size;
+            }
+
+            const header_decrypted = self.encryption_transit_context.decrypt_header(&header) catch |err| {
+                log.info("{}: header_callback: received invalid header err: {}", .{
+                    self.log_prefix(),
+                    err,
+                });
+                return error.InvalidHeader;
+            };
+            if (header_decrypted.cluster != self.cluster) {
+                return error.InvalidHeader;
+            }
+            return header_decrypted.size;
+        }
+
+        pub fn message_callback(
+            context: *anyopaque,
+            message_encrypted: []const u8,
+        ) anyerror!vsr.Peer {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
+
+            var header_encrypted: HeaderEncrypted = undefined;
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                std.mem.asBytes(&header_encrypted),
+                message_encrypted[0..@sizeOf(HeaderEncrypted)],
+            );
+
+            if (EncryptionTransitContext.is_handshake(&header_encrypted)) {
+                switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
+                    .peer => |peer| return peer,
+                    .send => |key_exhange_message| {
+                        _ = key_exhange_message;
+                        // TODO: send
+                        unreachable;
+                    },
+                    .err => |err| {
+                        log.err("{}: message_callback: handshake failed: {}", .{
+                            self.log_prefix(),
+                            err,
+                        });
+                        return error.HandshakeFailed;
+                    },
+                }
+            }
+
+            const target = self.message_bus.get_message(null);
+            defer self.message_bus.unref(target);
+            const peer = try self.encryption_transit_context.decrypt_message(target, message_encrypted);
+
+            assert(target.references == 1);
+
+            // Avoid leaking sector padding for messages written to a block device:
+            if (target.header.command == .request or
+                target.header.command == .prepare or
+                target.header.command == .block or
+                target.header.command == .reply)
+            {
+                const sector_ceil = vsr.sector_ceil(target.header.size);
+                if (target.header.size != sector_ceil) {
+                    assert(target.header.size < sector_ceil);
+                    assert(target.buffer.len == constants.message_size_max);
+                    @memset(target.buffer[target.header.size..sector_ceil], 0);
+                }
+            }
+
+            if (target.header.into(.request)) |request_header| {
+                assert(request_header.client != 0 or self.aof_recovery);
+            }
+            self.trace.count(.{ .replica_messages_in = .{
+                .command = target.header.command,
+            } }, 1);
+
+            self.on_message(target);
+            return peer;
+        }
+
         pub fn invariants(self: *const Replica) void {
             assert(self.journal.header_with_op(self.op) != null);
 
@@ -1557,13 +1640,6 @@ pub fn ReplicaType(
             // decrease throughput significantly.
             assert(self.loopback_queue == null);
             defer self.invariants();
-
-            if (self.message_bus.resume_needed()) {
-                // See fn suspend_message conditions.
-                assert(self.journal.writes.available() == 0 or
-                    self.grid_repair_writes.available() == 0 or
-                    self.syncing == .updating_checkpoint);
-            }
 
             if (self.status == .normal and !self.standby()) {
                 self.tick_normal_heartbeat_fault();
@@ -1661,76 +1737,75 @@ pub fn ReplicaType(
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
-        fn on_messages_from_bus(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-            const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
-            self.on_messages(buffer);
-        }
+        // fn on_messages_from_bus(message_bus: *MessageBus, buffer: *MessageBuffer) void {
+        //     const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
+        //     self.on_messages(buffer);
+        // }
 
-        pub fn on_messages(self: *Replica, buffer: *MessageBuffer) void {
-            var message_count: u32 = 0;
-            var message_suspended_count: u32 = 0;
-            while (buffer.next_header()) |header| {
-                message_count += 1;
-                if (header.cluster != self.cluster) {
-                    buffer.invalidate(.header_cluster);
-                    // TODO: double check if this is a bug, and we should continue instead
-                    return;
-                }
-                if (self.suspend_message(&header)) {
-                    buffer.suspend_message(&header);
-                    message_suspended_count += 1;
-                    continue;
-                }
-                const message_encrypted = buffer.consume_message(
-                    self.message_bus.pool,
-                    &header,
-                );
-                defer self.message_bus.unref(message_encrypted);
-
-                const message = self.message_bus.get_message(null);
-                defer self.message_bus.unref(message);
-
-                self.encryption_transit.decrypt_message(message, message_encrypted) catch |err|
-                    {
-                        log.err("{}: on_messages: decryption failed: {}", .{
-                            self.log_prefix(),
-                            err,
-                        });
-                        continue;
-                    };
-
-                assert(message.references == 1);
-
-                // Avoid leaking sector padding for messages written to a block device:
-                if (message.header.command == .request or
-                    message.header.command == .prepare or
-                    message.header.command == .block or
-                    message.header.command == .reply)
-                {
-                    const sector_ceil = vsr.sector_ceil(message.header.size);
-                    if (message.header.size != sector_ceil) {
-                        assert(message.header.size < sector_ceil);
-                        assert(message.buffer.len == constants.message_size_max);
-                        @memset(message.buffer[message.header.size..sector_ceil], 0);
-                    }
-                }
-
-                if (message.header.into(.request)) |request_header| {
-                    assert(request_header.client != 0 or self.aof_recovery);
-                }
-                self.trace.count(.{ .replica_messages_in = .{
-                    .command = message.header.command,
-                } }, 1);
-                self.on_message(message);
-            }
-            if (message_count > constants.bus_message_burst_warn_min) {
-                log.warn("{}: on_messages: message count={} suspended={}", .{
-                    self.log_prefix(),
-                    message_count,
-                    message_suspended_count,
-                });
-            }
-        }
+        // pub fn on_messages(self: *Replica, buffer: *MessageBuffer) void {
+        //     var message_count: u32 = 0;
+        //     var message_suspended_count: u32 = 0;
+        //     while (buffer.next_header()) |header| {
+        //         message_count += 1;
+        //         if (header.cluster != self.cluster) {
+        //             buffer.invalidate(.header_cluster);
+        //             return;
+        //         }
+        //         if (self.suspend_message(&header)) {
+        //             buffer.suspend_message(&header);
+        //             message_suspended_count += 1;
+        //             continue;
+        //         }
+        //         const message_encrypted = buffer.consume_message(
+        //             self.message_bus.pool,
+        //             &header,
+        //         );
+        //         defer self.message_bus.unref(message_encrypted);
+        //
+        //         const message = self.message_bus.get_message(null);
+        //         defer self.message_bus.unref(message);
+        //
+        //         self.encryption_transit.decrypt_message(message, message_encrypted) catch |err|
+        //             {
+        //                 log.err("{}: on_messages: decryption failed: {}", .{
+        //                     self.log_prefix(),
+        //                     err,
+        //                 });
+        //                 continue;
+        //             };
+        //
+        //         assert(message.references == 1);
+        //
+        //         // Avoid leaking sector padding for messages written to a block device:
+        //         if (message.header.command == .request or
+        //             message.header.command == .prepare or
+        //             message.header.command == .block or
+        //             message.header.command == .reply)
+        //         {
+        //             const sector_ceil = vsr.sector_ceil(message.header.size);
+        //             if (message.header.size != sector_ceil) {
+        //                 assert(message.header.size < sector_ceil);
+        //                 assert(message.buffer.len == constants.message_size_max);
+        //                 @memset(message.buffer[message.header.size..sector_ceil], 0);
+        //             }
+        //         }
+        //
+        //         if (message.header.into(.request)) |request_header| {
+        //             assert(request_header.client != 0 or self.aof_recovery);
+        //         }
+        //         self.trace.count(.{ .replica_messages_in = .{
+        //             .command = message.header.command,
+        //         } }, 1);
+        //         self.on_message(message);
+        //     }
+        //     if (message_count > constants.bus_message_burst_warn_min) {
+        //         log.warn("{}: on_messages: message count={} suspended={}", .{
+        //             self.log_prefix(),
+        //             message_count,
+        //             message_suspended_count,
+        //         });
+        //     }
+        // }
 
         // See fn tick for an assert to verify that we don't miss resumption.
         fn suspend_message(self: *const Replica, header: *const Header) bool {
@@ -1855,6 +1930,7 @@ pub fn ReplicaType(
                 .headers => |m| self.on_headers(m),
                 .request_blocks => |m| self.on_request_blocks(m),
                 .block => |m| self.on_block(m),
+                .handshake => unreachable,
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
@@ -3584,6 +3660,12 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_handshake(self: *Replica, message: *const Message.Handshake) void {
+            _ = self;
+            _ = message;
+            assert(false);
+        }
+
         fn grid_repair_block_callback(grid_write: *Grid.Write) void {
             const write: *BlockWrite = @fieldParentPtr("write", grid_write);
             const self = write.replica;
@@ -3600,7 +3682,7 @@ pub fn ReplicaType(
             });
 
             self.sync_reclaim_tables();
-            self.message_bus.resume_receive();
+            // self.message_bus.resume_receive();
         }
 
         fn on_ping_timeout(self: *Replica) void {
@@ -3966,7 +4048,7 @@ pub fn ReplicaType(
             self.release_seen_client_min = null;
             self.release_seen_client_max = null;
 
-            self.message_bus.trace_gauge();
+            // self.message_bus.trace_gauge();
 
             self.trace.emit_metrics();
         }
@@ -9024,7 +9106,8 @@ pub fn ReplicaType(
         fn send_message_to_client_base(self: *Replica, client: u128, message: *Message) void {
             assert(message.header.command == .pong_client or
                 message.header.command == .eviction or
-                message.header.command == .reply);
+                message.header.command == .reply or
+                message.header.command == .handshake);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
@@ -9066,6 +9149,10 @@ pub fn ReplicaType(
                     assert(header.release.value == self.release.value);
                     assert(header.view <= self.log_view_durable());
                 },
+                .handshake => |header| {
+                    assert(false);
+                    _ = header;
+                },
 
                 .reserved,
 
@@ -9099,19 +9186,25 @@ pub fn ReplicaType(
                 .command = message.header.command,
             } }, 1);
 
-            const message_buffer = self.message_bus.get_message(null);
-            defer self.message_bus.unref(message_buffer);
-
-            const message_network = self.encryption_transit.encrypt_message(
-                message_buffer,
-                message,
+            const maybe_message_buffer = self.message_bus.send_message_to_client(
+                client,
+                message.header.size,
             );
-
-            self.message_bus.send_message_to_client(client, message_network);
+            if (maybe_message_buffer) |message_buffer| {
+                // FIXME: use session
+                // self.encryption_transit.encrypt_message(
+                //     message_network.buffer,
+                //     message,
+                // );
+                _ = message_buffer;
+            } else {
+                log.warn("send_message_to_client_base: drop message header={}", .{
+                    message.header,
+                });
+            }
 
             if (self.event_callback) |hook| hook(
                 self,
-                // TODO: double check that we want unencrypted message here.
                 .{ .message_sent = message },
             );
         }
@@ -9348,6 +9441,10 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(header.release.value <= self.release.value);
                 },
+                .handshake => |header| {
+                    assert(false);
+                    _ = header;
+                },
             }
             // Critical:
             // Do not advertise a view/log_view before it is durable. We only need perform these
@@ -9407,17 +9504,22 @@ pub fn ReplicaType(
 
                 if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
 
-                const message_buffer = self.message_bus.get_message(null);
-                defer self.message_bus.unref(message_buffer);
-
-                const message_network = self.encryption_transit.encrypt_message(
-                    message_buffer,
-                    message,
+                const maybe_message_buffer = self.message_bus.send_message_to_replica(
+                    replica,
+                    message.header.size,
                 );
-                // TODO: maybe optimize by avoiding the copy here
-                // message.swap_content(message_buffer);
-
-                self.message_bus.send_message_to_replica(replica, message_network);
+                if (maybe_message_buffer) |message_buffer| {
+                    // FIXME: use session
+                    // self.encryption_transit.encrypt_message(
+                    //     message_network.buffer,
+                    //     message,
+                    // );
+                    _ = message_buffer;
+                } else {
+                    log.warn("send_message_to_replica_base: drop message header={}", .{
+                        message.header,
+                    });
+                }
             }
         }
 
@@ -10646,7 +10748,7 @@ pub fn ReplicaType(
             });
 
             self.grid.open(grid_open_callback);
-            self.message_bus.resume_receive();
+            // self.message_bus.resume_receive();
             assert(self.op <= self.op_prepare_max());
         }
 
@@ -11266,7 +11368,7 @@ pub fn ReplicaType(
         }
 
         fn write_prepare_callback(self: *Replica, wrote: ?*Message.Prepare) void {
-            self.message_bus.resume_receive();
+            // self.message_bus.resume_receive();
 
             // `null` indicates that we did not complete the write for some reason.
             const message = wrote orelse return;

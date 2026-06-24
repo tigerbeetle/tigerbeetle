@@ -20,8 +20,6 @@ const stdx = vsr.stdx;
 const MessageBus = vsr.message_bus.MessageBusType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
-const MessageNetwork = MessagePool.Message.Network;
-const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
@@ -335,64 +333,83 @@ const Node = struct {
     id: u8,
 
     fn send_message(node: *Node, target: u8, message: *Message) void {
-        const message_network: *MessageNetwork = @ptrCast(message);
-        message_network.metadata = .{
-            .size_value = message.header.size,
-            .command_value = message.header.command,
-        };
-
-        message_network.header.set_checksum_body(message_network.body_used());
-        message_network.header.set_checksum();
-        message_network.header = undefined;
-
         if (target < node.message_bus.replicas_addresses.len) {
-            node.message_bus.send_message_to_replica(target, message_network);
+            const maybe_message_network = node.message_bus.acquire_replica(target, message.header.size);
+            if (maybe_message_network) |message_network| {
+                stdx.copy_disjoint(
+                    .inexact,
+                    u8,
+                    message_network.buffer,
+                    message.buffer[0..message.header.size],
+                );
+                node.message_bus.send(message_network);
+            } else {
+                log.warn("send_message: drop message header={}", .{
+                    message.header,
+                });
+            }
+
+            node.message_bus.send_message_to_replica(target, message.buffer);
         } else {
             assert(node.message_bus.process == .replica);
-            node.message_bus.send_message_to_client(target, message_network);
-        }
-    }
 
-    fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-        const node: *Node = @fieldParentPtr("message_bus", message_bus);
-        while (buffer.next_header()) |header| {
-            assert(header.valid_checksum());
-
-            if (node.prng.chance(node.options.message_suspend_probability)) {
-                buffer.suspend_message(&header);
-                continue;
-            }
-
-            const message = buffer.consume_message(message_bus.pool, &header);
-            defer message_bus.unref(message);
-
-            assert(stdx.equal_bytes(vsr.Header, &header, message.header));
-            assert(message.header.valid_checksum_body(message.body_used()));
-
-            if (node.messages_pending.get(message.header.checksum())) |message_pending| {
-                const message_pending_checksum =
-                    std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(u128)]).*;
-                assert(message_pending_checksum == message.header.checksum());
-
-                if (message_pending.target == node.id) {
-                    const message_removed =
-                        node.messages_pending.swapRemove(message.header.checksum());
-                    assert(message_removed);
-                } else {
-                    // We aren't the intended recipient of this message.
-                    //
-                    // One of the following is true:
-                    // - We are a replica that was misidentified as a client, either due to:
-                    //   - accidental misidentification due to a request we sent, or
-                    //   - deliberate misidentification a ping_client we sent.
-                    // - We are a client that was misidentified as a *different* client, due to
-                    //   a "misdirected" ping_client we sent.
-                }
+            const maybe_message_network = node.message_bus.acquire_client(target, message.header.size);
+            if (maybe_message_network) |message_network| {
+                stdx.copy_disjoint(
+                    .inexact,
+                    u8,
+                    message_network.buffer,
+                    message.buffer[0..message.header.size],
+                );
+                node.message_bus.send(message_network);
             } else {
-                // Ignore duplicate messages.
+                log.warn("send_message: drop message header={}", .{
+                    message.header,
+                });
             }
         }
     }
+
+    // fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
+    //     const node: *Node = @fieldParentPtr("message_bus", message_bus);
+    //     while (buffer.next_header()) |header| {
+    //         assert(header.valid_checksum());
+    //
+    //         if (node.prng.chance(node.options.message_suspend_probability)) {
+    //             buffer.suspend_message(&header);
+    //             continue;
+    //         }
+    //
+    //         const message = buffer.consume_message(message_bus.pool, &header);
+    //         defer message_bus.unref(message);
+    //
+    //         assert(stdx.equal_bytes(vsr.Header, &header, message.header));
+    //         assert(message.header.valid_checksum_body(message.body_used()));
+    //
+    //         if (node.messages_pending.get(message.header.checksum())) |message_pending| {
+    //             const message_pending_checksum =
+    //                 std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(u128)]).*;
+    //             assert(message_pending_checksum == message.header.checksum());
+    //
+    //             if (message_pending.target == node.id) {
+    //                 const message_removed =
+    //                     node.messages_pending.swapRemove(message.header.checksum());
+    //                 assert(message_removed);
+    //             } else {
+    //                 // We aren't the intended recipient of this message.
+    //                 //
+    //                 // One of the following is true:
+    //                 // - We are a replica that was misidentified as a client, either due to:
+    //                 //   - accidental misidentification due to a request we sent, or
+    //                 //   - deliberate misidentification a ping_client we sent.
+    //                 // - We are a client that was misidentified as a *different* client, due to
+    //                 //   a "misdirected" ping_client we sent.
+    //             }
+    //         } else {
+    //             // Ignore duplicate messages.
+    //         }
+    //     }
+    // }
 };
 
 const MessagePending = struct {

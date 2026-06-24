@@ -11,6 +11,67 @@ const schema = @import("../lsm/schema.zig");
 
 const checksum_body_empty = vsr.checksum(&.{});
 
+pub const HeaderEncrypted = extern struct {
+    /// An AEAD tag covering only the remainder of this header.
+    /// This allows the header to be trusted without having to recv() or read() the associated body.
+    /// This tag is enough to uniquely identify a network message or prepare.
+    header_tag: u128,
+
+    /// The header_key_id is the ID of the key to use for decryption. It is cryptographically
+    /// derived from the encryption protocol version and the peers involved in the message.
+    ///
+    /// This field was previously checksum_padding. A value of all zeros is only valid to indicate
+    /// backwards compatibility.
+    header_key_id: u128,
+
+    /// The nonce for header encryption.
+    header_nonce: u128,
+
+    encrypted_data: [208]u8 = undefined,
+
+    comptime {
+        assert(@sizeOf(HeaderEncrypted) == @sizeOf(Header));
+        assert(@sizeOf(HeaderEncrypted) == 256);
+    }
+
+    pub fn slice_associated_data(self: *HeaderEncrypted) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(HeaderEncrypted, "header_key_id")..@offsetOf(HeaderEncrypted, "encrypted_data")];
+    }
+
+    pub fn slice_associated_data_const(self: *const HeaderEncrypted) []const u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(HeaderEncrypted, "header_key_id")..@offsetOf(HeaderEncrypted, "encrypted_data")];
+    }
+
+    pub fn slice_encrypted(self: *HeaderEncrypted) []u8 {
+        return &self.encrypted_data;
+    }
+
+    pub fn slice_encrypted_const(self: *const HeaderEncrypted) []const u8 {
+        return &self.encrypted_data;
+    }
+
+    pub fn slice_without_header_tag(self: *HeaderEncrypted) []u8 {
+        const bytes = std.mem.asBytes(self);
+        return bytes[@offsetOf(HeaderEncrypted, "header_key_id")..];
+    }
+
+    pub fn format(
+        self: *const HeaderEncrypted,
+        comptime fmt: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        assert(fmt.len == 0);
+        try writer.writeAll("HeaderEncrypted { ");
+        try writer.print(".header_tag={x:0>32}, ", .{self.header_tag});
+        try writer.print(".header_key_id={x:0>32}, ", .{self.header_key_id});
+        try writer.print(".header_nonce={x:0>32}", .{self.header_nonce});
+        try writer.writeAll(" }");
+    }
+};
+
 /// Network message, prepare, and grid block header:
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
@@ -103,6 +164,7 @@ pub const Header = extern struct {
             .eviction => Eviction,
             .request_blocks => RequestBlocks,
             .block => Block,
+            .handshake => Handshake,
             .deprecated_12 => Deprecated,
             .deprecated_21 => Deprecated,
             .deprecated_22 => Deprecated,
@@ -341,14 +403,14 @@ pub const Header = extern struct {
         writer: anytype,
     ) !void {
         // FIXTHIS
-        _ = self;
-        _ = fmt;
-        _ = options;
-        _ = writer;
-        return;
-        // switch (self.into_any()) {
-        //     inline else => |header| return try header.format(fmt, options, writer),
-        // }
+        // _ = self;
+        // _ = fmt;
+        // _ = options;
+        // _ = writer;
+        // return;
+        switch (self.into_any()) {
+            inline else => |header| return try header.format(fmt, options, writer),
+        }
     }
 
     fn HeaderFunctionsType(comptime CommandHeader: type) type {
@@ -1794,6 +1856,46 @@ pub const Header = extern struct {
             if (!self.block_type.valid()) return "block_type invalid";
             if (self.block_type == .reserved) return "block_type == .reserved";
             // TODO When manifest blocks include a snapshot, verify that snapshot≠0.
+            return null;
+        }
+    };
+
+    pub const Handshake = extern struct {
+        header_tag: u128 = 0,
+        header_key_id: u128 = 0,
+        header_nonce: u128 = 0,
+        body_tag: u128 = 0,
+        body_nonce: u128 = 0,
+        cluster: u128 = 0,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        /// The release that generated this block.
+        release: vsr.Release,
+        protocol: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0, // Always 0.
+        reserved_frame: [12]u8 = @splat(0),
+
+        client: u128,
+        reserved: [112]u8 = @splat(0),
+
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
+        pub const checksum = HeaderFunctionsType(@This()).checksum;
+        pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+        pub const format = HeaderFunctionsType(@This()).format;
+
+        fn invalid_header(self: *const @This()) ?[]const u8 {
+            assert(self.command == .handshake);
             return null;
         }
     };
