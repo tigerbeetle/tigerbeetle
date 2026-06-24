@@ -161,6 +161,7 @@ const quine =
     \\
     \\        if (std.mem.eql(u8, entry_path, "unit_tests.zig")) continue;
     \\        if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
+    \\        if (std.mem.eql(u8, entry_path, "inspect_snapshot.zig")) continue;
     \\        if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
     \\        if (std.mem.startsWith(u8, entry_path, "clients/") and
     \\            !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
@@ -285,6 +286,7 @@ fn unit_test_files(arena: std.mem.Allocator, src_dir: std.fs.Dir) ![]const []con
 
         if (std.mem.eql(u8, entry_path, "unit_tests.zig")) continue;
         if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
+        if (std.mem.eql(u8, entry_path, "inspect_snapshot.zig")) continue;
         if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
         if (std.mem.startsWith(u8, entry_path, "clients/") and
             !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
