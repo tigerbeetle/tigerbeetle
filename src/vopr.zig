@@ -86,6 +86,7 @@ const CLIArgs = struct {
     replica_missing: ?u8 = null,
     replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
+    storage_size_limit: ?stdx.ByteSize = null,
 
     @"--": void,
     seed: ?[]const u8 = null,
@@ -163,6 +164,12 @@ pub fn main() !void {
     }
     if (cli_args.requests_max) |requests_max| {
         options.requests_max = requests_max;
+        // A high requests_max can overflow the aof.
+        options.cluster.aof = false;
+    }
+    if (cli_args.storage_size_limit) |storage_size_limit| {
+        options.cluster.storage_size_limit = storage_size_limit.bytes();
+        options.storage.size = storage_size_limit.bytes();
     }
 
     if (options.replica_missing_until_request != null and
