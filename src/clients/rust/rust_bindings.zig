@@ -111,7 +111,7 @@ fn emit_bitflags(
         \\#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
         \\#[repr(transparent)]
         \\pub struct {[rust_name]s}({[backing_type_text]s});
-        \\ 
+        \\
     , .{ .rust_name = rust_name, .backing_type_text = backing_type_text });
 
     try writer.print("impl {s} {{\n", .{rust_name});
