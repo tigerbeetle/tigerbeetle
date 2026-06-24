@@ -7,7 +7,7 @@
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct TB_ACCOUNT_FLAGS(u16);
- impl TB_ACCOUNT_FLAGS {
+impl TB_ACCOUNT_FLAGS {
     pub const Linked: TB_ACCOUNT_FLAGS = TB_ACCOUNT_FLAGS(1 << 0);
     pub const DebitsMustNotExceedCredits: TB_ACCOUNT_FLAGS = TB_ACCOUNT_FLAGS(1 << 1);
     pub const CreditsMustNotExceedDebits: TB_ACCOUNT_FLAGS = TB_ACCOUNT_FLAGS(1 << 2);
@@ -50,7 +50,7 @@ pub struct tb_account_t {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct TB_TRANSFER_FLAGS(u16);
- impl TB_TRANSFER_FLAGS {
+impl TB_TRANSFER_FLAGS {
     pub const Linked: TB_TRANSFER_FLAGS = TB_TRANSFER_FLAGS(1 << 0);
     pub const Pending: TB_TRANSFER_FLAGS = TB_TRANSFER_FLAGS(1 << 1);
     pub const PostPendingTransfer: TB_TRANSFER_FLAGS = TB_TRANSFER_FLAGS(1 << 2);
@@ -226,7 +226,7 @@ pub struct tb_account_filter_t {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct TB_ACCOUNT_FILTER_FLAGS(u32);
- impl TB_ACCOUNT_FILTER_FLAGS {
+impl TB_ACCOUNT_FILTER_FLAGS {
     pub const Debits: TB_ACCOUNT_FILTER_FLAGS = TB_ACCOUNT_FILTER_FLAGS(1 << 0);
     pub const Credits: TB_ACCOUNT_FILTER_FLAGS = TB_ACCOUNT_FILTER_FLAGS(1 << 1);
     pub const Reversed: TB_ACCOUNT_FILTER_FLAGS = TB_ACCOUNT_FILTER_FLAGS(1 << 2);
@@ -274,7 +274,7 @@ pub struct tb_query_filter_t {
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct TB_QUERY_FILTER_FLAGS(u32);
- impl TB_QUERY_FILTER_FLAGS {
+impl TB_QUERY_FILTER_FLAGS {
     pub const Reversed: TB_QUERY_FILTER_FLAGS = TB_QUERY_FILTER_FLAGS(1 << 0);
 
     pub fn empty() -> Self { return TB_QUERY_FILTER_FLAGS(0) }
