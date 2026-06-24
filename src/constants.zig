@@ -60,8 +60,8 @@ comptime {
     //    This margin ensures that the entries prepared immediately following a checkpoint's prepare
     //    max never overwrite an entry from the previous WAL wrap until a quorum of replicas has
     //    reached that checkpoint. The first pipeline_prepare_queue_max is the maximum number of
-    //    entries a replica can prepare after a checkpoint trigger, so checkpointing doesn't stall
-    //    normal processing (referred to as the checkpoint's prepare_max). The second
+    //    entries a replica can prepare and ack after a checkpoint trigger, so checkpointing doesn't
+    //    stall normal processing (referred to as the checkpoint's op_prepare_ok_max). The second
     //    pipeline_prepare_queue_max ensures entries prepared after a checkpoint's prepare_max don't
     //    overwrite entries from the previous WAL wrap. By the time we start preparing entries after
     //    the second pipeline_prepare_queue_max, a quorum of replicas is guaranteed to have already
