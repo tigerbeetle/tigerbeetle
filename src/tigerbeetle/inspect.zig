@@ -456,7 +456,7 @@ fn print_tree_schema(
     comptime Tree: type,
 ) !void {
     try output.print(
-        "tree_id={} key={} value={} table={} block={} blocks={}\n",
+        "id={d: <2} K={s: <3} V={s: <4} T={d: <6} B={d: <5} BC={d: <3}\n",
         .{
             tree_id,
             stdx.fmt_int_size_bin_exact(@sizeOf(Tree.Table.Key)),
