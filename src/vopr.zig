@@ -350,13 +350,15 @@ pub fn main() !void {
                 fatal(.liveness, "no state convergence: {s}", .{reason});
             }
         } else {
-            const commits = simulator.cluster.state_checker.commits.items;
-            const last_checksum = commits[commits.len - 1].header.checksum;
-            for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
-                if (simulator.core.is_set(replica_index)) {
-                    try aof.validate(gpa, last_checksum);
-                } else {
-                    try aof.validate(gpa, null);
+            if (simulator.options.cluster.aof) {
+                const commits = simulator.cluster.state_checker.commits.items;
+                const last_checksum = commits[commits.len - 1].header.checksum;
+                for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
+                    if (simulator.core.is_set(replica_index)) {
+                        try aof.validate(gpa, last_checksum);
+                    } else {
+                        try aof.validate(gpa, null);
+                    }
                 }
             }
         }
@@ -412,6 +414,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .standby_count = standby_count,
         .client_count = client_count,
         .storage_size_limit = storage_size_limit,
+        .aof = prng.boolean(),
         .seed = prng.int(u64),
         .releases = &releases,
         .client_release = releases[0].release,
@@ -536,6 +539,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .standby_count = 0,
         .client_count = 4,
         .storage_size_limit = vsr.sector_floor(200 * MiB),
+        .aof = true,
         .seed = prng.int(u64),
         .releases = releases[0..1],
         .client_release = releases[0].release,
