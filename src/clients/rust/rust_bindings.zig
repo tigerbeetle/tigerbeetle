@@ -134,8 +134,8 @@ fn emit_bitflags(
             });
         }
         try writer.print("\n", .{});
-        try writer.print("    pub fn empty() -> Self {{ return {s}(0) }}\n", .{rust_name});
-        try writer.print("    pub fn bits(self) -> {s} {{ return self.0 }}\n", .{
+        try writer.print("    pub fn empty() -> Self {{ {s}(0) }}\n", .{rust_name});
+        try writer.print("    pub fn bits(self) -> {s} {{ self.0 }}\n", .{
             backing_type_text,
         });
         try writer.print(
@@ -203,7 +203,7 @@ fn emit_enum(
         try writer.print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
             rust_name,
             rust_name[0..suffix_pos],
-            @as([]const u8, &field_name),
+            field_name,
             rust_name,
             if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})

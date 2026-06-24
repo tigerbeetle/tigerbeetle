@@ -15,8 +15,8 @@ impl TB_ACCOUNT_FLAGS {
     pub const Imported: TB_ACCOUNT_FLAGS = TB_ACCOUNT_FLAGS(1 << 4);
     pub const Closed: TB_ACCOUNT_FLAGS = TB_ACCOUNT_FLAGS(1 << 5);
 
-    pub fn empty() -> Self { return TB_ACCOUNT_FLAGS(0) }
-    pub fn bits(self) -> u16 { return self.0 }
+    pub fn empty() -> Self { TB_ACCOUNT_FLAGS(0) }
+    pub fn bits(self) -> u16 { self.0 }
     pub fn contains(self, other: Self) -> bool { (self.0 & other.0) != 0 }
     pub fn from_bits_truncate(bits: u16) -> Self { Self(bits & 0x7F) }
 }
@@ -61,8 +61,8 @@ impl TB_TRANSFER_FLAGS {
     pub const ClosingCredit: TB_TRANSFER_FLAGS = TB_TRANSFER_FLAGS(1 << 7);
     pub const Imported: TB_TRANSFER_FLAGS = TB_TRANSFER_FLAGS(1 << 8);
 
-    pub fn empty() -> Self { return TB_TRANSFER_FLAGS(0) }
-    pub fn bits(self) -> u16 { return self.0 }
+    pub fn empty() -> Self { TB_TRANSFER_FLAGS(0) }
+    pub fn bits(self) -> u16 { self.0 }
     pub fn contains(self, other: Self) -> bool { (self.0 & other.0) != 0 }
     pub fn from_bits_truncate(bits: u16) -> Self { Self(bits & 0x3FF) }
 }
@@ -231,8 +231,8 @@ impl TB_ACCOUNT_FILTER_FLAGS {
     pub const Credits: TB_ACCOUNT_FILTER_FLAGS = TB_ACCOUNT_FILTER_FLAGS(1 << 1);
     pub const Reversed: TB_ACCOUNT_FILTER_FLAGS = TB_ACCOUNT_FILTER_FLAGS(1 << 2);
 
-    pub fn empty() -> Self { return TB_ACCOUNT_FILTER_FLAGS(0) }
-    pub fn bits(self) -> u32 { return self.0 }
+    pub fn empty() -> Self { TB_ACCOUNT_FILTER_FLAGS(0) }
+    pub fn bits(self) -> u32 { self.0 }
     pub fn contains(self, other: Self) -> bool { (self.0 & other.0) != 0 }
     pub fn from_bits_truncate(bits: u32) -> Self { Self(bits & 0xF) }
 }
@@ -277,8 +277,8 @@ pub struct TB_QUERY_FILTER_FLAGS(u32);
 impl TB_QUERY_FILTER_FLAGS {
     pub const Reversed: TB_QUERY_FILTER_FLAGS = TB_QUERY_FILTER_FLAGS(1 << 0);
 
-    pub fn empty() -> Self { return TB_QUERY_FILTER_FLAGS(0) }
-    pub fn bits(self) -> u32 { return self.0 }
+    pub fn empty() -> Self { TB_QUERY_FILTER_FLAGS(0) }
+    pub fn bits(self) -> u32 { self.0 }
     pub fn contains(self, other: Self) -> bool { (self.0 & other.0) != 0 }
     pub fn from_bits_truncate(bits: u32) -> Self { Self(bits & 0x3) }
 }
