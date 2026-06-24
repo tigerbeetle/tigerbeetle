@@ -391,45 +391,45 @@ test "inspect constants snapshot" {
         \\
         \\StateMachine:
         \\Account                         272B table=524160 block=4094
-        \\  object                        tree_id=7 usage=general kind=object key=8B value=128B table=524160 block=4094 blocks=129
-        \\  id                            tree_id=1 usage=general kind=unique_key key=16B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_128                 tree_id=2 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_64                  tree_id=3 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  user_data_32                  tree_id=4 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  ledger                        tree_id=5 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  code                          tree_id=6 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  imported                      tree_id=23 usage=secondary_index kind=composite_key key=8B value=8B table=262080 block=65504 blocks=5
-        \\  closed                        tree_id=25 usage=secondary_index kind=composite_key key=8B value=8B table=524160 block=65504 blocks=9
+        \\  object                        tree_id=7 key=8B value=128B table=524160 block=4094 blocks=129
+        \\  id                            tree_id=1 key=16B value=32B table=262080 block=16376 blocks=17
+        \\  user_data_128                 tree_id=2 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  user_data_64                  tree_id=3 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  user_data_32                  tree_id=4 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  ledger                        tree_id=5 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  code                          tree_id=6 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  imported                      tree_id=23 key=8B value=8B table=262080 block=65504 blocks=5
+        \\  closed                        tree_id=25 key=8B value=8B table=524160 block=65504 blocks=9
         \\
         \\Transfer                        416B table=262080 block=4094
-        \\  object                        tree_id=18 usage=general kind=object key=8B value=128B table=262080 block=4094 blocks=65
-        \\  id                            tree_id=8 usage=general kind=unique_key key=16B value=32B table=262080 block=16376 blocks=17
-        \\  debit_account_id              tree_id=9 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  credit_account_id             tree_id=10 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  amount                        tree_id=11 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  pending_id                    tree_id=12 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_128                 tree_id=13 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_64                  tree_id=14 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  user_data_32                  tree_id=15 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  ledger                        tree_id=16 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  code                          tree_id=17 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  expires_at                    tree_id=19 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  imported                      tree_id=24 usage=secondary_index kind=composite_key key=8B value=8B table=262080 block=65504 blocks=5
-        \\  closing                       tree_id=26 usage=secondary_index kind=composite_key key=8B value=8B table=262080 block=65504 blocks=5
+        \\  object                        tree_id=18 key=8B value=128B table=262080 block=4094 blocks=65
+        \\  id                            tree_id=8 key=16B value=32B table=262080 block=16376 blocks=17
+        \\  debit_account_id              tree_id=9 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  credit_account_id             tree_id=10 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  amount                        tree_id=11 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  pending_id                    tree_id=12 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  user_data_128                 tree_id=13 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  user_data_64                  tree_id=14 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  user_data_32                  tree_id=15 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  ledger                        tree_id=16 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  code                          tree_id=17 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  expires_at                    tree_id=19 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  imported                      tree_id=24 key=8B value=8B table=262080 block=65504 blocks=5
+        \\  closing                       tree_id=26 key=8B value=8B table=262080 block=65504 blocks=5
         \\
         \\TransferPending                 32B table=524160 block=32752
-        \\  object                        tree_id=20 usage=general kind=object key=8B value=16B table=524160 block=32752 blocks=17
-        \\  status                        tree_id=21 usage=secondary_index kind=composite_key key=16B value=16B table=524160 block=32752 blocks=17
+        \\  object                        tree_id=20 key=8B value=16B table=524160 block=32752 blocks=17
+        \\  status                        tree_id=21 key=16B value=16B table=524160 block=32752 blocks=17
         \\
         \\AccountEvent                    424B table=262080 block=2047
-        \\  object                        tree_id=22 usage=general kind=object key=8B value=256B table=262080 block=2047 blocks=129
-        \\  transfer_pending_status       tree_id=28 usage=secondary_index kind=composite_key key=16B value=16B table=262080 block=32752 blocks=9
-        \\  account_timestamp             tree_id=27 usage=secondary_index kind=composite_key key=16B value=16B table=524160 block=32752 blocks=17
-        \\  dr_account_id_expired         tree_id=29 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  cr_account_id_expired         tree_id=30 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  transfer_pending_id_expired   tree_id=31 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  ledger_expired                tree_id=32 usage=secondary_index kind=composite_key key=32B value=32B table=262080 block=16376 blocks=17
-        \\  prunable                      tree_id=33 usage=secondary_index kind=composite_key key=8B value=8B table=262080 block=65504 blocks=5
+        \\  object                        tree_id=22 key=8B value=256B table=262080 block=2047 blocks=129
+        \\  transfer_pending_status       tree_id=28 key=16B value=16B table=262080 block=32752 blocks=9
+        \\  account_timestamp             tree_id=27 key=16B value=16B table=524160 block=32752 blocks=17
+        \\  dr_account_id_expired         tree_id=29 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  cr_account_id_expired         tree_id=30 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  transfer_pending_id_expired   tree_id=31 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  ledger_expired                tree_id=32 key=32B value=32B table=262080 block=16376 blocks=17
+        \\  prunable                      tree_id=33 key=8B value=8B table=262080 block=65504 blocks=5
         \\
         \\Memory (approximate):
         \\datafile (on disk)              64TiB
