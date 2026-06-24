@@ -1,4 +1,4 @@
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
 use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
@@ -12,6 +12,67 @@ use futures::pin_mut;
 use futures::{Stream, StreamExt};
 
 use tigerbeetle as tb;
+
+thread_local! {
+    // Each test has the main thread and an IO thread, whose thread id is opaque to us.
+    // Allocation and deallocation count may therefore not match.
+    static ALLOCATION_STATS: RefCell<AllocationStats> = RefCell::new(Default::default());
+}
+
+#[global_allocator]
+static ALLOCATOR: TrackingAllocator = TrackingAllocator {};
+
+struct TrackingAllocator {}
+
+#[derive(Default, Clone, Debug)]
+struct AllocationStats {
+    count_alloc: usize,
+    count_dealloc: usize,
+    bytes_alloc: usize,
+    bytes_dealloc: usize,
+}
+
+impl AllocationStats {
+    fn snapshot() -> AllocationStats {
+        ALLOCATION_STATS.with_borrow(|stats| stats.clone())
+    }
+
+    fn diff(&self) -> AllocationStats {
+        let stats_old = self;
+        let stats_now = ALLOCATION_STATS.with_borrow(|stats| stats.clone());
+        AllocationStats {
+            count_alloc: stats_now.count_alloc - stats_old.count_alloc,
+            bytes_alloc: stats_now.bytes_alloc - stats_old.bytes_alloc,
+            count_dealloc: stats_now.count_dealloc - stats_old.count_dealloc,
+            bytes_dealloc: stats_now.bytes_dealloc - stats_old.bytes_dealloc,
+        }
+    }
+
+    fn track_allocation(&mut self, bytes_alloc: usize) {
+        self.count_alloc += 1;
+        self.bytes_alloc += bytes_alloc;
+    }
+
+    fn track_deallocation(&mut self, bytes_dealloc: usize) {
+        self.count_dealloc += 1;
+        self.bytes_dealloc += bytes_dealloc;
+    }
+}
+
+unsafe impl std::alloc::GlobalAlloc for TrackingAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let allocated = unsafe { std::alloc::System.alloc(layout) };
+        if !allocated.is_null() {
+            ALLOCATION_STATS.with_borrow_mut(|stats| stats.track_allocation(layout.size()));
+        }
+        return allocated;
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::System.dealloc(ptr, layout); }
+        ALLOCATION_STATS.with_borrow_mut(|stats| stats.track_deallocation(layout.size()));
+    }
+}
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -167,7 +228,7 @@ fn smoke() -> Result<()> {
 
     block_on(async {
         let (client, _guard) = test_client()?;
-
+        let alloc_stats = AllocationStats::snapshot();
         {
             let fut = client.create_accounts(&[
                 tb::Account {
@@ -208,6 +269,7 @@ fn smoke() -> Result<()> {
                 result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
             }));
         }
+        println!("ALLOC stats {:?}", alloc_stats.diff());
 
         {
             let results = client
@@ -1429,4 +1491,211 @@ fn client_evicted() -> Result<()> {
     assert_eq!(result, Err(tb::ClientClosed));
 
     Ok(())
+}
+
+
+#[test]
+fn allocation_count() -> Result<()> {
+    let account_id1 = tb::id();
+    let account_id2 = tb::id();
+    let transfer_id1 = tb::id();
+
+    let account_id2_user_data_128 = tb::id();
+    let transfer_id1_user_data_128 = tb::id();
+
+    block_on(async {
+        let (client, _guard) = test_client()?;
+        let alloc_stats = AllocationStats::snapshot();
+        {
+            let fut = client.create_accounts(&[
+                tb::Account {
+                    id: account_id1,
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+                tb::Account {
+                    id: account_id2,
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: account_id2_user_data_128,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+            ])?;
+            let results = assert_send(fut).await?;
+
+            assert_eq!(results.len(), 2);
+            assert!(results.iter().all(|result| {
+                result.timestamp > 0 && result.status == tb::CreateAccountStatus::Created
+            }));
+        }
+        println!("ALLOC stats {:?}", alloc_stats.diff());
+
+        {
+            let results = client
+                .create_transfers(&[tb::Transfer {
+                    id: transfer_id1,
+                    debit_account_id: account_id1,
+                    credit_account_id: account_id2,
+                    amount: 10,
+                    pending_id: 0,
+                    user_data_128: transfer_id1_user_data_128,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    timeout: 0,
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::TransferFlags::default(),
+                    timestamp: 0,
+                }])?
+                .await?;
+
+            assert_eq!(results.len(), 1);
+            assert!(results.iter().all(|result| {
+                result.timestamp > 0 && result.status == tb::CreateTransferStatus::Created
+            }));
+        }
+
+        {
+            let results = client.lookup_accounts(&[account_id1, account_id2])?.await?;
+
+            assert_eq!(results.len(), 2);
+            let res_account1 = results[0];
+            let res_account2 = results[1];
+
+            assert_eq!(res_account1.id, account_id1);
+            assert_eq!(res_account1.debits_posted, 10);
+            assert_eq!(res_account1.credits_posted, 0);
+            assert_eq!(res_account2.id, account_id2);
+            assert_eq!(res_account2.debits_posted, 0);
+            assert_eq!(res_account2.credits_posted, 10);
+        }
+
+        {
+            let results = client.lookup_transfers(&[transfer_id1])?.await?;
+
+            assert_eq!(results.len(), 1);
+            let res_transfer1 = results[0];
+
+            assert_eq!(res_transfer1.id, transfer_id1);
+            assert_eq!(res_transfer1.debit_account_id, account_id1);
+            assert_eq!(res_transfer1.credit_account_id, account_id2);
+            assert_eq!(res_transfer1.amount, 10);
+        }
+
+        {
+            let results = client
+                .get_account_transfers(tb::AccountFilter {
+                    account_id: account_id1,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    code: TEST_CODE,
+                    reserved: tb::Reserved::default(),
+                    timestamp_min: 0,
+                    timestamp_max: 0,
+                    limit: 10,
+                    flags: tb::AccountFilterFlags::Credits | tb::AccountFilterFlags::Debits,
+                })?
+                .await?;
+
+            assert_eq!(results.len(), 1);
+
+            let res_transfer = &results[0];
+
+            assert_eq!(res_transfer.id, transfer_id1);
+            assert_eq!(res_transfer.debit_account_id, account_id1);
+            assert_eq!(res_transfer.credit_account_id, account_id2);
+            assert_eq!(res_transfer.amount, 10);
+        }
+
+        {
+            let results = client
+                .get_account_balances(tb::AccountFilter {
+                    account_id: account_id1,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    code: TEST_CODE,
+                    reserved: tb::Reserved::default(),
+                    timestamp_min: 0,
+                    timestamp_max: 0,
+                    limit: 10,
+                    flags: tb::AccountFilterFlags::Credits | tb::AccountFilterFlags::Debits,
+                })?
+                .await?;
+
+            assert_eq!(results.len(), 1);
+
+            let res_balance_1 = &results[0];
+
+            assert_eq!(res_balance_1.debits_posted, 10);
+            assert_eq!(res_balance_1.credits_posted, 0);
+        }
+
+        {
+            let results = client
+                .query_accounts(tb::QueryFilter {
+                    user_data_128: account_id2_user_data_128,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    reserved: tb::Reserved::default(),
+                    timestamp_min: 0,
+                    timestamp_max: 0,
+                    limit: 10,
+                    flags: tb::QueryFilterFlags::default(),
+                })?
+                .await?;
+
+            assert_eq!(results.len(), 1);
+
+            let res_account = &results[0];
+
+            assert_eq!(res_account.id, account_id2);
+        }
+
+        {
+            let results = client
+                .query_transfers(tb::QueryFilter {
+                    user_data_128: transfer_id1_user_data_128,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    reserved: tb::Reserved::default(),
+                    timestamp_min: 0,
+                    timestamp_max: 0,
+                    limit: 10,
+                    flags: tb::QueryFilterFlags::default(),
+                })?
+                .await?;
+
+            assert_eq!(results.len(), 1);
+
+            let res_transfer = &results[0];
+
+            assert_eq!(res_transfer.id, transfer_id1);
+        }
+
+        Ok(())
+    })
 }
