@@ -87,7 +87,7 @@ fn fetch(arena: Allocator, options: struct {
                 "--retry-delay",    "30",
                 "--location",       options.url,
                 "--output",         curl_output,
-                "--verbose",
+                "--verbose",        "--fail",
             }),
             .max_output_bytes = 1024 * 1024,
         }) catch |err| {
