@@ -424,23 +424,76 @@ fn print_objects(output: std.io.AnyWriter) !void {
         try print_size_counts(
             output,
             size_total,
-            &.{ "table", "block" },
-            &.{ ObjectTree.Table.value_count_max, ObjectTree.Table.layout.block_value_count_max },
+            &.{},
+            &.{},
         );
 
         try print_header(output, 1, "object");
-        try print_size_count(output, object_size, 1);
+        try print_tree_schema(
+            output,
+            @field(Groove.config.ids, "timestamp"),
+            ObjectTree,
+        );
 
         inline for (std.meta.fields(Groove.IndexTrees)) |index_field| {
             const IndexTree = index_field.type;
-            const index_size = @sizeOf(IndexTree.Table.Value);
 
             try print_header(output, 1, index_field.name);
-            try print_size_count(output, index_size, 1);
+            try print_tree_schema(
+                output,
+                @field(Groove.config.ids, index_field.name),
+                IndexTree,
+            );
         }
 
         try output.print("\n", .{});
     }
+}
+
+fn print_tree_schema(
+    output: std.io.AnyWriter,
+    comptime tree_id: u16,
+    comptime Tree: type,
+) !void {
+    try output.print(
+        "id={d: <2} K={s: <3} V={s: <4} T={d: <6} B={d: <5} BC={d: <3} ",
+        .{
+            tree_id,
+            stdx.fmt_int_size_bin_exact(@sizeOf(Tree.Table.Key)),
+            stdx.fmt_int_size_bin_exact(@sizeOf(Tree.Table.Value)),
+            Tree.Table.value_count_max,
+            Tree.Table.layout.block_value_count_max,
+            Tree.Table.layout.value_block_count_max,
+        },
+    );
+
+    const block_index = comptime schema.TableIndex.init(.{
+        .key_size = @sizeOf(Tree.Table.Key),
+        .value_block_count_max = Tree.Table.layout.value_block_count_max,
+    });
+    try output.print("IL={d}+{d},{d}/{d}+{d},{d}+{d},{d}+{d} ", .{
+        block_index.value_checksums_offset,
+        block_index.value_checksums_size,
+        block_index.keys_min_offset,
+        block_index.keys_max_offset,
+        block_index.keys_size,
+        block_index.value_addresses_offset,
+        block_index.value_addresses_size,
+        block_index.padding_offset,
+        block_index.padding_size,
+    });
+
+    const block_value = comptime schema.TableValue.init(.{
+        .value_size = @sizeOf(Tree.Table.Value),
+        .value_count_max = Tree.Table.layout.block_value_count_max,
+    });
+
+    try output.print("VL={d}+{d},{d}+{d}\n", .{
+        block_value.values_offset,
+        block_value.values_size,
+        block_value.padding_offset,
+        block_value.padding_size,
+    });
 }
 
 const Inspector = struct {
