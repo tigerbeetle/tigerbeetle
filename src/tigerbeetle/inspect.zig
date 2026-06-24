@@ -27,7 +27,6 @@ const StateMachine = @import("main.zig").StateMachine;
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
-const is_unique_key = @import("../lsm/unique_key.zig").is_unique_key;
 
 const EventMetric = vsr.trace.EventMetric;
 const EventMetricAggregate = vsr.trace.EventMetricAggregate;
@@ -457,11 +456,9 @@ fn print_tree_schema(
     comptime Tree: type,
 ) !void {
     try output.print(
-        "tree_id={} usage={s} kind={s} key={} value={} table={} block={} blocks={}\n",
+        "tree_id={} key={} value={} table={} block={} blocks={}\n",
         .{
             tree_id,
-            @tagName(Tree.Table.usage),
-            tree_kind(Tree),
             stdx.fmt_int_size_bin_exact(@sizeOf(Tree.Table.Key)),
             stdx.fmt_int_size_bin_exact(@sizeOf(Tree.Table.Value)),
             Tree.Table.value_count_max,
@@ -469,13 +466,6 @@ fn print_tree_schema(
             Tree.Table.layout.value_block_count_max,
         },
     );
-}
-
-fn tree_kind(comptime Tree: type) []const u8 {
-    const Value = Tree.Table.Value;
-    if (comptime is_unique_key(Value)) return "unique_key";
-    if (comptime is_composite_key(Value)) return "composite_key";
-    return "object";
 }
 
 const Inspector = struct {
