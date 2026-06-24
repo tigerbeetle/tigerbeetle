@@ -314,8 +314,6 @@
 //!
 //! [The TigerBeetle Reference](https://docs.tigerbeetle.com/reference/).
 
-use bitflags::bitflags;
-
 use std::future::Future;
 use std::os::raw::{c_char, c_void};
 use std::{fmt, mem, ptr};
@@ -1150,27 +1148,12 @@ pub struct Account {
     pub timestamp: u64,
 }
 
-bitflags! {
-    /// Bitflags for the `flags` field of [`Account`].
-    ///
-    /// See the [`bitflags` crate](https://docs.rs/bitflags) for an explanation of Rust bitflags.
-    ///
-    /// # Protocol reference
-    ///
-    /// [`Account.flags`](https://docs.tigerbeetle.com/reference/account/#flags).
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
-    pub struct AccountFlags: u16 {
-        const None = 0;
-        const Linked = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_LINKED;
-        const DebitsMustNotExceedCredits = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_DEBITS_MUST_NOT_EXCEED_CREDITS;
-        const CreditsMustNotExceedDebits = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_CREDITS_MUST_NOT_EXCEED_DEBITS;
-        const History = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_HISTORY;
-        const Imported = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_IMPORTED;
-        const Closed = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_CLOSED;
-    }
-}
+/// Bitflags for the `flags` field of [`Account`].
+///
+/// # Protocol reference
+///
+/// [`Account.flags`](https://docs.tigerbeetle.com/reference/account/#flags).
+pub type AccountFlags = tbc::TB_ACCOUNT_FLAGS;
 
 /// A transfer between accounts.
 ///
@@ -1195,29 +1178,13 @@ pub struct Transfer {
     pub timestamp: u64,
 }
 
-bitflags! {
-    /// Bitflags for the `flags` field of [`Transfer`].
-    ///
-    /// See the [`bitflags` crate](https://docs.rs/bitflags) for an explanation of Rust bitflags.
-    ///
-    /// # Protocol reference
-    ///
-    /// [`Transfer.flags`](https://docs.tigerbeetle.com/reference/transfer/#flags).
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
-    pub struct TransferFlags: u16 {
-        const Linked = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED;
-        const Pending = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_PENDING;
-        const PostPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_POST_PENDING_TRANSFER;
-        const VoidPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_VOID_PENDING_TRANSFER;
-        const BalancingDebit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_DEBIT;
-        const BalancingCredit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_CREDIT;
-        const ClosingDebit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_DEBIT;
-        const ClosingCredit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_CREDIT;
-        const Imported = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_IMPORTED;
-    }
-}
+/// Bitflags for the `flags` field of [`Transfer`].
+///
+/// # Protocol reference
+///
+/// [`Transfer.flags`](https://docs.tigerbeetle.com/reference/transfer/#flags).
+pub type TransferFlags = tbc::TB_TRANSFER_FLAGS;
+
 
 /// Filter for querying transfers and historical balances.
 ///
@@ -1239,23 +1206,12 @@ pub struct AccountFilter {
     pub flags: AccountFilterFlags,
 }
 
-bitflags! {
-    /// Bitflags for the `flags` field of [`AccountFilter`].
-    ///
-    /// See the [`bitflags` crate](https://docs.rs/bitflags) for an explanation of Rust bitflags.
-    ///
-    /// # Protocol reference
-    ///
-    /// [`AccountFilter.flags`](https://docs.tigerbeetle.com/reference/account-filter/#flags).
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
-    pub struct AccountFilterFlags: u32 {
-        const Debits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_DEBITS;
-        const Credits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_CREDITS;
-        const Reversed = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_REVERSED;
-    }
-}
+/// Bitflags for the `flags` field of [`AccountFilter`].
+///
+/// # Protocol reference
+///
+/// [`AccountFilter.flags`](https://docs.tigerbeetle.com/reference/account-filter/#flags).
+pub type AccountFilterFlags = tbc::TB_ACCOUNT_FILTER_FLAGS;
 
 /// An account balance at a point in time.
 ///
@@ -1293,21 +1249,13 @@ pub struct QueryFilter {
     pub flags: QueryFilterFlags,
 }
 
-bitflags! {
-    /// Bitflags for the `flags` field of [`QueryFilter`].
-    ///
-    /// See the [`bitflags` crate](https://docs.rs/bitflags) for an explanation of Rust bitflags.
-    ///
-    /// # Protocol reference
-    ///
-    /// [`QueryFilter.flags`](https://docs.tigerbeetle.com/reference/query-filter/#flags).
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
-    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
-    pub struct QueryFilterFlags: u32 {
-        const Reversed = tbc::TB_QUERY_FILTER_FLAGS_TB_QUERY_FILTER_REVERSED;
-    }
-}
+/// Bitflags for the `flags` field of [`QueryFilter`].
+///
+/// # Protocol reference
+///
+/// [`QueryFilter.flags`](https://docs.tigerbeetle.com/reference/query-filter/#flags).
+pub type QueryFilterFlags = tbc::TB_QUERY_FILTER_FLAGS;
+
 
 /// The result of a single [`create_accounts`] event.
 ///
