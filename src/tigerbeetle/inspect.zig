@@ -424,8 +424,8 @@ fn print_objects(output: std.io.AnyWriter) !void {
         try print_size_counts(
             output,
             size_total,
-            &.{ "table", "block" },
-            &.{ ObjectTree.Table.value_count_max, ObjectTree.Table.layout.block_value_count_max },
+            &.{},
+            &.{},
         );
 
         try print_header(output, 1, "object");
