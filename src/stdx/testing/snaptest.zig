@@ -163,23 +163,8 @@ pub const Snap = struct {
     pub fn diff(snapshot: *const Snap, got: []const u8) !void {
         if (equal_excluding_ignored(got, snapshot.text)) return;
 
-        std.debug.print(
-            \\Snapshot differs.
-            \\Want:
-            \\----
-            \\{s}
-            \\----
-            \\Got:
-            \\----
-            \\{s}
-            \\----
-            \\
-        ,
-            .{
-                snapshot.text,
-                got,
-            },
-        );
+        std.debug.print("Snapshot differs.\n", .{});
+        try print_diff(snapshot.text, got);
 
         if (!snapshot.should_update()) {
             std.debug.print(
@@ -229,6 +214,138 @@ pub const Snap = struct {
         return error.SnapUpdated;
     }
 };
+
+fn print_diff(want: []const u8, got: []const u8) !void {
+    const allocator = std.testing.allocator;
+    const want_lines = try split_lines(allocator, want);
+    defer allocator.free(want_lines);
+    const got_lines = try split_lines(allocator, got);
+    defer allocator.free(got_lines);
+
+    const prefix = lines_common_prefix(want_lines, got_lines);
+    const suffix = lines_common_suffix(want_lines, got_lines, prefix);
+
+    const context = 3;
+    const hunk_start = prefix - @min(prefix, context);
+    const want_change_end = want_lines.len - suffix;
+    const got_change_end = got_lines.len - suffix;
+    const want_hunk_end = @min(want_lines.len, want_change_end + context);
+    const got_hunk_end = @min(got_lines.len, got_change_end + context);
+
+    std.debug.print(
+        \\Diff:
+        \\----
+        \\--- want
+        \\+++ got
+        \\@@ -{},{} +{},{} @@
+        \\
+    ,
+        .{
+            hunk_start + 1,
+            want_hunk_end - hunk_start,
+            hunk_start + 1,
+            got_hunk_end - hunk_start,
+        },
+    );
+
+    for (want_lines[hunk_start..prefix]) |line| {
+        std.debug.print(" {s}\n", .{line});
+    }
+
+    if (want_change_end - prefix == got_change_end - prefix) {
+        for (
+            want_lines[prefix..want_change_end],
+            got_lines[prefix..got_change_end],
+        ) |want_line, got_line| {
+            if (lines_match(want_line, got_line)) {
+                std.debug.print(" {s}\n", .{want_line});
+            } else {
+                std.debug.print("-{s}\n", .{want_line});
+                std.debug.print("+{s}\n", .{got_line});
+            }
+        }
+    } else {
+        for (want_lines[prefix..want_change_end]) |line| {
+            std.debug.print("-{s}\n", .{line});
+        }
+        for (got_lines[prefix..got_change_end]) |line| {
+            std.debug.print("+{s}\n", .{line});
+        }
+    }
+
+    for (
+        want_lines[want_change_end..want_hunk_end],
+        got_lines[got_change_end..got_hunk_end],
+    ) |want_line, got_line| {
+        assert(lines_match(want_line, got_line));
+        std.debug.print(" {s}\n", .{want_line});
+    }
+
+    std.debug.print("----\n", .{});
+}
+
+fn split_lines(allocator: std.mem.Allocator, text: []const u8) ![][]const u8 {
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    errdefer lines.deinit(allocator);
+
+    var rest = text;
+    while (stdx.cut(rest, "\n")) |cut| {
+        const line, const rest_next = cut;
+        try lines.append(allocator, line);
+        rest = rest_next;
+    }
+    if (rest.len > 0) {
+        try lines.append(allocator, rest);
+    }
+
+    return try lines.toOwnedSlice(allocator);
+}
+
+fn lines_common_prefix(a: []const []const u8, b: []const []const u8) usize {
+    for (0..@min(a.len, b.len)) |index| {
+        if (!lines_match(a[index], b[index])) return index;
+    }
+    return @min(a.len, b.len);
+}
+
+fn lines_common_suffix(
+    a: []const []const u8,
+    b: []const []const u8,
+    prefix: usize,
+) usize {
+    assert(prefix <= @min(a.len, b.len));
+
+    const suffix_max = @min(a.len, b.len) - prefix;
+    for (0..suffix_max) |suffix| {
+        const a_line = a[a.len - suffix - 1];
+        const b_line = b[b.len - suffix - 1];
+        if (!lines_match(a_line, b_line)) return suffix;
+    }
+    return suffix_max;
+}
+
+fn lines_match(want: []const u8, got: []const u8) bool {
+    return equal_excluding_ignored(got, want);
+}
+
+test "diff lines handle ignored markers" {
+    const want = [_][]const u8{
+        "{",
+        "  \"id\": \"5\",",
+        "  \"timestamp\": \"<snap:ignore>\",",
+        "}",
+    };
+    const got = [_][]const u8{
+        "{",
+        "  \"id\": \"1\",",
+        "  \"timestamp\": \"1782292370439176883\",",
+        "}",
+    };
+
+    const prefix = lines_common_prefix(&want, &got);
+    try std.testing.expectEqual(@as(usize, 1), prefix);
+    try std.testing.expectEqual(@as(usize, 2), lines_common_suffix(&want, &got, prefix));
+}
 
 fn equal_excluding_ignored(got: []const u8, snapshot: []const u8) bool {
     // Don't allow ignoring suffixes and prefixes, as that makes it easy to miss trailing or leading
