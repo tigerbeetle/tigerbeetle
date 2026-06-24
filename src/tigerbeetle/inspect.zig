@@ -467,20 +467,32 @@ fn print_tree_schema(
         },
     );
 
-    const index = comptime schema.TableIndex.init(.{
+    const block_index = comptime schema.TableIndex.init(.{
         .key_size = @sizeOf(Tree.Table.Key),
         .value_block_count_max = Tree.Table.layout.value_block_count_max,
     });
-    try output.print("IL={d}+{d},{d}/{d}+{d},{d}+{d},{d}+{d}\n", .{
-        index.value_checksums_offset,
-        index.value_checksums_size,
-        index.keys_min_offset,
-        index.keys_max_offset,
-        index.keys_size,
-        index.value_addresses_offset,
-        index.value_addresses_size,
-        index.padding_offset,
-        index.padding_size,
+    try output.print("IL={d}+{d},{d}/{d}+{d},{d}+{d},{d}+{d} ", .{
+        block_index.value_checksums_offset,
+        block_index.value_checksums_size,
+        block_index.keys_min_offset,
+        block_index.keys_max_offset,
+        block_index.keys_size,
+        block_index.value_addresses_offset,
+        block_index.value_addresses_size,
+        block_index.padding_offset,
+        block_index.padding_size,
+    });
+
+    const block_value = comptime schema.TableValue.init(.{
+        .value_size = @sizeOf(Tree.Table.Value),
+        .value_count_max = Tree.Table.layout.block_value_count_max,
+    });
+
+    try output.print("VL={d}+{d},{d}+{d}\n", .{
+        block_value.values_offset,
+        block_value.values_size,
+        block_value.padding_offset,
+        block_value.padding_size,
     });
 }
 
