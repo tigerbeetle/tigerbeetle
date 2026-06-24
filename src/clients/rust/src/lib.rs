@@ -1185,7 +1185,6 @@ pub struct Transfer {
 /// [`Transfer.flags`](https://docs.tigerbeetle.com/reference/transfer/#flags).
 pub type TransferFlags = tbc::TB_TRANSFER_FLAGS;
 
-
 /// Filter for querying transfers and historical balances.
 ///
 /// # Protocol reference
@@ -1255,7 +1254,6 @@ pub struct QueryFilter {
 ///
 /// [`QueryFilter.flags`](https://docs.tigerbeetle.com/reference/query-filter/#flags).
 pub type QueryFilterFlags = tbc::TB_QUERY_FILTER_FLAGS;
-
 
 /// The result of a single [`create_accounts`] event.
 ///
