@@ -70,7 +70,19 @@ const Environment = struct {
                     env.model.compact();
                 },
                 .upsert => |value| {
-                    env.cache_map.upsert(&value);
+                    const key = TestTable.key_from_value(&value);
+                    if (env.model.get(key)) |model_value| {
+                        const cache_map_value = env.cache_map.get(key);
+                        if (cache_map_value == null or
+                            !std.meta.eql(cache_map_value.?.*, model_value.value))
+                        {
+                            if (env.cache_map.scope_is_active) continue;
+                            env.cache_map.prefetch_upsert(&model_value.value);
+                        }
+                        env.cache_map.update(&value);
+                    } else {
+                        env.cache_map.insert(&value);
+                    }
                     try env.model.upsert(&value);
                 },
                 .remove => |key| {
@@ -85,7 +97,8 @@ const Environment = struct {
                         // been evicted from the recency cache. It must be loaded into the stash
                         // before removal, though.
                         assert(env.model.compacts > model_value.?.op);
-                        env.cache_map.upsert(&model_value.?.value);
+                        if (env.cache_map.scope_is_active) continue;
+                        env.cache_map.prefetch_upsert(&model_value.?.value);
                     }
 
                     env.cache_map.remove(key);

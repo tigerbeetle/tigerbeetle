@@ -1187,7 +1187,7 @@ pub fn GrooveType(
                                 // Zeroed timestamp indicates the object is not present,
                                 // and this id cannot be used anymore.
                                 entry.value_ptr.* = .found_orphaned;
-                                groove.insert_orphaned_object(value);
+                                groove.prefetch_orphaned_object(value);
                                 return;
                             }
                             assert(TimestampRange.valid(tree_value.timestamp));
@@ -1270,7 +1270,7 @@ pub fn GrooveType(
                             assert(IndexHelper.get(object).? == value);
                         },
                     }
-                    groove.objects_cache.upsert(object);
+                    groove.objects_cache.prefetch_upsert(object);
                     options.entry.value_ptr.* = .{
                         .found = @field(object, groove_options.primary_key),
                     };
@@ -1648,7 +1648,7 @@ pub fn GrooveType(
                             comptime assert(groove_options.primary_key_orphaned);
                             comptime assert(is_primary_key(field));
 
-                            worker.context.groove.insert_orphaned_object(tree_value.field);
+                            worker.context.groove.prefetch_orphaned_object(tree_value.field);
                             entry.value_ptr.* = .found_orphaned;
 
                             worker.current = null;
@@ -1753,7 +1753,7 @@ pub fn GrooveType(
                             assert(IndexHelper.get(object).? == value);
                         },
                     }
-                    worker.context.groove.objects_cache.upsert(object);
+                    worker.context.groove.objects_cache.prefetch_upsert(object);
                     entry.value_ptr.* = .{
                         .found = @field(object, groove_options.primary_key),
                     };
@@ -1773,7 +1773,7 @@ pub fn GrooveType(
             if (ObjectsCache != void) {
                 const primary_key = @field(object, groove_options.primary_key);
                 assert(!groove.objects_cache.has(primary_key));
-                groove.objects_cache.upsert(object);
+                groove.objects_cache.insert(object);
             }
 
             groove.objects.put(object);
@@ -1868,7 +1868,7 @@ pub fn GrooveType(
             // unless old comes from the stash) and no secondary indexes will be updated!
 
             if (ObjectsCache != void) {
-                groove.objects_cache.upsert(new);
+                groove.objects_cache.update(new);
             }
             groove.objects.put(new);
         }
@@ -1945,7 +1945,19 @@ pub fn GrooveType(
 
             var orphaned: Object = std.mem.zeroInit(Object, .{});
             @field(orphaned, groove_options.primary_key) = key;
-            groove.objects_cache.upsert(&orphaned);
+            groove.objects_cache.insert(&orphaned);
+        }
+
+        fn prefetch_orphaned_object(groove: *Groove, key: PrimaryKey) void {
+            comptime assert(groove_options.primary_key_orphaned);
+            comptime assert(!is_primary_key(.timestamp));
+
+            assert(key != 0);
+            assert(key != std.math.maxInt(PrimaryKey));
+
+            var orphaned: Object = std.mem.zeroInit(Object, .{});
+            @field(orphaned, groove_options.primary_key) = key;
+            groove.objects_cache.prefetch_upsert(&orphaned);
         }
 
         pub fn remove_orphaned_primary_key(groove: *Groove, id: u128) void {

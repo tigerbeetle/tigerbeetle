@@ -198,9 +198,35 @@ pub fn CacheMapType(
             return self.options.cache_value_count_max;
         }
 
-        pub fn upsert(self: *CacheMap, value: *const Value) void {
-            const updated = self.fetch_upsert(value);
+        pub fn prefetch_upsert(self: *CacheMap, value: *const Value) void {
+            assert(!self.scope_is_active);
+            assert(!tombstone(value));
+            _ = self.stash_upsert(value);
+        }
 
+        pub fn insert(self: *CacheMap, value: *const Value) void {
+            switch (self.get_or_tombstone(key_from_value(value))) {
+                .found => unreachable,
+                .not_found, .tombstone => {},
+            }
+
+            const updated = self.fetch_upsert(value);
+            assert(updated == null or tombstone(&updated.?));
+            self.rollback_log_append_update(value, updated);
+        }
+
+        pub fn update(self: *CacheMap, value: *const Value) void {
+            switch (self.get_or_tombstone(key_from_value(value))) {
+                .found => {},
+                .not_found, .tombstone => unreachable,
+            }
+
+            const updated = self.fetch_upsert(value).?;
+            assert(!tombstone(&updated));
+            self.rollback_log_append_update(value, updated);
+        }
+
+        fn rollback_log_append_update(self: *CacheMap, value: *const Value, updated: ?Value) void {
             // When upserting into a scope:
             if (self.scope_is_active) {
                 const rollback_action: RollbackLogAction = rollback_action: {
@@ -307,7 +333,8 @@ pub fn CacheMapType(
                         // Reverting an update or delete
                         // consists of an insert of the original value.
                         assert(!tombstone(rollback_value));
-                        self.upsert(rollback_value);
+                        const updated = self.fetch_upsert(rollback_value);
+                        assert(updated != null);
                     },
                     .restore_tombstone => |key| {
                         // Reverting an insert that overwrote a tombstone
@@ -408,7 +435,7 @@ test "cache_map: unit" {
         cache_map.cache_entries_max(),
     );
 
-    cache_map.upsert(&.{ .key = 1, .value = 1, .tombstone = false });
+    cache_map.insert(&.{ .key = 1, .value = 1, .tombstone = false });
     try testing.expectEqual(@as(u64, 1), cache_map.cache_entries());
     try testing.expectEqual(
         TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
@@ -417,7 +444,7 @@ test "cache_map: unit" {
 
     // Test scope persisting.
     cache_map.scope_open();
-    cache_map.upsert(&.{ .key = 2, .value = 2, .tombstone = false });
+    cache_map.insert(&.{ .key = 2, .value = 2, .tombstone = false });
     try testing.expectEqual(
         TestTable.Value{ .key = 2, .value = 2, .tombstone = false },
         cache_map.get(2).?.*,
@@ -430,9 +457,9 @@ test "cache_map: unit" {
 
     // Test scope discard on updates.
     cache_map.scope_open();
-    cache_map.upsert(&.{ .key = 2, .value = 22, .tombstone = false });
-    cache_map.upsert(&.{ .key = 2, .value = 222, .tombstone = false });
-    cache_map.upsert(&.{ .key = 2, .value = 2222, .tombstone = false });
+    cache_map.update(&.{ .key = 2, .value = 22, .tombstone = false });
+    cache_map.update(&.{ .key = 2, .value = 222, .tombstone = false });
+    cache_map.update(&.{ .key = 2, .value = 2222, .tombstone = false });
     try testing.expectEqual(
         TestTable.Value{ .key = 2, .value = 2222, .tombstone = false },
         cache_map.get(2).?.*,
@@ -445,12 +472,12 @@ test "cache_map: unit" {
 
     // Test scope discard on inserts.
     cache_map.scope_open();
-    cache_map.upsert(&.{ .key = 3, .value = 3, .tombstone = false });
+    cache_map.insert(&.{ .key = 3, .value = 3, .tombstone = false });
     try testing.expectEqual(
         TestTable.Value{ .key = 3, .value = 3, .tombstone = false },
         cache_map.get(3).?.*,
     );
-    cache_map.upsert(&.{ .key = 3, .value = 33, .tombstone = false });
+    cache_map.update(&.{ .key = 3, .value = 33, .tombstone = false });
     try testing.expectEqual(
         TestTable.Value{ .key = 3, .value = 33, .tombstone = false },
         cache_map.get(3).?.*,
@@ -471,7 +498,7 @@ test "cache_map: unit" {
     );
 
     // Test scope discard on a sequence of insert->remove->insert.
-    cache_map.upsert(&.{ .key = 4, .value = 4, .tombstone = false });
+    cache_map.insert(&.{ .key = 4, .value = 4, .tombstone = false });
     try testing.expectEqual(
         TestTable.Value{ .key = 4, .value = 4, .tombstone = false },
         cache_map.get(4).?.*,
@@ -483,7 +510,7 @@ test "cache_map: unit" {
     assert(cache_map.get_or_tombstone(4) == .tombstone);
 
     cache_map.scope_open();
-    cache_map.upsert(&.{ .key = 4, .value = 4, .tombstone = false });
+    cache_map.insert(&.{ .key = 4, .value = 4, .tombstone = false });
     cache_map.scope_close(.discard);
 
     assert(!cache_map.has(4));
@@ -504,7 +531,7 @@ test "cache_map: stash shadows cache until compact" {
     });
     defer cache_map.deinit(allocator);
 
-    cache_map.upsert(&.{ .key = 1, .value = 1, .tombstone = false });
+    cache_map.insert(&.{ .key = 1, .value = 1, .tombstone = false });
     try testing.expectEqual(@as(u64, 0), cache_map.cache_entries());
     try testing.expectEqual(
         TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
@@ -519,7 +546,7 @@ test "cache_map: stash shadows cache until compact" {
         cache_map.cache.?.get(1).?.*,
     );
 
-    cache_map.upsert(&.{ .key = 1, .value = 2, .tombstone = false });
+    cache_map.update(&.{ .key = 1, .value = 2, .tombstone = false });
     try testing.expectEqual(
         TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
         cache_map.cache.?.get(1).?.*,

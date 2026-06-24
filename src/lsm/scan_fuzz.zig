@@ -791,7 +791,7 @@ const Environment = struct {
         ) orelse return false;
         // Simulate what prefetch does in the real state machine: ensure the old object is in
         // the objects cache before calling update, which asserts its presence.
-        env.forest.grooves.things.objects_cache.upsert(old);
+        env.forest.grooves.things.objects_cache.prefetch_upsert(old);
         env.forest.grooves.things.update(.{ .old = old, .new = &new });
         env.model.items[model_index] = new;
 
