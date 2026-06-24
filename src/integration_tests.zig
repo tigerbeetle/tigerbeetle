@@ -391,45 +391,45 @@ test "inspect constants snapshot" {
         \\
         \\StateMachine:
         \\Account                         272B
-        \\  object                        id=7  K=8B  V=128B T=524160 B=4094  BC=129
-        \\  id                            id=1  K=16B V=32B  T=262080 B=16376 BC=17 
-        \\  user_data_128                 id=2  K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  user_data_64                  id=3  K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  user_data_32                  id=4  K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  ledger                        id=5  K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  code                          id=6  K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  imported                      id=23 K=8B  V=8B   T=262080 B=65504 BC=5  
-        \\  closed                        id=25 K=8B  V=8B   T=524160 B=65504 BC=9  
+        \\  object                        id=7  K=8B  V=128B T=524160 B=4094  BC=129 IL=256+4128,4384/5416+1032,6448+1032,7480+516808
+        \\  id                            id=1  K=16B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1072+272,1344+136,1480+522808
+        \\  user_data_128                 id=2  K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  user_data_64                  id=3  K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  user_data_32                  id=4  K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  ledger                        id=5  K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  code                          id=6  K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  imported                      id=23 K=8B  V=8B   T=262080 B=65504 BC=5   IL=256+160,416/456+40,496+40,536+523752
+        \\  closed                        id=25 K=8B  V=8B   T=524160 B=65504 BC=9   IL=256+288,544/616+72,688+72,760+523528
         \\
         \\Transfer                        416B
-        \\  object                        id=18 K=8B  V=128B T=262080 B=4094  BC=65 
-        \\  id                            id=8  K=16B V=32B  T=262080 B=16376 BC=17 
-        \\  debit_account_id              id=9  K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  credit_account_id             id=10 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  amount                        id=11 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  pending_id                    id=12 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  user_data_128                 id=13 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  user_data_64                  id=14 K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  user_data_32                  id=15 K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  ledger                        id=16 K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  code                          id=17 K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  expires_at                    id=19 K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  imported                      id=24 K=8B  V=8B   T=262080 B=65504 BC=5  
-        \\  closing                       id=26 K=8B  V=8B   T=262080 B=65504 BC=5  
+        \\  object                        id=18 K=8B  V=128B T=262080 B=4094  BC=65  IL=256+2080,2336/2856+520,3376+520,3896+520392
+        \\  id                            id=8  K=16B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1072+272,1344+136,1480+522808
+        \\  debit_account_id              id=9  K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  credit_account_id             id=10 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  amount                        id=11 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  pending_id                    id=12 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  user_data_128                 id=13 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  user_data_64                  id=14 K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  user_data_32                  id=15 K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  ledger                        id=16 K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  code                          id=17 K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  expires_at                    id=19 K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  imported                      id=24 K=8B  V=8B   T=262080 B=65504 BC=5   IL=256+160,416/456+40,496+40,536+523752
+        \\  closing                       id=26 K=8B  V=8B   T=262080 B=65504 BC=5   IL=256+160,416/456+40,496+40,536+523752
         \\
         \\TransferPending                 32B
-        \\  object                        id=20 K=8B  V=16B  T=524160 B=32752 BC=17 
-        \\  status                        id=21 K=16B V=16B  T=524160 B=32752 BC=17 
+        \\  object                        id=20 K=8B  V=16B  T=524160 B=32752 BC=17  IL=256+544,800/936+136,1072+136,1208+523080
+        \\  status                        id=21 K=16B V=16B  T=524160 B=32752 BC=17  IL=256+544,800/1072+272,1344+136,1480+522808
         \\
         \\AccountEvent                    424B
-        \\  object                        id=22 K=8B  V=256B T=262080 B=2047  BC=129
-        \\  transfer_pending_status       id=28 K=16B V=16B  T=262080 B=32752 BC=9  
-        \\  account_timestamp             id=27 K=16B V=16B  T=524160 B=32752 BC=17 
-        \\  dr_account_id_expired         id=29 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  cr_account_id_expired         id=30 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  transfer_pending_id_expired   id=31 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  ledger_expired                id=32 K=32B V=32B  T=262080 B=16376 BC=17 
-        \\  prunable                      id=33 K=8B  V=8B   T=262080 B=65504 BC=5  
+        \\  object                        id=22 K=8B  V=256B T=262080 B=2047  BC=129 IL=256+4128,4384/5416+1032,6448+1032,7480+516808
+        \\  transfer_pending_status       id=28 K=16B V=16B  T=262080 B=32752 BC=9   IL=256+288,544/688+144,832+72,904+523384
+        \\  account_timestamp             id=27 K=16B V=16B  T=524160 B=32752 BC=17  IL=256+544,800/1072+272,1344+136,1480+522808
+        \\  dr_account_id_expired         id=29 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  cr_account_id_expired         id=30 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  transfer_pending_id_expired   id=31 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  ledger_expired                id=32 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264
+        \\  prunable                      id=33 K=8B  V=8B   T=262080 B=65504 BC=5   IL=256+160,416/456+40,496+40,536+523752
         \\
         \\Memory (approximate):
         \\datafile (on disk)              64TiB
