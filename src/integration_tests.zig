@@ -390,46 +390,46 @@ test "inspect constants snapshot" {
         \\  block                         512KiB
         \\
         \\StateMachine:
-        \\Account                         272B table=524160 block=4094
-        \\  object                        tree_id=7 key=8B value=128B table=524160 block=4094 blocks=129
-        \\  id                            tree_id=1 key=16B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_128                 tree_id=2 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_64                  tree_id=3 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  user_data_32                  tree_id=4 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  ledger                        tree_id=5 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  code                          tree_id=6 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  imported                      tree_id=23 key=8B value=8B table=262080 block=65504 blocks=5
-        \\  closed                        tree_id=25 key=8B value=8B table=524160 block=65504 blocks=9
+        \\Account                         272B
+        \\  object                        id=7  K=8B  V=128B T=524160 B=4094  BC=129
+        \\  id                            id=1  K=16B V=32B  T=262080 B=16376 BC=17 
+        \\  user_data_128                 id=2  K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  user_data_64                  id=3  K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  user_data_32                  id=4  K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  ledger                        id=5  K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  code                          id=6  K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  imported                      id=23 K=8B  V=8B   T=262080 B=65504 BC=5  
+        \\  closed                        id=25 K=8B  V=8B   T=524160 B=65504 BC=9  
         \\
-        \\Transfer                        416B table=262080 block=4094
-        \\  object                        tree_id=18 key=8B value=128B table=262080 block=4094 blocks=65
-        \\  id                            tree_id=8 key=16B value=32B table=262080 block=16376 blocks=17
-        \\  debit_account_id              tree_id=9 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  credit_account_id             tree_id=10 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  amount                        tree_id=11 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  pending_id                    tree_id=12 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_128                 tree_id=13 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  user_data_64                  tree_id=14 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  user_data_32                  tree_id=15 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  ledger                        tree_id=16 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  code                          tree_id=17 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  expires_at                    tree_id=19 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  imported                      tree_id=24 key=8B value=8B table=262080 block=65504 blocks=5
-        \\  closing                       tree_id=26 key=8B value=8B table=262080 block=65504 blocks=5
+        \\Transfer                        416B
+        \\  object                        id=18 K=8B  V=128B T=262080 B=4094  BC=65 
+        \\  id                            id=8  K=16B V=32B  T=262080 B=16376 BC=17 
+        \\  debit_account_id              id=9  K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  credit_account_id             id=10 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  amount                        id=11 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  pending_id                    id=12 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  user_data_128                 id=13 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  user_data_64                  id=14 K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  user_data_32                  id=15 K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  ledger                        id=16 K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  code                          id=17 K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  expires_at                    id=19 K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  imported                      id=24 K=8B  V=8B   T=262080 B=65504 BC=5  
+        \\  closing                       id=26 K=8B  V=8B   T=262080 B=65504 BC=5  
         \\
-        \\TransferPending                 32B table=524160 block=32752
-        \\  object                        tree_id=20 key=8B value=16B table=524160 block=32752 blocks=17
-        \\  status                        tree_id=21 key=16B value=16B table=524160 block=32752 blocks=17
+        \\TransferPending                 32B
+        \\  object                        id=20 K=8B  V=16B  T=524160 B=32752 BC=17 
+        \\  status                        id=21 K=16B V=16B  T=524160 B=32752 BC=17 
         \\
-        \\AccountEvent                    424B table=262080 block=2047
-        \\  object                        tree_id=22 key=8B value=256B table=262080 block=2047 blocks=129
-        \\  transfer_pending_status       tree_id=28 key=16B value=16B table=262080 block=32752 blocks=9
-        \\  account_timestamp             tree_id=27 key=16B value=16B table=524160 block=32752 blocks=17
-        \\  dr_account_id_expired         tree_id=29 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  cr_account_id_expired         tree_id=30 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  transfer_pending_id_expired   tree_id=31 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  ledger_expired                tree_id=32 key=32B value=32B table=262080 block=16376 blocks=17
-        \\  prunable                      tree_id=33 key=8B value=8B table=262080 block=65504 blocks=5
+        \\AccountEvent                    424B
+        \\  object                        id=22 K=8B  V=256B T=262080 B=2047  BC=129
+        \\  transfer_pending_status       id=28 K=16B V=16B  T=262080 B=32752 BC=9  
+        \\  account_timestamp             id=27 K=16B V=16B  T=524160 B=32752 BC=17 
+        \\  dr_account_id_expired         id=29 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  cr_account_id_expired         id=30 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  transfer_pending_id_expired   id=31 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  ledger_expired                id=32 K=32B V=32B  T=262080 B=16376 BC=17 
+        \\  prunable                      id=33 K=8B  V=8B   T=262080 B=65504 BC=5  
         \\
         \\Memory (approximate):
         \\datafile (on disk)              64TiB
