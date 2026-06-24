@@ -27,6 +27,7 @@ const StateMachine = @import("main.zig").StateMachine;
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
+const is_unique_key = @import("../lsm/unique_key.zig").is_unique_key;
 
 const EventMetric = vsr.trace.EventMetric;
 const EventMetricAggregate = vsr.trace.EventMetricAggregate;
@@ -456,7 +457,7 @@ fn print_tree_schema(
     comptime Tree: type,
 ) !void {
     try output.print(
-        "id={d: <2} K={s: <3} V={s: <4} T={d: <6} B={d: <5} BC={d: <3}\n",
+        "id={d: <2} K={s: <3} V={s: <4} T={d: <6} B={d: <5} BC={d: <3} ",
         .{
             tree_id,
             stdx.fmt_int_size_bin_exact(@sizeOf(Tree.Table.Key)),
@@ -466,6 +467,36 @@ fn print_tree_schema(
             Tree.Table.layout.value_block_count_max,
         },
     );
+
+    const index = comptime schema.TableIndex.init(.{
+        .key_size = @sizeOf(Tree.Table.Key),
+        .value_block_count_max = Tree.Table.layout.value_block_count_max,
+    });
+    try output.print("IL={d}+{d},{d}/{d}+{d},{d}+{d},{d}+{d}\n", .{
+        index.value_checksums_offset,
+        index.value_checksums_size,
+        index.keys_min_offset,
+        index.keys_max_offset,
+        index.keys_size,
+        index.value_addresses_offset,
+        index.value_addresses_size,
+        index.padding_offset,
+        index.padding_size,
+    });
+}
+
+fn tree_usage(comptime Tree: type) []const u8 {
+    return switch (Tree.Table.usage) {
+        .general => "general",
+        .secondary_index => "secondary",
+    };
+}
+
+fn tree_kind(comptime Tree: type) []const u8 {
+    const Value = Tree.Table.Value;
+    if (comptime is_unique_key(Value)) return "unique";
+    if (comptime is_composite_key(Value)) return "composite";
+    return "object";
 }
 
 const Inspector = struct {
