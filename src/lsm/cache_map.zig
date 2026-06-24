@@ -257,24 +257,12 @@ pub fn CacheMapType(
             const old_value = (self.get(key) orelse unreachable).*;
             assert(!tombstone(&old_value));
 
-            const stash_removed: ?Value = stash_removed: {
-                assert(self.stash.count() <= self.options.stash_value_count_max);
-
-                const tombstone_object = tombstone_from_key(key);
-                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
-
-                // Add a tombstone in the stash, indicating that the
-                // deletion happened and that the key should not be
-                // looked up in the immutable table or LSM tree.
-                defer entry.key_ptr.* = tombstone_object;
-
-                break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
-            };
-
+            const tombstone_object = tombstone_from_key(key);
+            const stash_removed = self.stash_upsert(&tombstone_object);
             maybe(stash_removed != null);
-
             // Cannot remove a value that has already been removed.
             if (stash_removed) |stash_value| assert(!tombstone(&stash_value));
+
             if (self.scope_is_active) {
                 self.scope_rollback_log.appendAssumeCapacity(.{
                     .restore = old_value,
