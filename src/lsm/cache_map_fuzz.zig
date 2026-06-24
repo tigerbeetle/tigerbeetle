@@ -55,7 +55,8 @@ const Environment = struct {
 
     pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The cache_map should behave exactly like a hash map, with some exceptions:
-        // * .compact() removes values added more than one .compact() ago.
+        // * .compact() moves stashed values into the recency cache; old values may then be
+        //   evicted from the recency cache.
         // * .scope_close(.discard) rolls back all operations done from the corresponding
         //   .scope_open()
 
@@ -80,9 +81,9 @@ const Environment = struct {
                     } else {
                         if (model_value == null) continue; // The key doesn't exist.
 
-                        // If the entry has an op from one or more compactions ago, it
-                        // may have been evicted from the cache.
-                        // It must be loaded into the cache before removal, though.
+                        // If the entry has an op from one or more compactions ago, it may have
+                        // been evicted from the recency cache. It must be loaded into the stash
+                        // before removal, though.
                         assert(env.model.compacts > model_value.?.op);
                         env.cache_map.upsert(&model_value.?.value);
                     }
@@ -101,7 +102,7 @@ const Environment = struct {
                     } else if (env.model.compacts > model_value.?.op) {
                         // .compact() support; if the entry has an op 1 or more compacts ago, it
                         // doesn't have to exist in the cache_map. It may still be served from the
-                        // cache layer, however.
+                        // recency cache, however.
                         stdx.maybe(cache_map_value == null);
                         if (cache_map_value) |cache_map_value_unwrapped| {
                             assert(std.meta.eql(cache_map_value_unwrapped.*, model_value.?.value));
@@ -129,16 +130,14 @@ const Environment = struct {
     }
 
     /// Verifies both the positive and negative spaces, as both are equally important. We verify
-    /// the positive space by iterating over our model, and ensuring everything exists and is
-    /// equal in the cache_map.
+    /// the positive space by iterating over our model, and ensuring everything still visible in
+    /// the cache_map is equal.
     ///
     /// We verify the negative space by iterating over the cache_map's cache and maps directly,
     /// ensuring that:
-    /// 1. The values in the cache all exist and are equal in the model.
-    /// 2. The values in stash either exists and are equal in the model, or there's the same key
-    ///    in the cache.
-    /// 3. The values in stash_2 either exists and are equal in the model, or there's the same key
-    ///    in stash_1 or the cache.
+    /// 1. The values in the cache exist and are equal in the model, or are shadowed by the stash.
+    /// 2. The values in stash exist and are equal in the model, or are tombstones for keys that
+    ///    do not exist in the model.
     pub fn verify(env: *Environment) void {
         var checked: u32 = 0;
         var it = env.model.iterator();
@@ -158,8 +157,22 @@ const Environment = struct {
 
         log.info("Verified {} items from model exist and match in cache_map.", .{checked});
 
-        // It's fine for the cache_map to have values older than .compact() in it; good, in fact,
-        // but they _MUST NOT_ be stale.
+        // The stash is the authoritative layer for the current commit and must not be stale.
+        var stash_iterator = env.cache_map.stash.keyIterator();
+        while (stash_iterator.next()) |stash_value| {
+            const key = TestTable.key_from_value(stash_value);
+            const model_value = env.model.get(key);
+
+            if (TestTable.tombstone(stash_value)) {
+                assert(model_value == null);
+            } else {
+                assert(model_value != null);
+                assert(std.meta.eql(stash_value.*, model_value.?.value));
+            }
+        }
+
+        // It's fine for the cache_map to have values older than .compact() in it; good, in fact.
+        // If a cache value is stale, the stash must shadow it with the current value or tombstone.
         if (env.cache_map.cache) |*cache| {
             for (cache.values, 0..) |*cache_value, i| {
                 // If the count for an index is 0, the value doesn't exist.
@@ -167,43 +180,25 @@ const Environment = struct {
                     continue;
                 }
 
-                const model_val = env.model.get(TestTable.key_from_value(cache_value));
-                assert(std.meta.eql(cache_value.*, model_val.?.value));
-            }
-        }
+                const key = TestTable.key_from_value(cache_value);
+                const model_value = env.model.get(key);
+                if (model_value) |model_value_unwrapped| {
+                    if (std.meta.eql(cache_value.*, model_value_unwrapped.value)) continue;
+                }
 
-        // The stash can have stale values, but in that case the real value _must_ exist
-        // in the cache. It should be impossible for the stash to have a value that isn't in the
-        // model, since cache_map.remove() removes from both the cache and stash.
-        var stash_iterator = env.cache_map.stash.keyIterator();
-        while (stash_iterator.next()) |stash_value| {
-            // Get account from model.
-            const model_value = env.model.get(TestTable.key_from_value(stash_value));
-
-            // Even if the stash has stale values, the key must still exist in the model.
-            if (TestTable.tombstone(stash_value)) {
-                stdx.maybe(model_value == null);
-                continue;
-            }
-            assert(!TestTable.tombstone(stash_value));
-            assert(model_value != null);
-
-            const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
-
-            if (!stash_value_equal) {
-                if (env.cache_map.cache) |*cache| {
-                    // We verified all cache entries were equal and correct above, so if it exists,
-                    // it must be right.
-                    const cache_value = cache.get(
-                        TestTable.key_from_value(stash_value),
-                    );
-                    assert(cache_value != null);
+                const stash_value = env.cache_map.stash.getKey(TestTable.tombstone_from_key(key));
+                assert(stash_value != null);
+                if (TestTable.tombstone(&stash_value.?)) {
+                    assert(model_value == null);
+                } else {
+                    assert(model_value != null);
+                    assert(std.meta.eql(stash_value.?, model_value.?.value));
                 }
             }
         }
 
         log.info(
-            "Verified all items in the cache and stash exist and match the model.",
+            "Verified all items in the stash are current and cache items are current or shadowed.",
             .{},
         );
     }

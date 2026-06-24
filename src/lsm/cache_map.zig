@@ -8,21 +8,20 @@ const maybe = stdx.maybe;
 const SetAssociativeCacheType = @import("set_associative_cache.zig").SetAssociativeCacheType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 
-/// A CacheMap is a hybrid between our SetAssociativeCache and a HashMap (stash). The
-/// SetAssociativeCache sits on top and absorbs the majority of get / put requests. Below that,
-/// lives a HashMap. Should an insert() cause an eviction (which can happen either because the Key
-/// is the same, or because our Way is full), the evicted value is caught and put in the stash.
+/// A CacheMap is a hybrid between our SetAssociativeCache and a HashMap (stash). The stash is the
+/// authoritative layer for values needed by the current commit; the SetAssociativeCache is a
+/// best-effort recency cache for values from previous commits.
 ///
 /// This allows for a potentially huge cache, with all the advantages of CLOCK Nth-Chance, while
-/// still being able to give hard guarantees that values will be present. The stash will often be
-/// significantly smaller, as the amount of values we're required to guarantee is less than what
-/// we'd like to optimistically keep in memory.
+/// still being able to give hard guarantees that values prefetched into the stash will be present.
+/// The stash will often be significantly smaller, as the amount of values we're required to
+/// guarantee is less than what we'd like to optimistically keep in memory.
 ///
 /// Within our LSM, the CacheMap is the backing for the combined Groove prefetch + cache. The cache
 /// part fills the use case of an object cache, while the stash ensures that prefetched values
 /// are available in memory during their respective commit.
 ///
-/// Cache invalidation for the stash is handled by `compact`.
+/// `compact()` promotes the stash into the recency cache, then clears the stash.
 pub fn CacheMapType(
     comptime Key: type,
     comptime Value: type,
@@ -79,10 +78,10 @@ pub fn CacheMapType(
         };
         const RollbackLog = std.ArrayListUnmanaged(RollbackLogAction);
 
-        // The hierarchy for lookups is cache (if present) -> stash -> immutable table -> lsm.
-        // Lower levels _may_ have stale values, provided the correct value exists
-        // in one of the levels above.
-        // Evictions from the cache first flow into stash, with `.compact()` clearing it.
+        // The hierarchy for lookups is stash -> cache (if present) -> immutable table -> lsm.
+        // Lower levels _may_ have stale values, provided the correct value exists in one of the
+        // levels above. Cache evictions are discarded; only `compact()` promotes stash values into
+        // the recency cache.
         // When cache is null, the stash mirrors the mutable table.
         cache: ?Cache,
         stash: Map,
@@ -155,13 +154,18 @@ pub fn CacheMapType(
         }
 
         pub fn get(self: *const CacheMap, key: Key) ?*Value {
-            return (if (self.cache) |*cache| cache.get(key) else null) orelse stash: {
-                if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
-                    // Deleted keys are represented as tombstones in the stash.
-                    break :stash if (tombstone(object)) null else object;
+            if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
+                // Deleted keys are represented as tombstones in the stash.
+                return if (tombstone(object)) null else object;
+            }
+
+            if (self.cache) |*cache| {
+                if (cache.get(key)) |object| {
+                    return if (tombstone(object)) null else object;
                 }
-                break :stash null;
-            };
+            }
+
+            return null;
         }
 
         pub fn get_or_tombstone(self: *const CacheMap, key: Key) union(enum) {
@@ -169,14 +173,15 @@ pub fn CacheMapType(
             not_found,
             tombstone,
         } {
-            if (self.cache) |*cache| {
-                if (cache.get(key)) |object| {
-                    return .{ .found = object };
-                }
-            }
             if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
                 // Deleted keys are represented as tombstones in the stash.
                 return if (tombstone(object)) .tombstone else .{ .found = object };
+            }
+
+            if (self.cache) |*cache| {
+                if (cache.get(key)) |object| {
+                    return if (tombstone(object)) .tombstone else .{ .found = object };
+                }
             }
 
             return .not_found;
@@ -215,50 +220,17 @@ pub fn CacheMapType(
             }
         }
 
-        // Upserts the cache and stash and returns the old value in case of
-        // an update.
+        // Upserts the stash and returns the old visible value in case of an update.
         fn fetch_upsert(self: *CacheMap, value: *const Value) ?Value {
+            const key = key_from_value(value);
+            const old_stash = self.stash_upsert(value);
+            if (old_stash) |old| return old;
+
             if (self.cache) |*cache| {
-                const key = key_from_value(value);
-                const result = cache.upsert(value);
-
-                if (result.evicted) |*evicted| {
-                    switch (result.updated) {
-                        .update => {
-                            assert(key_from_value(evicted) == key);
-                            if (constants.verify) {
-                                const stash: ?Value = self.stash.getKey(value.*);
-                                assert(stash == null or tombstone(&stash.?));
-                            }
-
-                            // There was an eviction because an item was updated,
-                            // the evicted item is always its previous version.
-                            return evicted.*;
-                        },
-                        .insert => {
-                            assert(key_from_value(evicted) != key);
-
-                            // There was an eviction because a new item was inserted,
-                            // the evicted item will be added to the stash.
-                            const stash_updated = self.stash_upsert(evicted);
-
-                            // We don't expect stale values on the stash.
-                            assert(stash_updated == null or tombstone(&stash_updated.?));
-                        },
-                    }
-                } else {
-                    // It must be an insert without eviction,
-                    // since updates always evict the old version.
-                    assert(result.updated == .insert);
-                }
-
-                // The stash may have the old value if nothing was evicted.
-                return self.stash_remove(key);
-            } else {
-                // No cache.
-                // Upserting the stash directly.
-                return self.stash_upsert(value);
+                if (cache.get(key)) |old| return old.*;
             }
+
+            return null;
         }
 
         fn stash_upsert(self: *CacheMap, value: *const Value) ?Value {
@@ -275,20 +247,16 @@ pub fn CacheMapType(
                 null;
         }
 
-        /// Removes a key from cache, adding a tombstone to record the action.
-        /// Invariant: The key must be present in cache.
+        /// Removes a key by adding a tombstone to the stash.
+        /// Invariant: The key must be visible through the cache map.
         pub fn remove(self: *CacheMap, key: Key) void {
             // Only unit tests and fuzzers call this function.
             // Assert that it is not called from production code.
             comptime assert(constants.verify);
 
-            const cache_removed: ?Value = if (self.cache) |*cache|
-                cache.remove(key)
-            else
-                null;
+            const old_value = (self.get(key) orelse unreachable).*;
+            assert(!tombstone(&old_value));
 
-            // We don't allow stale values, so we need to remove from the stash as well,
-            // since both can have different versions with the same key.
             const stash_removed: ?Value = stash_removed: {
                 assert(self.stash.count() <= self.options.stash_value_count_max);
 
@@ -303,13 +271,10 @@ pub fn CacheMapType(
                 break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
             };
 
-            // Does not allow removing a key that is not in the cache.
-            assert(cache_removed != null or stash_removed != null);
-            maybe(cache_removed != null and stash_removed != null);
+            maybe(stash_removed != null);
 
-            const old_value = cache_removed orelse stash_removed orelse unreachable;
             // Cannot remove a value that has already been removed.
-            assert(!tombstone(&old_value));
+            if (stash_removed) |stash_value| assert(!tombstone(&stash_value));
             if (self.scope_is_active) {
                 self.scope_rollback_log.appendAssumeCapacity(.{
                     .restore = old_value,
@@ -367,15 +332,8 @@ pub fn CacheMapType(
                     },
                     .remove => |key| {
                         // Reverting an insert consists of removing the value.
-                        const cache_removed: bool =
-                            if (self.cache) |*cache| cache.remove(key) != null else false;
-
-                        // The key should be in the stash iff it wasn't in the cache.
-                        if (self.stash_remove(key)) |*stash_value| {
-                            assert(!cache_removed or tombstone(stash_value));
-                        } else {
-                            assert(cache_removed);
-                        }
+                        const stash_value = self.stash_remove(key).?;
+                        assert(!tombstone(&stash_value));
                     },
                 }
             }
@@ -388,6 +346,17 @@ pub fn CacheMapType(
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash.count() <= self.options.stash_value_count_max);
 
+            if (self.cache) |*cache| {
+                var stash_iterator = self.stash.keyIterator();
+                while (stash_iterator.next()) |object| {
+                    const key = key_from_value(object);
+                    if (tombstone(object)) {
+                        _ = cache.remove(key);
+                    } else {
+                        _ = cache.upsert(object);
+                    }
+                }
+            }
             self.stash.clearRetainingCapacity();
         }
     };
@@ -532,4 +501,61 @@ test "cache_map: unit" {
     assert(!cache_map.has(4));
     assert(cache_map.get(4) == null);
     assert(cache_map.get_or_tombstone(4) == .tombstone);
+}
+
+test "cache_map: stash shadows cache until compact" {
+    const testing = std.testing;
+
+    const allocator = testing.allocator;
+
+    var cache_map = try TestCacheMap.init(allocator, .{
+        .cache_value_count_max = TestCacheMap.Cache.value_count_max_multiple,
+        .scope_value_count_max = 32,
+        .stash_value_count_max = 32,
+        .name = "test map",
+    });
+    defer cache_map.deinit(allocator);
+
+    cache_map.upsert(&.{ .key = 1, .value = 1, .tombstone = false });
+    try testing.expectEqual(@as(u64, 0), cache_map.cache_entries());
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
+        cache_map.get(1).?.*,
+    );
+
+    cache_map.compact();
+    try testing.expectEqual(@as(u64, 1), cache_map.cache_entries());
+    try testing.expectEqual(@as(u64, 0), cache_map.stash.count());
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
+        cache_map.cache.?.get(1).?.*,
+    );
+
+    cache_map.upsert(&.{ .key = 1, .value = 2, .tombstone = false });
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 1, .tombstone = false },
+        cache_map.cache.?.get(1).?.*,
+    );
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 2, .tombstone = false },
+        cache_map.get(1).?.*,
+    );
+
+    cache_map.compact();
+    try testing.expectEqual(@as(u64, 0), cache_map.stash.count());
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 2, .tombstone = false },
+        cache_map.cache.?.get(1).?.*,
+    );
+
+    cache_map.remove(1);
+    assert(cache_map.get(1) == null);
+    try testing.expectEqual(
+        TestTable.Value{ .key = 1, .value = 2, .tombstone = false },
+        cache_map.cache.?.get(1).?.*,
+    );
+
+    cache_map.compact();
+    assert(cache_map.get(1) == null);
+    assert(cache_map.cache.?.get(1) == null);
 }
