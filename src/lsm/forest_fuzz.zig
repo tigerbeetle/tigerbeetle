@@ -840,6 +840,7 @@ const Environment = struct {
                         },
                         inline else => |field| index: {
                             const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
+                            if (IndexHelper.is_deprecated) unreachable;
                             comptime assert(IndexHelper.Type != void);
 
                             const value = IndexHelper.get(object).?;
@@ -1025,10 +1026,22 @@ pub fn generate_fuzz_ops(
             .scan => blk: {
                 @setEvalBranchQuota(10_000);
                 const Index = std.meta.FieldEnum(GrooveTransfers.IndexTrees);
-                const index = prng.enum_uniform(Index);
+                const EnumWeights = stdx.PRNG.EnumWeightsType(Index);
+                const index_weights: EnumWeights = index_weights: {
+                    // Exclude deprecated indexes.
+                    var index_weights: EnumWeights = undefined;
+                    inline for (comptime std.enums.values(Index)) |index| {
+                        const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(index));
+                        const weight = if (IndexHelper.is_deprecated) 0 else 1;
+                        @field(index_weights, @tagName(index)) = weight;
+                    }
+                    break :index_weights index_weights;
+                };
+                const index = prng.enum_weighted(Index, index_weights);
                 break :blk switch (index) {
                     inline else => |field| {
                         const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
+                        assert(!IndexHelper.is_deprecated);
                         const min: u128, const max: u128 = switch (IndexHelper.Type) {
                             void => .{ 0, 0 },
                             else => range: {

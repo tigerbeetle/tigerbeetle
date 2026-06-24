@@ -170,11 +170,14 @@ pub fn GrooveType(
     ///     An array of fields that should *not* index zero values.
     ///     Unique keys can be optional, except for the primary key.
     ///
-    ///
     /// - derived: { .field = *const fn (*const Object) ?DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
     ///     Derived indexes can be made optional by returning `null`.
+    ///
+    /// - deprecated: { .field: Type }:
+    ///     An anonymous struct which contain trees that don't exist on the Object anymore
+    ///     but are still part of the schema.
     ///
     /// - objects_cache: bool:
     ///     Whether Groove should have an ObjectCache.
@@ -195,8 +198,9 @@ pub fn GrooveType(
     assert(@hasField(GrooveOptions, "ignored"));
     assert(@hasField(GrooveOptions, "optional"));
     assert(@hasField(GrooveOptions, "derived"));
+    assert(@hasField(GrooveOptions, "deprecated"));
     assert(@hasField(GrooveOptions, "objects_cache"));
-    assert(std.meta.fields(GrooveOptions).len == 9);
+    assert(std.meta.fields(GrooveOptions).len == 10);
 
     assert(@hasField(Object, "timestamp"));
     assert(@FieldType(Object, "timestamp") == u64);
@@ -388,6 +392,33 @@ pub fn GrooveType(
         };
     }
 
+    // Generate IndexTrees for deprecated trees in groove_options.
+    const deprecated_fields = std.meta.fields(@TypeOf(groove_options.deprecated));
+    for (deprecated_fields) |field| {
+        comptime var unique_key: bool = false;
+        for (groove_options.unique_keys) |unique_key_name| {
+            unique_key = unique_key or std.mem.eql(u8, field.name, unique_key_name);
+        }
+
+        const Field: type = @field(groove_options.deprecated, field.name);
+        const table_value_count_max = constants.lsm_compaction_ops *
+            @field(groove_options.batch_value_count_max, field.name);
+        const IndexTree = if (unique_key)
+            UniqueKeyTreeType(Storage, Field, table_value_count_max)
+        else
+            IndexTreeType(Storage, Field, table_value_count_max);
+
+        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
+            .{
+                .name = field.name,
+                .type = IndexTree,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(IndexTree),
+            },
+        };
+    }
+
     comptime var index_options_fields: [index_fields.len]std.builtin.Type.StructField = undefined;
     for (index_fields, 0..) |index_field, i| {
         const IndexTree = index_field.type;
@@ -438,7 +469,8 @@ pub fn GrooveType(
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len +
-        std.meta.fields(@TypeOf(groove_options.derived)).len -
+        derived_fields.len +
+        deprecated_fields.len -
         groove_options.ignored.len -
         // The timestamp field is implicitly ignored since it's the primary key for ObjectTree:
         @as(usize, 1);
@@ -449,6 +481,11 @@ pub fn GrooveType(
         fn HelperType(comptime field_name: []const u8) type {
             return struct {
                 pub const Type = type: {
+                    if (is_deprecated) break :type @field(
+                        groove_options.deprecated,
+                        field_name,
+                    );
+
                     if (is_derived) {
                         const derived_fn = @typeInfo(@TypeOf(@field(
                             groove_options.derived,
@@ -481,6 +518,13 @@ pub fn GrooveType(
                     break :is_derived false;
                 };
 
+                pub const is_deprecated: bool = is_deprecated: {
+                    for (deprecated_fields) |field| {
+                        if (std.mem.eql(u8, field.name, field_name)) break :is_deprecated true;
+                    }
+                    break :is_deprecated false;
+                };
+
                 pub const allow_zero: bool = allow_zero: {
                     for (groove_options.optional) |optional| {
                         if (std.mem.eql(u8, field_name, optional)) {
@@ -503,6 +547,8 @@ pub fn GrooveType(
                 /// Try to extract an index from the object, deriving it when necessary.
                 /// Null means the value should not be indexed.
                 pub fn index_from_object(object: *const Object) ?IndexPrefix {
+                    if (is_deprecated) return null;
+
                     if (is_derived) {
                         return if (get(object)) |value|
                             as_prefix(value)
@@ -520,6 +566,7 @@ pub fn GrooveType(
                 /// Extracts the value of the index,
                 /// either by accessing the field or by calling the derived index function.
                 pub inline fn get(object: *const Object) ?Type {
+                    comptime assert(!is_deprecated);
                     if (is_derived) {
                         const function = @field(groove_options.derived, field_name);
                         return function(object);

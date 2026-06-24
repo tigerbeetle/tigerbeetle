@@ -61,7 +61,7 @@ pub const tree_ids = struct {
         .debit_account_id = 9,
         .credit_account_id = 10,
         .amount = 11,
-        .pending_id = 12,
+        .deprecated_pending_id = 12,
         .user_data_128 = 13,
         .user_data_64 = 14,
         .user_data_32 = 15,
@@ -71,6 +71,7 @@ pub const tree_ids = struct {
         .expires_at = 19,
         .imported = 24,
         .closing = 26,
+        .pending_id = 34,
     };
 
     pub const TransferPending = .{
@@ -82,11 +83,17 @@ pub const tree_ids = struct {
         .timestamp = 22,
         .account_timestamp = 27,
         .transfer_pending_status = 28,
-        .dr_account_id_expired = 29,
-        .cr_account_id_expired = 30,
-        .transfer_pending_id_expired = 31,
-        .ledger_expired = 32,
+        .expired_debit_account_id = 29,
+        .expired_credit_account_id = 30,
+        .deprecated_expired_transfer_id = 31,
+        .deprecated_expired_ledger = 32,
         .prunable = 33,
+        .expired_ledger = 35,
+        .expired_transfer_id = 36,
+        .expired_code = 37,
+        .expired_user_data_128 = 38,
+        .expired_user_data_64 = 39,
+        .expired_user_data_32 = 40,
     };
 };
 
@@ -300,6 +307,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const IndexHelperType = AccountsGroove.IndexHelperType;
                 assert(IndexHelperType("imported").Type == void);
                 assert(IndexHelperType("closed").Type == void);
+
+                assert(std.meta.fields(@TypeOf(AccountsGroove.config.deprecated)).len == 0);
             }
 
             // Transfers:
@@ -311,28 +320,50 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(IndexHelperType("expires_at").Type == u64);
                 assert(IndexHelperType("imported").Type == void);
                 assert(IndexHelperType("closing").Type == void);
+
+                assert(std.meta.fields(@TypeOf(TransfersGroove.config.deprecated)).len == 1);
+                // Secondary index was deprecated, replaced by an unique key.
+                assert(@hasField(
+                    @TypeOf(TransfersGroove.config.deprecated),
+                    "deprecated_pending_id",
+                ));
             }
 
             // TransfersPending:
             {
                 assert(@FieldType(Forest.Grooves, "transfers_pending") == TransfersPendingGroove);
                 assert(std.meta.fields(@TypeOf(TransfersPendingGroove.config.derived)).len == 0);
+                assert(std.meta.fields(@TypeOf(TransfersPendingGroove.config.deprecated)).len == 0);
             }
 
             // AccountEvents:
             {
                 assert(@FieldType(Forest.Grooves, "account_events") == AccountEventsGroove);
-                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 6);
+                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 10);
 
                 const IndexHelperType = AccountEventsGroove.IndexHelperType;
                 assert(IndexHelperType("account_timestamp").Type == u64);
-                assert(IndexHelperType("dr_account_id_expired").Type == u128);
-                assert(IndexHelperType("cr_account_id_expired").Type == u128);
-                assert(IndexHelperType("transfer_pending_id_expired").Type == u128);
-                // TODO: `ledger_expired` returns the wrong type!
-                // It should be u32 instead, the same as `ledger`.
-                assert(IndexHelperType("ledger_expired").Type == u128);
+                assert(IndexHelperType("expired_debit_account_id").Type == u128);
+                assert(IndexHelperType("expired_credit_account_id").Type == u128);
                 assert(IndexHelperType("prunable").Type == void);
+                assert(IndexHelperType("expired_transfer_id").Type == u128);
+                assert(IndexHelperType("expired_ledger").Type == u32);
+                assert(IndexHelperType("expired_code").Type == u16);
+                assert(IndexHelperType("expired_user_data_128").Type == u128);
+                assert(IndexHelperType("expired_user_data_64").Type == u64);
+                assert(IndexHelperType("expired_user_data_32").Type == u32);
+
+                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.deprecated)).len == 2);
+                // Secondary index was deprecated, replaced by an unique key.
+                assert(@hasField(
+                    @TypeOf(AccountEventsGroove.config.deprecated),
+                    "deprecated_expired_transfer_id",
+                ));
+                // Wrong data type u128.
+                assert(@hasField(
+                    @TypeOf(AccountEventsGroove.config.deprecated),
+                    "deprecated_expired_ledger",
+                ));
             }
         }
 
@@ -422,6 +453,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.closed,
                 },
+                .deprecated = .{},
                 .objects_cache = true,
             },
         );
@@ -469,6 +501,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.closing,
                 },
+                .deprecated = .{
+                    .deprecated_pending_id = u128,
+                },
                 .objects_cache = true,
             },
         );
@@ -491,6 +526,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "status",
                 },
                 .derived = .{},
+                .deprecated = .{},
                 .objects_cache = true,
             },
         );
@@ -503,7 +539,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .batch_value_count_max = tree_values_count_max.account_events,
                 .primary_key = "timestamp",
                 .primary_key_orphaned = false,
-                .unique_keys = &[_][:0]const u8{"transfer_pending_id_expired"},
+                .unique_keys = &[_][:0]const u8{"expired_transfer_id"},
                 .ignored = &[_][:0]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
@@ -529,14 +565,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                 },
                 .optional = &[_][:0]const u8{},
                 .derived = .{
-                    // Placeholder derived index (will be inserted during `account_event`).
-                    //
                     // This index stores two values per object (the credit and debit accounts).
                     // It is used for balance as-of queries and to search events related to a
                     // particular account.
                     // Examples:
                     //   "Balance where account=X and timestamp=Y".
                     //   "Last time account=X was updated".
+                    // Placeholder derived index (will be inserted during `account_event`).
                     .account_timestamp = struct {
                         fn account_timestamp(_: *const AccountEvent) ?u64 {
                             return null;
@@ -548,49 +583,95 @@ pub fn StateMachineType(comptime Storage: type) type {
                     // However, expired events require a specific index to be searchable by both
                     // debit and credit accounts.
                     // Example: "All expired debits where account=X".
-                    .dr_account_id_expired = struct {
-                        fn dr_account_id_expired(object: *const AccountEvent) ?u128 {
+                    .expired_debit_account_id = struct {
+                        fn expired_debit_account_id(object: *const AccountEvent) ?u128 {
                             return if (object.transfer_pending_status == .expired)
                                 object.dr_account_id
                             else
                                 null;
                         }
-                    }.dr_account_id_expired,
-                    .cr_account_id_expired = struct {
-                        fn cr_account_id_expired(object: *const AccountEvent) ?u128 {
+                    }.expired_debit_account_id,
+                    .expired_credit_account_id = struct {
+                        fn expired_credit_account_id(object: *const AccountEvent) ?u128 {
                             return if (object.transfer_pending_status == .expired)
                                 object.cr_account_id
                             else
                                 null;
                         }
-                    }.cr_account_id_expired,
+                    }.expired_credit_account_id,
 
                     // Events related to voiding or posting pending transfers can be searched using
                     // `Transfers.pending_id`.
                     // However, expired events require a specific index to be searchable by the
                     // transfer.
                     // Example: "When transfer=X has expired".
-                    .transfer_pending_id_expired = struct {
-                        fn transfer_pending_id_expired(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.transfer_pending_id
-                            else
-                                null;
+                    .expired_transfer_id = struct {
+                        fn expired_transfer_id(object: *const AccountEvent) ?u128 {
+                            return switch (object.transfer_pending_status) {
+                                .none => null,
+                                .pending, .posted, .voided => null,
+                                .expired => object.transfer_pending_id,
+                            };
                         }
-                    }.transfer_pending_id_expired,
+                    }.expired_transfer_id,
 
                     // Events related to transfers can be searched using `Transfers.ledger`.
                     // However, expired events require a specific index to be searchable
                     // by ledger.
                     // Example: "All expiry events where ledger=X".
-                    .ledger_expired = struct {
-                        fn transfer_expired_ledger(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.ledger
-                            else
-                                null;
+                    .expired_ledger = struct {
+                        fn expired_ledger(object: *const AccountEvent) ?u32 {
+                            return switch (object.transfer_pending_status) {
+                                .none => null,
+                                .pending, .posted, .voided => null,
+                                .expired => object.ledger,
+                            };
                         }
-                    }.transfer_expired_ledger,
+                    }.expired_ledger,
+
+                    // Events related to transfers can be searched using `Transfers.code`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where code=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_code = struct {
+                        fn expired_code(_: *const AccountEvent) ?u16 {
+                            return null;
+                        }
+                    }.expired_code,
+
+                    // Events related to transfers can be searched using `Transfers.user_data_128`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where user_data_128=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_user_data_128 = struct {
+                        fn expired_user_data_128(_: *const AccountEvent) ?u128 {
+                            return null;
+                        }
+                    }.expired_user_data_128,
+
+                    // Events related to transfers can be searched using `Transfers.user_data_64`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where user_data_64=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_user_data_64 = struct {
+                        fn expired_user_data_64(_: *const AccountEvent) ?u64 {
+                            return null;
+                        }
+                    }.expired_user_data_64,
+
+                    // Events related to transfers can be searched using `Transfers.user_data_32`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where user_data_32=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_user_data_32 = struct {
+                        fn expired_user_data_32(_: *const AccountEvent) ?u32 {
+                            return null;
+                        }
+                    }.expired_user_data_32,
 
                     // Tracks events for accounts without the history flag,
                     // enabling a cleanup job to delete them after CDC.
@@ -605,6 +686,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                             }
                         }
                     }.prunable,
+                },
+                .deprecated = .{
+                    .deprecated_expired_transfer_id = u128,
+                    .deprecated_expired_ledger = u128,
                 },
                 .objects_cache = false,
             },
@@ -4482,7 +4567,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                 },
             }
 
-            // For CDC we always insert the history regardless `Account.flags.history`.
             self.forest.grooves.account_events.insert(&.{
                 .timestamp = args.timestamp_event,
 
@@ -4516,6 +4600,35 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .transfer_pending_flags = if (args.transfer_pending) |p| p.flags else .{},
             });
 
+            if (args.transfer_pending_status == .expired) {
+                // Indexing the expired transfer fields that copy the original transfer
+                // allows querying by the expiry timestamp with the same fields.
+                // These indexes are not derivable only from the AccountEvent object.
+                self.forest.grooves.account_events.indexes.expired_code.put(&.{
+                    .timestamp = args.timestamp_event,
+                    .field = args.transfer_pending.?.code,
+                });
+                if (args.transfer_pending.?.user_data_128 != 0) {
+                    self.forest.grooves.account_events.indexes.expired_user_data_128.put(&.{
+                        .timestamp = args.timestamp_event,
+                        .field = args.transfer_pending.?.user_data_128,
+                    });
+                }
+                if (args.transfer_pending.?.user_data_64 != 0) {
+                    self.forest.grooves.account_events.indexes.expired_user_data_64.put(&.{
+                        .timestamp = args.timestamp_event,
+                        .field = args.transfer_pending.?.user_data_64,
+                    });
+                }
+                if (args.transfer_pending.?.user_data_32 != 0) {
+                    self.forest.grooves.account_events.indexes.expired_user_data_32.put(&.{
+                        .timestamp = args.timestamp_event,
+                        .field = args.transfer_pending.?.user_data_32,
+                    });
+                }
+            }
+
+            // The `flags.history` bit enables additional indexes for point in time balances:
             if (args.dr_account.flags.history) {
                 // Indexing the debit account.
                 self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
@@ -4837,7 +4950,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 debit_account_id: u32,
                 credit_account_id: u32,
                 amount: u32,
-                pending_id: u32,
+                deprecated_pending_id: u32,
                 user_data_128: u32,
                 user_data_64: u32,
                 user_data_32: u32,
@@ -4846,6 +4959,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 expires_at: u32,
                 imported: u32,
                 closing: u32,
+                pending_id: u32,
             },
             transfers_pending: struct {
                 timestamp: u32,
@@ -4855,11 +4969,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                 timestamp: u32,
                 account_timestamp: u32,
                 transfer_pending_status: u32,
-                dr_account_id_expired: u32,
-                cr_account_id_expired: u32,
-                transfer_pending_id_expired: u32,
-                ledger_expired: u32,
+                expired_debit_account_id: u32,
+                expired_credit_account_id: u32,
+                deprecated_expired_transfer_id: u32,
+                deprecated_expired_ledger: u32,
                 prunable: u32,
+                expired_transfer_id: u32,
+                expired_ledger: u32,
+                expired_code: u32,
+                expired_user_data_128: u32,
+                expired_user_data_64: u32,
+                expired_user_data_32: u32,
             },
         } {
             assert(batch_size_limit <= constants.message_body_size_max);
@@ -4901,7 +5021,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .debit_account_id = batch_create_transfers,
                     .credit_account_id = batch_create_transfers,
                     .amount = batch_create_transfers,
-                    .pending_id = batch_create_transfers,
+                    .deprecated_pending_id = batch_create_transfers,
                     .user_data_128 = batch_create_transfers,
                     .user_data_64 = batch_create_transfers,
                     .user_data_32 = batch_create_transfers,
@@ -4910,6 +5030,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .expires_at = batch_create_transfers,
                     .imported = batch_create_transfers,
                     .closing = batch_create_transfers,
+                    .pending_id = batch_create_transfers,
                 },
                 .transfers_pending = .{
                     // Objects are mutated when the pending transfer is posted/voided/expired.
@@ -4920,11 +5041,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .timestamp = batch_create_transfers,
                     .account_timestamp = 2 * batch_create_transfers, // dr and cr accounts.
                     .transfer_pending_status = batch_create_transfers,
-                    .dr_account_id_expired = batch_create_transfers,
-                    .cr_account_id_expired = batch_create_transfers,
-                    .transfer_pending_id_expired = batch_create_transfers,
-                    .ledger_expired = batch_create_transfers,
+                    .expired_debit_account_id = batch_create_transfers,
+                    .expired_credit_account_id = batch_create_transfers,
+                    .deprecated_expired_transfer_id = batch_create_transfers,
+                    .deprecated_expired_ledger = batch_create_transfers,
                     .prunable = batch_create_transfers,
+                    .expired_transfer_id = batch_create_transfers,
+                    .expired_ledger = batch_create_transfers,
+                    .expired_code = batch_create_transfers,
+                    .expired_user_data_128 = batch_create_transfers,
+                    .expired_user_data_64 = batch_create_transfers,
+                    .expired_user_data_32 = batch_create_transfers,
                 },
             };
         }

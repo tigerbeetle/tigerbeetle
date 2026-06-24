@@ -71,6 +71,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .ignored = &[_][:0]const u8{},
                 .optional = &[_][:0]const u8{},
                 .derived = .{},
+                .deprecated = .{},
                 .objects_cache = true,
             },
         );
