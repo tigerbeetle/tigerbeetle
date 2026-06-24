@@ -27,7 +27,6 @@ const StateMachine = @import("main.zig").StateMachine;
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
-const is_unique_key = @import("../lsm/unique_key.zig").is_unique_key;
 
 const EventMetric = vsr.trace.EventMetric;
 const EventMetricAggregate = vsr.trace.EventMetricAggregate;
@@ -483,20 +482,6 @@ fn print_tree_schema(
         index.padding_offset,
         index.padding_size,
     });
-}
-
-fn tree_usage(comptime Tree: type) []const u8 {
-    return switch (Tree.Table.usage) {
-        .general => "general",
-        .secondary_index => "secondary",
-    };
-}
-
-fn tree_kind(comptime Tree: type) []const u8 {
-    const Value = Tree.Table.Value;
-    if (comptime is_unique_key(Value)) return "unique";
-    if (comptime is_composite_key(Value)) return "composite";
-    return "object";
 }
 
 const Inspector = struct {
