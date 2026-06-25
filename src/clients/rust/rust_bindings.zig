@@ -5,19 +5,19 @@ const assert = std.debug.assert;
 const stdx = vsr.stdx;
 
 const type_mappings = .{
-    .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
+    .{ exports.tb_account_flags, "AccountFlags" },
     .{ exports.tb_account_t, "tb_account_t" },
-    .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
+    .{ exports.tb_transfer_flags, "TransferFlags" },
     .{ exports.tb_transfer_t, "tb_transfer_t" },
     .{ exports.tb_create_account_status, "TB_CREATE_ACCOUNT_STATUS" },
     .{ exports.tb_create_transfer_status, "TB_CREATE_TRANSFER_STATUS" },
     .{ exports.tb_create_account_result_t, "tb_create_account_result_t" },
     .{ exports.tb_create_transfer_result_t, "tb_create_transfer_result_t" },
     .{ exports.tb_account_filter_t, "tb_account_filter_t" },
-    .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
+    .{ exports.tb_account_filter_flags, "AccountFilterFlags" },
     .{ exports.tb_account_balance_t, "tb_account_balance_t" },
     .{ exports.tb_query_filter_t, "tb_query_filter_t" },
-    .{ exports.tb_query_filter_flags, "TB_QUERY_FILTER_FLAGS" },
+    .{ exports.tb_query_filter_flags, "QueryFilterFlags" },
     .{
         exports.tb_client_t, "tb_client_t",
         \\// Opaque struct serving as a handle for the client instance.
@@ -87,9 +87,8 @@ fn emit_bitflags(
     comptime skip_fields: []const []const u8,
 ) !void {
     assert(@typeInfo(Type).@"struct".layout == .@"packed");
-
-    var suffix_pos = std.mem.lastIndexOf(u8, rust_name, "_").?;
-    if (std.mem.count(u8, rust_name, "_") == 1) suffix_pos = rust_name.len;
+    assert(std.mem.count(u8, rust_name, "_") == 0);
+    assert(rust_name[0] >= 'A' and rust_name[0] <= 'Z');
 
     const backing_type_text = switch (@typeInfo(type_info.backing_integer.?)) {
         .int => |i| brk: {
@@ -110,7 +109,7 @@ fn emit_bitflags(
         \\#[derive(Copy, Clone, Debug, Default)] 
         \\#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
         \\#[repr(transparent)]
-        \\pub struct {[rust_name]s}({[backing_type_text]s});
+        \\pub struct {[rust_name]s}(pub {[backing_type_text]s});
         \\
     , .{ .rust_name = rust_name, .backing_type_text = backing_type_text });
 
@@ -135,19 +134,6 @@ fn emit_bitflags(
         }
         try writer.print("\n", .{});
         try writer.print("    pub fn empty() -> Self {{ {s}(0) }}\n", .{rust_name});
-        try writer.print("    pub fn bits(self) -> {s} {{ self.0 }}\n", .{
-            backing_type_text,
-        });
-        try writer.print(
-            "    pub fn contains(self, other: Self) -> bool {{ (self.0 & other.0) != 0 }}\n",
-            .{},
-        );
-
-        const mask = @as(type_info.backing_integer.?, (1 << type_info.fields.len) - 1);
-        try writer.print(
-            "    pub fn from_bits_truncate(bits: {s}) -> Self {{ Self(bits & 0x{X}) }}\n",
-            .{ backing_type_text, mask },
-        );
     }
     try writer.print("}}\n\n", .{});
 
@@ -159,7 +145,7 @@ fn emit_bitflags(
         \\    }}
         \\}}
         \\
-        \\ 
+        \\
     , .{ .rust_name = rust_name });
 }
 

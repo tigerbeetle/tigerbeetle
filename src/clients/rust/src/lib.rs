@@ -139,7 +139,7 @@
 //!         End,
 //!     }
 //!
-//!     let is_reverse = event.flags.contains(tb::AccountFilterFlags::Reversed);
+//!     let is_reverse = (event.flags.0 & tb::AccountFilterFlags::Reversed.0) != 0;
 //!
 //!     futures::stream::unfold(State::Start, move |state| async move {
 //!         let event = match state {
@@ -1060,14 +1060,6 @@ fn assert_abi_compatibility() {
         std::mem::align_of::<tbc::tb_account_t>()
     );
     assert_eq!(
-        std::mem::size_of::<AccountFlags>(),
-        std::mem::size_of::<tbc::TB_ACCOUNT_FLAGS>()
-    );
-    assert_eq!(
-        std::mem::align_of::<AccountFlags>(),
-        std::mem::align_of::<tbc::TB_ACCOUNT_FLAGS>()
-    );
-    assert_eq!(
         std::mem::size_of::<Transfer>(),
         std::mem::size_of::<tbc::tb_transfer_t>()
     );
@@ -1076,28 +1068,12 @@ fn assert_abi_compatibility() {
         std::mem::align_of::<tbc::tb_transfer_t>()
     );
     assert_eq!(
-        std::mem::size_of::<TransferFlags>(),
-        std::mem::size_of::<tbc::TB_TRANSFER_FLAGS>()
-    );
-    assert_eq!(
-        std::mem::align_of::<TransferFlags>(),
-        std::mem::align_of::<tbc::TB_TRANSFER_FLAGS>()
-    );
-    assert_eq!(
         std::mem::size_of::<AccountFilter>(),
         std::mem::size_of::<tbc::tb_account_filter_t>()
     );
     assert_eq!(
         std::mem::align_of::<AccountFilter>(),
         std::mem::align_of::<tbc::tb_account_filter_t>()
-    );
-    assert_eq!(
-        std::mem::size_of::<AccountFilterFlags>(),
-        std::mem::size_of::<tbc::TB_ACCOUNT_FILTER_FLAGS>()
-    );
-    assert_eq!(
-        std::mem::align_of::<AccountFilterFlags>(),
-        std::mem::align_of::<tbc::TB_ACCOUNT_FILTER_FLAGS>()
     );
     assert_eq!(
         std::mem::size_of::<AccountBalance>(),
@@ -1114,14 +1090,6 @@ fn assert_abi_compatibility() {
     assert_eq!(
         std::mem::align_of::<QueryFilter>(),
         std::mem::align_of::<tbc::tb_query_filter_t>()
-    );
-    assert_eq!(
-        std::mem::size_of::<QueryFilterFlags>(),
-        std::mem::size_of::<tbc::TB_QUERY_FILTER_FLAGS>()
-    );
-    assert_eq!(
-        std::mem::align_of::<QueryFilterFlags>(),
-        std::mem::align_of::<tbc::TB_QUERY_FILTER_FLAGS>()
     );
 }
 
@@ -1153,7 +1121,7 @@ pub struct Account {
 /// # Protocol reference
 ///
 /// [`Account.flags`](https://docs.tigerbeetle.com/reference/account/#flags).
-pub type AccountFlags = tbc::TB_ACCOUNT_FLAGS;
+pub use tbc::AccountFlags;
 
 /// A transfer between accounts.
 ///
@@ -1183,7 +1151,7 @@ pub struct Transfer {
 /// # Protocol reference
 ///
 /// [`Transfer.flags`](https://docs.tigerbeetle.com/reference/transfer/#flags).
-pub type TransferFlags = tbc::TB_TRANSFER_FLAGS;
+pub use tbc::TransferFlags;
 
 /// Filter for querying transfers and historical balances.
 ///
@@ -1210,7 +1178,7 @@ pub struct AccountFilter {
 /// # Protocol reference
 ///
 /// [`AccountFilter.flags`](https://docs.tigerbeetle.com/reference/account-filter/#flags).
-pub type AccountFilterFlags = tbc::TB_ACCOUNT_FILTER_FLAGS;
+pub use tbc::AccountFilterFlags;
 
 /// An account balance at a point in time.
 ///
@@ -1253,7 +1221,7 @@ pub struct QueryFilter {
 /// # Protocol reference
 ///
 /// [`QueryFilter.flags`](https://docs.tigerbeetle.com/reference/query-filter/#flags).
-pub type QueryFilterFlags = tbc::TB_QUERY_FILTER_FLAGS;
+pub use tbc::QueryFilterFlags;
 
 /// The result of a single [`create_accounts`] event.
 ///
