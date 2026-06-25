@@ -30,6 +30,7 @@ class TestTransfers < TigerBeetleIntegrationTest
     assert_equal(1, results.length)
     assert_operator(results[0].timestamp, :>, 0)
     assert_equal(TigerBeetle::CreateTransferStatus::CREATED, results[0].status)
+    assert_equal(:created, results[0].status_name)
   end
 
   def test_create_transfer_duplicate
@@ -47,6 +48,7 @@ class TestTransfers < TigerBeetleIntegrationTest
     results = @client.create_transfers([transfer])
     assert_equal(1, results.length)
     assert_equal(TigerBeetle::CreateTransferStatus::EXISTS, results[0].status)
+    assert_equal(:exists, results[0].status_name)
   end
 
   def test_create_transfer_id_zero
@@ -84,6 +86,7 @@ class TestTransfers < TigerBeetleIntegrationTest
       TigerBeetle::CreateTransferStatus::DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO,
       results[0].status
     )
+    assert_equal(:debit_account_id_must_not_be_zero, results[0].status_name)
   end
 
   def test_create_transfer_credit_account_id_zero

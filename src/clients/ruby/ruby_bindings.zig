@@ -93,6 +93,12 @@ fn ruby_type_name(comptime Type: type) []const u8 {
     return type_basename(Type);
 }
 
+fn result_status_type(comptime Type: type) ?type {
+    if (Type == tb.CreateAccountResult) return tb.CreateAccountStatus;
+    if (Type == tb.CreateTransferResult) return tb.CreateTransferStatus;
+    return null;
+}
+
 fn operation_function_name(comptime operation: tb.Operation) []const u8 {
     return @tagName(operation);
 }
@@ -186,6 +192,12 @@ fn emit_struct_class(
             "    attr_{s} :{s}\n",
             .{ if (read_only) "reader" else "accessor", field.name },
         );
+        if (comptime read_only and
+            std.mem.eql(u8, field.name, "status") and
+            result_status_type(Type) != null)
+        {
+            buffer.print("    attr_reader :status_name\n", .{});
+        }
     }
     buffer.print("\n", .{});
 
@@ -212,6 +224,13 @@ fn emit_struct_class(
             buffer.print("      @{s} = 0\n", .{field.name});
         }
         buffer.print("    end\n", .{});
+
+        if (comptime result_status_type(Type) != null) {
+            buffer.print("\n", .{});
+            buffer.print("    def to_s =\n", .{});
+            buffer.write("      \"#<#{self.class} timestamp=#{@timestamp} ");
+            buffer.write("status_name=#{@status_name}>\"\n");
+        }
     }
     buffer.print("  end\n\n", .{});
 }
@@ -253,6 +272,23 @@ fn emit_rbs_constants_module(
     buffer.print("  end\n\n", .{});
 }
 
+fn emit_rbs_status_name_alias(
+    buffer: *Buffer,
+    comptime StatusType: type,
+    comptime alias_name: []const u8,
+) void {
+    assert(@typeInfo(StatusType) == .@"enum");
+
+    buffer.print("  type {s} =\n", .{alias_name});
+    comptime var sep: []const u8 = "    ";
+    inline for (@typeInfo(StatusType).@"enum".fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+        buffer.print("{s}:{s}\n", .{ sep, field.name });
+        sep = "    | ";
+    }
+    buffer.print("\n", .{});
+}
+
 fn emit_rbs_struct_class(
     buffer: *Buffer,
     comptime Type: type,
@@ -272,6 +308,13 @@ fn emit_rbs_struct_class(
             "    attr_{s} {s}: Integer\n",
             .{ if (read_only) "reader" else "accessor", field.name },
         );
+        if (comptime read_only and std.mem.eql(u8, field.name, "status")) {
+            if (comptime Type == tb.CreateAccountResult) {
+                buffer.print("    attr_reader status_name: create_account_status_name\n", .{});
+            } else if (comptime Type == tb.CreateTransferResult) {
+                buffer.print("    attr_reader status_name: create_transfer_status_name\n", .{});
+            }
+        }
     }
     buffer.print("\n", .{});
 
@@ -353,6 +396,16 @@ fn emit_rbs_bindings(buffer: *Buffer) void {
     emit_rbs_struct_class(buffer, tb.QueryFilter, "QueryFilter", false);
 
     emit_rbs_struct_class(buffer, tb.AccountBalance, "AccountBalance", true);
+    emit_rbs_status_name_alias(
+        buffer,
+        tb.CreateAccountStatus,
+        "create_account_status_name",
+    );
+    emit_rbs_status_name_alias(
+        buffer,
+        tb.CreateTransferStatus,
+        "create_transfer_status_name",
+    );
     emit_rbs_struct_class(buffer, tb.CreateAccountResult, "CreateAccountResult", true);
     emit_rbs_struct_class(buffer, tb.CreateTransferResult, "CreateTransferResult", true);
 
@@ -465,6 +518,31 @@ fn emit_c_init_error_message(buffer: *Buffer) void {
         \\
         \\
     );
+}
+
+fn emit_c_status_name_function(
+    buffer: *Buffer,
+    comptime StatusType: type,
+    comptime function_name: []const u8,
+) void {
+    assert(@typeInfo(StatusType) == .@"enum");
+
+    buffer.print("static VALUE {s}(uint32_t status) {{\n", .{function_name});
+    buffer.print("    switch (status) {{\n", .{});
+    inline for (@typeInfo(StatusType).@"enum".fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+        const value: u64 = @intCast(@intFromEnum(@field(StatusType, field.name)));
+        buffer.print("    case {d}:\n", .{value});
+        buffer.print("        return ID2SYM(rb_intern(\"{s}\"));\n", .{field.name});
+    }
+    buffer.write(
+        \\    default:
+        \\        tb_assert(false);
+        \\        return Qnil;
+        \\    }
+        \\}
+    );
+    buffer.write("\n\n");
 }
 
 fn emit_c_num_from_ruby(
@@ -584,6 +662,18 @@ fn emit_c_deserialize_struct(buffer: *Buffer, comptime operation: tb.Operation) 
         buffer.print("        rb_ivar_set(obj, rb_intern(\"@{s}\"), ", .{field.name});
         emit_c_value_from_field(buffer, field.type, field_expr);
         buffer.print(");\n", .{});
+        if (comptime std.mem.eql(u8, field.name, "status")) {
+            if (comptime result_status_type(Type) != null) {
+                buffer.print(
+                    \\        rb_ivar_set(
+                    \\            obj,
+                    \\            rb_intern("@status_name"),
+                    \\            rb_tb_{s}_status_name(item->status)
+                    \\        );
+                    \\
+                , .{operation_name});
+            }
+        }
     }
 
     buffer.print("        rb_ary_push(results, obj);\n", .{});
@@ -697,6 +787,16 @@ fn emit_c_header(buffer: *Buffer) void {
 
     emit_c_header_preamble(buffer);
     emit_c_init_error_message(buffer);
+    emit_c_status_name_function(
+        buffer,
+        tb.CreateAccountStatus,
+        "rb_tb_create_accounts_status_name",
+    );
+    emit_c_status_name_function(
+        buffer,
+        tb.CreateTransferStatus,
+        "rb_tb_create_transfers_status_name",
+    );
 
     inline for (@typeInfo(tb.Operation).@"enum".fields) |operation_field| {
         const operation: tb.Operation = @enumFromInt(operation_field.value);
