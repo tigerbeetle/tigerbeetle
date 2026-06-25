@@ -50,7 +50,6 @@ const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
-const schema = @import("schema.zig");
 const RingBufferType = stdx.RingBufferType;
 
 /// The upper-bound count of input tables to a single tree's compaction.
@@ -928,7 +927,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         }
 
         pub fn compaction_iop_release_callback(ctx: *anyopaque) void {
-            const compaction: *Compaction = @alignCast(@ptrCast(ctx));
+            const compaction: *Compaction = @ptrCast(@alignCast(ctx));
             compaction.compaction_dispatch();
         }
 
@@ -1207,7 +1206,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 } else {
                     if (compaction.level_a_index_block.head()) |index_block| {
                         if (index_block.stage == .read_index_block_done) {
-                            const index_schema = schema.TableIndex.from(index_block.ptr);
+                            const index_schema = Table.index.from_block(
+                                index_block.ptr,
+                                compaction.tree.config.id,
+                            );
                             const value_blocks_count =
                                 index_schema.value_blocks_used(index_block.ptr);
                             if (!compaction.level_a_value_block.full() and
@@ -1236,7 +1238,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 // Read level B value block.
                 if (compaction.level_b_index_block.head()) |index_block| {
                     if (index_block.stage == .read_index_block_done) {
-                        const index_schema = schema.TableIndex.from(index_block.ptr);
+                        const index_schema = Table.index.from_block(
+                            index_block.ptr,
+                            compaction.tree.config.id,
+                        );
                         const value_blocks_count =
                             index_schema.value_blocks_used(index_block.ptr);
 
@@ -1457,7 +1462,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 }
             };
 
-            const index_schema = schema.TableIndex.from(index_block.ptr);
+            const index_schema = Table.index.from_block(index_block.ptr, compaction.tree.config.id);
 
             const value_block_address =
                 index_schema.value_addresses_used(index_block.ptr)[value_block_index];
@@ -1485,7 +1490,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             compaction: *Compaction,
             index_block: BlockPtrConst,
         ) void {
-            const index_schema = schema.TableIndex.from(index_block);
+            const index_schema = Table.index.from_block(index_block, compaction.tree.config.id);
             const index_block_address = Table.block_address(index_block);
             const value_block_addresses = index_schema.value_addresses_used(index_block);
 
@@ -1687,10 +1692,9 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             compaction.level_b_position.value += merge_result.consumed_b;
             compaction.table_builder.value_count += merge_result.produced;
 
-            if (compaction.table_info_a.? == .immutable) {
-                assert(compaction.level_a_position.value <= Table.value_count_max);
-            } else {
-                assert(compaction.level_a_position.value <= Table.data.value_count_max);
+            switch (compaction.table_info_a.?) {
+                .immutable => assert(compaction.level_a_position.value <= Table.value_count_max),
+                .disk => assert(compaction.level_a_position.value <= Table.data.value_count_max),
             }
             assert(compaction.level_b_position.value <= Table.data.value_count_max);
             assert(compaction.table_builder.value_count <= Table.data.value_count_max);
@@ -1738,6 +1742,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             const level_b_values_used: ?[]const Value = values: {
                 if (compaction.level_b_value_block.head()) |block| {
                     assert(block.stage == .merge);
+                    Table.data.assert_matching_block_schema(block.ptr, compaction.tree.config.id);
                     break :values Table.value_block_values_used(block.ptr);
                 } else {
                     break :values null;
@@ -1765,6 +1770,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                     .disk => {
                         if (compaction.level_a_value_block.head()) |block| {
                             assert(block.stage == .merge);
+                            Table.data.assert_matching_block_schema(
+                                block.ptr,
+                                compaction.tree.config.id,
+                            );
                             break :values Table.value_block_values_used(block.ptr);
                         } else {
                             break :values null;
@@ -1776,6 +1785,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             const level_b_values_used: ?[]const Value = values: {
                 if (compaction.level_b_value_block.head()) |block| {
                     assert(block.stage == .merge);
+                    Table.data.assert_matching_block_schema(block.ptr, compaction.tree.config.id);
                     break :values Table.value_block_values_used(block.ptr);
                 } else {
                     break :values null;
@@ -1835,7 +1845,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
                         const index_block = compaction.level_a_index_block.head().?;
                         assert(index_block.stage == .read_index_block_done);
-                        const index_schema = schema.TableIndex.from(index_block.ptr);
+                        const index_schema = Table.index.from_block(
+                            index_block.ptr,
+                            compaction.tree.config.id,
+                        );
                         const value_blocks_count =
                             index_schema.value_blocks_used(index_block.ptr);
 
@@ -1879,7 +1892,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
                     const index_block = compaction.level_b_index_block.head().?;
                     assert(index_block.stage == .read_index_block_done);
-                    const index_schema = schema.TableIndex.from(index_block.ptr);
+                    const index_schema = Table.index.from_block(
+                        index_block.ptr,
+                        compaction.tree.config.id,
+                    );
                     const value_blocks_count =
                         index_schema.value_blocks_used(index_block.ptr);
 
