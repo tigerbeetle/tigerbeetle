@@ -327,21 +327,29 @@ module TigerBeetle
   class CreateAccountResult
     attr_reader :timestamp
     attr_reader :status
+    attr_reader :status_name
 
     def initialize
       @timestamp = 0
       @status = 0
     end
+
+    def to_s =
+      "#<#{self.class} timestamp=#{@timestamp} status_name=#{@status_name}>"
   end
 
   class CreateTransferResult
     attr_reader :timestamp
     attr_reader :status
+    attr_reader :status_name
 
     def initialize
       @timestamp = 0
       @status = 0
     end
+
+    def to_s =
+      "#<#{self.class} timestamp=#{@timestamp} status_name=#{@status_name}>"
   end
 
 end
