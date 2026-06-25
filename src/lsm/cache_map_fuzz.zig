@@ -13,8 +13,7 @@ const Key = TestTable.Key;
 const Value = TestTable.Value;
 
 const stash_value_count_max = 1024;
-// Use a large scope (relative to stash_value_count_max) to increase the chances of
-// (SetAssociativeCache) hash collisions.
+// Use a large scope (relative to stash_value_count_max) to increase churn in the MICA ring.
 const scope_value_count_max = stash_value_count_max;
 
 const OpValue = struct {
@@ -132,13 +131,9 @@ const Environment = struct {
     /// the positive space by iterating over our model, and ensuring everything exists and is
     /// equal in the cache_map.
     ///
-    /// We verify the negative space by iterating over the cache_map's cache and maps directly,
-    /// ensuring that:
-    /// 1. The values in the cache all exist and are equal in the model.
-    /// 2. The values in stash either exists and are equal in the model, or there's the same key
-    ///    in the cache.
-    /// 3. The values in stash_2 either exists and are equal in the model, or there's the same key
-    ///    in stash_1 or the cache.
+    /// We verify the negative space by iterating over the cache_map's table directly,
+    /// ensuring that visible values either exist and match the model, or are tombstones for
+    /// absent values.
     pub fn verify(env: *Environment) void {
         var checked: u32 = 0;
         var it = env.model.iterator();
@@ -158,52 +153,25 @@ const Environment = struct {
 
         log.info("Verified {} items from model exist and match in cache_map.", .{checked});
 
-        // It's fine for the cache_map to have values older than .compact() in it; good, in fact,
-        // but they _MUST NOT_ be stale.
-        if (env.cache_map.cache) |*cache| {
-            for (cache.values, 0..) |*cache_value, i| {
-                // If the count for an index is 0, the value doesn't exist.
-                if (cache.counts.get(i) == 0) {
-                    continue;
-                }
+        // The hash table points only to the latest visible value for each key. Older versions may
+        // remain in the ring until FIFO eviction reaches them, but must not be reachable here.
+        var table_iterator = env.cache_map.table.iterator();
+        while (table_iterator.next()) |entry| {
+            const table_value = &entry.value;
+            const model_value = env.model.get(TestTable.key_from_value(table_value));
 
-                const model_val = env.model.get(TestTable.key_from_value(cache_value));
-                assert(std.meta.eql(cache_value.*, model_val.?.value));
-            }
-        }
-
-        // The stash can have stale values, but in that case the real value _must_ exist
-        // in the cache. It should be impossible for the stash to have a value that isn't in the
-        // model, since cache_map.remove() removes from both the cache and stash.
-        var stash_iterator = env.cache_map.stash.keyIterator();
-        while (stash_iterator.next()) |stash_value| {
-            // Get account from model.
-            const model_value = env.model.get(TestTable.key_from_value(stash_value));
-
-            // Even if the stash has stale values, the key must still exist in the model.
-            if (TestTable.tombstone(stash_value)) {
+            if (TestTable.tombstone(table_value)) {
                 stdx.maybe(model_value == null);
                 continue;
             }
-            assert(!TestTable.tombstone(stash_value));
+
+            assert(!TestTable.tombstone(table_value));
             assert(model_value != null);
-
-            const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
-
-            if (!stash_value_equal) {
-                if (env.cache_map.cache) |*cache| {
-                    // We verified all cache entries were equal and correct above, so if it exists,
-                    // it must be right.
-                    const cache_value = cache.get(
-                        TestTable.key_from_value(stash_value),
-                    );
-                    assert(cache_value != null);
-                }
-            }
+            assert(std.meta.eql(table_value.*, model_value.?.value));
         }
 
         log.info(
-            "Verified all items in the cache and stash exist and match the model.",
+            "Verified all visible items in the cache map exist and match the model.",
             .{},
         );
     }

@@ -5,24 +5,327 @@ const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const SetAssociativeCacheType = @import("set_associative_cache.zig").SetAssociativeCacheType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 
-/// A CacheMap is a hybrid between our SetAssociativeCache and a HashMap (stash). The
-/// SetAssociativeCache sits on top and absorbs the majority of get / put requests. Below that,
-/// lives a HashMap. Should an insert() cause an eviction (which can happen either because the Key
-/// is the same, or because our Way is full), the evicted value is caught and put in the stash.
-///
-/// This allows for a potentially huge cache, with all the advantages of CLOCK Nth-Chance, while
-/// still being able to give hard guarantees that values will be present. The stash will often be
-/// significantly smaller, as the amount of values we're required to guarantee is less than what
-/// we'd like to optimistically keep in memory.
-///
-/// Within our LSM, the CacheMap is the backing for the combined Groove prefetch + cache. The cache
-/// part fills the use case of an object cache, while the stash ensures that prefetched values
-/// are available in memory during their respective commit.
-///
-/// Cache invalidation for the stash is handled by `compact`.
+const Fingerprint = struct {
+    code: u7,
+    free: u1,
+    slot: u32,
+};
+
+const capacity_ring = 1048576;
+const capacity_hash = capacity_ring * 2;
+
+fn FieldType(comptime T: type, comptime field_name: []const u8) type {
+    const info = @typeInfo(T);
+    if (info != .@"struct") {
+        @compileError("KV must be a struct with .key and .value fields");
+    }
+
+    inline for (info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, field_name)) return field.type;
+    }
+
+    @compileError("KV must have a ." ++ field_name ++ " field");
+}
+
+fn capacity_power_of_two_min(capacity_min: usize) usize {
+    assert(capacity_min > 0);
+
+    var capacity: usize = 1;
+    while (capacity < capacity_min) {
+        assert(capacity <= std.math.maxInt(usize) / 2);
+        capacity *= 2;
+    }
+    return capacity;
+}
+
+fn MicaType(
+    comptime KV: type,
+    comptime hash_from_key: fn (FieldType(KV, "key")) callconv(.@"inline") u64,
+    comptime capacity_ring_min: usize,
+    comptime capacity_hash_min: usize,
+) type {
+    const Key = FieldType(KV, "key");
+    const Value = FieldType(KV, "value");
+
+    return struct {
+        const Self = @This();
+
+        const back_invalid = std.math.maxInt(u32);
+        const empty_fingerprint = Fingerprint{ .code = 0, .free = 1, .slot = 0 };
+
+        // head = next element to read
+        // tail = next slot to write
+        //
+        // empty when head == tail
+        // full  when tail - head == capacity
+        tail: usize,
+        head: usize,
+
+        ring_capacity: usize,
+        hash_capacity: usize,
+        mask_ring: usize,
+        mask_hash: usize,
+
+        ring: []KV,
+        hash: []Fingerprint,
+        back: []u32,
+        count: usize,
+
+        pub fn init(allocator: std.mem.Allocator, ring_capacity_min: usize) !Self {
+            const ring_capacity = @max(
+                capacity_ring_min,
+                capacity_power_of_two_min(ring_capacity_min),
+            );
+            const hash_capacity = @max(capacity_hash_min, ring_capacity * 2);
+
+            assert(std.math.isPowerOfTwo(hash_capacity));
+            assert(std.math.isPowerOfTwo(ring_capacity));
+            assert(hash_capacity > ring_capacity);
+            assert(ring_capacity - 1 <= std.math.maxInt(u32));
+            assert(hash_capacity - 1 <= std.math.maxInt(u32));
+
+            const ring = try allocator.alloc(KV, ring_capacity);
+            errdefer allocator.free(ring);
+
+            const hash = try allocator.alloc(Fingerprint, hash_capacity);
+            errdefer allocator.free(hash);
+
+            const back = try allocator.alloc(u32, ring_capacity);
+            errdefer allocator.free(back);
+
+            @memset(hash, empty_fingerprint);
+            @memset(back, back_invalid);
+
+            return Self{
+                .tail = 0,
+                .head = 0,
+                .ring_capacity = ring_capacity,
+                .hash_capacity = hash_capacity,
+                .mask_ring = ring_capacity - 1,
+                .mask_hash = hash_capacity - 1,
+                .ring = ring,
+                .hash = hash,
+                .back = back,
+                .count = 0,
+            };
+        }
+
+        pub fn deinit(mica: *Self, allocator: std.mem.Allocator) void {
+            allocator.free(mica.back);
+            allocator.free(mica.hash);
+            allocator.free(mica.ring);
+            mica.* = undefined;
+        }
+
+        pub fn reset(mica: *Self) void {
+            mica.tail = 0;
+            mica.head = 0;
+            mica.count = 0;
+            @memset(mica.hash, empty_fingerprint);
+            @memset(mica.back, back_invalid);
+        }
+
+        pub fn len(mica: *const Self) usize {
+            return mica.tail - mica.head;
+        }
+
+        fn code(hash: u64) u7 {
+            return @truncate(hash >> 57);
+        }
+
+        fn hash_slot(mica: *const Self, hash: u64) usize {
+            return @as(usize, @truncate(hash)) & mica.mask_hash;
+        }
+
+        fn probe_distance(mica: *const Self, ideal: usize, slot: usize) usize {
+            return (slot -% ideal) & mica.mask_hash;
+        }
+
+        const Slot = union(enum) {
+            found: usize,
+            free: usize,
+            full,
+        };
+
+        fn find_slot(mica: *const Self, key: Key) Slot {
+            const hash = hash_from_key(key);
+            const fingerprint = code(hash);
+            var slot = mica.hash_slot(hash);
+
+            for (0..mica.hash_capacity) |_| {
+                const entry = mica.hash[slot];
+                if (entry.free == 1) return .{ .free = slot };
+
+                if (entry.code == fingerprint and
+                    std.meta.eql(mica.ring[entry.slot].key, key))
+                {
+                    return .{ .found = slot };
+                }
+
+                slot = (slot + 1) & mica.mask_hash;
+            }
+
+            return .full;
+        }
+
+        fn delete_hash_slot(mica: *Self, slot_delete: usize) void {
+            var hole = slot_delete & mica.mask_hash;
+            assert(mica.hash[hole].free == 0);
+
+            mica.back[mica.hash[hole].slot] = back_invalid;
+            mica.count -= 1;
+
+            var slot = (hole + 1) & mica.mask_hash;
+            while (mica.hash[slot].free == 0) : (slot = (slot + 1) & mica.mask_hash) {
+                const entry = mica.hash[slot];
+                const ideal = mica.hash_slot(hash_from_key(mica.ring[entry.slot].key));
+
+                if (mica.probe_distance(ideal, slot) > mica.probe_distance(ideal, hole)) {
+                    mica.hash[hole] = entry;
+                    mica.back[entry.slot] = @intCast(hole);
+                    mica.hash[slot] = empty_fingerprint;
+                    hole = slot;
+                }
+            }
+
+            mica.hash[hole] = empty_fingerprint;
+        }
+
+        fn evict_one(mica: *Self) void {
+            assert(mica.len() == mica.ring_capacity);
+
+            const slot_ring = mica.head & mica.mask_ring;
+            const slot_hash = mica.back[slot_ring];
+            if (slot_hash != back_invalid) {
+                mica.delete_hash_slot(slot_hash);
+            }
+
+            mica.back[slot_ring] = back_invalid;
+            mica.head += 1;
+        }
+
+        fn ensure_room(mica: *Self) void {
+            if (mica.len() == mica.ring_capacity) mica.evict_one();
+        }
+
+        fn append_at(mica: *Self, slot_hash: usize, kv: KV) void {
+            assert(mica.len() < mica.ring_capacity);
+            assert(mica.hash[slot_hash].free == 0);
+
+            const slot_ring = mica.tail & mica.mask_ring;
+            mica.ring[slot_ring] = kv;
+            mica.back[slot_ring] = @intCast(slot_hash);
+            mica.hash[slot_hash].slot = @intCast(slot_ring);
+            mica.tail += 1;
+        }
+
+        pub fn put(mica: *Self, kv: KV) void {
+            mica.ensure_room();
+
+            switch (mica.find_slot(kv.key)) {
+                .found => |slot_hash| {
+                    const old_slot_ring = mica.hash[slot_hash].slot;
+                    mica.back[old_slot_ring] = back_invalid;
+                    mica.append_at(slot_hash, kv);
+                },
+                .free => |slot_hash| {
+                    mica.hash[slot_hash] = Fingerprint{
+                        .code = code(hash_from_key(kv.key)),
+                        .free = 0,
+                        .slot = 0,
+                    };
+                    mica.count += 1;
+                    mica.append_at(slot_hash, kv);
+                },
+                .full => unreachable,
+            }
+        }
+
+        pub fn insert(mica: *Self, kv: KV) void {
+            mica.put(kv);
+        }
+
+        pub fn update(mica: *Self, kv: KV) void {
+            // Append only to the ring buffer. This invalidates older versions, but
+            // they can stay in the ring until natural FIFO eviction reaches them.
+            mica.put(kv);
+        }
+
+        pub fn remove(mica: *Self, key: Key) ?KV {
+            return switch (mica.find_slot(key)) {
+                .found => |slot_hash| kv: {
+                    const slot_ring = mica.hash[slot_hash].slot;
+                    const kv = mica.ring[slot_ring];
+                    mica.delete_hash_slot(slot_hash);
+                    break :kv kv;
+                },
+                .free, .full => null,
+            };
+        }
+
+        pub fn lookup(mica: *const Self, key: Key) ?Value {
+            return switch (mica.find_slot(key)) {
+                .found => |slot_hash| mica.ring[mica.hash[slot_hash].slot].value,
+                .free, .full => null,
+            };
+        }
+
+        pub fn lookup_kv(mica: *const Self, key: Key) ?KV {
+            return switch (mica.find_slot(key)) {
+                .found => |slot_hash| mica.ring[mica.hash[slot_hash].slot],
+                .free, .full => null,
+            };
+        }
+
+        pub fn lookup_value_ptr(mica: *const Self, key: Key) ?*Value {
+            return switch (mica.find_slot(key)) {
+                .found => |slot_hash| &@constCast(&mica.ring[mica.hash[slot_hash].slot]).value,
+                .free, .full => null,
+            };
+        }
+
+        pub fn contains(mica: *const Self, key: Key) bool {
+            return mica.lookup(key) != null;
+        }
+
+        pub const Iterator = struct {
+            mica: *const Self,
+            index: usize = 0,
+
+            pub fn next(it: *Iterator) ?*const KV {
+                while (it.index < it.mica.hash_capacity) {
+                    const index = it.index;
+                    it.index += 1;
+
+                    const entry = it.mica.hash[index];
+                    if (entry.free == 0) {
+                        return &it.mica.ring[entry.slot];
+                    }
+                }
+
+                return null;
+            }
+        };
+
+        pub fn iterator(mica: *const Self) Iterator {
+            return .{ .mica = mica };
+        }
+    };
+}
+
+pub fn Mica(
+    comptime KV: type,
+    comptime hash_from_key: fn (FieldType(KV, "key")) callconv(.@"inline") u64,
+) type {
+    return MicaType(KV, hash_from_key, capacity_ring, capacity_hash);
+}
+
+/// A CacheMap is a MICA-style ring cache backed by a linear-probed hash table. Updates append a
+/// fresh copy into the ring and redirect the hash entry, leaving old versions to age out by FIFO
+/// eviction. Tombstones are stored as ordinary values so point lookups can distinguish "not cached"
+/// from "deleted".
 pub fn CacheMapType(
     comptime Key: type,
     comptime Value: type,
@@ -34,30 +337,9 @@ pub fn CacheMapType(
     return struct {
         const CacheMap = @This();
 
-        const map_load_percentage_max = 50;
-
-        pub const Cache = SetAssociativeCacheType(
-            Key,
-            Value,
-            key_from_value,
-            hash_from_key,
-            .{},
-        );
-
-        pub const Map = std.HashMapUnmanaged(
-            Value,
-            void,
-            struct {
-                pub inline fn eql(_: @This(), a: Value, b: Value) bool {
-                    return key_from_value(&a) == key_from_value(&b);
-                }
-
-                pub inline fn hash(_: @This(), value: Value) u64 {
-                    return stdx.hash_inline(key_from_value(&value));
-                }
-            },
-            map_load_percentage_max,
-        );
+        pub const Cache = struct {
+            pub const value_count_max_multiple = 256;
+        };
 
         pub const Options = struct {
             cache_value_count_max: u32,
@@ -65,6 +347,13 @@ pub fn CacheMapType(
             scope_value_count_max: u32,
             name: []const u8,
         };
+
+        pub const Entry = struct {
+            key: Key,
+            value: Value,
+        };
+
+        pub const Table = Mica(Entry, hash_from_key);
 
         const RollbackLogAction = union(enum) {
             /// The operation updated or deleted a value
@@ -79,13 +368,7 @@ pub fn CacheMapType(
         };
         const RollbackLog = std.ArrayListUnmanaged(RollbackLogAction);
 
-        // The hierarchy for lookups is cache (if present) -> stash -> immutable table -> lsm.
-        // Lower levels _may_ have stale values, provided the correct value exists
-        // in one of the levels above.
-        // Evictions from the cache first flow into stash, with `.compact()` clearing it.
-        // When cache is null, the stash mirrors the mutable table.
-        cache: ?Cache,
-        stash: Map,
+        table: Table,
 
         // Scopes allow you to perform operations on the CacheMap before either persisting or
         // discarding them.
@@ -99,16 +382,12 @@ pub fn CacheMapType(
             maybe(options.cache_value_count_max == 0);
             maybe(options.scope_value_count_max == 0);
 
-            var cache: ?Cache = if (options.cache_value_count_max == 0) null else try Cache.init(
-                allocator,
-                options.cache_value_count_max,
-                .{ .name = options.name },
-            );
-            errdefer if (cache) |*cache_unwrapped| cache_unwrapped.deinit(allocator);
-
-            var stash: Map = .{};
-            try stash.ensureTotalCapacity(allocator, options.stash_value_count_max);
-            errdefer stash.deinit(allocator);
+            const table_value_count_max: usize =
+                @as(usize, options.cache_value_count_max) +
+                @as(usize, options.stash_value_count_max) +
+                @as(usize, options.scope_value_count_max);
+            var table = try Table.init(allocator, table_value_count_max);
+            errdefer table.deinit(allocator);
 
             var scope_rollback_log: RollbackLog = try .initCapacity(
                 allocator,
@@ -117,8 +396,7 @@ pub fn CacheMapType(
             errdefer scope_rollback_log.deinit(allocator);
 
             return CacheMap{
-                .cache = cache,
-                .stash = stash,
+                .table = table,
                 .scope_rollback_log = scope_rollback_log,
                 .options = options,
             };
@@ -127,24 +405,21 @@ pub fn CacheMapType(
         pub fn deinit(self: *CacheMap, allocator: std.mem.Allocator) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash.count() <= self.options.stash_value_count_max);
+            assert(self.table.count <= self.table.ring_capacity);
 
             self.scope_rollback_log.deinit(allocator);
-            self.stash.deinit(allocator);
-            if (self.cache) |*cache| cache.deinit(allocator);
+            self.table.deinit(allocator);
         }
 
         pub fn reset(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash.count() <= self.options.stash_value_count_max);
+            assert(self.table.count <= self.table.ring_capacity);
 
-            if (self.cache) |*cache| cache.reset();
-            self.stash.clearRetainingCapacity();
+            self.table.reset();
 
             self.* = .{
-                .cache = self.cache,
-                .stash = self.stash,
+                .table = self.table,
                 .scope_rollback_log = self.scope_rollback_log,
                 .options = self.options,
             };
@@ -155,13 +430,8 @@ pub fn CacheMapType(
         }
 
         pub fn get(self: *const CacheMap, key: Key) ?*Value {
-            return (if (self.cache) |*cache| cache.get(key) else null) orelse stash: {
-                if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
-                    // Deleted keys are represented as tombstones in the stash.
-                    break :stash if (tombstone(object)) null else object;
-                }
-                break :stash null;
-            };
+            const object = self.table.lookup_value_ptr(key) orelse return null;
+            return if (tombstone(object)) null else object;
         }
 
         pub fn get_or_tombstone(self: *const CacheMap, key: Key) union(enum) {
@@ -169,24 +439,20 @@ pub fn CacheMapType(
             not_found,
             tombstone,
         } {
-            if (self.cache) |*cache| {
-                if (cache.get(key)) |object| {
-                    return .{ .found = object };
-                }
-            }
-            if (self.stash.getKeyPtr(tombstone_from_key(key))) |object| {
-                // Deleted keys are represented as tombstones in the stash.
-                return if (tombstone(object)) .tombstone else .{ .found = object };
-            }
+            const object = self.table.lookup_value_ptr(key) orelse return .not_found;
+            return if (tombstone(object)) .tombstone else .{ .found = object };
+        }
 
-            return .not_found;
+        fn table_entry_count_for_metrics(self: *const CacheMap) u64 {
+            if (self.options.cache_value_count_max == 0) return 0;
+            return @min(
+                @as(u64, self.table.count),
+                @as(u64, self.options.cache_value_count_max),
+            );
         }
 
         pub fn cache_entries(self: *const CacheMap) u64 {
-            return if (self.cache) |*cache|
-                cache.metrics.value_count
-            else
-                0;
+            return self.table_entry_count_for_metrics();
         }
 
         pub fn cache_entries_max(self: *const CacheMap) u64 {
@@ -215,64 +481,12 @@ pub fn CacheMapType(
             }
         }
 
-        // Upserts the cache and stash and returns the old value in case of
-        // an update.
+        // Upserts the table and returns the old value in case of an update.
         fn fetch_upsert(self: *CacheMap, value: *const Value) ?Value {
-            if (self.cache) |*cache| {
-                const key = key_from_value(value);
-                const result = cache.upsert(value);
-
-                if (result.evicted) |*evicted| {
-                    switch (result.updated) {
-                        .update => {
-                            assert(key_from_value(evicted) == key);
-                            if (constants.verify) {
-                                const stash: ?Value = self.stash.getKey(value.*);
-                                assert(stash == null or tombstone(&stash.?));
-                            }
-
-                            // There was an eviction because an item was updated,
-                            // the evicted item is always its previous version.
-                            return evicted.*;
-                        },
-                        .insert => {
-                            assert(key_from_value(evicted) != key);
-
-                            // There was an eviction because a new item was inserted,
-                            // the evicted item will be added to the stash.
-                            const stash_updated = self.stash_upsert(evicted);
-
-                            // We don't expect stale values on the stash.
-                            assert(stash_updated == null or tombstone(&stash_updated.?));
-                        },
-                    }
-                } else {
-                    // It must be an insert without eviction,
-                    // since updates always evict the old version.
-                    assert(result.updated == .insert);
-                }
-
-                // The stash may have the old value if nothing was evicted.
-                return self.stash_remove(key);
-            } else {
-                // No cache.
-                // Upserting the stash directly.
-                return self.stash_upsert(value);
-            }
-        }
-
-        fn stash_upsert(self: *CacheMap, value: *const Value) ?Value {
-            defer assert(self.stash.count() <= self.options.stash_value_count_max);
-            // Using `getOrPutAssumeCapacity` instead of `putAssumeCapacity` is
-            // critical, since we use HashMaps with no Value, `putAssumeCapacity`
-            // _will not_ clobber the existing value.
-            const gop = self.stash.getOrPutAssumeCapacity(value.*);
-            defer gop.key_ptr.* = value.*;
-
-            return if (gop.found_existing)
-                gop.key_ptr.*
-            else
-                null;
+            const key = key_from_value(value);
+            const updated = if (self.table.lookup_kv(key)) |entry| entry.value else null;
+            self.table.put(.{ .key = key, .value = value.* });
+            return updated;
         }
 
         /// Removes a key from cache, adding a tombstone to record the action.
@@ -282,47 +496,21 @@ pub fn CacheMapType(
             // Assert that it is not called from production code.
             comptime assert(constants.verify);
 
-            const cache_removed: ?Value = if (self.cache) |*cache|
-                cache.remove(key)
-            else
-                null;
-
-            // We don't allow stale values, so we need to remove from the stash as well,
-            // since both can have different versions with the same key.
-            const stash_removed: ?Value = stash_removed: {
-                assert(self.stash.count() <= self.options.stash_value_count_max);
-
-                const tombstone_object = tombstone_from_key(key);
-                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
-
-                // Add a tombstone in the stash, indicating that the
-                // deletion happened and that the key should not be
-                // looked up in the immutable table or LSM tree.
-                defer entry.key_ptr.* = tombstone_object;
-
-                break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
-            };
-
-            // Does not allow removing a key that is not in the cache.
-            assert(cache_removed != null or stash_removed != null);
-            maybe(cache_removed != null and stash_removed != null);
-
-            const old_value = cache_removed orelse stash_removed orelse unreachable;
+            const old_value = (self.table.lookup_kv(key) orelse unreachable).value;
             // Cannot remove a value that has already been removed.
             assert(!tombstone(&old_value));
+
+            const tombstone_object = tombstone_from_key(key);
+            self.table.put(.{
+                .key = key,
+                .value = tombstone_object,
+            });
+
             if (self.scope_is_active) {
                 self.scope_rollback_log.appendAssumeCapacity(.{
                     .restore = old_value,
                 });
             }
-        }
-
-        fn stash_remove(self: *CacheMap, key: Key) ?Value {
-            assert(self.stash.count() <= self.options.stash_value_count_max);
-            return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
-                kv.key
-            else
-                null;
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -358,7 +546,7 @@ pub fn CacheMapType(
                     },
                     .restore_tombstone => |key| {
                         // Reverting an insert that overwrote a tombstone
-                        // consists of restoring the tombstone to the stash.
+                        // consists of restoring the tombstone to the table.
                         if (constants.verify)
                             // Only unit tests and fuzzers call `remove`.
                             self.remove(key)
@@ -367,15 +555,8 @@ pub fn CacheMapType(
                     },
                     .remove => |key| {
                         // Reverting an insert consists of removing the value.
-                        const cache_removed: bool =
-                            if (self.cache) |*cache| cache.remove(key) != null else false;
-
-                        // The key should be in the stash iff it wasn't in the cache.
-                        if (self.stash_remove(key)) |*stash_value| {
-                            assert(!cache_removed or tombstone(stash_value));
-                        } else {
-                            assert(cache_removed);
-                        }
+                        const removed = self.table.remove(key);
+                        assert(removed != null);
                     },
                 }
             }
@@ -386,9 +567,9 @@ pub fn CacheMapType(
         pub fn compact(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash.count() <= self.options.stash_value_count_max);
+            assert(self.table.count <= self.table.ring_capacity);
 
-            self.stash.clearRetainingCapacity();
+            self.table.reset();
         }
     };
 }
