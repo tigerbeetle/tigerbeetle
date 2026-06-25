@@ -6,3 +6,13 @@ edition = "2021"
 [dependencies]
 futures = { version = "0.3.31", default-features = false, features = ["executor"] }
 tigerbeetle.path = "../.."
+
+[profile.release]
+# It is *strongly* recommended that Rust applications using TigerBeetle
+# enable overflow checks, because the nature of accounting makes overflow
+# errors catastrophic.
+#
+# Note that the following line enables the checks only for the tests in
+# this crate. In other words, overflow checks must be enabled in the
+# Cargo.toml of the end application.
+overflow-checks = true

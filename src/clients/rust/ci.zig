@@ -16,6 +16,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         try shell.exec("cargo fmt --check", .{});
         try shell.exec("cargo clippy -- -D clippy::all", .{});
+        try shell.exec("grep -q {checked_arithmetic_text} Cargo.toml", .{
+            .checked_arithmetic_text = "overflow-checks = true",
+        });
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
