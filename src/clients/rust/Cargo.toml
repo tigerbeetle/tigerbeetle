@@ -20,6 +20,13 @@ include = [
 ]
 
 [profile.release]
+# It is *strongly* recommended that Rust applications using TigerBeetle
+# enable overflow checks, because the nature of accounting makes overflow
+# errors catastrophic.
+#
+# Note that the following line enables the checks only for the tests in
+# this crate. In other words, overflow checks must be enabled in the
+# Cargo.toml of the end application.
 overflow-checks = true
 
 [dev-dependencies]
