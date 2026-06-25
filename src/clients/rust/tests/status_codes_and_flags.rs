@@ -177,8 +177,8 @@ fn round_trip_account_flags() {
         &[],
         // We use from_bits_truncate here to discard unknown flags.
         // This will fail a round-trip test if we see one.
-        |c_value| tb::AccountFlags::from_bits_truncate(c_value),
-        |rust_value| rust_value.bits(),
+        |c_value| tb::AccountFlags(c_value),
+        |rust_value| rust_value.0,
     );
 }
 
@@ -187,8 +187,8 @@ fn round_trip_transfer_flags() {
     round_trip_test::<tb::TransferFlags, u16>(
         "TB_TRANSFER_FLAGS",
         &[],
-        |c_value| tb::TransferFlags::from_bits_truncate(c_value),
-        |rust_value| rust_value.bits(),
+        |c_value| tb::TransferFlags(c_value),
+        |rust_value| rust_value.0,
     );
 }
 
@@ -197,8 +197,8 @@ fn round_trip_account_filter_flags() {
     round_trip_test::<tb::AccountFilterFlags, u32>(
         "TB_ACCOUNT_FILTER_FLAGS",
         &[],
-        |c_value| tb::AccountFilterFlags::from_bits_truncate(c_value),
-        |rust_value| rust_value.bits(),
+        |c_value| tb::AccountFilterFlags(c_value),
+        |rust_value| rust_value.0,
     );
 }
 
@@ -207,7 +207,7 @@ fn round_trip_query_filter_flags() {
     round_trip_test::<tb::QueryFilterFlags, u32>(
         "TB_QUERY_FILTER_FLAGS",
         &[],
-        |c_value| tb::QueryFilterFlags::from_bits_truncate(c_value),
-        |rust_value| rust_value.bits(),
+        |c_value| tb::QueryFilterFlags(c_value),
+        |rust_value| rust_value.0,
     );
 }

@@ -114,24 +114,20 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     for transfer in &transfers {
         if transfer.id == 1 {
             assert!(
-                transfer.flags.contains(tb::TransferFlags::Pending),
+                transfer.flags.0 & tb::TransferFlags::Pending.0 != 0,
                 "transfer 1 pending"
             );
             assert!(
-                !transfer
-                    .flags
-                    .contains(tb::TransferFlags::PostPendingTransfer),
+                transfer.flags.0 & tb::TransferFlags::PostPendingTransfer.0 == 0,
                 "transfer 1 post_pending_transfer"
             );
         } else if transfer.id == 2 {
             assert!(
-                !transfer.flags.contains(tb::TransferFlags::Pending),
+                transfer.flags.0 & tb::TransferFlags::Pending.0 == 0,
                 "transfer 2 pending"
             );
             assert!(
-                transfer
-                    .flags
-                    .contains(tb::TransferFlags::PostPendingTransfer),
+                transfer.flags.0 & tb::TransferFlags::PostPendingTransfer.0 != 0,
                 "transfer 2 post_pending_transfer"
             );
         } else {

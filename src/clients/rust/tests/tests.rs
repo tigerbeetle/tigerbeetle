@@ -748,7 +748,7 @@ fn get_account_transfers_paged(
         End,
     }
 
-    let is_reverse = event.flags.contains(tb::AccountFilterFlags::Reversed);
+    let is_reverse = (event.flags.0 & tb::AccountFilterFlags::Reversed.0) != 0;
 
     futures::stream::unfold(State::Start, move |state| async move {
         let event = match state {
