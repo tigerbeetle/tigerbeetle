@@ -61,6 +61,212 @@ static const char *rb_tb_init_error_message(TB_INIT_STATUS status) {
     }
 }
 
+static VALUE rb_tb_create_accounts_status_name(uint32_t status) {
+    switch (status) {
+    case 4294967295:
+        return ID2SYM(rb_intern("created"));
+    case 1:
+        return ID2SYM(rb_intern("linked_event_failed"));
+    case 2:
+        return ID2SYM(rb_intern("linked_event_chain_open"));
+    case 22:
+        return ID2SYM(rb_intern("imported_event_expected"));
+    case 23:
+        return ID2SYM(rb_intern("imported_event_not_expected"));
+    case 3:
+        return ID2SYM(rb_intern("timestamp_must_be_zero"));
+    case 24:
+        return ID2SYM(rb_intern("imported_event_timestamp_out_of_range"));
+    case 25:
+        return ID2SYM(rb_intern("imported_event_timestamp_must_not_advance"));
+    case 4:
+        return ID2SYM(rb_intern("reserved_field"));
+    case 5:
+        return ID2SYM(rb_intern("reserved_flag"));
+    case 6:
+        return ID2SYM(rb_intern("id_must_not_be_zero"));
+    case 7:
+        return ID2SYM(rb_intern("id_must_not_be_int_max"));
+    case 15:
+        return ID2SYM(rb_intern("exists_with_different_flags"));
+    case 16:
+        return ID2SYM(rb_intern("exists_with_different_user_data_128"));
+    case 17:
+        return ID2SYM(rb_intern("exists_with_different_user_data_64"));
+    case 18:
+        return ID2SYM(rb_intern("exists_with_different_user_data_32"));
+    case 19:
+        return ID2SYM(rb_intern("exists_with_different_ledger"));
+    case 20:
+        return ID2SYM(rb_intern("exists_with_different_code"));
+    case 21:
+        return ID2SYM(rb_intern("exists"));
+    case 8:
+        return ID2SYM(rb_intern("flags_are_mutually_exclusive"));
+    case 9:
+        return ID2SYM(rb_intern("debits_pending_must_be_zero"));
+    case 10:
+        return ID2SYM(rb_intern("debits_posted_must_be_zero"));
+    case 11:
+        return ID2SYM(rb_intern("credits_pending_must_be_zero"));
+    case 12:
+        return ID2SYM(rb_intern("credits_posted_must_be_zero"));
+    case 13:
+        return ID2SYM(rb_intern("ledger_must_not_be_zero"));
+    case 14:
+        return ID2SYM(rb_intern("code_must_not_be_zero"));
+    case 26:
+        return ID2SYM(rb_intern("imported_event_timestamp_must_not_regress"));
+    default:
+        tb_assert(false);
+        return Qnil;
+    }
+}
+
+static VALUE rb_tb_create_transfers_status_name(uint32_t status) {
+    switch (status) {
+    case 4294967295:
+        return ID2SYM(rb_intern("created"));
+    case 1:
+        return ID2SYM(rb_intern("linked_event_failed"));
+    case 2:
+        return ID2SYM(rb_intern("linked_event_chain_open"));
+    case 56:
+        return ID2SYM(rb_intern("imported_event_expected"));
+    case 57:
+        return ID2SYM(rb_intern("imported_event_not_expected"));
+    case 3:
+        return ID2SYM(rb_intern("timestamp_must_be_zero"));
+    case 58:
+        return ID2SYM(rb_intern("imported_event_timestamp_out_of_range"));
+    case 59:
+        return ID2SYM(rb_intern("imported_event_timestamp_must_not_advance"));
+    case 4:
+        return ID2SYM(rb_intern("reserved_flag"));
+    case 5:
+        return ID2SYM(rb_intern("id_must_not_be_zero"));
+    case 6:
+        return ID2SYM(rb_intern("id_must_not_be_int_max"));
+    case 36:
+        return ID2SYM(rb_intern("exists_with_different_flags"));
+    case 40:
+        return ID2SYM(rb_intern("exists_with_different_pending_id"));
+    case 44:
+        return ID2SYM(rb_intern("exists_with_different_timeout"));
+    case 37:
+        return ID2SYM(rb_intern("exists_with_different_debit_account_id"));
+    case 38:
+        return ID2SYM(rb_intern("exists_with_different_credit_account_id"));
+    case 39:
+        return ID2SYM(rb_intern("exists_with_different_amount"));
+    case 41:
+        return ID2SYM(rb_intern("exists_with_different_user_data_128"));
+    case 42:
+        return ID2SYM(rb_intern("exists_with_different_user_data_64"));
+    case 43:
+        return ID2SYM(rb_intern("exists_with_different_user_data_32"));
+    case 67:
+        return ID2SYM(rb_intern("exists_with_different_ledger"));
+    case 45:
+        return ID2SYM(rb_intern("exists_with_different_code"));
+    case 46:
+        return ID2SYM(rb_intern("exists"));
+    case 68:
+        return ID2SYM(rb_intern("id_already_failed"));
+    case 7:
+        return ID2SYM(rb_intern("flags_are_mutually_exclusive"));
+    case 8:
+        return ID2SYM(rb_intern("debit_account_id_must_not_be_zero"));
+    case 9:
+        return ID2SYM(rb_intern("debit_account_id_must_not_be_int_max"));
+    case 10:
+        return ID2SYM(rb_intern("credit_account_id_must_not_be_zero"));
+    case 11:
+        return ID2SYM(rb_intern("credit_account_id_must_not_be_int_max"));
+    case 12:
+        return ID2SYM(rb_intern("accounts_must_be_different"));
+    case 13:
+        return ID2SYM(rb_intern("pending_id_must_be_zero"));
+    case 14:
+        return ID2SYM(rb_intern("pending_id_must_not_be_zero"));
+    case 15:
+        return ID2SYM(rb_intern("pending_id_must_not_be_int_max"));
+    case 16:
+        return ID2SYM(rb_intern("pending_id_must_be_different"));
+    case 17:
+        return ID2SYM(rb_intern("timeout_reserved_for_pending_transfer"));
+    case 64:
+        return ID2SYM(rb_intern("closing_transfer_must_be_pending"));
+    case 19:
+        return ID2SYM(rb_intern("ledger_must_not_be_zero"));
+    case 20:
+        return ID2SYM(rb_intern("code_must_not_be_zero"));
+    case 21:
+        return ID2SYM(rb_intern("debit_account_not_found"));
+    case 22:
+        return ID2SYM(rb_intern("credit_account_not_found"));
+    case 23:
+        return ID2SYM(rb_intern("accounts_must_have_the_same_ledger"));
+    case 24:
+        return ID2SYM(rb_intern("transfer_must_have_the_same_ledger_as_accounts"));
+    case 25:
+        return ID2SYM(rb_intern("pending_transfer_not_found"));
+    case 26:
+        return ID2SYM(rb_intern("pending_transfer_not_pending"));
+    case 27:
+        return ID2SYM(rb_intern("pending_transfer_has_different_debit_account_id"));
+    case 28:
+        return ID2SYM(rb_intern("pending_transfer_has_different_credit_account_id"));
+    case 29:
+        return ID2SYM(rb_intern("pending_transfer_has_different_ledger"));
+    case 30:
+        return ID2SYM(rb_intern("pending_transfer_has_different_code"));
+    case 31:
+        return ID2SYM(rb_intern("exceeds_pending_transfer_amount"));
+    case 32:
+        return ID2SYM(rb_intern("pending_transfer_has_different_amount"));
+    case 33:
+        return ID2SYM(rb_intern("pending_transfer_already_posted"));
+    case 34:
+        return ID2SYM(rb_intern("pending_transfer_already_voided"));
+    case 35:
+        return ID2SYM(rb_intern("pending_transfer_expired"));
+    case 60:
+        return ID2SYM(rb_intern("imported_event_timestamp_must_not_regress"));
+    case 61:
+        return ID2SYM(rb_intern("imported_event_timestamp_must_postdate_debit_account"));
+    case 62:
+        return ID2SYM(rb_intern("imported_event_timestamp_must_postdate_credit_account"));
+    case 63:
+        return ID2SYM(rb_intern("imported_event_timeout_must_be_zero"));
+    case 65:
+        return ID2SYM(rb_intern("debit_account_already_closed"));
+    case 66:
+        return ID2SYM(rb_intern("credit_account_already_closed"));
+    case 47:
+        return ID2SYM(rb_intern("overflows_debits_pending"));
+    case 48:
+        return ID2SYM(rb_intern("overflows_credits_pending"));
+    case 49:
+        return ID2SYM(rb_intern("overflows_debits_posted"));
+    case 50:
+        return ID2SYM(rb_intern("overflows_credits_posted"));
+    case 51:
+        return ID2SYM(rb_intern("overflows_debits"));
+    case 52:
+        return ID2SYM(rb_intern("overflows_credits"));
+    case 53:
+        return ID2SYM(rb_intern("overflows_timeout"));
+    case 54:
+        return ID2SYM(rb_intern("exceeds_credits"));
+    case 55:
+        return ID2SYM(rb_intern("exceeds_debits"));
+    default:
+        tb_assert(false);
+        return Qnil;
+    }
+}
+
 static VALUE rb_tb_deserialize_lookup_accounts(const uint8_t *buf, uint32_t buf_size) {
     VALUE klass = rb_path2class("TigerBeetle::Account");
     tb_assert(buf_size % sizeof(tb_account_t) == 0);
@@ -321,6 +527,11 @@ static VALUE rb_tb_deserialize_create_accounts(const uint8_t *buf, uint32_t buf_
         VALUE obj = rb_obj_alloc(klass);
         rb_ivar_set(obj, rb_intern("@timestamp"), RB_ULL2NUM(item->timestamp));
         rb_ivar_set(obj, rb_intern("@status"), RB_UINT2NUM(item->status));
+        rb_ivar_set(
+            obj,
+            rb_intern("@status_name"),
+            rb_tb_create_accounts_status_name(item->status)
+        );
         tb_assert(item->reserved == 0);
         rb_ary_push(results, obj);
     }
@@ -359,6 +570,11 @@ static VALUE rb_tb_deserialize_create_transfers(const uint8_t *buf, uint32_t buf
         VALUE obj = rb_obj_alloc(klass);
         rb_ivar_set(obj, rb_intern("@timestamp"), RB_ULL2NUM(item->timestamp));
         rb_ivar_set(obj, rb_intern("@status"), RB_UINT2NUM(item->status));
+        rb_ivar_set(
+            obj,
+            rb_intern("@status_name"),
+            rb_tb_create_transfers_status_name(item->status)
+        );
         tb_assert(item->reserved == 0);
         rb_ary_push(results, obj);
     }
