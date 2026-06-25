@@ -7,6 +7,7 @@ TigerBeetle has official client libraries for the following languages:
 - [Java](/src/clients/java/) ([maven central package](https://central.sonatype.com/artifact/com.tigerbeetle/tigerbeetle-java), [API docs](https://javadoc.io/doc/com.tigerbeetle/tigerbeetle-java/)).
 - [Node.js](/src/clients/node/) ([npm package](https://www.npmjs.com/package/tigerbeetle-node)).
 - [Python](/src/clients/python/) ([PyPi package](https://pypi.org/project/tigerbeetle/)).
+- [Ruby](/src/clients/ruby/) ([RubyGems package](https://rubygems.org/gems/tigerbeetle)).
 - [Rust](/src/clients/rust/) ([Cargo package](https://crates.io/crates/tigerbeetle)).
 
 See [API Changes](../api-changes.md) for the history of changes introduced in the TigerBeetle

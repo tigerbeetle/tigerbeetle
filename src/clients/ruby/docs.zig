@@ -16,7 +16,9 @@ pub const RubyDocs = Docs{
     \\>[!IMPORTANT]
     \\>This gem changed ownership from [Anthony D](https://github.com/antstorm)
     \\to TigerBeetle. If you're upgrading from a 0.0.x version, please consult
-    \\the [migration guide](./docs/migration.md) for the necessary code changes.
+    \\the [migration guide](
+    \\https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/ruby/docs/migration.md
+    \\) for the necessary code changes.
     ,
     .prerequisites =
     \\* Ruby >= `3.3`
