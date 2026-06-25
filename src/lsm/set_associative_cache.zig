@@ -146,20 +146,32 @@ pub fn SetAssociativeCacheType(
 
         pub fn init(
             allocator: mem.Allocator,
-            value_count_max: u64,
+            value_count: u64,
             options: Options,
         ) !SetAssociativeCache {
+            const value_count_max = stdx.div_ceil(
+                value_count,
+                value_count_max_multiple,
+            ) * value_count_max_multiple;
+            assert(value_count_max % value_count_max_multiple == 0);
+
             const sets = @divExact(value_count_max, layout.ways);
 
             assert(value_count_max > 0);
             assert(value_count_max >= layout.ways);
             assert(value_count_max % layout.ways == 0);
 
-            const values_size_max = value_count_max * @sizeOf(Value);
+            const values_size_max = stdx.div_ceil(
+                value_count_max * @sizeOf(Value),
+                layout.cache_line_size,
+            ) * layout.cache_line_size;
             assert(values_size_max >= layout.cache_line_size);
             assert(values_size_max % layout.cache_line_size == 0);
 
-            const counts_size = @divExact(value_count_max * layout.clock_bits, 8);
+            const counts_size = stdx.div_ceil(
+                @divExact(value_count_max * layout.clock_bits, 8),
+                layout.cache_line_size,
+            ) * layout.cache_line_size;
             assert(counts_size >= layout.cache_line_size);
             assert(counts_size % layout.cache_line_size == 0);
 
@@ -169,8 +181,6 @@ pub fn SetAssociativeCacheType(
             const clocks_size = @divExact(sets * clock_hand_bits, 8);
             maybe(clocks_size >= layout.cache_line_size);
             maybe(clocks_size % layout.cache_line_size == 0);
-
-            assert(value_count_max % value_count_max_multiple == 0);
 
             const tags = try allocator.alloc(Tag, value_count_max);
             errdefer allocator.free(tags);

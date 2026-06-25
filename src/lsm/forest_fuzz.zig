@@ -691,10 +691,10 @@ const Environment = struct {
                         // sure we manually call groove.objects_cache.compact() every
                         // `stash_value_count_max` operations here.
                         // This is specific to this fuzzing code.
-                        const groove_stash_value_count_max = env.forest.grooves
-                            .transfers.objects_cache.options.stash_value_count_max;
+                        const groove_scope_value_count_max = env.forest.grooves
+                            .transfers.objects_cache.options.scope_value_count_max;
 
-                        if (log_index % groove_stash_value_count_max == 0) {
+                        if (log_index % groove_scope_value_count_max == 0) {
                             env.forest.grooves.transfers.objects_cache.compact();
                         }
                     }

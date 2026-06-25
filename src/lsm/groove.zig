@@ -571,7 +571,6 @@ pub fn GrooveType(
         Object,
         ObjectsCacheHelpers.key_from_value,
         ObjectsCacheHelpers.hash,
-        ObjectsCacheHelpers.tombstone_from_key,
         ObjectsCacheHelpers.tombstone,
     ) else void;
 
@@ -765,15 +764,16 @@ pub fn GrooveType(
             };
 
             groove.objects_cache = if (ObjectsCache != void) try ObjectsCache.init(allocator, .{
-                .cache_value_count_max = options.cache_entries_max,
-                // In the worst case, each stash must be able to store
+                // In the worst case, the cache must be able to store
                 // batch_value_count_limit per beat (to contain either TableMutable or
                 // TableImmutable) as well as the maximum number of prefetches a bar may
                 // perform, excluding prefetches already accounted
                 // for by batch_value_count_limit.
-                .stash_value_count_max = constants.lsm_compaction_ops *
-                    (options.tree_options_object.batch_value_count_limit +
-                        options.prefetch_entries_for_read_max),
+                .cache_value_count_max = @max(
+                    options.cache_entries_max,
+                    options.tree_options_object.batch_value_count_limit,
+                    options.prefetch_entries_for_read_max,
+                ),
 
                 // Scopes are limited to a single beat, so the maximum number of entries in
                 // a single scope is batch_value_count_limit (total – not per beat).
@@ -883,30 +883,13 @@ pub fn GrooveType(
 
         /// Gets the object from the object cache.
         pub fn get(groove: *const Groove, key: PrimaryKey) ObjectCacheResult {
-            switch (groove.objects_cache.get_or_tombstone(key)) {
-                .found => |object| {
-                    // Orphaned primary key.
-                    if (object.timestamp == 0) {
-                        if (!groove_options.primary_key_orphaned) unreachable;
-                        if (is_primary_key(.timestamp)) unreachable;
-                        comptime assert(groove_options.primary_key_orphaned);
-                        comptime assert(!is_primary_key(.timestamp));
-
-                        if (constants.verify) {
-                            const prefetch_key = groove.prefetch_keys.get(@unionInit(
-                                UniqueKey,
-                                groove_options.primary_key,
-                                key,
-                            ));
-                            assert(prefetch_key == null or
-                                prefetch_key.? == .found_orphaned or
-                                prefetch_key.? == .not_found // not found and then failed.
-                            );
-                        }
-
-                        return .found_orphaned;
-                    }
-                    assert(TimestampRange.valid(object.timestamp));
+            if (groove.objects_cache.get(key)) |object| {
+                // Orphaned primary key.
+                if (object.timestamp == 0) {
+                    if (!groove_options.primary_key_orphaned) unreachable;
+                    if (is_primary_key(.timestamp)) unreachable;
+                    comptime assert(groove_options.primary_key_orphaned);
+                    comptime assert(!is_primary_key(.timestamp));
 
                     if (constants.verify) {
                         const prefetch_key = groove.prefetch_keys.get(@unionInit(
@@ -915,38 +898,37 @@ pub fn GrooveType(
                             key,
                         ));
                         assert(prefetch_key == null or
-                            prefetch_key.? == .found or
-                            prefetch_key.? == .not_found // not found and then inserted.
+                            prefetch_key.? == .found_orphaned or
+                            prefetch_key.? == .not_found // not found and then failed.
                         );
                     }
 
-                    return .{ .found_object = object.* };
-                },
-                .tombstone => {
-                    if (constants.verify) {
-                        const prefetch_key = groove.prefetch_keys.get(@unionInit(
-                            UniqueKey,
-                            groove_options.primary_key,
-                            key,
-                        ));
-                        assert(prefetch_key == null or
-                            prefetch_key.? == .not_found or
-                            prefetch_key.? == .found // found and then deleted.
-                        );
-                    }
+                    return .found_orphaned;
+                }
+                assert(TimestampRange.valid(object.timestamp));
 
-                    return .not_found;
-                },
-                .not_found => {
-                    if (constants.verify) {
-                        const prefetch_key = groove.prefetch_keys.get(
-                            @unionInit(UniqueKey, groove_options.primary_key, key),
-                        );
-                        assert(prefetch_key == null or prefetch_key.? == .not_found);
-                    }
+                if (constants.verify) {
+                    const prefetch_key = groove.prefetch_keys.get(@unionInit(
+                        UniqueKey,
+                        groove_options.primary_key,
+                        key,
+                    ));
+                    assert(prefetch_key == null or
+                        prefetch_key.? == .found or
+                        prefetch_key.? == .not_found // not found and then inserted.
+                    );
+                }
 
-                    return .not_found;
-                },
+                return .{ .found_object = object.* };
+            } else {
+                if (constants.verify) {
+                    const prefetch_key = groove.prefetch_keys.get(
+                        @unionInit(UniqueKey, groove_options.primary_key, key),
+                    );
+                    assert(prefetch_key == null or prefetch_key.? == .not_found);
+                }
+
+                return .not_found;
             }
         }
 
@@ -1033,6 +1015,19 @@ pub fn GrooveType(
                             return;
                         }
 
+                        groove.objects.table_mutable.sort();
+                        if (groove.objects.table_mutable.get(value)) |object| {
+                            groove.objects_cache.upsert(object);
+                            if (ObjectTreeHelper.tombstone(object)) {
+                                entry.value_ptr.* = .not_found;
+                            } else {
+                                entry.value_ptr.* = .{
+                                    .found = @field(object, groove_options.primary_key),
+                                };
+                            }
+                            return;
+                        }
+
                         break :timestamp value;
                     }
                     comptime assert(field != .timestamp);
@@ -1045,27 +1040,19 @@ pub fn GrooveType(
                     }
 
                     if (comptime is_primary_key(field)) {
-                        switch (groove.objects_cache.get_or_tombstone(value)) {
-                            .found => |object| {
-                                if (groove_options.primary_key_orphaned) {
-                                    if (object.timestamp == 0) {
-                                        entry.value_ptr.* = .found_orphaned;
-                                        return;
-                                    }
+                        if (groove.objects_cache.get(value)) |object| {
+                            if (groove_options.primary_key_orphaned) {
+                                if (object.timestamp == 0) {
+                                    entry.value_ptr.* = .found_orphaned;
+                                    return;
                                 }
-                                assert(TimestampRange.valid(object.timestamp));
+                            }
+                            assert(TimestampRange.valid(object.timestamp));
 
-                                entry.value_ptr.* = .{
-                                    .found = value,
-                                };
-                                return;
-                            },
-                            .tombstone => {
-                                // Tombstone found in the object cache, the key was deleted.
-                                entry.value_ptr.* = .not_found;
-                                return;
-                            },
-                            .not_found => {},
+                            entry.value_ptr.* = .{
+                                .found = value,
+                            };
+                            return;
                         }
                     }
 
@@ -1076,25 +1063,24 @@ pub fn GrooveType(
                         return;
                     }
 
-                    if (comptime !is_primary_key(field)) {
-                        // Lookup by the primary key skip the mutable
-                        // table by checking the object cache.
-                        // When searching by other unique keys, the mutable
-                        // table needs to be sorted and binary-searched.
-                        tree.table_mutable.sort();
-                        if (tree.table_mutable.get(value)) |tree_value| {
-                            if (tree_value.tombstone()) {
-                                entry.value_ptr.* = .not_found;
-                                return;
-                            }
-
-                            // Timestamp cannot be zero,
-                            // as orphaned objects are only expected for primary keys.
-                            assert(TimestampRange.valid(tree_value.timestamp));
-                            assert(tree_value.field == value);
-                            break :timestamp tree_value.timestamp;
+                    // Lookup by the primary key skip the mutable
+                    // table by checking the object cache.
+                    // When searching by other unique keys, the mutable
+                    // table needs to be sorted and binary-searched.
+                    tree.table_mutable.sort();
+                    if (tree.table_mutable.get(value)) |tree_value| {
+                        if (tree_value.tombstone()) {
+                            entry.value_ptr.* = .not_found;
+                            return;
                         }
+
+                        // Timestamp cannot be zero,
+                        // as orphaned objects are only expected for primary keys.
+                        assert(TimestampRange.valid(tree_value.timestamp));
+                        assert(tree_value.field == value);
+                        break :timestamp tree_value.timestamp;
                     }
+
                     break :timestamp null;
                 },
             };
@@ -1110,24 +1096,19 @@ pub fn GrooveType(
                             };
                             return;
                         }
-                    } else {
-                        // Lookup by the primary key skip the mutable
-                        // table by checking the object cache.
-                        // When searching by other unique keys, the mutable
-                        // table needs to be sorted and binary-searched.
-                        switch (groove.sort_and_search_table_mutable(key, timestamp)) {
-                            .found => |primary_key| {
-                                entry.value_ptr.* = .{
-                                    .found = primary_key,
-                                };
-                                return;
-                            },
-                            .tombstone => {
-                                entry.value_ptr.* = .not_found;
-                                return;
-                            },
-                            .not_found => {},
+                    }
+
+                    groove.objects.table_mutable.sort();
+                    if (groove.objects.table_mutable.get(timestamp)) |object| {
+                        groove.objects_cache.upsert(object);
+                        if (ObjectTreeHelper.tombstone(object)) {
+                            entry.value_ptr.* = .not_found;
+                        } else {
+                            entry.value_ptr.* = .{
+                                .found = ObjectTreeHelper.key_from_value(object),
+                            };
                         }
+                        return;
                     }
                 }
 

@@ -12,10 +12,10 @@ const log = std.log.scoped(.lsm_cache_map_fuzz);
 const Key = TestTable.Key;
 const Value = TestTable.Value;
 
-const stash_value_count_max = 1024;
-// Use a large scope (relative to stash_value_count_max) to increase the chances of
+// Use a large scope to increase the chances of
 // (SetAssociativeCache) hash collisions.
-const scope_value_count_max = stash_value_count_max;
+const scope_value_count_max = 1024;
+const upserts_since_compact_max: usize = constants.lsm_compaction_ops * scope_value_count_max;
 
 const OpValue = struct {
     op: u32,
@@ -83,7 +83,7 @@ const Environment = struct {
                         // If the entry has an op from one or more compactions ago, it
                         // may have been evicted from the cache.
                         // It must be loaded into the cache before removal, though.
-                        assert(env.model.compacts > model_value.?.op);
+                        stdx.maybe(env.model.compacts > model_value.?.op);
                         env.cache_map.upsert(&model_value.?.value);
                     }
 
@@ -106,8 +106,6 @@ const Environment = struct {
                         if (cache_map_value) |cache_map_value_unwrapped| {
                             assert(std.meta.eql(cache_map_value_unwrapped.*, model_value.?.value));
                         }
-                    } else {
-                        assert(std.meta.eql(model_value.?.value, cache_map_value.?.*));
                     }
                 },
                 .scope => |mode| switch (mode) {
@@ -150,7 +148,7 @@ const Environment = struct {
                 assert(std.meta.eql(kv.value_ptr.value, cache_map_value_unwrapped.*));
             } else {
                 // .compact() support:
-                assert(env.model.compacts > kv.value_ptr.op);
+                stdx.maybe(env.model.compacts > kv.value_ptr.op);
             }
 
             checked += 1;
@@ -160,46 +158,16 @@ const Environment = struct {
 
         // It's fine for the cache_map to have values older than .compact() in it; good, in fact,
         // but they _MUST NOT_ be stale.
-        if (env.cache_map.cache) |*cache| {
-            for (cache.values, 0..) |*cache_value, i| {
-                // If the count for an index is 0, the value doesn't exist.
-                if (cache.counts.get(i) == 0) {
-                    continue;
-                }
 
-                const model_val = env.model.get(TestTable.key_from_value(cache_value));
-                assert(std.meta.eql(cache_value.*, model_val.?.value));
-            }
-        }
-
-        // The stash can have stale values, but in that case the real value _must_ exist
-        // in the cache. It should be impossible for the stash to have a value that isn't in the
-        // model, since cache_map.remove() removes from both the cache and stash.
-        var stash_iterator = env.cache_map.stash.keyIterator();
-        while (stash_iterator.next()) |stash_value| {
-            // Get account from model.
-            const model_value = env.model.get(TestTable.key_from_value(stash_value));
-
-            // Even if the stash has stale values, the key must still exist in the model.
-            if (TestTable.tombstone(stash_value)) {
-                stdx.maybe(model_value == null);
+        for (env.cache_map.cache.values, 0..) |*cache_value, i| {
+            // If the count for an index is 0, the value doesn't exist.
+            if (env.cache_map.cache.counts.get(i) == 0) {
                 continue;
             }
-            assert(!TestTable.tombstone(stash_value));
-            assert(model_value != null);
 
-            const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
-
-            if (!stash_value_equal) {
-                if (env.cache_map.cache) |*cache| {
-                    // We verified all cache entries were equal and correct above, so if it exists,
-                    // it must be right.
-                    const cache_value = cache.get(
-                        TestTable.key_from_value(stash_value),
-                    );
-                    assert(cache_value != null);
-                }
-            }
+            const model_val = env.model.get(TestTable.key_from_value(cache_value));
+            assert(TestTable.tombstone(cache_value) or
+                std.meta.eql(cache_value.*, model_val.?.value));
         }
 
         log.info(
@@ -298,7 +266,7 @@ const Model = struct {
 fn random_id(prng: *stdx.PRNG) u32 {
     return fuzz.random_id(prng, u32, .{
         .average_hot = 8,
-        .average_cold = scope_value_count_max + stash_value_count_max +
+        .average_cold = scope_value_count_max +
             TestCacheMap.Cache.value_count_max_multiple,
     });
 }
@@ -333,7 +301,6 @@ pub fn generate_fuzz_ops(
     var operations_since_scope_open: usize = 0;
     const operations_since_scope_open_max: usize = scope_value_count_max;
     var upserts_since_compact: usize = 0;
-    const upserts_since_compact_max: usize = stash_value_count_max;
     var scope_is_open = false;
     for (fuzz_ops, 0..) |*fuzz_op, i| {
         var fuzz_op_tag: FuzzOpTag = undefined;
@@ -421,11 +388,11 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    // Running the same fuzz with and without cache enabled.
-    inline for (&.{ TestCacheMap.Cache.value_count_max_multiple, 0 }) |cache_value_count_max| {
+    // Running the same fuzz with a cache that matches number of operations per compaction,
+    // and and the minimal cache enabled.
+    inline for (&.{ upserts_since_compact_max, TestCacheMap.Cache.value_count_max_multiple }) |cache_value_count_max| {
         const options = TestCacheMap.Options{
             .cache_value_count_max = cache_value_count_max,
-            .stash_value_count_max = stash_value_count_max,
             .scope_value_count_max = scope_value_count_max,
             .name = "fuzz map",
         };
