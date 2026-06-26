@@ -212,6 +212,9 @@ pub const TableIndex = struct {
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
         assert(header_metadata.value_block_count <= header_metadata.value_block_count_max);
         assert(stdx.zeroed(&header_metadata.reserved));
+        assert(header.size == @sizeOf(vsr.Header) +
+            header_metadata.value_block_count_max *
+                (checksum_size + address_size + header_metadata.key_size * 2));
         return header_metadata;
     }
 
