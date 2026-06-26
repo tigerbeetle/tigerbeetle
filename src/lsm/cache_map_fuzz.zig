@@ -169,6 +169,7 @@ const Environment = struct {
             assert(model_value != null);
             assert(std.meta.eql(table_value.*, model_value.?.value));
         }
+        env.cache_map.table.validate();
 
         log.info(
             "Verified all visible items in the cache map exist and match the model.",

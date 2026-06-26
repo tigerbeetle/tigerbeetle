@@ -7,10 +7,9 @@ const maybe = stdx.maybe;
 
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 
-const Fingerprint = struct {
-    code: u7,
-    free: u1,
-    slot: u32,
+const Fingerprint = packed struct(u32) {
+    slot: u24,
+    code: u8,
 };
 
 const capacity_ring = 1048576;
@@ -52,8 +51,10 @@ fn MicaType(
     return struct {
         const Self = @This();
 
+        const array_alignment = constants.cache_line_size;
         const back_invalid = std.math.maxInt(u32);
-        const empty_fingerprint = Fingerprint{ .code = 0, .free = 1, .slot = 0 };
+        const code_empty = std.math.maxInt(u8);
+        const empty_fingerprint = Fingerprint{ .code = code_empty, .slot = 0 };
 
         // head = next element to read
         // tail = next slot to write
@@ -68,9 +69,10 @@ fn MicaType(
         mask_ring: usize,
         mask_hash: usize,
 
-        ring: []KV,
-        hash: []Fingerprint,
-        back: []u32,
+        ring: []align(array_alignment) KV,
+        hash: []align(array_alignment) Fingerprint,
+        dist: []align(array_alignment) u8,
+        back: []align(array_alignment) u32,
         count: usize,
 
         pub fn init(allocator: std.mem.Allocator, ring_capacity_min: usize) !Self {
@@ -83,19 +85,27 @@ fn MicaType(
             assert(std.math.isPowerOfTwo(hash_capacity));
             assert(std.math.isPowerOfTwo(ring_capacity));
             assert(hash_capacity > ring_capacity);
-            assert(ring_capacity - 1 <= std.math.maxInt(u32));
+            assert(ring_capacity - 1 <= std.math.maxInt(u24));
             assert(hash_capacity - 1 <= std.math.maxInt(u32));
 
-            const ring = try allocator.alloc(KV, ring_capacity);
+            const ring = try allocator.alignedAlloc(KV, array_alignment, ring_capacity);
             errdefer allocator.free(ring);
 
-            const hash = try allocator.alloc(Fingerprint, hash_capacity);
+            const hash = try allocator.alignedAlloc(
+                Fingerprint,
+                array_alignment,
+                hash_capacity,
+            );
             errdefer allocator.free(hash);
 
-            const back = try allocator.alloc(u32, ring_capacity);
+            const dist = try allocator.alignedAlloc(u8, array_alignment, hash_capacity);
+            errdefer allocator.free(dist);
+
+            const back = try allocator.alignedAlloc(u32, array_alignment, ring_capacity);
             errdefer allocator.free(back);
 
             @memset(hash, empty_fingerprint);
+            @memset(dist, 0);
             @memset(back, back_invalid);
 
             return Self{
@@ -107,6 +117,7 @@ fn MicaType(
                 .mask_hash = hash_capacity - 1,
                 .ring = ring,
                 .hash = hash,
+                .dist = dist,
                 .back = back,
                 .count = 0,
             };
@@ -114,6 +125,7 @@ fn MicaType(
 
         pub fn deinit(mica: *Self, allocator: std.mem.Allocator) void {
             allocator.free(mica.back);
+            allocator.free(mica.dist);
             allocator.free(mica.hash);
             allocator.free(mica.ring);
             mica.* = undefined;
@@ -124,6 +136,7 @@ fn MicaType(
             mica.head = 0;
             mica.count = 0;
             @memset(mica.hash, empty_fingerprint);
+            @memset(mica.dist, 0);
             @memset(mica.back, back_invalid);
         }
 
@@ -131,16 +144,12 @@ fn MicaType(
             return mica.tail - mica.head;
         }
 
-        fn code(hash: u64) u7 {
+        fn code(hash: u64) u8 {
             return @truncate(hash >> 57);
         }
 
         fn hash_slot(mica: *const Self, hash: u64) usize {
             return @as(usize, @truncate(hash)) & mica.mask_hash;
-        }
-
-        fn probe_distance(mica: *const Self, ideal: usize, slot: usize) usize {
-            return (slot -% ideal) & mica.mask_hash;
         }
 
         const Slot = union(enum) {
@@ -156,7 +165,7 @@ fn MicaType(
 
             for (0..mica.hash_capacity) |_| {
                 const entry = mica.hash[slot];
-                if (entry.free == 1) return .{ .free = slot };
+                if (entry.code == code_empty) return .{ .free = slot };
 
                 if (entry.code == fingerprint and
                     std.meta.eql(mica.ring[entry.slot].key, key))
@@ -171,26 +180,33 @@ fn MicaType(
         }
 
         fn delete_hash_slot(mica: *Self, slot_delete: usize) void {
-            var hole = slot_delete & mica.mask_hash;
-            assert(mica.hash[hole].free == 0);
+            var i = slot_delete & mica.mask_hash;
+            assert(mica.hash[i].code != code_empty);
 
-            mica.back[mica.hash[hole].slot] = back_invalid;
+            mica.back[mica.hash[i].slot] = back_invalid;
             mica.count -= 1;
 
-            var slot = (hole + 1) & mica.mask_hash;
-            while (mica.hash[slot].free == 0) : (slot = (slot + 1) & mica.mask_hash) {
-                const entry = mica.hash[slot];
-                const ideal = mica.hash_slot(hash_from_key(mica.ring[entry.slot].key));
+            while (true) {
+                var j = (i + 1) & mica.mask_hash;
+                var off: usize = 1;
+                while (true) {
+                    const entry = mica.hash[j];
+                    if (entry.code == code_empty) {
+                        mica.hash[i] = empty_fingerprint;
+                        mica.dist[i] = 0;
+                        return;
+                    }
 
-                if (mica.probe_distance(ideal, slot) > mica.probe_distance(ideal, hole)) {
-                    mica.hash[hole] = entry;
-                    mica.back[entry.slot] = @intCast(hole);
-                    mica.hash[slot] = empty_fingerprint;
-                    hole = slot;
+                    if (mica.dist[j] >= off) break;
+                    j = (j + 1) & mica.mask_hash;
+                    off += 1;
                 }
-            }
 
-            mica.hash[hole] = empty_fingerprint;
+                mica.hash[i] = mica.hash[j];
+                mica.dist[i] = @intCast(mica.dist[j] - off);
+                mica.back[mica.hash[i].slot] = @intCast(i);
+                i = j;
+            }
         }
 
         fn evict_one(mica: *Self) void {
@@ -212,7 +228,7 @@ fn MicaType(
 
         fn append_at(mica: *Self, slot_hash: usize, kv: KV) void {
             assert(mica.len() < mica.ring_capacity);
-            assert(mica.hash[slot_hash].free == 0);
+            assert(mica.hash[slot_hash].code != code_empty);
 
             const slot_ring = mica.tail & mica.mask_ring;
             mica.ring[slot_ring] = kv;
@@ -224,22 +240,33 @@ fn MicaType(
         pub fn put(mica: *Self, kv: KV) void {
             mica.ensure_room();
 
-            switch (mica.find_slot(kv.key)) {
-                .found => |slot_hash| {
-                    const old_slot_ring = mica.hash[slot_hash].slot;
-                    mica.back[old_slot_ring] = back_invalid;
-                    mica.append_at(slot_hash, kv);
-                },
-                .free => |slot_hash| {
-                    mica.hash[slot_hash] = Fingerprint{
-                        .code = code(hash_from_key(kv.key)),
-                        .free = 0,
-                        .slot = 0,
-                    };
+            const hash = hash_from_key(kv.key);
+            const fingerprint = code(hash);
+            const home = mica.hash_slot(hash);
+            var slot = home;
+
+            while (true) {
+                const entry = mica.hash[slot];
+                if (entry.code == code_empty) {
+                    const distance = (slot -% home) & mica.mask_hash;
+                    assert(distance <= std.math.maxInt(u8));
+
+                    mica.hash[slot] = Fingerprint{ .code = fingerprint, .slot = 0 };
+                    mica.dist[slot] = @intCast(distance);
                     mica.count += 1;
-                    mica.append_at(slot_hash, kv);
-                },
-                .full => unreachable,
+                    mica.append_at(slot, kv);
+                    return;
+                }
+
+                if (entry.code == fingerprint and
+                    std.meta.eql(mica.ring[entry.slot].key, kv.key))
+                {
+                    mica.back[entry.slot] = back_invalid;
+                    mica.append_at(slot, kv);
+                    return;
+                }
+
+                slot = (slot + 1) & mica.mask_hash;
             }
         }
 
@@ -300,7 +327,7 @@ fn MicaType(
                     it.index += 1;
 
                     const entry = it.mica.hash[index];
-                    if (entry.free == 0) {
+                    if (entry.code != code_empty) {
                         return &it.mica.ring[entry.slot];
                     }
                 }
@@ -311,6 +338,31 @@ fn MicaType(
 
         pub fn iterator(mica: *const Self) Iterator {
             return .{ .mica = mica };
+        }
+
+        pub fn validate(mica: *const Self) void {
+            var occupied: usize = 0;
+            for (mica.hash, 0..) |entry, slot| {
+                if (entry.code == code_empty) continue;
+                occupied += 1;
+
+                const ring_slot = entry.slot;
+                assert(mica.back[ring_slot] == slot);
+
+                const key = mica.ring[ring_slot].key;
+                const hash = hash_from_key(key);
+                assert(entry.code == code(hash));
+
+                const home = mica.hash_slot(hash);
+                assert(mica.dist[slot] == ((slot -% home) & mica.mask_hash));
+
+                var s = home;
+                while (s != slot) : (s = (s + 1) & mica.mask_hash) {
+                    assert(mica.hash[s].code != code_empty);
+                }
+            }
+
+            assert(occupied == mica.count);
         }
     };
 }
