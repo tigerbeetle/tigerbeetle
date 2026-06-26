@@ -25,18 +25,18 @@ Released: 2026-06-26
 
 - [#3816](https://github.com/tigerbeetle/tigerbeetle/pull/3816)
 
-  Improve the ruby client migration guide.
+  Improve the Ruby client migration guide.
 
 - [#3836](https://github.com/tigerbeetle/tigerbeetle/pull/3836)
   [#3832](https://github.com/tigerbeetle/tigerbeetle/pull/3832)
   [#3835](https://github.com/tigerbeetle/tigerbeetle/pull/3835)
 
-  Various docs improvements, including adding the ruby client and print layout support.
+  Various docs improvements, including adding the Ruby client and print layout support.
 
 - [#3830](https://github.com/tigerbeetle/tigerbeetle/pull/3830)
   [#3811](https://github.com/tigerbeetle/tigerbeetle/pull/3811)
 
-  Add a u128 bounds check in the ruby client and make its status return type more idiomatic.
+  Add a u128 bounds check in the Ruby client and make its status return type more idiomatic.
 
 ### Internals
 
