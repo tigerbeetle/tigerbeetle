@@ -498,6 +498,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             loading_manifest,
             loading_index: struct {
                 key_exclusive_next: Key,
+                table_key_min: Key,
+                table_key_max: Key,
                 address: u64,
                 checksum: u128,
                 read: Grid.Read = undefined,
@@ -754,6 +756,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 self.state = .{
                     .loading_index = .{
                         .key_exclusive_next = key_exclusive_next,
+                        .table_key_min = table_info.key_min,
+                        .table_key_max = table_info.key_max,
                         .address = table_info.address,
                         .checksum = table_info.checksum,
                     },
@@ -788,6 +792,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 const scan_key_min = @min(self.scan.key_lower, self.scan.key_upper);
                 const scan_key_max = @max(self.scan.key_lower, self.scan.key_upper);
 
+                const index_schema = Table.index.from_block(index_block, self.scan.tree.config.id);
                 const keys_max = Table.index_value_keys_used(self.buffer.index_block, .key_max);
                 const keys_min = Table.index_value_keys_used(self.buffer.index_block, .key_min);
                 // The `index_block` *might* contain the key range,
@@ -796,6 +801,13 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 assert(keys_min.len == keys_max.len);
                 assert(keys_min[0] <= scan_key_max);
                 assert(scan_key_min <= keys_max[keys_max.len - 1]);
+
+                assert(keys_min.len > 0);
+                assert(keys_min.len == keys_max.len);
+                assert(keys_min.len == index_schema.value_blocks_used(index_block));
+
+                assert(keys_min[0] == state.loading_index.table_key_min);
+                assert(keys_max[keys_max.len - 1] == state.loading_index.table_key_max);
 
                 const indexes = binary_search.binary_search_keys_range_upsert_indexes(
                     Key,
