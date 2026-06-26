@@ -89,6 +89,17 @@ Accidentally dropping rows or tables is bad in any database, but it is unaccepta
 accounting. Legal compliance and good business practices require that all funds be fully accounted
 for, and all history be maintained.
 
+### Preserving User Privacy
+
+Many applications must comply with GDPR and other privacy-preserving requirements, such as the right
+to be forgotten. User privacy can be preserved by being intentional about what data is stored in
+the `user_data_*` fields.
+
+For example, if `user_data_128` is used to map from your application's unique `user_id` and
+TigerBeetle, a user can be 'forgotten' by deleting that mapping. Without it, the accounts and
+transfers in TigerBeetle cannot be linked back to a real user, rendering them meaningless and
+preserving the user's privacy.
+
 ## Don't Roll Your Own Ledger
 
 Many companies start out building their own system for recording business transactions. Then, once
