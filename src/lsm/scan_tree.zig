@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
-const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
 const k_way_merge = @import("k_way_merge.zig");
 
@@ -506,6 +505,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             },
             iterating: struct {
                 key_exclusive_next: Key,
+                index_key_min: Key,
+                index_key_max: Key,
                 values: union(enum) {
                     none,
                     iterator: TableValueIterator,
@@ -784,6 +785,13 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state == .buffering);
             assert(self.scan.state.buffering.pending_count > 0);
 
+            const index_schema = Table.verify_index_block(
+                index_block,
+                self.scan.tree.config.id,
+                state.loading_index.table_key_min,
+                state.loading_index.table_key_max,
+            );
+
             self.scan.tree.grid.block_unref(self.buffer.index_block);
             self.buffer.index_block = self.scan.tree.grid.block_ref(index_block);
 
@@ -792,7 +800,6 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 const scan_key_min = @min(self.scan.key_lower, self.scan.key_upper);
                 const scan_key_max = @max(self.scan.key_lower, self.scan.key_upper);
 
-                const index_schema = Table.index.from_block(index_block, self.scan.tree.config.id);
                 const keys_max = Table.index_value_keys_used(self.buffer.index_block, .key_max);
                 const keys_min = Table.index_value_keys_used(self.buffer.index_block, .key_min);
                 // The `index_block` *might* contain the key range,
@@ -801,13 +808,6 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 assert(keys_min.len == keys_max.len);
                 assert(keys_min[0] <= scan_key_max);
                 assert(scan_key_min <= keys_max[keys_max.len - 1]);
-
-                assert(keys_min.len > 0);
-                assert(keys_min.len == keys_max.len);
-                assert(keys_min.len == index_schema.value_blocks_used(index_block));
-
-                assert(keys_min[0] == state.loading_index.table_key_min);
-                assert(keys_max[keys_max.len - 1] == state.loading_index.table_key_max);
 
                 const indexes = binary_search.binary_search_keys_range_upsert_indexes(
                     Key,
@@ -837,7 +837,6 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 };
             };
 
-            const index_schema = schema.TableIndex.from(self.buffer.index_block);
             const data_addresses = index_schema.value_addresses_used(self.buffer.index_block);
             const data_checksums = index_schema.value_checksums_used(self.buffer.index_block);
             assert(data_addresses.len == data_checksums.len);
@@ -847,6 +846,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 break :iterating .{
                     .iterating = .{
                         .key_exclusive_next = key_exclusive_next,
+                        .index_key_min = self.state.loading_index.table_key_min,
+                        .index_key_max = self.state.loading_index.table_key_max,
                         .values = .none,
                     },
                 };
@@ -894,6 +895,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.values == .fetching);
             assert(self.scan.state == .buffering);
             assert(self.scan.state.buffering.pending_count > 0);
+            Table.data.assert_matching_block_schema(value_block, self.scan.tree.config.id);
 
             const values = Table.value_block_values_used(value_block);
             const scan_key_min = @min(self.scan.key_lower, self.scan.key_upper);
@@ -922,6 +924,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 const key_max = key_from_value(&values[values.len - 1]);
                 assert(key_min < scan_key_min);
                 assert(scan_key_max < key_max);
+                assert(key_min >= self.state.iterating.index_key_min);
+                assert(key_max <= self.state.iterating.index_key_max);
 
                 // Keep fetching if there are more value blocks on this table,
                 // or move to the next table otherwise.
