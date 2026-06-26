@@ -383,6 +383,10 @@ function render_performance_results(batches, query_metric) {
       title: "CSO",
       metric: "Cluster TPS",
     },
+    {
+      title: "CPO",
+      metric: "CPO TPS",
+    },
   ];
   const freshness_threshold_ms = 24 * 60 * 60 * 1000;
   const table_dom = document.querySelector("#performance-results>tbody");
