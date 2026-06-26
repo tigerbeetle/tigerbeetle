@@ -550,6 +550,17 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(compaction.manifest_entries.empty());
         }
 
+        fn assert_valid_source_value_block(
+            compaction: *const Compaction,
+            value_block: *const ResourcePool.Block,
+            index_block: *const ResourcePool.Block,
+        ) void {
+            const tree_id = compaction.tree.config.id;
+            assert(value_block.stage == .merge);
+            assert(index_block.stage == .read_index_block_done);
+            Table.verify_value_block_schema_and_range(value_block.ptr, index_block.ptr, tree_id);
+        }
+
         fn idle(compaction: *const Compaction) bool {
             return compaction.pool == null and
                 compaction.callback == null and
@@ -1740,10 +1751,12 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             };
 
             const level_b_values_used: ?[]const Value = values: {
-                if (compaction.level_b_value_block.head()) |block| {
-                    assert(block.stage == .merge);
-                    Table.data.assert_matching_block_schema(block.ptr, compaction.tree.config.id);
-                    break :values Table.value_block_values_used(block.ptr);
+                if (compaction.level_b_value_block.head()) |value_block| {
+                    compaction.assert_valid_source_value_block(
+                        value_block,
+                        compaction.level_b_index_block.head().?,
+                    );
+                    break :values Table.value_block_values_used(value_block.ptr);
                 } else {
                     break :values null;
                 }
@@ -1768,13 +1781,12 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                         unreachable;
                     },
                     .disk => {
-                        if (compaction.level_a_value_block.head()) |block| {
-                            assert(block.stage == .merge);
-                            Table.data.assert_matching_block_schema(
-                                block.ptr,
-                                compaction.tree.config.id,
+                        if (compaction.level_a_value_block.head()) |value_block| {
+                            compaction.assert_valid_source_value_block(
+                                value_block,
+                                compaction.level_a_index_block.head().?,
                             );
-                            break :values Table.value_block_values_used(block.ptr);
+                            break :values Table.value_block_values_used(value_block.ptr);
                         } else {
                             break :values null;
                         }
@@ -1783,10 +1795,12 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             };
 
             const level_b_values_used: ?[]const Value = values: {
-                if (compaction.level_b_value_block.head()) |block| {
-                    assert(block.stage == .merge);
-                    Table.data.assert_matching_block_schema(block.ptr, compaction.tree.config.id);
-                    break :values Table.value_block_values_used(block.ptr);
+                if (compaction.level_b_value_block.head()) |value_block| {
+                    compaction.assert_valid_source_value_block(
+                        value_block,
+                        compaction.level_b_index_block.head().?,
+                    );
+                    break :values Table.value_block_values_used(value_block.ptr);
                 } else {
                     break :values null;
                 }
