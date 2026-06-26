@@ -543,6 +543,62 @@ pub fn TableType(
             );
         }
 
+        pub fn verify_value_block_schema_and_range(
+            value_block: BlockPtrConst,
+            index_block: BlockPtrConst,
+            tree_id: u16,
+        ) void {
+            data.assert_matching_block_schema(value_block, tree_id);
+
+            const index_block_addresses = index.value_addresses_used(index_block);
+            const index_block_keys_min = index_value_keys_used(index_block, .key_min);
+            const index_block_keys_max = index_value_keys_used(index_block, .key_max);
+
+            assert(index_block_addresses.len > 0);
+            assert(index_block_keys_min.len == index_block_keys_max.len);
+            assert(index_block_keys_min.len == index_block_addresses.len);
+
+            const value_block_address = block_address(value_block);
+            const values = value_block_values_used(value_block);
+            assert(values.len > 0);
+
+            const value_block_index = std.mem.indexOfScalar(
+                u64,
+                index_block_addresses,
+                value_block_address,
+            ).?;
+
+            const index_key_min = index_block_keys_min[0];
+            const index_key_max = index_block_keys_max[index_block_keys_max.len - 1];
+            const value_key_min = key_from_value(&values[0]);
+            const value_key_max = key_from_value(&values[values.len - 1]);
+
+            assert(index_key_min <= value_key_min);
+            assert(index_key_max >= value_key_max);
+            if (values.len > 1) assert(value_key_min < value_key_max);
+
+            if (value_block_index > 0 and value_block_index < index_block_addresses.len - 1) {
+                assert(index_key_min < value_key_min);
+                assert(index_key_max > value_key_max);
+            }
+
+            if (value_block_index == 0) {
+                assert(index_key_min == value_key_min);
+                if (values.len > 1) assert(index_key_min < value_key_max);
+            }
+
+            if (value_block_index == index_block_addresses.len - 1) {
+                assert(index_key_max == value_key_max);
+                if (values.len > 1) assert(index_key_max > value_key_min);
+            }
+
+            if (constants.verify) {
+                for (values[0 .. values.len - 1], values[1..]) |*a, *b| {
+                    assert(key_from_value(a) < key_from_value(b));
+                }
+            }
+        }
+
         pub fn verify(
             comptime Storage: type,
             storage: *const Storage,
