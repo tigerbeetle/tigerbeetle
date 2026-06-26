@@ -348,6 +348,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             var index_block_count: u8 = 0;
             var index_block_addresses: [constants.lsm_levels]u64 = undefined;
             var index_block_checksums: [constants.lsm_levels]u128 = undefined;
+            var index_block_keys_min: [constants.lsm_levels]Key = undefined;
+            var index_block_keys_max: [constants.lsm_levels]Key = undefined;
             {
                 var it = tree.manifest.lookup(
                     parameters.snapshot,
@@ -361,6 +363,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
                     index_block_addresses[index_block_count] = table.address;
                     index_block_checksums[index_block_count] = table.checksum;
+                    index_block_keys_min[index_block_count] = table.key_min;
+                    index_block_keys_max[index_block_count] = table.key_max;
                 }
             }
 
@@ -376,6 +380,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .index_block_count = index_block_count,
                 .index_block_addresses = index_block_addresses,
                 .index_block_checksums = index_block_checksums,
+                .index_block_keys_min = index_block_keys_min,
+                .index_block_keys_max = index_block_keys_max,
                 .callback = parameters.callback,
             };
 
@@ -395,6 +401,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             index_block_count: u8,
             index_block_addresses: [constants.lsm_levels]u64,
             index_block_checksums: [constants.lsm_levels]u128,
+            index_block_keys_min: [constants.lsm_levels]Key,
+            index_block_keys_max: [constants.lsm_levels]Key,
 
             value_block: ?struct {
                 address: u64,
@@ -426,6 +434,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count <= constants.lsm_levels);
                 assert(Table.index.block_metadata(index_block).tree_id == context.tree.config.id);
 
+                const keys_min = Table.index_value_keys_used(index_block, .key_min);
+                const keys_max = Table.index_value_keys_used(index_block, .key_max);
+
+                assert(keys_min[0] == context.index_block_keys_min[context.index_block]);
+                assert(keys_max[keys_max.len - 1] ==
+                    context.index_block_keys_max[context.index_block]);
+
                 const blocks = Table.index_blocks_for_key(index_block, context.key) orelse {
                     // The key is not present in this table, check the next level.
                     context.advance_to_next_level();
@@ -452,7 +467,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
-                assert(Table.data.block_metadata(value_block).tree_id == context.tree.config.id);
+                Table.data.assert_matching_block_schema(value_block, context.tree.config.id);
+
+                const values = Table.value_block_values_used(value_block);
+                assert(Table.key_from_value(&values[0]) >=
+                    context.index_block_keys_min[context.index_block]);
+                assert(Table.key_from_value(&values[values.len - 1]) <=
+                    context.index_block_keys_max[context.index_block]);
 
                 if (Table.value_block_search(value_block, context.key)) |value| {
                     context.callback(context, unwrap_tombstone(value));
