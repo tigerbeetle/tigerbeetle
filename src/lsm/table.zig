@@ -543,7 +543,7 @@ pub fn TableType(
             );
         }
 
-        pub fn verify_value_block_schema_and_range(
+        pub fn verify_value_block(
             value_block: BlockPtrConst,
             index_block: BlockPtrConst,
             tree_id: u16,
@@ -575,22 +575,18 @@ pub fn TableType(
 
             assert(index_key_min <= value_key_min);
             assert(index_key_max >= value_key_max);
-            if (values.len > 1) assert(value_key_min < value_key_max);
-
+            if (values.len > 1) {
+                assert(value_key_min < value_key_max);
+                assert(index_key_min < value_key_max);
+                assert(index_key_max > value_key_min);
+            }
             if (value_block_index > 0 and value_block_index < index_block_addresses.len - 1) {
                 assert(index_key_min < value_key_min);
                 assert(index_key_max > value_key_max);
             }
-
-            if (value_block_index == 0) {
-                assert(index_key_min == value_key_min);
-                if (values.len > 1) assert(index_key_min < value_key_max);
-            }
-
-            if (value_block_index == index_block_addresses.len - 1) {
+            if (value_block_index == 0) assert(index_key_min == value_key_min);
+            if (value_block_index == index_block_addresses.len - 1)
                 assert(index_key_max == value_key_max);
-                if (values.len > 1) assert(index_key_max > value_key_min);
-            }
 
             if (constants.verify) {
                 for (values[0 .. values.len - 1], values[1..]) |*a, *b| {
