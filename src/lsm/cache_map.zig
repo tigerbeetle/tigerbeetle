@@ -64,8 +64,8 @@ fn MicaType(
         tail: usize,
         head: usize,
 
-        ring_capacity: usize,
-        hash_capacity: usize,
+        capacity_ring: usize,
+        capacity_hash: usize,
         mask_ring: usize,
         mask_hash: usize,
 
@@ -73,6 +73,7 @@ fn MicaType(
         hash: []align(array_alignment) Fingerprint,
         dist: []align(array_alignment) u8,
         back: []align(array_alignment) u32,
+
         count: usize,
 
         pub fn init(allocator: std.mem.Allocator, ring_capacity_min: usize) !Self {
@@ -111,8 +112,8 @@ fn MicaType(
             return Self{
                 .tail = 0,
                 .head = 0,
-                .ring_capacity = ring_capacity,
-                .hash_capacity = hash_capacity,
+                .capacity_ring = ring_capacity,
+                .capacity_hash = hash_capacity,
                 .mask_ring = ring_capacity - 1,
                 .mask_hash = hash_capacity - 1,
                 .ring = ring,
@@ -163,7 +164,7 @@ fn MicaType(
             const fingerprint = code(hash);
             var slot = mica.hash_slot(hash);
 
-            for (0..mica.hash_capacity) |_| {
+            for (0..mica.capacity_hash) |_| {
                 const entry = mica.hash[slot];
                 if (entry.code == code_empty) return .{ .free = slot };
 
@@ -210,7 +211,7 @@ fn MicaType(
         }
 
         fn evict_one(mica: *Self) void {
-            assert(mica.len() == mica.ring_capacity);
+            assert(mica.len() == mica.capacity_ring);
 
             const slot_ring = mica.head & mica.mask_ring;
             const slot_hash = mica.back[slot_ring];
@@ -223,11 +224,11 @@ fn MicaType(
         }
 
         fn ensure_room(mica: *Self) void {
-            if (mica.len() == mica.ring_capacity) mica.evict_one();
+            if (mica.len() == mica.capacity_ring) mica.evict_one();
         }
 
         fn append_at(mica: *Self, slot_hash: usize, kv: KV) void {
-            assert(mica.len() < mica.ring_capacity);
+            assert(mica.len() < mica.capacity_ring);
             assert(mica.hash[slot_hash].code != code_empty);
 
             const slot_ring = mica.tail & mica.mask_ring;
@@ -322,7 +323,7 @@ fn MicaType(
             index: usize = 0,
 
             pub fn next(it: *Iterator) ?*const KV {
-                while (it.index < it.mica.hash_capacity) {
+                while (it.index < it.mica.capacity_hash) {
                     const index = it.index;
                     it.index += 1;
 
@@ -457,7 +458,7 @@ pub fn CacheMapType(
         pub fn deinit(self: *CacheMap, allocator: std.mem.Allocator) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.table.count <= self.table.ring_capacity);
+            assert(self.table.count <= self.table.capacity_ring);
 
             self.scope_rollback_log.deinit(allocator);
             self.table.deinit(allocator);
@@ -466,7 +467,7 @@ pub fn CacheMapType(
         pub fn reset(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.table.count <= self.table.ring_capacity);
+            assert(self.table.count <= self.table.capacity_ring);
 
             self.table.reset();
 
@@ -619,7 +620,7 @@ pub fn CacheMapType(
         pub fn compact(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.table.count <= self.table.ring_capacity);
+            assert(self.table.count <= self.table.capacity_ring);
 
             self.table.reset();
         }
