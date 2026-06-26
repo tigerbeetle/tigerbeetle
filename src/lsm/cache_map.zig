@@ -287,17 +287,18 @@ pub fn CacheMapType(
             else
                 null;
 
-            // We don't allow stale values, so we need to remove from the stash as well,
-            // since both can have different versions with the same key.
+            // The stash and cache can contain different versions of the same key,
+            // so we also need to remove it from the stash, leaving a tombstone in
+            // its place. The tombstone indicates that, although the object is not
+            // present in the cache, a deletion occurred and the key must not be
+            // looked up in the immutable table or LSM tree.
             const stash_removed: ?Value = stash_removed: {
-                assert(self.stash.count() <= self.options.stash_value_count_max);
-
                 const tombstone_object = tombstone_from_key(key);
-                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
 
-                // Add a tombstone in the stash, indicating that the
-                // deletion happened and that the key should not be
-                // looked up in the immutable table or LSM tree.
+                // If the key exists in the stash, it will be replaced
+                // with a tombstone without increasing the stash count.
+                assert(self.stash.count() <= self.options.stash_value_count_max);
+                const entry = self.stash.getOrPutAssumeCapacity(tombstone_object);
                 defer entry.key_ptr.* = tombstone_object;
 
                 break :stash_removed if (entry.found_existing) entry.key_ptr.* else null;
