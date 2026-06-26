@@ -3,6 +3,74 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.17.9
+
+Released: 2026-06-26
+
+### Safety And Performance
+
+- [#3810](https://github.com/tigerbeetle/tigerbeetle/pull/3810)
+
+  Revert unique keys, which caused compatibility issues (see [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802)).
+
+- [#3822](https://github.com/tigerbeetle/tigerbeetle/pull/3822)
+
+  Extend `inspect constants` to catch schema changes.
+
+- [#3828](https://github.com/tigerbeetle/tigerbeetle/pull/3828)
+
+  Use our full journal in VSR.
+
+### Features
+
+- [#3816](https://github.com/tigerbeetle/tigerbeetle/pull/3816)
+
+  Improve the ruby client migration guide.
+
+- [#3836](https://github.com/tigerbeetle/tigerbeetle/pull/3836)
+  [#3832](https://github.com/tigerbeetle/tigerbeetle/pull/3832)
+  [#3835](https://github.com/tigerbeetle/tigerbeetle/pull/3835)
+
+  Various docs improvements, including adding the ruby client and print layout support.
+
+- [#3830](https://github.com/tigerbeetle/tigerbeetle/pull/3830)
+  [#3811](https://github.com/tigerbeetle/tigerbeetle/pull/3811)
+
+  Add a u128 bounds check in the ruby client and make its status return type more idiomatic.
+
+### Internals
+
+- [#3825](https://github.com/tigerbeetle/tigerbeetle/pull/3825)
+  [#3831](https://github.com/tigerbeetle/tigerbeetle/pull/3831)
+
+  Improve various code comments.
+
+- [#3793](https://github.com/tigerbeetle/tigerbeetle/pull/3793)
+
+  Switch to `stdx.SocketAddress`.
+
+- [#3826](https://github.com/tigerbeetle/tigerbeetle/pull/3826)
+
+  Fail on curl instead of unzip for network flakes during Vortex builds.
+
+- [#3813](https://github.com/tigerbeetle/tigerbeetle/pull/3813)
+
+  Expose `TimeSim` and fixtures in VSR.
+
+- [#3820](https://github.com/tigerbeetle/tigerbeetle/pull/3820)
+
+  Introduce the canonical workload principle for benchmarks.
+
+- [#3821](https://github.com/tigerbeetle/tigerbeetle/pull/3821)
+  [#3682](https://github.com/tigerbeetle/tigerbeetle/pull/3682)
+  [#3817](https://github.com/tigerbeetle/tigerbeetle/pull/3817)
+
+  Multiple CI improvements.
+
+### TigerTracks 🎧
+
+- [Home](https://www.youtube.com/watch?v=5Fc9A6mLHJU)
+
 ## TigerBeetle 0.17.8
 
 Released: 2026-06-19
