@@ -1207,3 +1207,31 @@ article {
     }
   }
 }
+
+@media print {
+
+  nav.left-pane,
+  body>.resizer,
+  body>.expand-button,
+  #github-link,
+  #single-page-link,
+  .edit-link,
+  .code-wrapper button {
+    display: none !important;
+  }
+
+  body {
+    display: block;
+    height: unset;
+  }
+
+  article {
+    display: block;
+    overflow-y: unset;
+  }
+
+  pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
