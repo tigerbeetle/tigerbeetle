@@ -51,7 +51,6 @@ fn MicaType(
     return struct {
         const Self = @This();
 
-        const array_alignment = constants.cache_line_size;
         const back_invalid = std.math.maxInt(u32);
         const code_empty = std.math.maxInt(u8);
         const empty_fingerprint = Fingerprint{ .code = code_empty, .slot = 0 };
@@ -69,10 +68,10 @@ fn MicaType(
         mask_ring: usize,
         mask_hash: usize,
 
-        ring: []align(array_alignment) KV,
-        hash: []align(array_alignment) Fingerprint,
-        dist: []align(array_alignment) u8,
-        back: []align(array_alignment) u32,
+        ring: []KV,
+        hash: []Fingerprint,
+        dist: []u8,
+        back: []u32,
 
         count: usize,
 
@@ -89,20 +88,16 @@ fn MicaType(
             assert(ring_capacity - 1 <= std.math.maxInt(u24));
             assert(hash_capacity - 1 <= std.math.maxInt(u32));
 
-            const ring = try allocator.alignedAlloc(KV, array_alignment, ring_capacity);
+            const ring = try allocator.alloc(KV, ring_capacity);
             errdefer allocator.free(ring);
 
-            const hash = try allocator.alignedAlloc(
-                Fingerprint,
-                array_alignment,
-                hash_capacity,
-            );
+            const hash = try allocator.alloc(Fingerprint, hash_capacity);
             errdefer allocator.free(hash);
 
-            const dist = try allocator.alignedAlloc(u8, array_alignment, hash_capacity);
+            const dist = try allocator.alloc(u8, hash_capacity);
             errdefer allocator.free(dist);
 
-            const back = try allocator.alignedAlloc(u32, array_alignment, ring_capacity);
+            const back = try allocator.alloc(u32, ring_capacity);
             errdefer allocator.free(back);
 
             @memset(hash, empty_fingerprint);
