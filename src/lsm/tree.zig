@@ -540,7 +540,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.compaction_op = tree.grid.superblock.working.vsr_state.checkpoint.header.op;
             tree.key_range = tree.manifest.key_range();
 
-            tree.manifest.verify(snapshot_latest);
+            tree.manifest.verify(snapshot_latest, tree.config.id);
             assert(tree.compaction_op.? == 0 or
                 (tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
             maybe(tree.key_range == null);
