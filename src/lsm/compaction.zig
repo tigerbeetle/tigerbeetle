@@ -1284,7 +1284,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                     if (index_block.stage == .read_index_block_done) {
                         compaction.assert_valid_source_index_block(
                             index_block,
-                            compaction.level_a_table_info_current(),
+                            compaction.level_b_table_info_current(),
                         );
                         const index_schema = Table.index.from_block(
                             index_block.ptr,
