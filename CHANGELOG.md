@@ -1,7 +1,7 @@
 # Changelog
 
-Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
-to receive notifications about breaking changes!
+Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to receive notifications about breaking changes and critical issues!
 
 ## TigerBeetle 0.17.9
 
