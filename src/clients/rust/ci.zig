@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = std.log;
+const assert = std.debug.assert;
 
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
@@ -16,6 +17,10 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         try shell.exec("cargo fmt --check", .{});
         try shell.exec("cargo clippy -- -D clippy::all", .{});
+        assert(try file_contains(shell, gpa, "Cargo.toml", .{
+            .needle = "overflow-checks = true",
+            .line_length_max = 100,
+        }));
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
@@ -26,6 +31,29 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("cargo run", .{});
     }
+}
+
+fn file_contains(
+    shell: *Shell,
+    gpa: std.mem.Allocator,
+    path: []const u8,
+    options: struct {
+        needle: []const u8,
+        line_length_max: u32 = 100,
+    },
+) !bool {
+    const file = try shell.cwd.openFile(path, .{});
+    defer file.close();
+
+    const line_buffer = try gpa.alloc(u8, options.line_length_max + 1);
+    defer gpa.free(line_buffer);
+
+    const reader = file.reader();
+    while (try reader.readUntilDelimiterOrEof(line_buffer, '\n')) |line| {
+        if (std.mem.indexOf(u8, line, options.needle) != null) return true;
+    }
+
+    return false;
 }
 
 pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {

@@ -5,19 +5,19 @@ const assert = std.debug.assert;
 const stdx = vsr.stdx;
 
 const type_mappings = .{
-    .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
+    .{ exports.tb_account_flags, "AccountFlags" },
     .{ exports.tb_account_t, "tb_account_t" },
-    .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
+    .{ exports.tb_transfer_flags, "TransferFlags" },
     .{ exports.tb_transfer_t, "tb_transfer_t" },
     .{ exports.tb_create_account_status, "TB_CREATE_ACCOUNT_STATUS" },
     .{ exports.tb_create_transfer_status, "TB_CREATE_TRANSFER_STATUS" },
     .{ exports.tb_create_account_result_t, "tb_create_account_result_t" },
     .{ exports.tb_create_transfer_result_t, "tb_create_transfer_result_t" },
     .{ exports.tb_account_filter_t, "tb_account_filter_t" },
-    .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
+    .{ exports.tb_account_filter_flags, "AccountFilterFlags" },
     .{ exports.tb_account_balance_t, "tb_account_balance_t" },
     .{ exports.tb_query_filter_t, "tb_query_filter_t" },
-    .{ exports.tb_query_filter_flags, "TB_QUERY_FILTER_FLAGS" },
+    .{ exports.tb_query_filter_flags, "QueryFilterFlags" },
     .{
         exports.tb_client_t, "tb_client_t",
         \\// Opaque struct serving as a handle for the client instance.
@@ -79,22 +79,18 @@ fn resolve_rust_type(comptime Type: type) []const u8 {
     }
 }
 
-fn emit_enum(
-    buffer: *std.ArrayList(u8),
+fn emit_bitflags(
+    writer: anytype,
     comptime Type: type,
-    comptime type_info: anytype,
+    comptime type_info: std.builtin.Type.Struct,
     comptime rust_name: []const u8,
     comptime skip_fields: []const []const u8,
 ) !void {
-    var suffix_pos = std.mem.lastIndexOf(u8, rust_name, "_").?;
-    if (std.mem.count(u8, rust_name, "_") == 1) suffix_pos = rust_name.len;
+    assert(@typeInfo(Type).@"struct".layout == .@"packed");
+    assert(std.mem.count(u8, rust_name, "_") == 0);
+    assert(rust_name[0] >= 'A' and rust_name[0] <= 'Z');
 
-    const backing_type = switch (@typeInfo(Type)) {
-        .@"struct" => |s| s.backing_integer.?,
-        .@"enum" => |e| e.tag_type,
-        else => @panic("unexpected"),
-    };
-    const rust_backing_type_str = switch (@typeInfo(backing_type)) {
+    const backing_type_text = switch (@typeInfo(type_info.backing_integer.?)) {
         .int => |i| brk: {
             break :brk switch (i.bits) {
                 32 => switch (i.signedness) {
@@ -109,75 +105,132 @@ fn emit_enum(
         else => @panic("unexpected"),
     };
 
-    try buffer.writer().print("pub type {s} = {s};\n", .{ rust_name, rust_backing_type_str });
+    try writer.print(
+        \\#[derive(Copy, Clone, Debug, Default)] 
+        \\#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
+        \\#[repr(transparent)]
+        \\pub struct {[rust_name]s}(pub {[backing_type_text]s});
+        \\
+    , .{ .rust_name = rust_name, .backing_type_text = backing_type_text });
 
-    inline for (type_info.fields, 0..) |field, i| {
+    try writer.print("impl {s} {{\n", .{rust_name});
+    {
+        inline for (type_info.fields, 0..) |field, bit_index| {
+            if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+            comptime var skip = false;
+            inline for (skip_fields) |sf| {
+                skip = skip or comptime std.mem.eql(u8, sf, field.name);
+            }
+            if (skip) continue;
+
+            assert(field.type == bool);
+            const field_name = stdx.to_case(field.name, .PascalCase);
+            try writer.print("    pub const {s}: {s} = {s}(1 << {});\n", .{
+                field_name,
+                rust_name,
+                rust_name,
+                bit_index,
+            });
+        }
+        try writer.print("\n", .{});
+        try writer.print("    pub fn empty() -> Self {{ {s}(0) }}\n", .{rust_name});
+    }
+    try writer.print("}}\n\n", .{});
+
+    try writer.print(
+        \\impl std::ops::BitOr for {[rust_name]s} {{
+        \\    type Output = {[rust_name]s};
+        \\    fn bitor(self, rhs: Self) -> Self::Output {{
+        \\         Self(self.0 | rhs.0)
+        \\    }}
+        \\}}
+        \\
+        \\
+    , .{ .rust_name = rust_name });
+}
+
+fn emit_enum(
+    writer: anytype,
+    comptime Type: type,
+    comptime type_info: std.builtin.Type.Enum,
+    comptime rust_name: []const u8,
+    comptime skip_fields: []const []const u8,
+) !void {
+    var suffix_pos = std.mem.lastIndexOf(u8, rust_name, "_").?;
+    if (std.mem.count(u8, rust_name, "_") == 1) suffix_pos = rust_name.len;
+
+    const backing_type_text = switch (@typeInfo(type_info.tag_type)) {
+        .int => |i| brk: {
+            break :brk switch (i.bits) {
+                32 => switch (i.signedness) {
+                    .unsigned => "u32",
+                    .signed => "i32",
+                },
+                16 => "u16",
+                8 => "u8",
+                else => @panic("unexpected"),
+            };
+        },
+        else => @panic("unexpected"),
+    };
+
+    try writer.print("pub type {s} = {s};\n", .{ rust_name, backing_type_text });
+
+    inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         comptime var skip = false;
         inline for (skip_fields) |sf| {
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
         }
+        if (skip) continue;
 
-        if (!skip) {
-            const field_name = stdx.to_case(field.name, .UPPER_CASE);
-            if (@typeInfo(Type) == .@"enum") {
-                const int_value = @intFromEnum(@field(Type, field.name));
-                try buffer.writer().print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
-                    rust_name,
-                    rust_name[0..suffix_pos],
-                    field_name,
-                    rust_name,
-                    if (int_value == std.math.maxInt(@TypeOf(int_value)))
-                        std.fmt.comptimePrint("0x{X}", .{int_value})
-                    else
-                        std.fmt.comptimePrint("{}", .{int_value}),
-                });
-            } else {
-                // Packed structs.
-                try buffer.writer().print("pub const {s}_{s}_{s}: {s} = 1 << {};\n", .{
-                    rust_name,
-                    rust_name[0..suffix_pos],
-                    field_name,
-                    rust_name,
-                    i,
-                });
-            }
-        }
+        const field_name = stdx.to_case(field.name, .UPPER_CASE);
+        const int_value = @intFromEnum(@field(Type, field.name));
+        try writer.print("pub const {s}_{s}_{s}: {s} = {s};\n", .{
+            rust_name,
+            rust_name[0..suffix_pos],
+            field_name,
+            rust_name,
+            if (int_value == std.math.maxInt(@TypeOf(int_value)))
+                std.fmt.comptimePrint("0x{X}", .{int_value})
+            else
+                std.fmt.comptimePrint("{}", .{int_value}),
+        });
     }
 
-    try buffer.writer().print("\n", .{});
+    try writer.print("\n", .{});
 }
 
 fn emit_struct(
-    buffer: *std.ArrayList(u8),
+    writer: anytype,
     comptime type_info: anytype,
     comptime rust_name: []const u8,
 ) !void {
-    try buffer.writer().print("#[repr(C)]\n", .{});
-    try buffer.writer().print("#[derive(Debug, Copy, Clone)]\n", .{});
-    try buffer.writer().print("pub struct {s} {{\n", .{rust_name});
+    try writer.print("#[repr(C)]\n", .{});
+    try writer.print("#[derive(Debug, Copy, Clone)]\n", .{});
+    try writer.print("pub struct {s} {{\n", .{rust_name});
 
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
             .array => |array| {
-                try buffer.writer().print("    pub {s}: [{s}; {}]", .{
+                try writer.print("    pub {s}: [{s}; {}]", .{
                     field.name,
                     resolve_rust_type(field.type),
                     array.len,
                 });
             },
             else => {
-                try buffer.writer().print("    pub {s}: {s}", .{
+                try writer.print("    pub {s}: {s}", .{
                     field.name,
                     resolve_rust_type(field.type),
                 });
             },
         }
 
-        try buffer.writer().print(",\n", .{});
+        try writer.print(",\n", .{});
     }
 
-    try buffer.writer().print("}}\n\n", .{});
+    try writer.print("}}\n\n", .{});
 }
 
 pub fn main() !void {
@@ -186,7 +239,8 @@ pub fn main() !void {
     const allocator = arena.allocator();
 
     var buffer = std.ArrayList(u8).init(allocator);
-    try buffer.writer().print(
+    var writer = buffer.writer();
+    try writer.print(
         \\ ///////////////////////////////////////////////////////
         \\ // This file was auto-generated by rust_bindings.zig //
         \\ //              Do not manually modify.              //
@@ -200,27 +254,27 @@ pub fn main() !void {
         const rust_name = type_mapping[1];
         if (type_mapping.len == 3) {
             const comments: []const u8 = type_mapping[2];
-            try buffer.writer().print(comments, .{});
-            try buffer.writer().print("\n", .{});
+            try writer.print(comments, .{});
+            try writer.print("\n", .{});
         }
 
         switch (@typeInfo(ZigType)) {
             .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError("Invalid C struct type: " ++ @typeName(ZigType)),
-                .@"packed" => try emit_enum(&buffer, ZigType, info, rust_name, &.{"padding"}),
-                .@"extern" => try emit_struct(&buffer, info, rust_name),
+                .@"packed" => try emit_bitflags(writer, ZigType, info, rust_name, &.{"padding"}),
+                .@"extern" => try emit_struct(writer, info, rust_name),
             },
             .@"enum" => |info| {
-                try emit_enum(&buffer, ZigType, info, rust_name, &.{});
+                try emit_enum(writer, ZigType, info, rust_name, &.{});
             },
-            else => try buffer.writer().print("pub type {s} = {s};\n\n", .{
+            else => try writer.print("pub type {s} = {s};\n\n", .{
                 rust_name,
                 resolve_rust_type(ZigType),
             }),
         }
     }
 
-    try buffer.writer().print(
+    try writer.print(
         \\extern "C" {{
         \\    // Initialize a new TigerBeetle client which connects to the addresses provided and
         \\    // completes submitted packets by invoking the callback with the given context.

@@ -3,13 +3,27 @@
  //              Do not manually modify.              //
  ///////////////////////////////////////////////////////
 
-pub type TB_ACCOUNT_FLAGS = u16;
-pub const TB_ACCOUNT_FLAGS_TB_ACCOUNT_LINKED: TB_ACCOUNT_FLAGS = 1 << 0;
-pub const TB_ACCOUNT_FLAGS_TB_ACCOUNT_DEBITS_MUST_NOT_EXCEED_CREDITS: TB_ACCOUNT_FLAGS = 1 << 1;
-pub const TB_ACCOUNT_FLAGS_TB_ACCOUNT_CREDITS_MUST_NOT_EXCEED_DEBITS: TB_ACCOUNT_FLAGS = 1 << 2;
-pub const TB_ACCOUNT_FLAGS_TB_ACCOUNT_HISTORY: TB_ACCOUNT_FLAGS = 1 << 3;
-pub const TB_ACCOUNT_FLAGS_TB_ACCOUNT_IMPORTED: TB_ACCOUNT_FLAGS = 1 << 4;
-pub const TB_ACCOUNT_FLAGS_TB_ACCOUNT_CLOSED: TB_ACCOUNT_FLAGS = 1 << 5;
+#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct AccountFlags(pub u16);
+impl AccountFlags {
+    pub const Linked: AccountFlags = AccountFlags(1 << 0);
+    pub const DebitsMustNotExceedCredits: AccountFlags = AccountFlags(1 << 1);
+    pub const CreditsMustNotExceedDebits: AccountFlags = AccountFlags(1 << 2);
+    pub const History: AccountFlags = AccountFlags(1 << 3);
+    pub const Imported: AccountFlags = AccountFlags(1 << 4);
+    pub const Closed: AccountFlags = AccountFlags(1 << 5);
+
+    pub fn empty() -> Self { AccountFlags(0) }
+}
+
+impl std::ops::BitOr for AccountFlags {
+    type Output = AccountFlags;
+    fn bitor(self, rhs: Self) -> Self::Output {
+         Self(self.0 | rhs.0)
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -29,16 +43,30 @@ pub struct tb_account_t {
     pub timestamp: u64,
 }
 
-pub type TB_TRANSFER_FLAGS = u16;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED: TB_TRANSFER_FLAGS = 1 << 0;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_PENDING: TB_TRANSFER_FLAGS = 1 << 1;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_POST_PENDING_TRANSFER: TB_TRANSFER_FLAGS = 1 << 2;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_VOID_PENDING_TRANSFER: TB_TRANSFER_FLAGS = 1 << 3;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_DEBIT: TB_TRANSFER_FLAGS = 1 << 4;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_CREDIT: TB_TRANSFER_FLAGS = 1 << 5;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_DEBIT: TB_TRANSFER_FLAGS = 1 << 6;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_CREDIT: TB_TRANSFER_FLAGS = 1 << 7;
-pub const TB_TRANSFER_FLAGS_TB_TRANSFER_IMPORTED: TB_TRANSFER_FLAGS = 1 << 8;
+#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct TransferFlags(pub u16);
+impl TransferFlags {
+    pub const Linked: TransferFlags = TransferFlags(1 << 0);
+    pub const Pending: TransferFlags = TransferFlags(1 << 1);
+    pub const PostPendingTransfer: TransferFlags = TransferFlags(1 << 2);
+    pub const VoidPendingTransfer: TransferFlags = TransferFlags(1 << 3);
+    pub const BalancingDebit: TransferFlags = TransferFlags(1 << 4);
+    pub const BalancingCredit: TransferFlags = TransferFlags(1 << 5);
+    pub const ClosingDebit: TransferFlags = TransferFlags(1 << 6);
+    pub const ClosingCredit: TransferFlags = TransferFlags(1 << 7);
+    pub const Imported: TransferFlags = TransferFlags(1 << 8);
+
+    pub fn empty() -> Self { TransferFlags(0) }
+}
+
+impl std::ops::BitOr for TransferFlags {
+    type Output = TransferFlags;
+    fn bitor(self, rhs: Self) -> Self::Output {
+         Self(self.0 | rhs.0)
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -188,10 +216,24 @@ pub struct tb_account_filter_t {
     pub flags: u32,
 }
 
-pub type TB_ACCOUNT_FILTER_FLAGS = u32;
-pub const TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_DEBITS: TB_ACCOUNT_FILTER_FLAGS = 1 << 0;
-pub const TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_CREDITS: TB_ACCOUNT_FILTER_FLAGS = 1 << 1;
-pub const TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_REVERSED: TB_ACCOUNT_FILTER_FLAGS = 1 << 2;
+#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct AccountFilterFlags(pub u32);
+impl AccountFilterFlags {
+    pub const Debits: AccountFilterFlags = AccountFilterFlags(1 << 0);
+    pub const Credits: AccountFilterFlags = AccountFilterFlags(1 << 1);
+    pub const Reversed: AccountFilterFlags = AccountFilterFlags(1 << 2);
+
+    pub fn empty() -> Self { AccountFilterFlags(0) }
+}
+
+impl std::ops::BitOr for AccountFilterFlags {
+    type Output = AccountFilterFlags;
+    fn bitor(self, rhs: Self) -> Self::Output {
+         Self(self.0 | rhs.0)
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -219,8 +261,22 @@ pub struct tb_query_filter_t {
     pub flags: u32,
 }
 
-pub type TB_QUERY_FILTER_FLAGS = u32;
-pub const TB_QUERY_FILTER_FLAGS_TB_QUERY_FILTER_REVERSED: TB_QUERY_FILTER_FLAGS = 1 << 0;
+#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[repr(transparent)]
+pub struct QueryFilterFlags(pub u32);
+impl QueryFilterFlags {
+    pub const Reversed: QueryFilterFlags = QueryFilterFlags(1 << 0);
+
+    pub fn empty() -> Self { QueryFilterFlags(0) }
+}
+
+impl std::ops::BitOr for QueryFilterFlags {
+    type Output = QueryFilterFlags;
+    fn bitor(self, rhs: Self) -> Self::Output {
+         Self(self.0 | rhs.0)
+    }
+}
 
 // Opaque struct serving as a handle for the client instance.
 // This struct must be "pinned" (not copyable or movable), as its address must remain stable
