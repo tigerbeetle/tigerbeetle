@@ -16,7 +16,10 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const expectError = std.testing.expectError;
+const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src/stdx");
 
 /// An IPv6 or IPv6-mapped IPv4.
 pub const IPAddress = extern struct {
@@ -52,6 +55,14 @@ pub const IPAddress = extern struct {
         for (0..10) |i| assert(IPv4_prefix_octets[i] == 0);
         for (10..12) |i| assert(IPv4_prefix_octets[i] == 0xFF);
         assert(IPv4_prefix_octets.len == 12);
+    }
+
+    pub fn from_v4(big: [4]u8) IPAddress {
+        return .{ .big = IPv4_prefix_octets ++ big };
+    }
+
+    pub fn from_v6(big: [16]u8) IPAddress {
+        return .{ .big = big };
     }
 
     pub fn family(ip: IPAddress) Family {
@@ -204,9 +215,6 @@ pub const IPAddress = extern struct {
     fn as_v4(ip: IPAddress) ?[4]u8 {
         if (ip.family() != .IPv4) return null;
         return ip.big[12..].*;
-    }
-    fn from_v4(big: [4]u8) IPAddress {
-        return .{ .big = IPv4_prefix_octets ++ big };
     }
 
     fn as_u128(ip: IPAddress) u128 {
@@ -421,6 +429,16 @@ test IPAddress {
             "::ffff:192.0.2.128",
         },
     });
+}
+
+test "IPAddress: from_v4" {
+    const v4 = IPAddress.from_v4(.{ 1, 2, 3, 4 });
+    const v4_std = std.net.Address.initIp4(.{ 1, 2, 3, 4 }, 0);
+    try expectEqual(v4, (try SocketAddress.from_std(v4_std)).ip);
+
+    try snap(@src(),
+        \\00 00 00 00 00 00 00 00  00 00 ff ff 01 02 03 04
+    ).diff_hex(&v4.big);
 }
 
 pub const SocketAddress = struct {
