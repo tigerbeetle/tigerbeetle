@@ -558,7 +558,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             const tree_id = compaction.tree.config.id;
             assert(value_block.stage == .merge);
             assert(index_block.stage == .read_index_block_done);
-            Table.verify_value_block_schema_and_range(value_block.ptr, index_block.ptr, tree_id);
+            Table.verify_value_block(value_block.ptr, index_block.ptr, tree_id);
         }
 
         fn idle(compaction: *const Compaction) bool {
