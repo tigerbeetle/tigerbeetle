@@ -623,6 +623,7 @@ pub fn TableType(
             index_address: u64,
             key_min: ?Key,
             key_max: ?Key,
+            tree_id: u16,
         ) void {
             if (Storage != @import("../testing/storage.zig").Storage)
                 // Too complicated to do async verification
@@ -631,6 +632,10 @@ pub fn TableType(
             const index_block = storage.grid_block(index_address).?;
             const value_block_addresses = index.value_addresses_used(index_block);
             const value_block_checksums = index.value_checksums_used(index_block);
+
+            if (key_min != null and key_max != null) {
+                _ = Table.verify_index_block(index_block, tree_id, key_min.?, key_max.?);
+            }
 
             for (
                 value_block_addresses,
@@ -641,6 +646,8 @@ pub fn TableType(
                 const value_block_header = schema.header_from_block(value_block);
                 assert(value_block_header.address == value_block_address);
                 assert(value_block_header.checksum == value_block_checksum.value);
+
+                Table.verify_value_block(value_block, index_block, tree_id);
 
                 const values = value_block_values_used(value_block);
                 if (values.len > 0) {
