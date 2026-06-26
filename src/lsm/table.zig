@@ -559,14 +559,15 @@ pub fn TableType(
             assert(index_block_keys_min.len == index_block_addresses.len);
 
             const value_block_address = block_address(value_block);
-            const values = value_block_values_used(value_block);
-            assert(values.len > 0);
-
             const value_block_index = std.mem.indexOfScalar(
                 u64,
                 index_block_addresses,
                 value_block_address,
             ).?;
+
+            const values = value_block_values_used(value_block);
+            assert(values.len > 0);
+            assert(values.len <= data.value_count_max);
 
             const index_key_min = index_block_keys_min[0];
             const index_key_max = index_block_keys_max[index_block_keys_max.len - 1];

@@ -433,6 +433,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
                 assert(Table.index.block_metadata(index_block).tree_id == context.tree.config.id);
+                _ = Table.index.from_block(index_block, context.tree.config.id);
 
                 const keys_min = Table.index_value_keys_used(index_block, .key_min);
                 const keys_max = Table.index_value_keys_used(index_block, .key_max);

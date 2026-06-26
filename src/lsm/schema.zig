@@ -195,9 +195,9 @@ pub const TableIndex = struct {
         assert(header_metadata.value_block_count_max == schema.value_block_count_max);
         assert(stdx.zeroed(&header_metadata.reserved));
 
-        // The other schema fields are computed from key_size and value_block_count_max in .init and
-        // not saved in metadata. There is no way to detect whether the computation itself has
-        // changed between versions.
+        // The other schema fields are computed from key_size and value_block_count_max at runtime
+        // and not saved in metadata. There is currently no way to detect whether this computation
+        // itself has changed between versions.
         return TableIndex.init(.{
             .key_size = header_metadata.key_size,
             .value_block_count_max = header_metadata.value_block_count_max,
@@ -386,9 +386,9 @@ pub const TableValue = struct {
         assert(header_metadata.value_size == schema.value_size);
         assert(header_metadata.value_count_max == schema.value_count_max);
         assert(stdx.zeroed(&header_metadata.reserved));
-        // The other schema fields are computed from value_size and value_count_max in .init and not
-        // saved in metadata. There is no way to detect whether the computation itself has changed
-        // between versions.
+        // The other schema fields are computed from value_size and value_count_max at runtime and
+        // not saved in metadata. There is currently no way to detect whether this computation
+        // itself has changed between versions.
     }
 
     pub fn metadata(value_block: BlockPtrConst) *const Metadata {
