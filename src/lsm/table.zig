@@ -596,6 +596,27 @@ pub fn TableType(
             }
         }
 
+        pub fn verify_index_block(
+            index_block: BlockPtrConst,
+            tree_id: u16,
+            key_min: Key,
+            key_max: Key,
+        ) schema.TableIndex {
+            const index_schema = index.from_block(index_block, tree_id);
+
+            const keys_min = index_value_keys_used(index_block, .key_min);
+            const keys_max = index_value_keys_used(index_block, .key_max);
+
+            assert(keys_min.len > 0);
+            assert(keys_min.len == keys_max.len);
+            assert(keys_min.len == index_schema.value_blocks_used(index_block));
+
+            assert(keys_min[0] == key_min);
+            assert(keys_max[keys_max.len - 1] == key_max);
+
+            return index_schema;
+        }
+
         pub fn verify(
             comptime Storage: type,
             storage: *const Storage,
