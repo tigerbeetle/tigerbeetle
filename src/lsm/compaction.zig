@@ -436,9 +436,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         // state, the two blocks are popped off the queues and passed down to the merge. At this
         // point, any number of the blocks still in the queues can continue their read operations.
         //
-        // For index blocks, queues of length one are used. Because an index block is freed as soon
-        // as the read for the last value block is scheduled, the pipeline should not dry out even
-        // when switching between the tables.
+        // An index block is dropped whenever all its value blocks are fully merged.
         //
         // Note that level_{a,b}_position fields track the logical, deterministic progression of
         // compaction.
@@ -938,7 +936,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         }
 
         pub fn compaction_iop_release_callback(ctx: *anyopaque) void {
-            const compaction: *Compaction = @ptrCast(@alignCast(ctx));
+            const compaction: *Compaction = @alignCast(@ptrCast(ctx));
             compaction.compaction_dispatch();
         }
 
