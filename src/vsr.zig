@@ -1649,10 +1649,11 @@ pub const Checkpoint = struct {
 
     pub fn prepare_max_for_checkpoint(checkpoint: u64) ?u64 {
         assert(valid(checkpoint));
-        if (checkpoint == 0) {
-            return null;
+
+        if (trigger_for_checkpoint(checkpoint)) |trigger| {
+            return trigger + (2 * constants.pipeline_prepare_queue_max);
         } else {
-            return checkpoint + constants.journal_slot_count - constants.vsr_checkpoint_ops;
+            return null;
         }
     }
 

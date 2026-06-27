@@ -2159,12 +2159,12 @@ pub fn ReplicaType(
                 assert(vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max));
                 if (message.header.op > @min(
                     // Committed ops can be safely overwritten.
-                    self.commit_min,
+                    self.commit_min + constants.journal_slot_count,
                     // Except op_checkpoint_next to op_checkpoint_next_trigger, which are required
                     // during upgrade (see `release_for_next_checkpoint`) and checkpoint (see
                     // `commit_checkpoint_superblock`), and can't be overwritten.
-                    self.op_checkpoint_next() - 1,
-                ) + constants.journal_slot_count) {
+                    self.op_checkpoint_next() + constants.journal_slot_count - 1,
+                )) {
                     log.warn("{}: on_prepare: ignoring prepare.op={} " ++
                         "(too far ahead, commit_min={} op={} commit_max={} prepare_max={})", .{
                         self.log_prefix(),
