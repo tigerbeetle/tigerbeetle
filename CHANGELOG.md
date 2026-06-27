@@ -17,10 +17,6 @@ Released: 2026-06-26
 
   Extend `inspect constants` to catch schema changes.
 
-- [#3828](https://github.com/tigerbeetle/tigerbeetle/pull/3828)
-
-  Use our full journal in VSR.
-
 ### Features
 
 - [#3816](https://github.com/tigerbeetle/tigerbeetle/pull/3816)
@@ -37,6 +33,10 @@ Released: 2026-06-26
   [#3811](https://github.com/tigerbeetle/tigerbeetle/pull/3811)
 
   Add a u128 bounds check in the Ruby client and make its status return type more idiomatic.
+
+- [#3827](https://github.com/tigerbeetle/tigerbeetle/pull/3827)
+
+  Improve the Rust client, removing the bitflags dependency and enabling overflow checks.
 
 ### Internals
 
@@ -61,11 +61,13 @@ Released: 2026-06-26
 
   Introduce the canonical workload principle for benchmarks.
 
-- [#3821](https://github.com/tigerbeetle/tigerbeetle/pull/3821)
-  [#3682](https://github.com/tigerbeetle/tigerbeetle/pull/3682)
-  [#3817](https://github.com/tigerbeetle/tigerbeetle/pull/3817)
+- [#3682](https://github.com/tigerbeetle/tigerbeetle/pull/3682)
 
-  Multiple CI improvements.
+  Make publishing TigerBeetle client artifacts idempotent.
+
+- [#3817](https://github.com/tigerbeetle/tigerbeetle/pull/3817)
+
+  Workaround MacOS builds on Zig 0.14.1 (see [issue](ttps://codeberg.org/ziglang/zig/issues/31658)).
 
 ### TigerTracks 🎧
 
