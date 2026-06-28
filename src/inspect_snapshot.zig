@@ -16,6 +16,8 @@ test "inspect constants snapshot" {
         .{ .tigerbeetle = tigerbeetle },
     );
 
+    // Note: This test is compatibility-sensitive. If you update it,
+    // please request a third pair of eyes.
     try snap(@src(),
         \\VSR:
         \\prepare_queue                   8
@@ -24,8 +26,15 @@ test "inspect constants snapshot" {
         \\
         \\LSM:
         \\compaction_ops                  32
+        \\
+        \\Checkpoint Schedule:
         \\checkpoint_ops                  960
         \\journal_slot_count              1024
+        \\op_checkpoint                   959
+        \\op_checkpoint_trigger           991
+        \\op_prepare_ok_max               999
+        \\op_prepare_max                  1007
+        \\op_checkpoint_next              1919
         \\
         \\Data File Layout:
         \\superblock                      96KiB
