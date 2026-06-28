@@ -18,8 +18,6 @@ const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_no
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
-const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
-
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -437,8 +435,6 @@ pub fn GrooveType(
         },
     });
 
-    const has_scan = index_fields.len > 0;
-
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len +
@@ -695,8 +691,6 @@ pub fn GrooveType(
             not_found,
         };
 
-        pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
-
         grid: *Grid,
         objects: ObjectTree,
         indexes: IndexTrees,
@@ -726,8 +720,6 @@ pub fn GrooveType(
         /// table, it _must_ exist in our object cache.
         /// Otherwise, the ObjectsCache is of type void.
         objects_cache: ObjectsCache,
-
-        scan_builder: ScanBuilder,
 
         pub const IndexTreeOptions = _IndexTreeOptions;
 
@@ -761,7 +753,6 @@ pub fn GrooveType(
                 .indexes = undefined,
                 .prefetch_keys = undefined,
                 .objects_cache = if (ObjectsCache != void) undefined else {},
-                .scan_builder = undefined,
             };
 
             groove.objects_cache = if (ObjectsCache != void) try ObjectsCache.init(allocator, .{
@@ -838,9 +829,6 @@ pub fn GrooveType(
                 options.prefetch_entries_for_read_max + options.prefetch_entries_for_update_max,
             );
             errdefer groove.prefetch_keys.deinit(allocator);
-
-            if (has_scan) try groove.scan_builder.init(allocator);
-            errdefer if (has_scan) groove.scan_builder.deinit(allocator);
         }
 
         pub fn deinit(groove: *Groove, allocator: mem.Allocator) void {
@@ -853,7 +841,6 @@ pub fn GrooveType(
             groove.prefetch_keys.deinit(allocator);
 
             if (ObjectsCache != void) groove.objects_cache.deinit(allocator);
-            if (has_scan) groove.scan_builder.deinit(allocator);
 
             groove.* = undefined;
         }
@@ -868,8 +855,6 @@ pub fn GrooveType(
 
             if (ObjectsCache != void) groove.objects_cache.reset();
 
-            if (has_scan) groove.scan_builder.reset();
-
             groove.* = .{
                 .grid = groove.grid,
                 .objects = groove.objects,
@@ -877,7 +862,6 @@ pub fn GrooveType(
                 .prefetch_keys = groove.prefetch_keys,
                 .prefetch_snapshot = null,
                 .objects_cache = groove.objects_cache,
-                .scan_builder = groove.scan_builder,
             };
         }
 
@@ -981,11 +965,21 @@ pub fn GrooveType(
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
-        pub fn prefetch_setup(groove: *Groove, snapshot_target: u64) void {
+        pub fn prefetch_begin(groove: *Groove, snapshot_target: u64) void {
             assert(snapshot_target < snapshot_latest);
+            assert(groove.prefetch_snapshot == null);
+            maybe(groove.prefetch_keys.count() > 0);
 
             groove.prefetch_snapshot = snapshot_target;
             groove.prefetch_keys.clearRetainingCapacity();
+        }
+
+        /// Must be called after the state machine finishes prefetching.
+        pub fn prefetch_finish(groove: *Groove) void {
+            assert(groove.prefetch_snapshot != null);
+            maybe(groove.prefetch_keys.count() == 0);
+
+            groove.prefetch_snapshot = null;
         }
 
         /// This must be called by the state machine for every lookup by unique keys.
@@ -1341,13 +1335,14 @@ pub fn GrooveType(
             callback: *const fn (*PrefetchContext) void,
             context: *PrefetchContext,
         ) void {
+            assert(groove.prefetch_snapshot != null);
+
             context.* = .{
                 .groove = groove,
                 .callback = callback,
                 .snapshot = groove.prefetch_snapshot.?,
                 .key_iterator = groove.prefetch_keys.iterator(),
             };
-            groove.prefetch_snapshot = null;
             context.start_workers();
         }
 
