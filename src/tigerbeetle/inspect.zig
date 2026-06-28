@@ -163,13 +163,29 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
     });
     try output.print("\n", .{});
 
+    const checkpoint = vsr.Checkpoint.checkpoint_after(0);
+    const trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint).?;
+
     try output.print("LSM:\n", .{});
     try print_header(output, 0, "compaction_ops");
     try output.print("{}\n", .{constants.lsm_compaction_ops});
+    try output.print("\n", .{});
+
+    try output.print("Checkpoint Schedule:\n", .{});
     try print_header(output, 0, "checkpoint_ops");
     try output.print("{}\n", .{constants.vsr_checkpoint_ops});
     try print_header(output, 0, "journal_slot_count");
     try output.print("{}\n", .{constants.journal_slot_count});
+    try print_header(output, 0, "op_checkpoint");
+    try output.print("{}\n", .{checkpoint});
+    try print_header(output, 0, "op_checkpoint_trigger");
+    try output.print("{}\n", .{trigger});
+    try print_header(output, 0, "op_prepare_ok_max");
+    try output.print("{}\n", .{trigger + constants.pipeline_prepare_queue_max});
+    try print_header(output, 0, "op_prepare_max");
+    try output.print("{}\n", .{vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint).?});
+    try print_header(output, 0, "op_checkpoint_next");
+    try output.print("{}\n", .{vsr.Checkpoint.checkpoint_after(checkpoint)});
     try output.print("\n", .{});
 
     try output.print("Data File Layout:\n", .{});
