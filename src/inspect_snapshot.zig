@@ -28,13 +28,8 @@ test "inspect constants snapshot" {
         \\compaction_ops                  32
         \\
         \\Checkpoint Schedule:
-        \\checkpoint_ops                  960
-        \\journal_slot_count              1024
-        \\op_checkpoint                   959
-        \\op_checkpoint_trigger           991
-        \\op_prepare_ok_max               999
-        \\op_prepare_max                  1007
-        \\op_checkpoint_next              1919
+        \\checkpoint_ops      journal_slot_count  checkpoint          trigger             prepare_ok_max      prepare_max         checkpoint_next
+        \\960                 1024                959            +32  991            +8   999            +8   1007           +912 1919
         \\
         \\Data File Layout:
         \\superblock                      96KiB

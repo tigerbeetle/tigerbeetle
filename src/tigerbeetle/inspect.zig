@@ -172,20 +172,46 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
     try output.print("\n", .{});
 
     try output.print("Checkpoint Schedule:\n", .{});
-    try print_header(output, 0, "checkpoint_ops");
-    try output.print("{}\n", .{constants.vsr_checkpoint_ops});
-    try print_header(output, 0, "journal_slot_count");
-    try output.print("{}\n", .{constants.journal_slot_count});
-    try print_header(output, 0, "op_checkpoint");
-    try output.print("{}\n", .{checkpoint});
-    try print_header(output, 0, "op_checkpoint_trigger");
-    try output.print("{}\n", .{trigger});
-    try print_header(output, 0, "op_prepare_ok_max");
-    try output.print("{}\n", .{trigger + constants.pipeline_prepare_queue_max});
-    try print_header(output, 0, "op_prepare_max");
-    try output.print("{}\n", .{vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint).?});
-    try print_header(output, 0, "op_checkpoint_next");
-    try output.print("{}\n", .{vsr.Checkpoint.checkpoint_after(checkpoint)});
+    const prepare_ok_max = trigger + constants.pipeline_prepare_queue_max;
+    const prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint).?;
+    const checkpoint_next = vsr.Checkpoint.checkpoint_after(checkpoint);
+    const checkpoint_points = .{
+        .checkpoint = checkpoint,
+        .trigger = trigger,
+        .prepare_ok_max = prepare_ok_max,
+        .prepare_max = prepare_max,
+        .checkpoint_next = checkpoint_next,
+    };
+    try output.print(
+        "{s: <20}{s: <20}{s: <20}{s: <20}{s: <20}{s: <20}{s}\n",
+        .{
+            "checkpoint_ops",
+            "journal_slot_count",
+            "checkpoint",
+            "trigger",
+            "prepare_ok_max",
+            "prepare_max",
+            "checkpoint_next",
+        },
+    );
+    try output.print("{d: <20}{d: <20}", .{
+        constants.vsr_checkpoint_ops,
+        constants.journal_slot_count,
+    });
+    try output.print(
+        "{d: <15}+{d: <4}{d: <15}+{d: <4}{d: <15}+{d: <4}{d: <15}+{d: <4}{}\n",
+        .{
+            checkpoint_points.checkpoint,
+            checkpoint_points.trigger - checkpoint_points.checkpoint,
+            checkpoint_points.trigger,
+            checkpoint_points.prepare_ok_max - checkpoint_points.trigger,
+            checkpoint_points.prepare_ok_max,
+            checkpoint_points.prepare_max - checkpoint_points.prepare_ok_max,
+            checkpoint_points.prepare_max,
+            checkpoint_points.checkpoint_next - checkpoint_points.prepare_max,
+            checkpoint_points.checkpoint_next,
+        },
+    );
     try output.print("\n", .{});
 
     try output.print("Data File Layout:\n", .{});
