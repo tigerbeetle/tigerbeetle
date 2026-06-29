@@ -926,7 +926,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         }
 
         pub fn compaction_iop_release_callback(ctx: *anyopaque) void {
-            const compaction: *Compaction = @ptrCast(@alignCast(ctx));
+            const compaction: *Compaction = @alignCast(@ptrCast(ctx));
             compaction.compaction_dispatch();
         }
 
