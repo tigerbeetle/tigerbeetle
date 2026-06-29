@@ -100,6 +100,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             counters: ?*CompactionCounters = null,
             block: *Block,
             pool: *ResourcePool,
+            verify: [96]u8,
         };
 
         const BlockWrite = struct {
@@ -548,28 +549,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(compaction.manifest_entries.empty());
         }
 
-        fn assert_valid_source_value_block(
-            compaction: *const Compaction,
-            value_block: *const ResourcePool.Block,
-            index_block: *const ResourcePool.Block,
-        ) void {
-            assert(value_block.stage == .merge);
-            assert(index_block.stage == .read_index_block_done);
-            Table.verify_value_block(value_block.ptr, index_block.ptr, compaction.tree.config.id);
-        }
-
-        fn level_a_table_info_current(compaction: *const Compaction) *const TableInfo {
-            assert(compaction.table_info_a.? == .disk);
-            return compaction.table_info_a.?.disk.table_info;
-        }
-
-        fn level_b_table_info_current(compaction: *const Compaction) *const TableInfo {
-            assert(compaction.level_b_position.index_block < compaction.range_b.?.tables.count());
-            return compaction.range_b.?.tables.get(
-                compaction.level_b_position.index_block,
-            ).table_info;
-        }
-
         fn idle(compaction: *const Compaction) bool {
             return compaction.pool == null and
                 compaction.callback == null and
@@ -947,7 +926,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
         }
 
         pub fn compaction_iop_release_callback(ctx: *anyopaque) void {
-            const compaction: *Compaction = @alignCast(@ptrCast(ctx));
+            const compaction: *Compaction = @ptrCast(@alignCast(ctx));
             compaction.compaction_dispatch();
         }
 
@@ -1227,12 +1206,9 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                     if (compaction.level_a_index_block.head()) |index_block| {
                         if (index_block.stage == .read_index_block_done) {
                             assert(index_block.stage == .read_index_block_done);
-                            const table_info = compaction.level_a_table_info_current();
-                            const index_schema = Table.verify_index_block(
+                            const index_schema = Table.index.from_block(
                                 index_block.ptr,
                                 compaction.tree.config.id,
-                                table_info.key_min,
-                                table_info.key_max,
                             );
                             const value_blocks_count =
                                 index_schema.value_blocks_used(index_block.ptr);
@@ -1262,12 +1238,9 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 // Read level B value block.
                 if (compaction.level_b_index_block.head()) |index_block| {
                     if (index_block.stage == .read_index_block_done) {
-                        const table_info = compaction.level_b_table_info_current();
-                        const index_schema = Table.verify_index_block(
+                        const index_schema = Table.index.from_block(
                             index_block.ptr,
                             compaction.tree.config.id,
-                            table_info.key_min,
-                            table_info.key_max,
                         );
                         const value_blocks_count =
                             index_schema.value_blocks_used(index_block.ptr);
@@ -1402,6 +1375,25 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             return progressed;
         }
 
+        const VerifyIndexBlock = struct {
+            key_min: Table.Key,
+            key_max: Table.Key,
+            read: *const ResourcePool.BlockRead,
+            tree_id: u16,
+        };
+
+        const VerifyValueBlock = struct {
+            key_min: Table.Key,
+            key_max: Table.Key,
+            read: *const ResourcePool.BlockRead,
+            tree_id: u16,
+        };
+
+        fn block_read_verify_data(Verify: type, read: *ResourcePool.BlockRead) *align(1) Verify {
+            assert(@sizeOf(Verify) <= @sizeOf(@TypeOf(read.verify)));
+            return std.mem.bytesAsValue(Verify, read.verify[0..@sizeOf(Verify)]);
+        }
+
         fn read_index_block(
             compaction: *Compaction,
             level: enum { level_a, level_b },
@@ -1430,6 +1422,14 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             read.* = .{
                 .block = index_block,
                 .pool = compaction.pool.?,
+                .verify = @splat(0),
+            };
+
+            block_read_verify_data(VerifyIndexBlock, read).* = VerifyIndexBlock{
+                .key_min = table_ref.table_info.key_min,
+                .key_max = table_ref.table_info.key_max,
+                .tree_id = compaction.tree.config.id,
+                .read = read,
             };
 
             compaction.grid.read_block(
@@ -1448,6 +1448,15 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(read.block.stage == .read_index_block);
             assert(read.counters == null);
 
+            const verify = block_read_verify_data(VerifyIndexBlock, read);
+            assert(verify.read == read);
+            _ = Table.verify_index_block(
+                index_block,
+                verify.tree_id,
+                verify.key_min,
+                verify.key_max,
+            );
+
             grid.block_unref(read.block.ptr);
             read.block.ptr = @constCast(grid.block_ref(index_block));
             read.block.stage = .read_index_block_done;
@@ -1465,8 +1474,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             if (level == .level_a) assert(compaction.table_info_a.? == .disk);
 
             const index_block = switch (level) {
-                .level_a => compaction.level_a_index_block.head().?,
-                .level_b => compaction.level_b_index_block.head().?,
+                .level_a => compaction.level_a_index_block.head().?.ptr,
+                .level_b => compaction.level_b_index_block.head().?.ptr,
             };
 
             const level_a_value_block_next =
@@ -1489,17 +1498,25 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 }
             };
 
-            const index_schema = Table.index.from_block(index_block.ptr, compaction.tree.config.id);
+            const index_schema = Table.index.from_block(index_block, compaction.tree.config.id);
 
-            const value_block_address =
-                index_schema.value_addresses_used(index_block.ptr)[value_block_index];
+            const value_block_addresses = index_schema.value_addresses_used(index_block);
+            const value_block_address = value_block_addresses[value_block_index];
             const value_block_checksum =
-                index_schema.value_checksums_used(index_block.ptr)[value_block_index];
+                index_schema.value_checksums_used(index_block)[value_block_index];
 
             read.* = .{
                 .block = value_block,
                 .pool = compaction.pool.?,
                 .counters = &compaction.counters,
+                .verify = @splat(0),
+            };
+
+            block_read_verify_data(VerifyValueBlock, read).* = .{
+                .key_min = Table.index_value_keys_used(index_block, .key_min)[value_block_index],
+                .key_max = Table.index_value_keys_used(index_block, .key_max)[value_block_index],
+                .read = read,
+                .tree_id = compaction.tree.config.id,
             };
 
             compaction.grid.read_block(
@@ -1540,6 +1557,14 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             read.counters.?.in += Table.value_block_values_used(value_block).len;
 
             assert(read.block.stage == .read_value_block);
+            const verify = block_read_verify_data(VerifyValueBlock, read);
+            assert(verify.read == read);
+            Table.verify_value_block(
+                value_block,
+                verify.tree_id,
+                verify.key_min,
+                verify.key_max,
+            );
 
             grid.block_unref(read.block.ptr);
             read.block.ptr = @constCast(grid.block_ref(value_block));
@@ -1768,10 +1793,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
             const level_b_values_used: ?[]const Value = values: {
                 if (compaction.level_b_value_block.head()) |value_block| {
-                    compaction.assert_valid_source_value_block(
-                        value_block,
-                        compaction.level_b_index_block.head().?,
-                    );
+                    assert(value_block.stage == .merge);
+                    assert(compaction.level_b_index_block.head().?.stage == .read_index_block_done);
                     break :values Table.value_block_values_used(value_block.ptr);
                 } else {
                     break :values null;
@@ -1798,10 +1821,9 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                     },
                     .disk => {
                         if (compaction.level_a_value_block.head()) |value_block| {
-                            compaction.assert_valid_source_value_block(
-                                value_block,
-                                compaction.level_a_index_block.head().?,
-                            );
+                            assert(value_block.stage == .merge);
+                            assert(compaction.level_a_index_block.head().?.stage ==
+                                .read_index_block_done);
                             break :values Table.value_block_values_used(value_block.ptr);
                         } else {
                             break :values null;
@@ -1812,10 +1834,8 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
             const level_b_values_used: ?[]const Value = values: {
                 if (compaction.level_b_value_block.head()) |value_block| {
-                    compaction.assert_valid_source_value_block(
-                        value_block,
-                        compaction.level_b_index_block.head().?,
-                    );
+                    assert(value_block.stage == .merge);
+                    assert(compaction.level_b_index_block.head().?.stage == .read_index_block_done);
                     break :values Table.value_block_values_used(value_block.ptr);
                 } else {
                     break :values null;
