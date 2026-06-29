@@ -898,6 +898,11 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             Table.data.assert_matching_block_schema(value_block, self.scan.tree.config.id);
 
             const values = Table.value_block_values_used(value_block);
+            const key_min = key_from_value(&values[0]);
+            const key_max = key_from_value(&values[values.len - 1]);
+            assert(key_min >= self.state.iterating.index_key_min);
+            assert(key_max <= self.state.iterating.index_key_max);
+
             const scan_key_min = @min(self.scan.key_lower, self.scan.key_upper);
             const scan_key_max = @max(self.scan.key_lower, self.scan.key_upper);
             const range = binary_search.binary_search_values_range(
@@ -920,12 +925,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             } else {
                 // The `value_block` *might* contain the key range,
                 // otherwise, it shouldn't have been returned by the iterator.
-                const key_min = key_from_value(&values[0]);
-                const key_max = key_from_value(&values[values.len - 1]);
                 assert(key_min < scan_key_min);
                 assert(scan_key_max < key_max);
-                assert(key_min >= self.state.iterating.index_key_min);
-                assert(key_max <= self.state.iterating.index_key_max);
 
                 // Keep fetching if there are more value blocks on this table,
                 // or move to the next table otherwise.

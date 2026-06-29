@@ -545,49 +545,24 @@ pub fn TableType(
 
         pub fn verify_value_block(
             value_block: BlockPtrConst,
-            index_block: BlockPtrConst,
             tree_id: u16,
+            key_min: Key,
+            key_max: Key,
         ) void {
             data.assert_matching_block_schema(value_block, tree_id);
 
-            const index_block_addresses = index.value_addresses_used(index_block);
-            const index_block_keys_min = index_value_keys_used(index_block, .key_min);
-            const index_block_keys_max = index_value_keys_used(index_block, .key_max);
-
-            assert(index_block_addresses.len > 0);
-            assert(index_block_keys_min.len == index_block_keys_max.len);
-            assert(index_block_keys_min.len == index_block_addresses.len);
-
-            const value_block_address = block_address(value_block);
-            const value_block_index = std.mem.indexOfScalar(
-                u64,
-                index_block_addresses,
-                value_block_address,
-            ).?;
-
-            const values = value_block_values_used(value_block);
+            const values = Table.value_block_values_used(value_block);
             assert(values.len > 0);
             assert(values.len <= data.value_count_max);
 
-            const index_key_min = index_block_keys_min[0];
-            const index_key_max = index_block_keys_max[index_block_keys_max.len - 1];
             const value_key_min = key_from_value(&values[0]);
             const value_key_max = key_from_value(&values[values.len - 1]);
 
-            assert(index_key_min <= value_key_min);
-            assert(index_key_max >= value_key_max);
-            if (values.len > 1) {
-                assert(value_key_min < value_key_max);
-                assert(index_key_min < value_key_max);
-                assert(index_key_max > value_key_min);
-            }
-            if (value_block_index > 0 and value_block_index < index_block_addresses.len - 1) {
-                assert(index_key_min < value_key_min);
-                assert(index_key_max > value_key_max);
-            }
-            if (value_block_index == 0) assert(index_key_min == value_key_min);
-            if (value_block_index == index_block_addresses.len - 1)
-                assert(index_key_max == value_key_max);
+            assert(value_key_min <= value_key_max);
+            if (values.len > 1) assert(value_key_min < value_key_max);
+
+            assert(value_key_min == key_min);
+            assert(value_key_max == key_max);
 
             if (constants.verify) {
                 for (values[0 .. values.len - 1], values[1..]) |*a, *b| {
@@ -647,7 +622,12 @@ pub fn TableType(
                 assert(value_block_header.address == value_block_address);
                 assert(value_block_header.checksum == value_block_checksum.value);
 
-                Table.verify_value_block(value_block, index_block, tree_id);
+                Table.verify_value_block(
+                    value_block,
+                    tree_id,
+                    Table.index_value_keys_used(index_block, .key_min)[value_block_index],
+                    Table.index_value_keys_used(index_block, .key_max)[value_block_index],
+                );
 
                 const values = value_block_values_used(value_block);
                 if (values.len > 0) {
