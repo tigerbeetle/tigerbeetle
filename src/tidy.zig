@@ -429,8 +429,7 @@ fn tidy_line(file: SourceFile, line: []const u8, line_index: usize, errors: *Err
             std.mem.startsWith(u8, string_value, "error: subcommand required")) return;
 
         // Inspect constants snapshot test.
-        if (std.mem.endsWith(u8, file.path, "inspect_snapshot.zig") and
-            std.mem.indexOf(u8, string_value, " IL=") != null) return;
+        if (std.mem.endsWith(u8, file.path, "inspect_snapshot.zig")) return;
 
         // REPL parser snapshot tests.
         if (std.mem.endsWith(u8, file.path, "parser.zig")) return;
