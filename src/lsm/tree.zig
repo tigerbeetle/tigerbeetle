@@ -407,6 +407,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             value_block: ?struct {
                 address: u64,
                 checksum: u128,
+                key_min: Key,
+                key_max: Key,
             } = null,
 
             callback: *const fn (*Tree.LookupContext, ?*const Value) void,
@@ -451,6 +453,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 context.value_block = .{
                     .address = blocks.value_block_address,
                     .checksum = blocks.value_block_checksum,
+                    .key_min = blocks.value_block_key_min,
+                    .key_max = blocks.value_block_key_max,
                 };
 
                 context.tree.grid.read_block(
@@ -471,10 +475,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 Table.data.assert_matching_block_schema(value_block, context.tree.config.id);
 
                 const values = Table.value_block_values_used(value_block);
-                assert(Table.key_from_value(&values[0]) >=
-                    context.index_block_keys_min[context.index_block]);
-                assert(Table.key_from_value(&values[values.len - 1]) <=
-                    context.index_block_keys_max[context.index_block]);
+                const values_key_min = Table.key_from_value(&values[0]);
+                const values_key_max = Table.key_from_value(&values[values.len - 1]);
+                assert(values_key_min >= context.index_block_keys_min[context.index_block]);
+                assert(values_key_max <= context.index_block_keys_max[context.index_block]);
+                assert(values_key_min == context.value_block.?.key_min);
+                assert(values_key_max == context.value_block.?.key_max);
 
                 if (Table.value_block_search(value_block, context.key)) |value| {
                     context.callback(context, unwrap_tombstone(value));

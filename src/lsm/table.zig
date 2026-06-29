@@ -504,6 +504,8 @@ pub fn TableType(
         pub const IndexBlocks = struct {
             value_block_address: u64,
             value_block_checksum: u128,
+            value_block_key_min: Key,
+            value_block_key_max: Key,
         };
 
         /// Returns all data stored in the index block relating to a given key
@@ -513,6 +515,8 @@ pub fn TableType(
             return if (Table.index_value_block_for_key(index_block, key)) |i| .{
                 .value_block_address = index.value_addresses_used(index_block)[i],
                 .value_block_checksum = index.value_checksums_used(index_block)[i].value,
+                .value_block_key_min = index_value_keys_used(index_block, .key_min)[i],
+                .value_block_key_max = index_value_keys_used(index_block, .key_max)[i],
             } else null;
         }
 
