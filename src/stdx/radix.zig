@@ -74,8 +74,7 @@ fn radix_sort(
     var target: []Value = values_scratch;
     var target_offsets: [radix_partitions]u32 = @splat(0);
 
-    inline for (0..radix_passes) |pass| {
-        const histogram = &histograms[pass];
+    inline for (histograms[0..radix_passes], 0..radix_passes) |*histogram, pass| {
         // Determine if a pass is trivial if exactly one partition has all `count` elements.
         const pass_trivial: bool = for (histogram) |partition_count| {
             if (partition_count == count) break true;
