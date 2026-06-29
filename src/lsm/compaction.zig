@@ -100,7 +100,11 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             counters: ?*CompactionCounters = null,
             block: *Block,
             pool: *ResourcePool,
-            verify: [96]u8,
+            verify: struct {
+                key_min: u256,
+                key_max: u256,
+                tree_id: u16,
+            },
         };
 
         const BlockWrite = struct {
@@ -1205,7 +1209,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 } else {
                     if (compaction.level_a_index_block.head()) |index_block| {
                         if (index_block.stage == .read_index_block_done) {
-                            assert(index_block.stage == .read_index_block_done);
                             const index_schema = Table.index.from_block(
                                 index_block.ptr,
                                 compaction.tree.config.id,
@@ -1375,25 +1378,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             return progressed;
         }
 
-        const VerifyIndexBlock = struct {
-            key_min: Table.Key,
-            key_max: Table.Key,
-            read: *const ResourcePool.BlockRead,
-            tree_id: u16,
-        };
-
-        const VerifyValueBlock = struct {
-            key_min: Table.Key,
-            key_max: Table.Key,
-            read: *const ResourcePool.BlockRead,
-            tree_id: u16,
-        };
-
-        fn block_read_verify_data(Verify: type, read: *ResourcePool.BlockRead) *align(1) Verify {
-            assert(@sizeOf(Verify) <= @sizeOf(@TypeOf(read.verify)));
-            return std.mem.bytesAsValue(Verify, read.verify[0..@sizeOf(Verify)]);
-        }
-
         fn read_index_block(
             compaction: *Compaction,
             level: enum { level_a, level_b },
@@ -1419,18 +1403,11 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .level_b => compaction.range_b.?.tables.get(level_b_index_block_next - 1),
             };
 
-            read.* = .{
-                .block = index_block,
-                .pool = compaction.pool.?,
-                .verify = @splat(0),
-            };
-
-            block_read_verify_data(VerifyIndexBlock, read).* = VerifyIndexBlock{
-                .key_min = table_ref.table_info.key_min,
-                .key_max = table_ref.table_info.key_max,
+            read.* = .{ .block = index_block, .pool = compaction.pool.?, .verify = .{
+                .key_min = @intCast(table_ref.table_info.key_min),
+                .key_max = @intCast(table_ref.table_info.key_max),
                 .tree_id = compaction.tree.config.id,
-                .read = read,
-            };
+            } };
 
             compaction.grid.read_block(
                 .{ .from_local_or_global_storage = read_index_block_callback },
@@ -1448,13 +1425,11 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(read.block.stage == .read_index_block);
             assert(read.counters == null);
 
-            const verify = block_read_verify_data(VerifyIndexBlock, read);
-            assert(verify.read == read);
             _ = Table.verify_index_block(
                 index_block,
-                verify.tree_id,
-                verify.key_min,
-                verify.key_max,
+                read.verify.tree_id,
+                @intCast(read.verify.key_min),
+                @intCast(read.verify.key_max),
             );
 
             grid.block_unref(read.block.ptr);
@@ -1509,14 +1484,15 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .block = value_block,
                 .pool = compaction.pool.?,
                 .counters = &compaction.counters,
-                .verify = @splat(0),
-            };
-
-            block_read_verify_data(VerifyValueBlock, read).* = .{
-                .key_min = Table.index_value_keys_used(index_block, .key_min)[value_block_index],
-                .key_max = Table.index_value_keys_used(index_block, .key_max)[value_block_index],
-                .read = read,
-                .tree_id = compaction.tree.config.id,
+                .verify = .{
+                    .key_min = @intCast(
+                        Table.index_value_keys_used(index_block, .key_min)[value_block_index],
+                    ),
+                    .key_max = @intCast(
+                        Table.index_value_keys_used(index_block, .key_max)[value_block_index],
+                    ),
+                    .tree_id = compaction.tree.config.id,
+                },
             };
 
             compaction.grid.read_block(
@@ -1557,13 +1533,11 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             read.counters.?.in += Table.value_block_values_used(value_block).len;
 
             assert(read.block.stage == .read_value_block);
-            const verify = block_read_verify_data(VerifyValueBlock, read);
-            assert(verify.read == read);
             Table.verify_value_block(
                 value_block,
-                verify.tree_id,
-                verify.key_min,
-                verify.key_max,
+                read.verify.tree_id,
+                @intCast(read.verify.key_min),
+                @intCast(read.verify.key_max),
             );
 
             grid.block_unref(read.block.ptr);
