@@ -60,27 +60,23 @@ fn radix_sort(
     comptime assert(@sizeOf(Histograms) <= 200 * stdx.KiB);
 
     // Create histograms per radix pass in a single iteration over `values`.
-    const histograms = blk: {
-        var histograms: Histograms align(64) = @splat(@splat(0));
-
-        for (values) |*value| {
-            const key = key_from_value(value);
-            inline for (0..radix_passes) |pass| {
-                const pass_bit_offset: BitsKey = @intCast(pass * radix_bits);
-                const partition_id: u32 = @intCast((key >> pass_bit_offset) & radix_mask);
-                histograms[pass][partition_id] += 1;
-            }
+    var histograms: Histograms align(64) = @splat(@splat(0));
+    for (values) |*value| {
+        const key = key_from_value(value);
+        inline for (0..radix_passes) |pass| {
+            const pass_bit_offset: BitsKey = @intCast(pass * radix_bits);
+            const partition_id: u32 = @intCast((key >> pass_bit_offset) & radix_mask);
+            histograms[pass][partition_id] += 1;
         }
-        break :blk histograms;
-    };
+    }
 
     var source: []Value = values;
     var target: []Value = values_scratch;
     var target_offsets: [radix_partitions]u32 = @splat(0);
 
-    inline for (0..radix_passes) |pass| {
+    inline for (histograms[0..radix_passes], 0..radix_passes) |*histogram, pass| {
         // Determine if a pass is trivial if exactly one partition has all `count` elements.
-        const pass_trivial: bool = for (histograms[pass]) |partition_count| {
+        const pass_trivial: bool = for (histogram) |partition_count| {
             if (partition_count == count) break true;
         } else false;
 
@@ -89,7 +85,7 @@ fn radix_sort(
             var next_offset: u32 = 0;
             for (0..radix_partitions) |partition_id| {
                 target_offsets[partition_id] = next_offset;
-                next_offset += histograms[pass][partition_id];
+                next_offset += histogram[partition_id];
             }
 
             // Partitioning pass.
