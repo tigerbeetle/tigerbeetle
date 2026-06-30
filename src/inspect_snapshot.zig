@@ -99,9 +99,13 @@ test "inspect constants snapshot" {
         \\  deprecated_expired_transfer_idid=31 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264 VL=256+524032,524288+0
         \\  deprecated_expired_ledger     id=32 K=32B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1344+544,1888+136,2024+522264 VL=256+524032,524288+0
         \\
+        \\SchemaMigration                 160B
+        \\  object                        id=42 K=8B  V=128B T=524160 B=4094  BC=129 IL=256+4128,4384/5416+1032,6448+1032,7480+516808 VL=256+524032,524288+0
+        \\  id                            id=41 K=16B V=32B  T=262080 B=16376 BC=17  IL=256+544,800/1072+272,1344+136,1480+522808 VL=256+524032,524288+0
+        \\
         \\Memory (approximate):
         \\datafile (on disk)              64TiB
-        \\free_set                        32.32MiB
+        \\free_set                        32.37MiB
         \\
     ).diff(output);
 }
