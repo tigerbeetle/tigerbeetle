@@ -259,6 +259,7 @@ pub const configs = struct {
             .message_size_max = Config.Cluster.message_size_max_min(4),
 
             .block_size = sector_size,
+            .lsm_levels = 8,
             .lsm_compaction_ops = 4,
             .lsm_growth_factor = 4,
             // (This is higher than the production default value because the block size is smaller.)
