@@ -1209,7 +1209,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 } else {
                     if (compaction.level_a_index_block.head()) |index_block| {
                         if (index_block.stage == .read_index_block_done) {
-                            const index_schema = Table.index.from_block(
+                            const index_schema = Table.index.from_block_with_schema(
                                 index_block.ptr,
                                 compaction.tree.config.id,
                             );
@@ -1241,7 +1241,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 // Read level B value block.
                 if (compaction.level_b_index_block.head()) |index_block| {
                     if (index_block.stage == .read_index_block_done) {
-                        const index_schema = Table.index.from_block(
+                        const index_schema = Table.index.from_block_with_schema(
                             index_block.ptr,
                             compaction.tree.config.id,
                         );
@@ -1473,8 +1473,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 }
             };
 
-            const index_schema = Table.index.from_block(index_block, compaction.tree.config.id);
-
+            const index_schema = Table.index.from_block_with_schema(
+                index_block,
+                compaction.tree.config.id,
+            );
             const value_block_addresses = index_schema.value_addresses_used(index_block);
             const value_block_address = value_block_addresses[value_block_index];
             const value_block_checksum =
@@ -1510,7 +1512,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             compaction: *Compaction,
             index_block: BlockPtrConst,
         ) void {
-            const index_schema = Table.index.from_block(index_block, compaction.tree.config.id);
+            const index_schema = Table.index.from_block_with_schema(
+                index_block,
+                compaction.tree.config.id,
+            );
             const index_block_address = Table.block_address(index_block);
             const value_block_addresses = index_schema.value_addresses_used(index_block);
 
@@ -1869,7 +1874,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
                         const index_block = compaction.level_a_index_block.head().?;
                         assert(index_block.stage == .read_index_block_done);
-                        const index_schema = Table.index.from_block(
+                        const index_schema = Table.index.from_block_with_schema(
                             index_block.ptr,
                             compaction.tree.config.id,
                         );
@@ -1916,7 +1921,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
                     const index_block = compaction.level_b_index_block.head().?;
                     assert(index_block.stage == .read_index_block_done);
-                    const index_schema = Table.index.from_block(
+                    const index_schema = Table.index.from_block_with_schema(
                         index_block.ptr,
                         compaction.tree.config.id,
                     );

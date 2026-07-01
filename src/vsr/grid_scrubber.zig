@@ -416,7 +416,7 @@ pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime
                     };
                 };
 
-                const index_schema = schema.TableIndex.from(index_block);
+                const index_schema = schema.TableIndex.from_block_without_schema(index_block);
                 const value_block_index = tour.table_value.value_block_index;
                 if (value_block_index <
                     index_schema.value_blocks_used(scrubber.tour_index_block))

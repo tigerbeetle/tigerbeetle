@@ -1579,7 +1579,7 @@ pub fn GridType(comptime Storage: type) type {
                     break :blk grid.superblock.storage.grid_block(index_address).?;
                 }
             };
-            const index_schema = schema.TableIndex.from(index_block);
+            const index_schema = schema.TableIndex.from_block_without_schema(index_block);
             const index_block_header = schema.header_from_block(index_block);
 
             assert(index_block_header.address == index_address);
