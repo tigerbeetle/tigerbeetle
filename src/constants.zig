@@ -681,14 +681,18 @@ pub const lsm_table_value_blocks_max = table_blocks_max: {
 /// The default size in bytes of the NodePool used for the LSM forest's manifests.
 pub const lsm_manifest_memory_size_default = lsm_manifest_memory: {
     // TODO Tune this better.
-    const lsm_forest_node_count: u32 = 8192;
+    const lsm_forest_node_count: u38 = 8192;
     break :lsm_manifest_memory lsm_forest_node_count * lsm_manifest_node_size;
 };
 
 /// The maximum size in bytes of the NodePool used for the LSM forest's manifests.
 pub const lsm_manifest_memory_size_max =
-    @divFloor(std.math.maxInt(u32), lsm_manifest_memory_size_multiplier) *
+    @divFloor(std.math.maxInt(u38), lsm_manifest_memory_size_multiplier) *
     lsm_manifest_memory_size_multiplier;
+
+comptime {
+    assert(lsm_manifest_memory_size_max == 256 * stdx.GiB - lsm_manifest_memory_size_multiplier);
+}
 
 /// The minimum size in bytes of the NodePool used for the LSM forest's manifests.
 pub const lsm_manifest_memory_size_min = lsm_manifest_memory_size_multiplier;

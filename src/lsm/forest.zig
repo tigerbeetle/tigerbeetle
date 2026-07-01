@@ -167,6 +167,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
     }
 
+    // Comptime scale is limited by LSM size, not manifest memory size.
+    comptime assert(@divFloor(
+        constants.lsm_manifest_memory_size_max,
+        @sizeOf(schema.ManifestNode.TableInfo),
+    ) > table_count_max * _tree_infos.len);
+
     const Grid = GridType(_Storage);
     const ScanBufferPool = ScanBufferPoolType(Grid);
 
