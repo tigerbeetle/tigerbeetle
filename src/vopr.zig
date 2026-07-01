@@ -112,7 +112,9 @@ pub fn main() !void {
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const cli_args = flags.parse(CLIArgs);
+    var cli_args = flags.parse(CLIArgs);
+    cli_args.requests_max = 16_000; // FIXME Remove these overrides.
+    cli_args.storage_size_limit = .{ .value = 800, .unit = .mib };
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
