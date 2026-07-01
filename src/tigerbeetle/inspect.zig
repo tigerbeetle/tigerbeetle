@@ -1496,7 +1496,7 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
             }
         },
         .index => {
-            const index = schema.TableIndex.from(block);
+            const index = schema.TableIndex.from_block_without_schema(block);
             for (
                 index.value_addresses_used(block),
                 index.value_checksums_used(block),

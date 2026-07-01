@@ -504,6 +504,8 @@ pub fn TableType(
         pub const IndexBlocks = struct {
             value_block_address: u64,
             value_block_checksum: u128,
+            value_block_key_min: Key,
+            value_block_key_max: Key,
         };
 
         /// Returns all data stored in the index block relating to a given key
@@ -513,6 +515,8 @@ pub fn TableType(
             return if (Table.index_value_block_for_key(index_block, key)) |i| .{
                 .value_block_address = index.value_addresses_used(index_block)[i],
                 .value_block_checksum = index.value_checksums_used(index_block)[i].value,
+                .value_block_key_min = index_value_keys_used(index_block, .key_min)[i],
+                .value_block_key_max = index_value_keys_used(index_block, .key_max)[i],
             } else null;
         }
 
@@ -543,12 +547,62 @@ pub fn TableType(
             );
         }
 
+        pub fn verify_value_block(
+            value_block: BlockPtrConst,
+            tree_id: u16,
+            key_min: Key,
+            key_max: Key,
+        ) void {
+            data.assert_matching_block_schema(value_block, tree_id);
+
+            const values = Table.value_block_values_used(value_block);
+            assert(values.len > 0);
+            assert(values.len <= data.value_count_max);
+
+            const value_key_min = key_from_value(&values[0]);
+            const value_key_max = key_from_value(&values[values.len - 1]);
+
+            assert(value_key_min <= value_key_max);
+            if (values.len > 1) assert(value_key_min < value_key_max);
+
+            assert(value_key_min == key_min);
+            assert(value_key_max == key_max);
+
+            if (constants.verify) {
+                for (values[0 .. values.len - 1], values[1..]) |*a, *b| {
+                    assert(key_from_value(a) < key_from_value(b));
+                }
+            }
+        }
+
+        pub fn verify_index_block(
+            index_block: BlockPtrConst,
+            tree_id: u16,
+            key_min: Key,
+            key_max: Key,
+        ) schema.TableIndex {
+            const index_schema = index.from_block_with_schema(index_block, tree_id);
+
+            const keys_min = index_value_keys_used(index_block, .key_min);
+            const keys_max = index_value_keys_used(index_block, .key_max);
+
+            assert(keys_min.len > 0);
+            assert(keys_min.len == keys_max.len);
+            assert(keys_min.len == index_schema.value_blocks_used(index_block));
+
+            assert(keys_min[0] == key_min);
+            assert(keys_max[keys_max.len - 1] == key_max);
+
+            return index_schema;
+        }
+
         pub fn verify(
             comptime Storage: type,
             storage: *const Storage,
             index_address: u64,
             key_min: ?Key,
             key_max: ?Key,
+            tree_id: u16,
         ) void {
             if (Storage != @import("../testing/storage.zig").Storage)
                 // Too complicated to do async verification
@@ -557,6 +611,10 @@ pub fn TableType(
             const index_block = storage.grid_block(index_address).?;
             const value_block_addresses = index.value_addresses_used(index_block);
             const value_block_checksums = index.value_checksums_used(index_block);
+
+            if (key_min != null and key_max != null) {
+                _ = Table.verify_index_block(index_block, tree_id, key_min.?, key_max.?);
+            }
 
             for (
                 value_block_addresses,
@@ -567,6 +625,13 @@ pub fn TableType(
                 const value_block_header = schema.header_from_block(value_block);
                 assert(value_block_header.address == value_block_address);
                 assert(value_block_header.checksum == value_block_checksum.value);
+
+                Table.verify_value_block(
+                    value_block,
+                    tree_id,
+                    Table.index_value_keys_used(index_block, .key_min)[value_block_index],
+                    Table.index_value_keys_used(index_block, .key_max)[value_block_index],
+                );
 
                 const values = value_block_values_used(value_block);
                 if (values.len > 0) {

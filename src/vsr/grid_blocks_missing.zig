@@ -488,7 +488,7 @@ pub const GridBlocksMissing = struct {
         assert(table.table_blocks_written == 0);
         assert(table.value_blocks_received.count() == 0);
 
-        const index_schema = schema.TableIndex.from(index_block);
+        const index_schema = schema.TableIndex.from_block_without_schema(index_block);
         const index_block_header = schema.header_from_block(index_block);
         assert(index_block_header.address == table.table_info.address);
         assert(index_block_header.checksum == table.table_info.checksum);
