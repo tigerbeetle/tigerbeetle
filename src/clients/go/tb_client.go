@@ -170,6 +170,23 @@ func getResultSize(op C.TB_OPERATION) uintptr {
 	}
 }
 
+// operationResultsAsymmetric reports whether an operation may return a number of
+// results that does not correspond one-to-one with the events submitted. Query-style
+// operations take a single filter event but can return many results, so the per-event
+// result-count check in onGoPacketCompletion does not apply to them.
+func operationResultsAsymmetric(op C.TB_OPERATION) bool {
+	switch op {
+	case C.TB_OPERATION_GET_ACCOUNT_TRANSFERS,
+		C.TB_OPERATION_GET_ACCOUNT_BALANCES,
+		C.TB_OPERATION_QUERY_ACCOUNTS,
+		C.TB_OPERATION_QUERY_TRANSFERS,
+		C.TB_OPERATION_GET_CHANGE_EVENTS:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *c_client) doRequest(
 	op C.TB_OPERATION,
 	count int,
@@ -256,12 +273,7 @@ func onGoPacketCompletion(
 			panic("invalid result_size:  misaligned for the event")
 		}
 
-		//TODO(batiati): Refine the way we handle events with asymmetric results.
-		if op != C.TB_OPERATION_GET_ACCOUNT_TRANSFERS &&
-			op != C.TB_OPERATION_GET_ACCOUNT_BALANCES &&
-			op != C.TB_OPERATION_QUERY_ACCOUNTS &&
-			op != C.TB_OPERATION_QUERY_TRANSFERS &&
-			op != C.TB_OPERATION_GET_CHANGE_EVENTS {
+		if !operationResultsAsymmetric(op) {
 			// Make sure the amount of results at least matches the amount of requests.
 			count := packet.data_size / C.uint32_t(getEventSize(op))
 			if count*resultSize < result_size {
