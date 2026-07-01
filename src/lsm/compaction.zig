@@ -1403,11 +1403,15 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .level_b => compaction.range_b.?.tables.get(level_b_index_block_next - 1),
             };
 
-            read.* = .{ .block = index_block, .pool = compaction.pool.?, .verify = .{
-                .key_min = @intCast(table_ref.table_info.key_min),
-                .key_max = @intCast(table_ref.table_info.key_max),
-                .tree_id = compaction.tree.config.id,
-            } };
+            read.* = .{
+                .block = index_block,
+                .pool = compaction.pool.?,
+                .verify = .{
+                    .key_min = table_ref.table_info.key_min,
+                    .key_max = table_ref.table_info.key_max,
+                    .tree_id = compaction.tree.config.id,
+                },
+            };
 
             compaction.grid.read_block(
                 .{ .from_local_or_global_storage = read_index_block_callback },
@@ -1473,6 +1477,20 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 }
             };
 
+            const key_min = Table.index_value_keys_used(index_block, .key_min)[value_block_index];
+            const key_max = Table.index_value_keys_used(index_block, .key_max)[value_block_index];
+
+            read.* = .{
+                .block = value_block,
+                .pool = compaction.pool.?,
+                .counters = &compaction.counters,
+                .verify = .{
+                    .key_min = key_min,
+                    .key_max = key_max,
+                    .tree_id = compaction.tree.config.id,
+                },
+            };
+
             const index_schema = Table.index.from_block_with_schema(
                 index_block,
                 compaction.tree.config.id,
@@ -1481,21 +1499,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             const value_block_address = value_block_addresses[value_block_index];
             const value_block_checksum =
                 index_schema.value_checksums_used(index_block)[value_block_index];
-
-            read.* = .{
-                .block = value_block,
-                .pool = compaction.pool.?,
-                .counters = &compaction.counters,
-                .verify = .{
-                    .key_min = @intCast(
-                        Table.index_value_keys_used(index_block, .key_min)[value_block_index],
-                    ),
-                    .key_max = @intCast(
-                        Table.index_value_keys_used(index_block, .key_max)[value_block_index],
-                    ),
-                    .tree_id = compaction.tree.config.id,
-                },
-            };
 
             compaction.grid.read_block(
                 .{ .from_local_or_global_storage = read_value_block_callback },
