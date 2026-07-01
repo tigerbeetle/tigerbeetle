@@ -1502,13 +1502,6 @@ pub fn GridType(comptime Storage: type) type {
 
                 read_remote_head.resolves = read_remote_resolves;
                 grid.read_global_queue.push(read_remote_head);
-
-                if (grid.blocks_missing.repair_blocks_available() > 0) {
-                    grid.blocks_missing.repair_block(
-                        read_remote_head.address,
-                        read_remote_head.checksum,
-                    );
-                }
             }
         }
 
