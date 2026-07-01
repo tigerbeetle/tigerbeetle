@@ -565,6 +565,7 @@ pub const Storage = struct {
         offset_in_zone: u64,
     ) void {
         zone.verify_iop(buffer, offset_in_zone);
+        assert(zone.offset(offset_in_zone) + buffer.len <= storage.memory.len);
         maybe(zone == .grid_padding); // Padding is zeroed during format.
 
         // Verify that there are no concurrent overlapping writes.

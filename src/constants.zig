@@ -339,6 +339,9 @@ pub const grid_repair_writes_max = grid_iops_write_max;
 /// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
 pub const grid_cache_size_default = config.process.grid_cache_size_default;
 
+/// The maximum number of concurrent block (repair) writes from the scrubber.
+pub const grid_scrubber_writes_max = config.process.grid_scrubber_writes_max;
+
 /// The maximum capacity (in *single* blocks – not counting syncing tables) of the
 /// GridBlocksMissing.
 ///
@@ -347,7 +350,7 @@ pub const grid_cache_size_default = config.process.grid_cache_size_default;
 /// - The "period" of GridBlocksMissing's requests increases.
 ///   This makes the repair protocol more tolerant of network latency.
 /// - (Repair protocol is used to repair manifest log blocks immediately after state sync).
-pub const grid_missing_blocks_max = config.process.grid_missing_blocks_max;
+pub const grid_missing_blocks_max = grid_repair_writes_max + grid_scrubber_writes_max;
 
 /// The number of tables that can be synced simultaneously.
 /// "Table" in this context is the number of table index blocks to hold in memory while syncing
@@ -363,10 +366,11 @@ comptime {
     assert(grid_repair_request_max <= @divFloor(message_body_size_max, @sizeOf(vsr.BlockRequest)));
     assert(grid_repair_request_max <= grid_repair_reads_max);
 
+    assert(grid_scrubber_writes_max > 0);
+
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
-    assert(grid_repair_writes_max <=
-        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_value_blocks_max);
+    assert(grid_repair_writes_max < grid_missing_blocks_max);
 
     assert(grid_missing_blocks_max > 0);
     assert(grid_missing_tables_max > 0);

@@ -258,18 +258,7 @@ pub const GridBlocksMissing = struct {
         assert(queue.enqueued_blocks_sync <=
             queue.options.tables_max * constants.lsm_table_value_blocks_max);
 
-        if (queue.state == .sync_jump) {
-            const faulty_blocks_free =
-                queue.faulty_blocks.capacity() -
-                queue.enqueued_blocks_repair;
-            return faulty_blocks_free;
-        } else {
-            const faulty_blocks_free =
-                queue.faulty_blocks.capacity() -
-                queue.enqueued_blocks_repair -
-                queue.options.tables_max * constants.lsm_table_value_blocks_max;
-            return faulty_blocks_free;
-        }
+        return queue.options.blocks_max - queue.enqueued_blocks_repair;
     }
 
     /// Queue a faulty block to request from the cluster and repair.
@@ -395,6 +384,12 @@ pub const GridBlocksMissing = struct {
         const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
         const fault = &queue.faulty_blocks.values()[fault_index];
         return fault.checksum == checksum and fault.state == .waiting;
+    }
+
+    pub fn block_writing(queue: *const GridBlocksMissing, address: u64, checksum: u128) bool {
+        const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
+        const fault = &queue.faulty_blocks.values()[fault_index];
+        return fault.checksum == checksum and fault.state == .writing;
     }
 
     pub fn write_commence(queue: *GridBlocksMissing, address: u64, checksum: u128) void {
