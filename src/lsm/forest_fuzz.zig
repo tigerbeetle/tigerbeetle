@@ -800,7 +800,7 @@ const Environment = struct {
                     const prefix_current: u128 = switch (params.index) {
                         .expires_at => index: {
                             assert(object.timeout != 0);
-                            const value = object.timeout_ns();
+                            const value = object.timestamp + object.timeout_ns();
                             assert(value >= params.min and value <= params.max);
                             break :index value;
                         },

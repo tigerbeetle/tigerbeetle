@@ -4201,7 +4201,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .expired => {
                     assert(p.timeout > 0);
                     assert(!p.flags.imported);
-                    assert(timestamp_event >= p.timestamp + p.timeout_ns());
+                    assert(p.timestamp + p.timeout_ns() <= timestamp_event);
                     return .pending_transfer_expired;
                 },
             }
