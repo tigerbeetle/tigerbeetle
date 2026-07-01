@@ -18,6 +18,7 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
 const ForestType = @import("forest.zig").ForestType;
 const ScanLookupType = @import("scan_lookup.zig").ScanLookupType;
+const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
 const TimestampRange = @import("timestamp_range.zig").TimestampRange;
 const Direction = @import("../direction.zig").Direction;
 
@@ -142,13 +143,17 @@ const Index = enum {
     index_13,
 };
 
+const ScanBuilder = ScanBuilderType(Storage, Forest, .{
+    .object_groove = .things,
+    .index_grooves = &.{.things},
+});
+const Scan = ScanBuilder.Scan;
+
 const ScanLookup = ScanLookupType(
     ThingsGroove,
-    ThingsGroove.ScanBuilder.Scan,
+    Scan,
     Storage,
 );
-
-const Scan = ThingsGroove.ScanBuilder.Scan;
 
 const thing_index_count = std.enums.values(Index).len;
 /// The max number of indexes in a query.
@@ -531,6 +536,7 @@ const Environment = struct {
     op: u64 = 1,
     checkpoint_op: ?u64 = null,
 
+    scan_builder: ScanBuilder = undefined,
     scan_lookup: ScanLookup = undefined,
     scan_lookup_buffer: []Thing,
     scan_lookup_result: ?[]const Thing = null,
@@ -669,7 +675,9 @@ const Environment = struct {
             assert(env.scan_lookup_result == null);
             defer {
                 env.forest.scan_buffer_pool.reset();
-                env.forest.grooves.things.scan_builder.reset();
+                env.scan_lookup = undefined;
+                env.scan_builder = undefined;
+                env.scan_lookup_result = null;
             }
 
             const query_results_max: u32 = env.prng.range_inclusive(
@@ -688,7 +696,6 @@ const Environment = struct {
                 try env.tick_until_state_change(.scanning, .fuzzing);
 
                 const query_results = env.scan_lookup_result.?;
-                env.scan_lookup_result = null;
                 break :results query_results;
             };
 
@@ -836,7 +843,7 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove;
-                groove.prefetch_setup(getter._snapshot);
+                groove.prefetch_begin(getter._snapshot);
                 groove.prefetch_enqueue(.{ .id = getter._key });
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
@@ -844,6 +851,8 @@ const Environment = struct {
             fn prefetch_callback(prefetch_context: *ThingsGroove.PrefetchContext) void {
                 const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
                 assert(!context.finished);
+
+                context._groove.prefetch_finish();
                 context.finished = true;
             }
         };
@@ -944,10 +953,9 @@ const Environment = struct {
         timestamp_last: u64, // exclusive
     ) *Scan {
         const scan_buffer_pool = &env.forest.scan_buffer_pool;
-        const things_groove = &env.forest.grooves.things;
-        const scan_builder: *ThingsGroove.ScanBuilder = &things_groove.scan_builder;
         const snapshot = env.op;
 
+        env.scan_builder = ScanBuilder.init(&env.forest);
         var stack = stdx.BoundedArrayType(*Scan, query_scans_max){};
         for (query_spec.query.const_slice()) |query_part| {
             switch (query_part) {
@@ -961,9 +969,9 @@ const Environment = struct {
                     assert(timestamp_range.min <= timestamp_range.max);
 
                     const scan = switch (field.index) {
-                        inline else => |comptime_index| scan_builder.scan_prefix(
+                        inline else => |comptime_index| env.scan_builder.scan_prefix(
                             comptime std.enums.nameCast(
-                                std.meta.FieldEnum(ThingsGroove.IndexTrees),
+                                Scan.Indexes,
                                 comptime_index,
                             ),
                             scan_buffer_pool.acquire_assume_capacity(),
@@ -981,8 +989,8 @@ const Environment = struct {
                     const scans_to_merge = stack.slice()[stack.count() - merge.operand_count ..];
 
                     const scan = switch (merge.operator) {
-                        .union_set => scan_builder.merge_union(scans_to_merge),
-                        .intersection_set => scan_builder.merge_intersection(scans_to_merge),
+                        .union_set => env.scan_builder.merge_union(scans_to_merge),
+                        .intersection_set => env.scan_builder.merge_intersection(scans_to_merge),
                     };
 
                     stack.truncate(stack.count() - merge.operand_count);
