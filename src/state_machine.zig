@@ -18,6 +18,7 @@ const GrooveType = @import("lsm/groove.zig").GrooveType;
 const ForestType = @import("lsm/forest.zig").ForestType;
 const ScanBufferType = @import("lsm/scan_buffer.zig").ScanBufferType;
 const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
+const ScanBuilderType = @import("lsm/scan_builder.zig").ScanBuilderType;
 
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
@@ -60,7 +61,7 @@ pub const tree_ids = struct {
         .debit_account_id = 9,
         .credit_account_id = 10,
         .amount = 11,
-        .pending_id = 12,
+        .deprecated_pending_id = 12,
         .user_data_128 = 13,
         .user_data_64 = 14,
         .user_data_32 = 15,
@@ -70,6 +71,7 @@ pub const tree_ids = struct {
         .expires_at = 19,
         .imported = 24,
         .closing = 26,
+        .pending_id = 34,
     };
 
     pub const TransferPending = .{
@@ -81,11 +83,23 @@ pub const tree_ids = struct {
         .timestamp = 22,
         .account_timestamp = 27,
         .transfer_pending_status = 28,
-        .dr_account_id_expired = 29,
-        .cr_account_id_expired = 30,
-        .transfer_pending_id_expired = 31,
-        .ledger_expired = 32,
+        .expired_debit_account_id = 29,
+        .expired_credit_account_id = 30,
+        .deprecated_expired_transfer_id = 31,
+        .deprecated_expired_ledger = 32,
         .prunable = 33,
+        .expired_ledger = 35,
+        .expired_transfer_id = 36,
+        .expired_code = 37,
+        .expired_user_data_128 = 38,
+        .expired_user_data_64 = 39,
+        .expired_user_data_32 = 40,
+    };
+
+    // Schema migrations are state-machine specific.
+    pub const SchemaMigrations = .{
+        .id = 41,
+        .timestamp = 42,
     };
 };
 
@@ -219,6 +233,37 @@ pub const AccountEvent = extern struct {
     }
 };
 
+/// Stores metadata for schema migrations.
+pub const SchemaMigration = extern struct {
+    id: u128,
+
+    /// Timestamp of the last migrated element.
+    /// May be zero.
+    timestamp_cursor: u64,
+
+    /// Timestamp when the schema migration was completed.
+    /// Zero indicates in-progress schema migrations.
+    timestamp_final: u64,
+
+    /// The number of times this schema migration task has run.
+    /// Each run is constrained by the batch size of the related
+    /// objects, so a migration may require several runs to
+    /// complete.
+    run_count: u32,
+
+    reserved: [84]u8 = @splat(0),
+
+    /// Timestamp when the new schema migration has started.
+    /// Only elements before this timestamp need migration.
+    timestamp: u64,
+
+    comptime {
+        // Assert that there is no implicit padding.
+        assert(@sizeOf(SchemaMigration) == 128);
+        assert(stdx.no_padding(SchemaMigration));
+    }
+};
+
 pub fn StateMachineType(comptime Storage: type) type {
     assert(constants.message_body_size_max > 0);
     assert(constants.lsm_compaction_ops > 0);
@@ -236,6 +281,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         prefetch_input: ?[]const u8 = null,
         prefetch_callback: ?*const fn (*StateMachine) void = null,
         prefetch_context: PrefetchContext = .null,
+        scan_builder: ScanBuilders = .null,
 
         scan_lookup: ScanLookup = .null,
         scan_lookup_buffer: []align(constants.cache_line_size) u8,
@@ -243,7 +289,18 @@ pub fn StateMachineType(comptime Storage: type) type {
         scan_lookup_results: std.ArrayListUnmanaged(u32),
         scan_lookup_next_tick: Grid.NextTick = undefined,
 
-        expire_pending_transfers: ExpirePendingTransfers = .{},
+        /// Different kinds of work can be triggered by the pulse operation.
+        pulse: enum {
+            null,
+            nop,
+            expire_pending_transfers,
+            schema_migrations,
+        } = .null,
+
+        schema_migrations_worker: SchemaMigrationWorker = .{},
+
+        // TODO: Split the scan from the running state.
+        expire_pending_transfers: ScanBuilders.ExpirePendingTransfers = .{},
 
         open_callback: ?*const fn (*StateMachine) void = null,
         compact_callback: ?*const fn (*StateMachine) void = null,
@@ -280,14 +337,17 @@ pub fn StateMachineType(comptime Storage: type) type {
             .transfers = TransfersGroove,
             .transfers_pending = TransfersPendingGroove,
             .account_events = AccountEventsGroove,
+            .schema_migrations = SchemaMigrationsGroove,
         });
+
+        const SchemaMigrationWorker = SchemaMigrationWorkerType(StateMachine);
 
         comptime {
             // Being intentional about the types we expect for derived indexes.
             // Indexes based on object fields are already validated by the struct size
             // and alignment requirements. Derived indexes, however, are not part of the
             // struct layout and need this extra sanity check.
-            assert(std.meta.fields(Forest.Grooves).len == 4);
+            assert(std.meta.fields(Forest.Grooves).len == 5);
 
             // Accounts:
             {
@@ -297,6 +357,8 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const IndexHelperType = AccountsGroove.IndexHelperType;
                 assert(IndexHelperType("imported").Type == void);
                 assert(IndexHelperType("closed").Type == void);
+
+                assert(std.meta.fields(@TypeOf(AccountsGroove.config.deprecated)).len == 0);
             }
 
             // Transfers:
@@ -308,28 +370,57 @@ pub fn StateMachineType(comptime Storage: type) type {
                 assert(IndexHelperType("expires_at").Type == u64);
                 assert(IndexHelperType("imported").Type == void);
                 assert(IndexHelperType("closing").Type == void);
+
+                assert(std.meta.fields(@TypeOf(TransfersGroove.config.deprecated)).len == 1);
+                // Secondary index was deprecated, replaced by an unique key.
+                assert(@hasField(
+                    @TypeOf(TransfersGroove.config.deprecated),
+                    "deprecated_pending_id",
+                ));
             }
 
             // TransfersPending:
             {
                 assert(@FieldType(Forest.Grooves, "transfers_pending") == TransfersPendingGroove);
                 assert(std.meta.fields(@TypeOf(TransfersPendingGroove.config.derived)).len == 0);
+                assert(std.meta.fields(@TypeOf(TransfersPendingGroove.config.deprecated)).len == 0);
             }
 
             // AccountEvents:
             {
                 assert(@FieldType(Forest.Grooves, "account_events") == AccountEventsGroove);
-                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 6);
+                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.derived)).len == 10);
 
                 const IndexHelperType = AccountEventsGroove.IndexHelperType;
                 assert(IndexHelperType("account_timestamp").Type == u64);
-                assert(IndexHelperType("dr_account_id_expired").Type == u128);
-                assert(IndexHelperType("cr_account_id_expired").Type == u128);
-                assert(IndexHelperType("transfer_pending_id_expired").Type == u128);
-                // TODO: `ledger_expired` returns the wrong type!
-                // It should be u32 instead, the same as `ledger`.
-                assert(IndexHelperType("ledger_expired").Type == u128);
+                assert(IndexHelperType("expired_debit_account_id").Type == u128);
+                assert(IndexHelperType("expired_credit_account_id").Type == u128);
                 assert(IndexHelperType("prunable").Type == void);
+                assert(IndexHelperType("expired_transfer_id").Type == u128);
+                assert(IndexHelperType("expired_ledger").Type == u32);
+                assert(IndexHelperType("expired_code").Type == u16);
+                assert(IndexHelperType("expired_user_data_128").Type == u128);
+                assert(IndexHelperType("expired_user_data_64").Type == u64);
+                assert(IndexHelperType("expired_user_data_32").Type == u32);
+
+                assert(std.meta.fields(@TypeOf(AccountEventsGroove.config.deprecated)).len == 2);
+                // Secondary index was deprecated, replaced by an unique key.
+                assert(@hasField(
+                    @TypeOf(AccountEventsGroove.config.deprecated),
+                    "deprecated_expired_transfer_id",
+                ));
+                // Wrong data type u128.
+                assert(@hasField(
+                    @TypeOf(AccountEventsGroove.config.deprecated),
+                    "deprecated_expired_ledger",
+                ));
+            }
+
+            // SchemaMigrationsGroove:
+            {
+                assert(@FieldType(Forest.Grooves, "schema_migrations") == SchemaMigrationsGroove);
+                assert(std.meta.fields(@TypeOf(SchemaMigrationsGroove.config.derived)).len == 0);
+                assert(std.meta.fields(@TypeOf(SchemaMigrationsGroove.config.deprecated)).len == 0);
             }
         }
 
@@ -419,6 +510,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.closed,
                 },
+                .deprecated = .{},
                 .objects_cache = true,
             },
         );
@@ -431,7 +523,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .batch_value_count_max = tree_values_count_max.transfers,
                 .primary_key = "id",
                 .primary_key_orphaned = true,
-                .unique_keys = &[_][:0]const u8{"id"},
+                .unique_keys = &[_][:0]const u8{
+                    "id",
+                    "pending_id",
+                },
                 .ignored = &[_][:0]const u8{ "timeout", "flags" },
                 .optional = &[_][:0]const u8{
                     "pending_id",
@@ -463,6 +558,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.closing,
                 },
+                .deprecated = .{
+                    .deprecated_pending_id = u128,
+                },
                 .objects_cache = true,
             },
         );
@@ -476,7 +574,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .primary_key = "timestamp",
                 .primary_key_orphaned = false,
                 .unique_keys = &[_][:0]const u8{},
-                .ignored = &[_][:0]const u8{"padding"},
+                .ignored = &[_][]const u8{"padding"},
                 .optional = &[_][:0]const u8{
                     // Index the current status of a pending transfer.
                     // Examples:
@@ -485,6 +583,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     "status",
                 },
                 .derived = .{},
+                .deprecated = .{},
                 .objects_cache = true,
             },
         );
@@ -497,7 +596,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .batch_value_count_max = tree_values_count_max.account_events,
                 .primary_key = "timestamp",
                 .primary_key_orphaned = false,
-                .unique_keys = &[_][:0]const u8{},
+                .unique_keys = &[_][:0]const u8{"expired_transfer_id"},
                 .ignored = &[_][:0]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
@@ -523,14 +622,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                 },
                 .optional = &[_][:0]const u8{},
                 .derived = .{
-                    // Placeholder derived index (will be inserted during `account_event`).
-                    //
                     // This index stores two values per object (the credit and debit accounts).
                     // It is used for balance as-of queries and to search events related to a
                     // particular account.
                     // Examples:
                     //   "Balance where account=X and timestamp=Y".
                     //   "Last time account=X was updated".
+                    // Placeholder derived index (will be inserted during `account_event`).
                     .account_timestamp = struct {
                         fn account_timestamp(_: *const AccountEvent) ?u64 {
                             return null;
@@ -542,49 +640,95 @@ pub fn StateMachineType(comptime Storage: type) type {
                     // However, expired events require a specific index to be searchable by both
                     // debit and credit accounts.
                     // Example: "All expired debits where account=X".
-                    .dr_account_id_expired = struct {
-                        fn dr_account_id_expired(object: *const AccountEvent) ?u128 {
+                    .expired_debit_account_id = struct {
+                        fn expired_debit_account_id(object: *const AccountEvent) ?u128 {
                             return if (object.transfer_pending_status == .expired)
                                 object.dr_account_id
                             else
                                 null;
                         }
-                    }.dr_account_id_expired,
-                    .cr_account_id_expired = struct {
-                        fn cr_account_id_expired(object: *const AccountEvent) ?u128 {
+                    }.expired_debit_account_id,
+                    .expired_credit_account_id = struct {
+                        fn expired_credit_account_id(object: *const AccountEvent) ?u128 {
                             return if (object.transfer_pending_status == .expired)
                                 object.cr_account_id
                             else
                                 null;
                         }
-                    }.cr_account_id_expired,
+                    }.expired_credit_account_id,
 
                     // Events related to voiding or posting pending transfers can be searched using
                     // `Transfers.pending_id`.
                     // However, expired events require a specific index to be searchable by the
                     // transfer.
                     // Example: "When transfer=X has expired".
-                    .transfer_pending_id_expired = struct {
-                        fn transfer_pending_id_expired(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.transfer_pending_id
-                            else
-                                null;
+                    .expired_transfer_id = struct {
+                        fn expired_transfer_id(object: *const AccountEvent) ?u128 {
+                            return switch (object.transfer_pending_status) {
+                                .none => null,
+                                .pending, .posted, .voided => null,
+                                .expired => object.transfer_pending_id,
+                            };
                         }
-                    }.transfer_pending_id_expired,
+                    }.expired_transfer_id,
 
                     // Events related to transfers can be searched using `Transfers.ledger`.
                     // However, expired events require a specific index to be searchable
                     // by ledger.
                     // Example: "All expiry events where ledger=X".
-                    .ledger_expired = struct {
-                        fn transfer_expired_ledger(object: *const AccountEvent) ?u128 {
-                            return if (object.transfer_pending_status == .expired)
-                                object.ledger
-                            else
-                                null;
+                    .expired_ledger = struct {
+                        fn expired_ledger(object: *const AccountEvent) ?u32 {
+                            return switch (object.transfer_pending_status) {
+                                .none => null,
+                                .pending, .posted, .voided => null,
+                                .expired => object.ledger,
+                            };
                         }
-                    }.transfer_expired_ledger,
+                    }.expired_ledger,
+
+                    // Events related to transfers can be searched using `Transfers.code`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where code=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_code = struct {
+                        fn expired_code(_: *const AccountEvent) ?u16 {
+                            return null;
+                        }
+                    }.expired_code,
+
+                    // Events related to transfers can be searched using `Transfers.user_data_128`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where user_data_128=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_user_data_128 = struct {
+                        fn expired_user_data_128(_: *const AccountEvent) ?u128 {
+                            return null;
+                        }
+                    }.expired_user_data_128,
+
+                    // Events related to transfers can be searched using `Transfers.user_data_64`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where user_data_64=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_user_data_64 = struct {
+                        fn expired_user_data_64(_: *const AccountEvent) ?u64 {
+                            return null;
+                        }
+                    }.expired_user_data_64,
+
+                    // Events related to transfers can be searched using `Transfers.user_data_32`.
+                    // However, expired events require a specific index to be searchable
+                    // by code.
+                    // Example: "All expiry events where user_data_32=X".
+                    // Placeholder index inserted during `execute_expire_pending_transfers`.
+                    .expired_user_data_32 = struct {
+                        fn expired_user_data_32(_: *const AccountEvent) ?u32 {
+                            return null;
+                        }
+                    }.expired_user_data_32,
 
                     // Tracks events for accounts without the history flag,
                     // enabling a cleanup job to delete them after CDC.
@@ -600,30 +744,37 @@ pub fn StateMachineType(comptime Storage: type) type {
                         }
                     }.prunable,
                 },
+                .deprecated = .{
+                    .deprecated_expired_transfer_id = u128,
+                    .deprecated_expired_ledger = u128,
+                },
                 .objects_cache = false,
             },
         );
 
-        const AccountsScanLookup = ScanLookupType(
-            AccountsGroove,
-            AccountsGroove.ScanBuilder.Scan,
+        const SchemaMigrationsGroove = GrooveType(
             Storage,
+            SchemaMigration,
+            .{
+                .ids = tree_ids.SchemaMigrations,
+                .batch_value_count_max = tree_values_count_max.accounts,
+                .primary_key = "id",
+                .primary_key_orphaned = false,
+                .unique_keys = &[_][:0]const u8{
+                    "id",
+                },
+                .ignored = &[_][:0]const u8{
+                    "timestamp_cursor",
+                    "timestamp_final",
+                    "run_count",
+                    "reserved",
+                },
+                .optional = &.{},
+                .derived = .{},
+                .deprecated = .{},
+                .objects_cache = true,
+            },
         );
-
-        const TransfersScanLookup = ScanLookupType(
-            TransfersGroove,
-            TransfersGroove.ScanBuilder.Scan,
-            Storage,
-        );
-
-        const AccountBalancesScanLookup = ScanLookupType(
-            AccountEventsGroove,
-            // Both Objects use the same timestamp, so we can use the TransfersGroove's indexes.
-            TransfersGroove.ScanBuilder.Scan,
-            Storage,
-        );
-
-        const ChangeEventsScanLookup = ChangeEventsScanLookupType(AccountEventsGroove, Storage);
 
         /// Since prefetch contexts are used one at a time, it's safe to access
         /// the union's fields and reuse the same memory for all context instances.
@@ -632,6 +783,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             accounts: AccountsGroove.PrefetchContext,
             transfers: TransfersGroove.PrefetchContext,
             transfers_pending: TransfersPendingGroove.PrefetchContext,
+            account_events: AccountEventsGroove.PrefetchContext,
+            schema_migrations: SchemaMigrationsGroove.PrefetchContext,
 
             pub const Field = std.meta.FieldEnum(PrefetchContext);
             pub fn FieldType(comptime field: Field) type {
@@ -658,17 +811,112 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
         };
 
-        const ExpirePendingTransfers = ExpirePendingTransfersType(TransfersGroove, Storage);
+        /// Defines a `ScanBuilder` type for each type of query the StateMachine executes.
+        /// Note: `get_change_events` does not use a `ScanBuilder`, since it iterates directly
+        /// over the object tree without filtering by secondary indexes.
+        const ScanBuilders = union(enum) {
+            null,
+            accounts: ScanBuilders.Accounts,
+            transfers: ScanBuilders.Transfers,
+            two_phase_completed: ScanBuilders.TwoPhaseCompleted,
 
-        /// Since scan lookups are used one at a time, it's safe to access
-        /// the union's fields and reuse the same memory for all ScanLookup instances.
+            const Tag = std.meta.Tag(@This());
+
+            /// Used by `query_accounts`.
+            const Accounts = ScanBuilderType(Storage, Forest, .{
+                .object_groove = .accounts,
+                .index_grooves = &.{.accounts},
+            });
+
+            /// Used by `query_transfers`, `get_account_transfers` and `get_account_balances`.
+            const Transfers = ScanBuilderType(Storage, Forest, .{
+                .object_groove = .transfers,
+                .index_grooves = &.{ .transfers, .transfers_pending, .account_events },
+            });
+
+            /// Used by `schema_migrations`.
+            const TwoPhaseCompleted = ScanBuilderType(Storage, Forest, .{
+                // Expiry events have no related `Transfer`,
+                // so the object Groove is `AccountEvents`.
+                .object_groove = .account_events,
+                .index_grooves = &.{ .account_events, .transfers },
+            });
+
+            // Used by `expire_pending_transfers`.
+            const ExpirePendingTransfers = ExpirePendingTransfersType(TransfersGroove, Storage);
+
+            pub fn FieldType(comptime field: Tag) type {
+                return @FieldType(ScanBuilders, @tagName(field));
+            }
+
+            pub fn get(self: *ScanBuilders, comptime field: Tag) *FieldType(field) {
+                comptime assert(field != .null);
+                assert(self.* == .null);
+
+                const state_machine: *StateMachine = @alignCast(
+                    @fieldParentPtr("scan_builder", self),
+                );
+                self.* = @unionInit(
+                    ScanBuilders,
+                    @tagName(field),
+                    .init(&state_machine.forest),
+                );
+                return &@field(self, @tagName(field));
+            }
+        };
+
+        /// Defines a `ScanLookup` type for each type of object
+        /// the StateMachine fetches from `ScanBuilder` queries.
+        ///
+        /// `ScanLookup`s and `ScanBuilder`s are composable.
+        /// Think of `ScanLookup` as the SELECT clause, while
+        /// `ScanBuilder`s are the WHERE and ORDER BY clauses.
         const ScanLookup = union(enum) {
             null,
-            transfers: TransfersScanLookup,
-            accounts: AccountsScanLookup,
-            account_balances: AccountBalancesScanLookup,
-            expire_pending_transfers: ExpirePendingTransfers.ScanLookup,
-            change_events: ChangeEventsScanLookup,
+            transfers: ScanLookup.Transfers,
+            accounts: ScanLookup.Accounts,
+            account_balances: ScanLookup.AccountBalances,
+            expire_pending_transfers: ScanLookup.ExpirePendingTransfers,
+            change_events: ScanLookup.ChangeEvents,
+            two_phase_completed: ScanLookup.TwoPhaseCompleted,
+
+            /// Used by `query_accounts`.
+            const Accounts = ScanLookupType(
+                AccountsGroove,
+                ScanBuilders.Accounts.Scan,
+                Storage,
+            );
+
+            /// Used by `query_transfers` and `get_account_transfers`.
+            const Transfers = ScanLookupType(
+                TransfersGroove,
+                ScanBuilders.Transfers.Scan,
+                Storage,
+            );
+
+            /// Used by `get_account_balances`.
+            const AccountBalances = ScanLookupType(
+                AccountEventsGroove,
+                ScanBuilders.Transfers.Scan,
+                Storage,
+            );
+
+            /// Custom lookup used by `get_change_events`.
+            const ChangeEvents = ChangeEventsScanLookupType(AccountEventsGroove, Storage);
+
+            /// Used by `expire_pending_transfers`.
+            const ExpirePendingTransfers = ScanLookupType(
+                TransfersGroove,
+                ScanBuilders.ExpirePendingTransfers.Scan,
+                Storage,
+            );
+
+            /// Used by `schema_migrations`.
+            const TwoPhaseCompleted = ScanLookupType(
+                AccountEventsGroove,
+                ScanBuilders.TwoPhaseCompleted.Scan,
+                Storage,
+            );
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -1137,10 +1385,13 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         pub fn pulse_needed(self: *const StateMachine, timestamp: u64) bool {
             assert(!self.aof_recovery);
+            assert(self.pulse == .null);
+
             assert(self.expire_pending_transfers.pulse_next_timestamp >=
                 TimestampRange.timestamp_min);
 
-            return self.expire_pending_transfers.pulse_next_timestamp <= timestamp;
+            return self.expire_pending_transfers.pulse_needed(timestamp) or
+                self.schema_migrations_worker.pulse_needed();
         }
 
         pub fn prefetch(
@@ -1188,15 +1439,16 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.prefetch_callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
-            self.forest.grooves.accounts.prefetch_setup(snapshot);
-            self.forest.grooves.transfers.prefetch_setup(snapshot);
-            self.forest.grooves.transfers_pending.prefetch_setup(snapshot);
+            self.forest.grooves.accounts.prefetch_begin(snapshot);
+            self.forest.grooves.transfers.prefetch_begin(snapshot);
+            self.forest.grooves.transfers_pending.prefetch_begin(snapshot);
+            self.forest.grooves.schema_migrations.prefetch_begin(snapshot);
 
             // Prefetch starts timing for an operation.
             self.metrics.timer.reset();
 
             switch (operation) {
-                .pulse => self.prefetch_expire_pending_transfers(),
+                .pulse => self.prefetch_pulse(),
                 .create_accounts => self.prefetch_create_accounts(),
                 .create_transfers => self.prefetch_create_transfers(),
                 .lookup_accounts => self.prefetch_lookup_accounts(),
@@ -1237,6 +1489,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.prefetch_snapshot = null;
             self.prefetch_operation = null;
             self.prefetch_input = null;
+
+            self.forest.grooves.accounts.prefetch_finish();
+            self.forest.grooves.transfers.prefetch_finish();
+            self.forest.grooves.transfers_pending.prefetch_finish();
+            self.forest.grooves.schema_migrations.prefetch_finish();
 
             callback(self);
         }
@@ -1517,7 +1774,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 );
 
                 const scan_lookup = self.scan_lookup.get(.transfers);
-                scan_lookup.* = TransfersScanLookup.init(
+                scan_lookup.* = ScanLookup.Transfers.init(
                     &self.forest.grooves.transfers,
                     scan,
                 );
@@ -1545,7 +1802,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_get_account_transfers_scan_callback(
-            scan_lookup: *TransfersScanLookup,
+            scan_lookup: *ScanLookup.Transfers,
             results: []const Transfer,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.transfers, scan_lookup);
@@ -1559,8 +1816,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
+            self.scan_builder = .null;
             self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.transfers.scan_builder.reset();
 
             return self.prefetch_scan_resume();
         }
@@ -1597,6 +1854,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_operation.? == .get_account_balances or
                 self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup == .null);
+
+            // It runs before the scan; there must be no ongoing scan lookup.
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
@@ -1633,7 +1892,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                         );
 
                         const scan_lookup = self.scan_lookup.get(.account_balances);
-                        scan_lookup.* = AccountBalancesScanLookup.init(
+                        scan_lookup.* = ScanLookup.AccountBalances.init(
                             &self.forest.grooves.account_events,
                             scan,
                         );
@@ -1675,7 +1934,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_get_account_balances_scan_callback(
-            scan_lookup: *AccountBalancesScanLookup,
+            scan_lookup: *ScanLookup.AccountBalances,
             results: []const AccountEvent,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.account_balances, scan_lookup);
@@ -1688,9 +1947,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(AccountEvent));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
-            self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.transfers.scan_builder.reset();
             self.scan_lookup = .null;
+            self.scan_builder = .null;
+            self.forest.scan_buffer_pool.reset();
 
             return self.prefetch_scan_resume();
         }
@@ -1737,7 +1996,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn get_scan_from_account_filter(
             self: *StateMachine,
             filter: *const AccountFilter,
-        ) ?*TransfersGroove.ScanBuilder.Scan {
+        ) ?*ScanBuilders.Transfers.Scan {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -1752,9 +2011,7 @@ pub fn StateMachineType(comptime Storage: type) type {
 
             if (!filter_valid) return null;
 
-            const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
-            const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
-
+            const scan_builder = self.scan_builder.get(.transfers);
             const timestamp_range: TimestampRange = .{
                 .min = if (filter.timestamp_min == 0)
                     TimestampRange.timestamp_min
@@ -1778,7 +2035,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             //     user_data_32=? AND
             //     code=?
             // ```
-            var scan_conditions: stdx.BoundedArrayType(*TransfersGroove.ScanBuilder.Scan, 5) = .{};
+            const Scan = ScanBuilders.Transfers.Scan;
+            var scan_conditions: stdx.BoundedArrayType(*Scan, 5) = .{};
             const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
 
             // Adding the condition for `debit_account_id = $account_id`.
@@ -1817,7 +2075,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             // Additional filters with an intersection `AND`.
-            inline for ([_]std.meta.FieldEnum(TransfersGroove.IndexTrees){
+            inline for ([_]std.meta.FieldEnum(Scan.Indexes){
                 .user_data_128, .user_data_64, .user_data_32, .code,
             }) |filter_field| {
                 const filter_value = @field(filter, @tagName(filter_field));
@@ -1865,11 +2123,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             });
 
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_query_filter(
-                AccountsGroove,
-                &self.forest.grooves.accounts,
-                filter,
-            )) |scan| {
+            if (self.get_scan_from_query_filter(.accounts, filter)) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
                 const scan_buffer = stdx.bytes_as_slice(
@@ -1879,7 +2133,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 );
 
                 const scan_lookup = self.scan_lookup.get(.accounts);
-                scan_lookup.* = AccountsScanLookup.init(
+                scan_lookup.* = ScanLookup.Accounts.init(
                     &self.forest.grooves.accounts,
                     scan,
                 );
@@ -1907,7 +2161,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_query_accounts_scan_callback(
-            scan_lookup: *AccountsScanLookup,
+            scan_lookup: *ScanLookup.Accounts,
             results: []const Account,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.accounts, scan_lookup);
@@ -1921,8 +2175,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
+            self.scan_builder = .null;
             self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.accounts.scan_builder.reset();
 
             return self.prefetch_scan_resume();
         }
@@ -1952,11 +2206,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             });
 
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_query_filter(
-                TransfersGroove,
-                &self.forest.grooves.transfers,
-                filter,
-            )) |scan| {
+            if (self.get_scan_from_query_filter(.transfers, filter)) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
                 const scan_buffer = stdx.bytes_as_slice(
@@ -1966,7 +2216,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 );
 
                 const scan_lookup = self.scan_lookup.get(.transfers);
-                scan_lookup.* = TransfersScanLookup.init(
+                scan_lookup.* = ScanLookup.Transfers.init(
                     &self.forest.grooves.transfers,
                     scan,
                 );
@@ -1994,7 +2244,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_query_transfers_scan_callback(
-            scan_lookup: *TransfersScanLookup,
+            scan_lookup: *ScanLookup.Transfers,
             results: []const Transfer,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.transfers, scan_lookup);
@@ -2008,8 +2258,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
+            self.scan_builder = .null;
             self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.transfers.scan_builder.reset();
 
             return self.prefetch_scan_resume();
         }
@@ -2053,10 +2303,10 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         fn get_scan_from_query_filter(
             self: *StateMachine,
-            comptime Groove: type,
-            groove: *Groove,
+            comptime target: std.meta.Tag(ScanBuilders),
             filter: *const QueryFilter,
-        ) ?*Groove.ScanBuilder.Scan {
+        ) ?*ScanBuilders.FieldType(target).Scan {
+            comptime assert(target == .accounts or target == .transfers);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -2090,16 +2340,19 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .ledger,
                 .code,
             };
-            comptime assert(indexes.len <= constants.lsm_scans_max);
+            comptime assert(indexes.len < constants.lsm_scans_max);
 
-            var scan_conditions: stdx.BoundedArrayType(*Groove.ScanBuilder.Scan, indexes.len) = .{};
+            const ScanBuilder = ScanBuilders.FieldType(target);
+            const scan_builder: *ScanBuilder = self.scan_builder.get(target);
+            var scan_conditions: stdx.BoundedArrayType(*ScanBuilder.Scan, indexes.len + 1) = .{};
             inline for (indexes) |index| {
-                if (@field(filter, @tagName(index)) != 0) {
-                    scan_conditions.push(groove.scan_builder.scan_prefix(
-                        std.enums.nameCast(std.meta.FieldEnum(Groove.IndexTrees), index),
+                const filter_value = @field(filter, @tagName(index));
+                if (filter_value != 0) {
+                    scan_conditions.push(scan_builder.scan_prefix(
+                        std.enums.nameCast(std.meta.FieldEnum(ScanBuilder.Scan.Indexes), index),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         self.prefetch_snapshot.?,
-                        @field(filter, @tagName(index)),
+                        filter_value,
                         timestamp_range,
                         direction,
                     ));
@@ -2111,14 +2364,14 @@ pub fn StateMachineType(comptime Storage: type) type {
                 // TODO(batiati): Querying only by timestamp uses the Object groove,
                 // we could skip the lookup step entirely then.
                 // It will be implemented as part of the query executor.
-                groove.scan_builder.scan_timestamp(
+                scan_builder.scan_timestamp(
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
                     self.prefetch_snapshot.?,
                     timestamp_range,
                     direction,
                 ),
                 1 => scan_conditions.get(0),
-                else => groove.scan_builder.merge_intersection(scan_conditions.const_slice()),
+                else => scan_builder.merge_intersection(scan_conditions.const_slice()),
             };
         }
 
@@ -2127,9 +2380,9 @@ pub fn StateMachineType(comptime Storage: type) type {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation != null);
             assert(self.scan_lookup == .null);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             maybe(self.scan_lookup_buffer_index > 0);
             maybe(self.scan_lookup_results.items.len > 0);
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             self.forest.grid.on_next_tick(
                 &prefetch_scan_invalid_filter_callback,
@@ -2288,21 +2541,24 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_get_change_events_scan_callback(
-            scan_lookup: *ChangeEventsScanLookup,
+            scan_lookup: *ScanLookup.ChangeEvents,
             results: []const AccountEvent,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.change_events, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+
+            // Operations not encoded as multi-batch
+            // must have only a single filter.
             assert(self.scan_lookup_results.items.len == 0);
 
             self.scan_lookup_buffer_index += @intCast(results.len * @sizeOf(AccountEvent));
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
-            self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.account_events.scan_builder.reset();
             self.scan_lookup = .null;
+            self.scan_builder = .null;
+            self.forest.scan_buffer_pool.reset();
 
             if (results.len == 0) return self.prefetch_finish();
 
@@ -2396,7 +2652,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn get_scan_from_change_events_filter(
             self: *StateMachine,
             filter: *const ChangeEventsFilter,
-        ) ?*ChangeEventsScanLookup {
+        ) ?*ScanLookup.ChangeEvents {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -2422,7 +2678,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             };
             assert(timestamp_range.min <= timestamp_range.max);
 
-            const scan_lookup: *ChangeEventsScanLookup = self.scan_lookup.get(.change_events);
+            const scan_lookup: *ScanLookup.ChangeEvents = self.scan_lookup.get(.change_events);
             scan_lookup.init(
                 &self.forest.grooves.account_events.objects,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
@@ -2431,6 +2687,51 @@ pub fn StateMachineType(comptime Storage: type) type {
             );
 
             return scan_lookup;
+        }
+
+        fn prefetch_pulse(self: *StateMachine) void {
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation.? == .pulse);
+            assert(self.pulse == .null);
+            defer assert(self.pulse != .null);
+
+            assert(self.scan_lookup_buffer_index == 0);
+            assert(self.scan_lookup_results.items.len == 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+            assert(TimestampRange.valid(self.prefetch_timestamp));
+
+            if (self.expire_pending_transfers.pulse_needed(self.prefetch_timestamp)) {
+                self.pulse = .expire_pending_transfers;
+                self.prefetch_expire_pending_transfers();
+                return;
+            }
+
+            if (self.schema_migrations_worker.pulse_needed()) {
+                self.pulse = .schema_migrations;
+                self.schema_migrations_worker.prefetch();
+                return;
+            }
+
+            // No action required.
+            // Although pulses are injected by `pulse_needed()`, nothing at the
+            // protocol level prevents us from receiving an unwanted pulse
+            // operation.
+            // The state machine fuzzer stresses this path.
+            self.pulse = .nop;
+            self.forest.grid.on_next_tick(
+                &prefetch_pulse_nop_callback,
+                &self.scan_lookup_next_tick,
+            );
+        }
+
+        fn prefetch_pulse_nop_callback(completion: *Grid.NextTick) void {
+            const self: *StateMachine = @alignCast(@fieldParentPtr(
+                "scan_lookup_next_tick",
+                completion,
+            ));
+
+            assert(self.pulse == .nop);
+            self.prefetch_finish();
         }
 
         fn prefetch_expire_pending_transfers(self: *StateMachine) void {
@@ -2465,7 +2766,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             );
 
             const scan_lookup = self.scan_lookup.get(.expire_pending_transfers);
-            scan_lookup.* = ExpirePendingTransfers.ScanLookup.init(
+            scan_lookup.* = ScanLookup.ExpirePendingTransfers.init(
                 transfers_groove,
                 scan,
             );
@@ -2476,7 +2777,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         }
 
         fn prefetch_expire_pending_transfers_scan_callback(
-            scan_lookup: *ExpirePendingTransfers.ScanLookup,
+            scan_lookup: *ScanLookup.ExpirePendingTransfers,
             results: []const Transfer,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.expire_pending_transfers, scan_lookup);
@@ -2490,8 +2791,8 @@ pub fn StateMachineType(comptime Storage: type) type {
             self.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
 
             self.scan_lookup = .null;
+            self.scan_builder = .null;
             self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.transfers.scan_builder.reset();
 
             self.prefetch_expire_pending_transfers_accounts();
         }
@@ -2585,7 +2886,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             }
 
             const result: usize = switch (operation) {
-                .pulse => self.execute_expire_pending_transfers(timestamp),
+                .pulse => self.execute_pulse(timestamp),
                 inline .create_accounts,
                 .create_transfers,
                 .lookup_accounts,
@@ -4137,7 +4438,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .expired => {
                     assert(p.timeout > 0);
                     assert(!p.flags.imported);
-                    assert(timestamp_event >= p.timestamp + p.timeout_ns());
+                    assert(p.timestamp + p.timeout_ns() <= timestamp_event);
                     return .pending_transfer_expired;
                 },
             }
@@ -4414,7 +4715,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                 },
             }
 
-            // For CDC we always insert the history regardless `Account.flags.history`.
             self.forest.grooves.account_events.insert(&.{
                 .timestamp = args.timestamp_event,
 
@@ -4448,6 +4748,35 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .transfer_pending_flags = if (args.transfer_pending) |p| p.flags else .{},
             });
 
+            if (args.transfer_pending_status == .expired) {
+                // Indexing the expired transfer fields that copy the original transfer
+                // allows querying by the expiry timestamp with the same fields.
+                // These indexes are not derivable only from the AccountEvent object.
+                self.forest.grooves.account_events.indexes.expired_code.put(&.{
+                    .timestamp = args.timestamp_event,
+                    .field = args.transfer_pending.?.code,
+                });
+                if (args.transfer_pending.?.user_data_128 != 0) {
+                    self.forest.grooves.account_events.indexes.expired_user_data_128.put(&.{
+                        .timestamp = args.timestamp_event,
+                        .field = args.transfer_pending.?.user_data_128,
+                    });
+                }
+                if (args.transfer_pending.?.user_data_64 != 0) {
+                    self.forest.grooves.account_events.indexes.expired_user_data_64.put(&.{
+                        .timestamp = args.timestamp_event,
+                        .field = args.transfer_pending.?.user_data_64,
+                    });
+                }
+                if (args.transfer_pending.?.user_data_32 != 0) {
+                    self.forest.grooves.account_events.indexes.expired_user_data_32.put(&.{
+                        .timestamp = args.timestamp_event,
+                        .field = args.transfer_pending.?.user_data_32,
+                    });
+                }
+            }
+
+            // The `flags.history` bit enables additional indexes for point in time balances:
             if (args.dr_account.flags.history) {
                 // Indexing the debit account.
                 self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
@@ -4506,6 +4835,18 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .status = status,
                 },
             });
+        }
+
+        fn execute_pulse(self: *StateMachine, timestamp: u64) usize {
+            assert(timestamp > self.commit_timestamp or self.aof_recovery);
+            defer self.pulse = .null;
+
+            return switch (self.pulse) {
+                .null => unreachable,
+                .nop => 0,
+                .expire_pending_transfers => self.execute_expire_pending_transfers(timestamp),
+                .schema_migrations => self.schema_migrations_worker.execute(timestamp),
+            };
         }
 
         fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) usize {
@@ -4667,6 +5008,11 @@ pub fn StateMachineType(comptime Storage: type) type {
             maybe(prefetch_lookup_accounts_limit > prefetch_create_accounts_limit);
             maybe(prefetch_lookup_transfers_limit > prefetch_create_transfers_limit);
 
+            const prefetch_schema_migrations_limit: u32 = comptime @intCast(
+                std.enums.values(SchemaMigrationWorker.Tasks).len,
+            );
+            assert(prefetch_schema_migrations_limit > 0);
+
             const tree_values_count_limit = tree_values_count(options.batch_size_limit);
             return .{
                 .accounts = .{
@@ -4737,6 +5083,19 @@ pub fn StateMachineType(comptime Storage: type) type {
                         tree_values_count_limit.account_events,
                     ),
                 },
+                .schema_migrations = .{
+                    .prefetch_entries_for_read_max = prefetch_schema_migrations_limit,
+                    .prefetch_entries_for_update_max = 1,
+                    .cache_entries_max = 0,
+                    .tree_options_object = .{
+                        .batch_value_count_limit = tree_values_count_limit
+                            .schema_migrations.timestamp,
+                    },
+                    .tree_options_index = index_tree_options(
+                        SchemaMigrationsGroove.IndexTreeOptions,
+                        tree_values_count_limit.schema_migrations,
+                    ),
+                },
             };
         }
 
@@ -4769,7 +5128,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 debit_account_id: u32,
                 credit_account_id: u32,
                 amount: u32,
-                pending_id: u32,
+                deprecated_pending_id: u32,
                 user_data_128: u32,
                 user_data_64: u32,
                 user_data_32: u32,
@@ -4778,6 +5137,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 expires_at: u32,
                 imported: u32,
                 closing: u32,
+                pending_id: u32,
             },
             transfers_pending: struct {
                 timestamp: u32,
@@ -4787,11 +5147,21 @@ pub fn StateMachineType(comptime Storage: type) type {
                 timestamp: u32,
                 account_timestamp: u32,
                 transfer_pending_status: u32,
-                dr_account_id_expired: u32,
-                cr_account_id_expired: u32,
-                transfer_pending_id_expired: u32,
-                ledger_expired: u32,
+                expired_debit_account_id: u32,
+                expired_credit_account_id: u32,
+                deprecated_expired_transfer_id: u32,
+                deprecated_expired_ledger: u32,
                 prunable: u32,
+                expired_transfer_id: u32,
+                expired_ledger: u32,
+                expired_code: u32,
+                expired_user_data_128: u32,
+                expired_user_data_64: u32,
+                expired_user_data_32: u32,
+            },
+            schema_migrations: struct {
+                id: u32,
+                timestamp: u32,
             },
         } {
             assert(batch_size_limit <= constants.message_body_size_max);
@@ -4833,7 +5203,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .debit_account_id = batch_create_transfers,
                     .credit_account_id = batch_create_transfers,
                     .amount = batch_create_transfers,
-                    .pending_id = batch_create_transfers,
+                    .deprecated_pending_id = batch_create_transfers,
                     .user_data_128 = batch_create_transfers,
                     .user_data_64 = batch_create_transfers,
                     .user_data_32 = batch_create_transfers,
@@ -4842,6 +5212,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .expires_at = batch_create_transfers,
                     .imported = batch_create_transfers,
                     .closing = batch_create_transfers,
+                    .pending_id = batch_create_transfers,
                 },
                 .transfers_pending = .{
                     // Objects are mutated when the pending transfer is posted/voided/expired.
@@ -4852,11 +5223,23 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .timestamp = batch_create_transfers,
                     .account_timestamp = 2 * batch_create_transfers, // dr and cr accounts.
                     .transfer_pending_status = batch_create_transfers,
-                    .dr_account_id_expired = batch_create_transfers,
-                    .cr_account_id_expired = batch_create_transfers,
-                    .transfer_pending_id_expired = batch_create_transfers,
-                    .ledger_expired = batch_create_transfers,
+                    .expired_debit_account_id = batch_create_transfers,
+                    .expired_credit_account_id = batch_create_transfers,
+                    .deprecated_expired_transfer_id = batch_create_transfers,
+                    .deprecated_expired_ledger = batch_create_transfers,
                     .prunable = batch_create_transfers,
+                    .expired_transfer_id = batch_create_transfers,
+                    .expired_ledger = batch_create_transfers,
+                    .expired_code = batch_create_transfers,
+                    .expired_user_data_128 = batch_create_transfers,
+                    .expired_user_data_64 = batch_create_transfers,
+                    .expired_user_data_32 = batch_create_transfers,
+                },
+                .schema_migrations = .{
+                    .timestamp = comptime std.enums.values(
+                        SchemaMigrationWorker.Tasks,
+                    ).len + 1, // +1 as the current task is updated.
+                    .id = comptime std.enums.values(SchemaMigrationWorker.Tasks).len,
                 },
             };
         }
@@ -4889,7 +5272,7 @@ fn ExpirePendingTransfersType(
         // TODO(zig) Context should be `*ExpirePendingTransfers`,
         // but its a dependency loop.
         const Context = struct {};
-        const ScanRange = ScanRangeType(
+        const Scan = ScanRangeType(
             Tree,
             Storage,
             *Context,
@@ -4897,17 +5280,11 @@ fn ExpirePendingTransfersType(
             timestamp_from_value,
         );
 
-        pub const ScanLookup = ScanLookupType(
-            TransfersGroove,
-            ScanRange,
-            Storage,
-        );
-
         context: Context = undefined,
         phase: union(enum) {
             idle,
             running: struct {
-                scan: ScanRange,
+                scan: Scan,
                 expires_at_max: u64,
             },
         } = .idle,
@@ -4925,6 +5302,11 @@ fn ExpirePendingTransfersType(
             self.* = .{};
         }
 
+        fn pulse_needed(self: *const ExpirePendingTransfers, timestamp: u64) bool {
+            assert(TimestampRange.valid(timestamp));
+            return self.pulse_next_timestamp <= timestamp;
+        }
+
         fn scan(
             self: *ExpirePendingTransfers,
             tree: *Tree,
@@ -4934,7 +5316,7 @@ fn ExpirePendingTransfersType(
                 /// Will fetch transfers expired before this timestamp (inclusive).
                 expires_at_max: u64,
             },
-        ) *ScanRange {
+        ) *Scan {
             assert(self.phase == .idle);
             assert(TimestampRange.valid(filter.expires_at_max));
             maybe(filter.expires_at_max != TimestampRange.timestamp_min and
@@ -5137,6 +5519,676 @@ fn ChangeEventsScanLookupType(
             const results = self.state.scan.buffer[0..self.state.scan.buffer_produced_len];
             self.state = .finished;
             callback(self, results);
+        }
+    };
+}
+
+fn SchemaMigrationWorkerType(comptime StateMachine: type) type {
+    return struct {
+        state: union(enum) {
+            idle,
+            pending,
+            running: Tasks,
+        } = .pending,
+
+        const Worker = @This();
+        const Operation = StateMachine.Operation;
+        const ScanLookup = StateMachine.ScanLookup;
+        const ScanBuilders = StateMachine.ScanBuilders;
+        const PrefetchContext = StateMachine.PrefetchContext;
+
+        pub const Tasks = enum(u128) {
+            /// Groove: Transfers.
+            /// Converts the deprecated secondary index `deprecated_pending_id = 12`
+            /// into the unique key `pending_id = 34`.
+            transfers_pending = 1,
+
+            /// Groove: AccountEvents.
+            /// Converts the deprecated secondary index `deprecated_expired_ledger = 32`,
+            /// whose prefix was `u128`, to `expired_ledger = 35` with the correct `u32` prefix.
+            /// Converts the deprecated secondary index `deprecated_expired_transfer_id = 31` to the
+            /// unique key `expired_transfer_id = 36`.
+            /// Populates the new secondary indexes:
+            /// - `expired_code = 37`
+            /// - `expired_user_data_128 = 38`
+            /// - `expired_user_data_64 = 39`
+            /// - `expired_user_data_32 = 40`
+            account_events_expired = 2,
+        };
+
+        pub fn pulse_needed(worker: *const Worker) bool {
+            return switch (worker.state) {
+                .idle => false,
+                .pending => true,
+                .running => unreachable,
+            };
+        }
+
+        pub fn prefetch(worker: *Worker) void {
+            assert(worker.state == .pending);
+
+            const state_machine: *StateMachine = worker.parent();
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+            assert(state_machine.scan_lookup_buffer_index == 0);
+            assert(state_machine.scan_lookup_results.items.len == 0);
+            assert(state_machine.forest.scan_buffer_pool.scan_buffer_used == 0);
+            assert(TimestampRange.valid(state_machine.prefetch_timestamp));
+
+            for (std.enums.values(Tasks)) |task| {
+                state_machine.forest.grooves.schema_migrations.prefetch_enqueue(.{
+                    .id = @intFromEnum(task),
+                });
+            }
+            state_machine.forest.grooves.schema_migrations.prefetch(
+                prefetch_callback,
+                state_machine.prefetch_context.get(.schema_migrations),
+            );
+        }
+
+        fn prefetch_callback(
+            completion: *StateMachine.SchemaMigrationsGroove.PrefetchContext,
+        ) void {
+            const state_machine: *StateMachine = PrefetchContext.parent(
+                .schema_migrations,
+                completion,
+            );
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+
+            const worker: *Worker = &state_machine.schema_migrations_worker;
+            assert(worker.state == .pending);
+            defer assert(worker.state != .pending);
+
+            state_machine.prefetch_context = .null;
+
+            for (std.enums.values(Tasks)) |task| {
+                const in_progress: bool = in_progress: {
+                    if (worker.get_schema_migration(task)) |object| {
+                        break :in_progress object.timestamp_final == 0;
+                    }
+                    break :in_progress true;
+                };
+                if (in_progress) {
+                    worker.prefetch_task(task);
+                    return;
+                }
+            }
+
+            worker.state = .idle;
+            state_machine.prefetch_finish();
+        }
+
+        fn prefetch_task(worker: *Worker, task: Tasks) void {
+            assert(worker.state == .pending);
+            worker.state = .{ .running = task };
+            switch (task) {
+                .transfers_pending => worker.task_transfers_pending_prefetch(),
+                .account_events_expired => worker.task_account_events_expired_prefetch(),
+            }
+        }
+
+        fn execute(
+            worker: *Worker,
+            timestamp: u64,
+        ) usize {
+            switch (worker.state) {
+                .idle => log.info("schema_migrations: up to date.", .{}),
+                .pending => unreachable,
+                .running => |task| {
+                    // Set the worker to `pending`, regardless of whether the current
+                    // task has completed, as there may be other pending tasks.
+                    defer worker.state = .pending;
+
+                    worker.tasks_initialize(timestamp);
+                    log.info(
+                        "schema_migrations: {[task]s}: run_count={[run_count]}",
+                        .{
+                            .task = @tagName(task),
+                            .run_count = worker.get_schema_migration(task).?.run_count + 1,
+                        },
+                    );
+
+                    switch (task) {
+                        .transfers_pending => worker.task_transfers_pending_execute(timestamp),
+                        .account_events_expired => worker.task_account_events_expired_execute(
+                            timestamp,
+                        ),
+                    }
+                },
+            }
+
+            // This operation has no output.
+            return 0;
+        }
+
+        /// Returns the timestamp range for the schema migration.
+        /// - `timestamp_min` is the timestamp of the last object processed by this
+        ///   task, or zero if it has never run.
+        /// - `timestamp_max` is the commit timestamp when this migration task first ran.
+        ///   Objects _after_ this timestamp were already created in the new schema
+        ///   and do not require migration.
+        ///   However, since schema migrations are not guaranteed to run immediately
+        ///   after an upgrade, there may be an overlap between objects created after
+        ///   the new schema was deployed (the actual upgrade timestamp) and before
+        ///   the state machine pulse triggered the migration.
+        ///   Migration tasks must therefore be prepared to skip or overwrite values
+        ///   that are already in the expected schema.
+        fn get_timestamp_range(worker: *const Worker, task: Tasks) TimestampRange {
+            assert(worker.state == .running);
+            assert(worker.state.running == task);
+
+            const state_machine: *const StateMachine = worker.parent_const();
+            if (worker.get_schema_migration(task)) |object| {
+                assert(object.timestamp > 0);
+                assert(object.timestamp_final == 0);
+                assert(object.timestamp <= state_machine.prefetch_timestamp);
+                assert(object.timestamp_cursor < object.timestamp);
+                maybe(object.run_count == 0);
+                maybe(object.timestamp_cursor == 0);
+                return .{
+                    .min = object.timestamp_cursor,
+                    .max = object.timestamp,
+                };
+            }
+
+            return .{
+                .min = 0,
+                .max = state_machine.prefetch_timestamp,
+            };
+        }
+
+        /// Inserts the `SchemaMigration` object for newly added tasks,
+        /// marking the cutoff timestamp that distinguishes objects created
+        /// under the old schema from those created under the new schema.
+        fn tasks_initialize(worker: *Worker, timestamp: u64) void {
+            assert(worker.state == .running);
+            assert(TimestampRange.valid(timestamp));
+
+            const state_machine: *StateMachine = worker.parent();
+            const schema_migrations: *StateMachine.SchemaMigrationsGroove =
+                &state_machine.forest.grooves.schema_migrations;
+
+            var timestamp_event: u64 = timestamp;
+            for (std.enums.values(Tasks)) |task| {
+                const initialized = schema_migrations.objects_cache.has(@intFromEnum(task));
+                if (!initialized) {
+                    schema_migrations.insert(&.{
+                        .id = @intFromEnum(task),
+                        .timestamp_cursor = 0,
+                        .timestamp_final = 0,
+                        .run_count = 0,
+                        .timestamp = timestamp_event,
+                    });
+                    timestamp_event += 1; // Timestamps must be unique.
+                }
+            }
+        }
+
+        /// Update the progress of the schema migration task.
+        fn tasks_update(worker: *Worker, options: struct {
+            task: Tasks,
+            timestamp: u64,
+            timestamp_cursor: u64,
+            finished: bool,
+        }) void {
+            assert(worker.state == .running);
+            assert(worker.state.running == options.task);
+            assert(options.timestamp > 0);
+            assert(options.timestamp_cursor < options.timestamp);
+            maybe(options.timestamp_cursor == 0); // Zero means that no migration was required.
+
+            const state_machine: *StateMachine = worker.parent();
+            const object: SchemaMigration = worker.get_schema_migration(options.task).?;
+            assert(object.id == @intFromEnum(options.task));
+            assert(object.timestamp > 0);
+            assert(object.timestamp_final == 0);
+            assert(object.timestamp_cursor < object.timestamp);
+            assert((object.run_count == 0) == (object.timestamp_cursor == 0));
+            assert(object.timestamp <= options.timestamp);
+            assert((object.timestamp_cursor == 0 and options.timestamp_cursor == 0) or
+                object.timestamp_cursor < options.timestamp_cursor);
+            assert(options.timestamp_cursor < object.timestamp);
+
+            state_machine.forest.grooves.schema_migrations.update(.{
+                .old = &object,
+                .new = &.{
+                    .id = object.id,
+                    .timestamp_cursor = options.timestamp_cursor,
+                    .timestamp_final = if (options.finished) options.timestamp else 0,
+                    .run_count = object.run_count + 1,
+                    .timestamp = object.timestamp,
+                },
+            });
+        }
+
+        fn get_schema_migration(worker: *const Worker, task: Tasks) ?SchemaMigration {
+            assert(worker.state == .pending or
+                worker.state.running == task);
+
+            const state_machine: *const StateMachine = worker.parent_const();
+            return switch (state_machine.forest.grooves.schema_migrations.get(
+                @intFromEnum(task),
+            )) {
+                .found_object => |object| object,
+                .not_found => null,
+            };
+        }
+
+        inline fn parent(worker: *Worker) *StateMachine {
+            return @alignCast(@fieldParentPtr("schema_migrations_worker", worker));
+        }
+
+        inline fn parent_const(worker: *const Worker) *const StateMachine {
+            return @alignCast(@fieldParentPtr("schema_migrations_worker", worker));
+        }
+
+        // Schema migration task: transfers_pending.
+
+        fn task_transfers_pending_prefetch(worker: *Worker) void {
+            assert(worker.state == .running);
+            assert(worker.state.running == .transfers_pending);
+
+            const state_machine: *StateMachine = worker.parent();
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+            assert(state_machine.forest.scan_buffer_pool.scan_buffer_used == 0);
+            assert(TimestampRange.valid(state_machine.prefetch_timestamp));
+
+            const timestamp_range = worker.get_timestamp_range(.transfers_pending);
+            assert(timestamp_range.min <= timestamp_range.max);
+
+            const scan_buffer: []Transfer = stdx.bytes_as_slice(
+                .inexact,
+                Transfer,
+                state_machine.scan_lookup_buffer,
+            );
+            // We must be constrained to the same limit as `create_transfers`.
+            const limit_max = @max(
+                Operation.create_transfers.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_sparse.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
+                    state_machine.batch_size_limit,
+                ),
+            );
+            assert(limit_max > 0);
+            assert(scan_buffer.len >= limit_max);
+
+            const ScanBuilder = ScanBuilders.FieldType(.transfers);
+            const scan_builder: *ScanBuilder = state_machine.scan_builder.get(.transfers);
+            const scan: *ScanBuilder.Scan = scan_builder.merge_union(&.{
+                scan_builder.scan_prefix(
+                    .transfer_pending_status,
+                    state_machine.forest.scan_buffer_pool.acquire_assume_capacity(),
+                    state_machine.prefetch_snapshot.?,
+                    @intFromEnum(TransferPendingStatus.posted),
+                    timestamp_range,
+                    .ascending,
+                ),
+                scan_builder.scan_prefix(
+                    .transfer_pending_status,
+                    state_machine.forest.scan_buffer_pool.acquire_assume_capacity(),
+                    state_machine.prefetch_snapshot.?,
+                    @intFromEnum(TransferPendingStatus.voided),
+                    timestamp_range,
+                    .ascending,
+                ),
+            });
+            assert(state_machine.forest.scan_buffer_pool.scan_buffer_used > 0);
+
+            const scan_lookup = state_machine.scan_lookup.get(.transfers);
+            scan_lookup.* = .init(
+                &state_machine.forest.grooves.transfers,
+                scan,
+            );
+            scan_lookup.read(
+                scan_buffer[0..limit_max],
+                &task_transfers_pending_prefetch_callback,
+            );
+        }
+
+        fn task_transfers_pending_prefetch_callback(
+            scan_lookup: *ScanLookup.Transfers,
+            results: []const Transfer,
+        ) void {
+            const state_machine: *StateMachine = ScanLookup.parent(
+                .transfers,
+                scan_lookup,
+            );
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+            assert(state_machine.scan_lookup_buffer_index < state_machine.scan_lookup_buffer.len);
+            assert(state_machine.scan_lookup_results.items.len == 0);
+
+            const worker: *Worker = &state_machine.schema_migrations_worker;
+            assert(worker.state == .running);
+            assert(worker.state.running == .transfers_pending);
+
+            const result_max: u32 = @max(
+                Operation.create_transfers.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_sparse.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
+                    state_machine.batch_size_limit,
+                ),
+            );
+            assert(results.len <= result_max);
+            maybe(results.len == 0);
+
+            state_machine.scan_lookup_buffer_index = @intCast(results.len * @sizeOf(Transfer));
+            state_machine.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
+
+            state_machine.scan_lookup = .null;
+            state_machine.scan_builder = .null;
+            state_machine.forest.scan_buffer_pool.reset();
+
+            state_machine.prefetch_finish();
+        }
+
+        fn task_transfers_pending_execute(worker: *Worker, timestamp: u64) void {
+            assert(worker.state == .running);
+            assert(worker.state.running == .transfers_pending);
+
+            const state_machine: *StateMachine = worker.parent();
+            assert(state_machine.scan_lookup_results.items.len == 1); // No multi-batch.
+            assert(timestamp > state_machine.commit_timestamp or state_machine.aof_recovery);
+
+            defer {
+                state_machine.scan_lookup_buffer_index = 0;
+                state_machine.scan_lookup_results.clearRetainingCapacity();
+            }
+
+            const result_count: u32 = state_machine.scan_lookup_results.items[0];
+            const result_max: u32 = @max(
+                Operation.create_transfers.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_sparse.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
+                    state_machine.batch_size_limit,
+                ),
+            );
+            assert(result_count <= result_max);
+            maybe(result_count == 0);
+            maybe(state_machine.scan_lookup_buffer_index == 0);
+            assert(state_machine.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
+            const results: []const Transfer = stdx.bytes_as_slice(
+                .exact,
+                Transfer,
+                state_machine.scan_lookup_buffer[0..state_machine.scan_lookup_buffer_index],
+            );
+
+            const timestamp_range = worker.get_timestamp_range(.transfers_pending);
+            for (results) |*transfer| {
+                assert(transfer.timestamp >= timestamp_range.min);
+                assert(transfer.timestamp <= timestamp_range.max);
+                assert(transfer.pending_id != 0);
+                assert(transfer.flags.post_pending_transfer or
+                    transfer.flags.void_pending_transfer);
+
+                // Converts the deprecated secondary index `deprecated_pending_id = 12`
+                // into the unique key `pending_id = 34`.
+                state_machine.forest.grooves.transfers.indexes.pending_id.put(&.{
+                    .timestamp = transfer.timestamp,
+                    .field = transfer.pending_id,
+                });
+            }
+
+            worker.tasks_update(.{
+                .task = .transfers_pending,
+                .timestamp = timestamp,
+                .timestamp_cursor = if (result_count > 0)
+                    results[results.len - 1].timestamp + 1
+                else
+                    0,
+                .finished = result_count < result_max,
+            });
+        }
+
+        // Schema migration task: account_events_expired.
+
+        fn task_account_events_expired_prefetch(worker: *Worker) void {
+            assert(worker.state == .running);
+            assert(worker.state.running == .account_events_expired);
+
+            const state_machine: *StateMachine = worker.parent();
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+            assert(state_machine.forest.scan_buffer_pool.scan_buffer_used == 0);
+            assert(TimestampRange.valid(state_machine.prefetch_timestamp));
+
+            const timestamp_range = worker.get_timestamp_range(.account_events_expired);
+            assert(timestamp_range.min <= timestamp_range.max);
+
+            const scan_buffer: []AccountEvent = stdx.bytes_as_slice(
+                .inexact,
+                AccountEvent,
+                state_machine.scan_lookup_buffer,
+            );
+            // We must be constrained to the same limit as `create_transfers`.
+            const limit_max = @max(
+                Operation.create_transfers.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_sparse.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
+                    state_machine.batch_size_limit,
+                ),
+            );
+            assert(limit_max > 0);
+            assert(scan_buffer.len >= limit_max);
+
+            const ScanBuilder = ScanBuilders.FieldType(.two_phase_completed);
+            const scan_builder: *ScanBuilder = state_machine.scan_builder.get(.two_phase_completed);
+            const scan: *ScanBuilder.Scan = scan_builder.scan_prefix(
+                .transfer_pending_status,
+                state_machine.forest.scan_buffer_pool.acquire_assume_capacity(),
+                state_machine.prefetch_snapshot.?,
+                @intFromEnum(TransferPendingStatus.expired),
+                timestamp_range,
+                .ascending,
+            );
+            assert(state_machine.forest.scan_buffer_pool.scan_buffer_used > 0);
+
+            const scan_lookup = state_machine.scan_lookup.get(.two_phase_completed);
+            scan_lookup.* = .init(
+                &state_machine.forest.grooves.account_events,
+                scan,
+            );
+            scan_lookup.read(
+                scan_buffer[0..limit_max],
+                &task_account_events_expired_prefetch_callback,
+            );
+        }
+
+        fn task_account_events_expired_prefetch_callback(
+            scan_lookup: *ScanLookup.TwoPhaseCompleted,
+            results: []const AccountEvent,
+        ) void {
+            const state_machine: *StateMachine = ScanLookup.parent(
+                .two_phase_completed,
+                scan_lookup,
+            );
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+            assert(state_machine.scan_lookup_buffer_index < state_machine.scan_lookup_buffer.len);
+            assert(state_machine.scan_lookup_results.items.len == 0);
+
+            const worker: *Worker = &state_machine.schema_migrations_worker;
+            assert(worker.state == .running);
+            assert(worker.state.running == .account_events_expired);
+
+            const result_max: u32 = @max(
+                Operation.create_transfers.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_sparse.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
+                    state_machine.batch_size_limit,
+                ),
+            );
+            assert(results.len <= result_max);
+            maybe(results.len == 0);
+
+            state_machine.scan_lookup_buffer_index = @intCast(results.len * @sizeOf(AccountEvent));
+            state_machine.scan_lookup_results.appendAssumeCapacity(@intCast(results.len));
+
+            state_machine.scan_lookup = .null;
+            state_machine.scan_builder = .null;
+            state_machine.forest.scan_buffer_pool.reset();
+
+            for (results) |account_event| {
+                assert(account_event.transfer_pending_status == .expired);
+                state_machine.forest.grooves.transfers.prefetch_enqueue(.{
+                    .id = account_event.transfer_pending_id,
+                });
+            }
+            state_machine.forest.grooves.transfers.prefetch(
+                task_account_events_expired_prefetch_transfer_callback,
+                state_machine.prefetch_context.get(.transfers),
+            );
+        }
+
+        fn task_account_events_expired_prefetch_transfer_callback(
+            completion: *StateMachine.TransfersGroove.PrefetchContext,
+        ) void {
+            const state_machine: *StateMachine = PrefetchContext.parent(.transfers, completion);
+            assert(state_machine.prefetch_input != null);
+            assert(state_machine.prefetch_operation.? == .pulse);
+            assert(state_machine.pulse == .schema_migrations);
+
+            const worker: *Worker = &state_machine.schema_migrations_worker;
+            assert(worker.state == .running);
+            assert(worker.state.running == .account_events_expired);
+
+            state_machine.prefetch_context = .null;
+            state_machine.prefetch_finish();
+        }
+
+        fn task_account_events_expired_execute(worker: *Worker, timestamp: u64) void {
+            assert(worker.state == .running);
+            assert(worker.state.running == .account_events_expired);
+
+            const state_machine: *StateMachine = worker.parent();
+            assert(timestamp > state_machine.commit_timestamp or state_machine.aof_recovery);
+
+            defer {
+                state_machine.scan_lookup_buffer_index = 0;
+                state_machine.scan_lookup_results.clearRetainingCapacity();
+            }
+
+            assert(state_machine.scan_lookup_results.items.len == 1); // No multi-batch.
+            const result_count: u32 = state_machine.scan_lookup_results.items[0];
+            const result_max: u32 = @max(
+                Operation.create_transfers.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_sparse.event_max(
+                    state_machine.batch_size_limit,
+                ),
+                Operation.deprecated_create_transfers_unbatched.event_max(
+                    state_machine.batch_size_limit,
+                ),
+            );
+            assert(result_count <= result_max);
+            maybe(result_count == 0);
+            maybe(state_machine.scan_lookup_buffer_index == 0);
+            assert(state_machine.scan_lookup_buffer_index == result_count * @sizeOf(AccountEvent));
+            const results: []const AccountEvent = stdx.bytes_as_slice(
+                .exact,
+                AccountEvent,
+                state_machine.scan_lookup_buffer[0..state_machine.scan_lookup_buffer_index],
+            );
+
+            const timestamp_range = worker.get_timestamp_range(.account_events_expired);
+            for (results) |*expiry| {
+                assert(expiry.timestamp >= timestamp_range.min);
+                assert(expiry.timestamp <= timestamp_range.max);
+                assert(expiry.transfer_pending_status == .expired);
+                assert(expiry.transfer_pending_id != 0);
+
+                const transfer_pending: Transfer = state_machine.get_transfer(
+                    expiry.transfer_pending_id,
+                ).?;
+                assert(transfer_pending.flags.pending);
+                assert(transfer_pending.debit_account_id == expiry.dr_account_id);
+                assert(transfer_pending.credit_account_id == expiry.cr_account_id);
+                assert(transfer_pending.ledger == expiry.ledger);
+
+                const account_events: *StateMachine.AccountEventsGroove =
+                    &state_machine.forest.grooves.account_events;
+
+                // Converts the deprecated secondary index `deprecated_expired_ledger = 32`,
+                // whose prefix was `u128`, to `expired_ledger = 35` with the correct `u32` prefix.
+                account_events.indexes.expired_ledger.put(&.{
+                    .timestamp = expiry.timestamp,
+                    .field = expiry.ledger,
+                });
+
+                // Converts the deprecated secondary index `deprecated_expired_transfer_id = 31`
+                // to the unique key `expired_transfer_id = 36`.
+                account_events.indexes.expired_transfer_id.put(&.{
+                    .timestamp = expiry.timestamp,
+                    .field = transfer_pending.id,
+                });
+
+                // Populates the new secondary indexes:
+                // - `expired_code = 37`
+                // - `expired_user_data_128 = 38`
+                // - `expired_user_data_64 = 39`
+                // - `expired_user_data_32 = 40`
+                account_events.indexes.expired_code.put(&.{
+                    .timestamp = expiry.timestamp,
+                    .field = transfer_pending.code,
+                });
+                if (transfer_pending.user_data_128 != 0) {
+                    account_events.indexes.expired_user_data_128.put(&.{
+                        .timestamp = expiry.timestamp,
+                        .field = transfer_pending.user_data_128,
+                    });
+                }
+                if (transfer_pending.user_data_64 != 0) {
+                    account_events.indexes.expired_user_data_64.put(&.{
+                        .timestamp = expiry.timestamp,
+                        .field = transfer_pending.user_data_64,
+                    });
+                }
+                if (transfer_pending.user_data_32 != 0) {
+                    account_events.indexes.expired_user_data_32.put(&.{
+                        .timestamp = expiry.timestamp,
+                        .field = transfer_pending.user_data_32,
+                    });
+                }
+            }
+
+            worker.tasks_update(.{
+                .task = .account_events_expired,
+                .timestamp = timestamp,
+                .timestamp_cursor = if (result_count > 0)
+                    results[results.len - 1].timestamp + 1
+                else
+                    0,
+                .finished = result_count < result_max,
+            });
         }
     };
 }

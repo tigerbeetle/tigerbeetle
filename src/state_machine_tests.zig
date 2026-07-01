@@ -155,6 +155,7 @@ pub const TestContext = struct {
         // transfers get expired.
         ctx.state_machine.expire_pending_transfers
             .pulse_next_timestamp = TimestampRange.timestamp_max;
+        ctx.state_machine.schema_migrations_worker.state = .idle;
 
         ctx.op = 1;
         ctx.busy = false;

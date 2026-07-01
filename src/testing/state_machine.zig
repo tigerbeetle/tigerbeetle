@@ -71,6 +71,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 .ignored = &[_][:0]const u8{},
                 .optional = &[_][:0]const u8{},
                 .derived = .{},
+                .deprecated = .{},
                 .objects_cache = true,
             },
         );
@@ -200,7 +201,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             state_machine.callback = callback;
 
             // TODO(Snapshots) Pass in the target snapshot.
-            state_machine.forest.grooves.things.prefetch_setup(snapshot);
+            state_machine.forest.grooves.things.prefetch_begin(snapshot);
             state_machine.forest.grooves.things.prefetch_enqueue(.{ .id = op });
             state_machine.forest.grooves.things.prefetch(
                 prefetch_callback,
@@ -213,6 +214,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 @alignCast(@fieldParentPtr("prefetch_context", completion));
             const callback = state_machine.callback.?;
             state_machine.callback = null;
+            state_machine.forest.grooves.things.prefetch_finish();
 
             callback(state_machine);
         }
