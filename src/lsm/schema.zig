@@ -157,7 +157,7 @@ pub const TableIndex = struct {
         };
     }
 
-    pub fn from(index_block: BlockPtrConst) TableIndex {
+    pub fn from_block_without_schema(index_block: BlockPtrConst) TableIndex {
         const header = header_from_block(index_block);
         assert(header.command == .block);
         assert(header.block_type == .index);
@@ -177,31 +177,19 @@ pub const TableIndex = struct {
         return index;
     }
 
-    pub fn from_block(
+    pub fn from_block_with_schema(
         schema: *const TableIndex,
         index_block: BlockPtrConst,
         tree_id: u16,
     ) TableIndex {
-        const header = header_from_block(index_block);
-        assert(header.command == .block);
-        assert(header.block_type == .index);
-        assert(header.address > 0);
-        assert(header.snapshot > 0);
-
         const header_metadata = metadata(index_block);
-
         assert(header_metadata.tree_id == tree_id);
         assert(header_metadata.key_size == schema.key_size);
         assert(header_metadata.value_block_count_max == schema.value_block_count_max);
-        assert(stdx.zeroed(&header_metadata.reserved));
-
         // The other schema fields are computed from key_size and value_block_count_max at runtime
         // and not saved in metadata. There is currently no way to detect whether this computation
         // itself has changed between versions.
-        return TableIndex.init(.{
-            .key_size = header_metadata.key_size,
-            .value_block_count_max = header_metadata.value_block_count_max,
-        });
+        return from_block_without_schema(index_block);
     }
 
     pub fn metadata(index_block: BlockPtrConst) *const Metadata {

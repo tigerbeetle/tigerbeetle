@@ -581,7 +581,7 @@ pub fn TableType(
             key_min: Key,
             key_max: Key,
         ) schema.TableIndex {
-            const index_schema = index.from_block(index_block, tree_id);
+            const index_schema = index.from_block_with_schema(index_block, tree_id);
 
             const keys_min = index_value_keys_used(index_block, .key_min);
             const keys_max = index_value_keys_used(index_block, .key_max);
