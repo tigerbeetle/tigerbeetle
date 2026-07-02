@@ -114,12 +114,14 @@ fn parameter_fallible(
 pub fn start(bench: *Bench) void {
     assert(bench.timer == null);
     defer assert(bench.timer != null);
+
     bench.timer = bench.time.benchmark_monotonic();
 }
 
 pub fn stop(bench: *Bench) Duration {
     assert(bench.timer != null);
     defer assert(bench.timer == null);
+
     const instant_stop = bench.time.benchmark_monotonic();
     const elapsed = bench.timer.?.elapsed(instant_stop);
     bench.timer = null;

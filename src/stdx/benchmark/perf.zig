@@ -2,19 +2,34 @@ const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
-const Time = @import("time.zig");
 const stdx = @import("../stdx.zig");
-const Instant = stdx.Instant;
 const Duration = stdx.Duration;
 
 test "benchmark: performance counter tutorial" {
+    if (comptime builtin.target.os.tag != .linux) {
+        return;
+    }
 
+    var perf = try PerfCounters.init();
+    defer perf.deinit();
+
+    const scale = 1_000_000;
+    var checksum: u64 = 1;
+
+    try perf.start();
+
+    for (0..scale) |i| {
+        checksum *= i;
+    }
+
+    const measurements = try perf.read(scale, checksum);
+    try measurements.print_csv(.header);
 }
 
 pub const CounterType = enum {
-    cpu_cycles,
-    kernel_cycles,
-    stall_cycles,
+    cycles_cpu,
+    cycles_kernel,
+    cycles_stall,
     instructions,
     cache_references,
     cache_misses,
@@ -24,9 +39,9 @@ pub const CounterType = enum {
 
     pub fn shortcode(counter_type: CounterType) []u8 {
         return switch (counter_type) {
-            .cpu_cycles => "c",
-            .kernel_cycles => "kc",
-            .stall_cycles => "sc",
+            .cycles_cpu => "c",
+            .cycles_kernel => "kc",
+            .cycles_stall => "sc",
             .instructions => "i",
             .cache_references => "cr",
             .cache_misses => "cm",
@@ -38,13 +53,15 @@ pub const CounterType = enum {
 };
 
 pub const DerivedCounter = enum {
-    ipc, ghz, cores,
+    ipc,
+    ghz,
+    cores,
 
     pub fn shortcode(derived_counter: DerivedCounter) []u8 {
-        return switch (counter_type) {
+        return switch (derived_counter) {
             .ipc => "ipc",
             .ghz => "ghz",
-            .cores => "cpu"
+            .cores => "cpu",
         };
     }
 };
@@ -58,65 +75,87 @@ pub const CounterInterpretation = enum {
 };
 
 pub const PerfMeasurement = struct {
-    counters: std.enums.EnumMap(CounterType, f64),
+    counters: std.enums.EnumArray(CounterType, f64),
     elapsed: Duration,
+    checksum: u64,
+    scale: f64,
 
     pub fn compute_derived(
-        measurements: *const PerfMeasurement,
+        measurement: *const PerfMeasurement,
         counter_derived: DerivedCounter,
     ) ?f64 {
         switch (counter_derived) {
             .ipc => {
-                const instructions = measurements.get(.instructions) orelse return null;
-                const cycles = measurements.get(.instructions) orelse return null;
-                return instructions / cycles;
+                const instructions = measurement.get_counter(.instructions);
+                const cycles_cpu = measurement.get_counter(.cycles_cpu);
+                return instructions / cycles_cpu;
             },
             .ghz => {
-                const cpu_cycles = measurements.get(.cpu_cycles) orelse return null;
-                const task_clock = measurements.get(.task_clock) orelse return null;
-                return cpu_cycles / task_clock;
+                const cycles_cpu = measurement.get_counter(.cycles_cpu);
+                const task_clock = measurement.get_counter(.task_clock);
+                return cycles_cpu / task_clock;
             },
             .cores => {
-                const task_clock = measurements.get(.task_clock) orelse return null;
-                const elapsed_ns = measurements.elapsed.ns;
+                const task_clock = measurement.get_counter(.task_clock);
+                const elapsed_ns = measurement.elapsed.ns;
                 return task_clock / @as(f64, @floatFromInt(elapsed_ns));
-            }
+            },
         }
     }
 
-    pub fn get_counter(measurements: *const PerfMeasurement, counter: CounterType) ?f64 {
-        return measurements.counters.get(counter);
+    pub fn get_counter(measurement: *const PerfMeasurement, counter: CounterType) f64 {
+        return measurement.counters.get(counter);
+    }
+
+    pub fn print_csv(
+        measurement: *const PerfMeasurement,
+        mode: enum { header, noheader },
+    ) !void {
+        const writer = std.io.getStdErr().writer();
+        switch (mode) {
+            .header => try measurement.write_csv_header(writer),
+            .noheader => {},
+        }
+        try measurement.write_csv_values(writer);
     }
 
     pub fn write_csv_header(
-        measurement: *PerfMeasurement,
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        for (&measurement.counters, 0..) |*entry, i| {
+        measurement: *const PerfMeasurement,
+        writer: anytype,
+    ) !void {
+        try writer.print("elapsed_ms, ", .{});
+        for (std.enums.values(CounterType), 0..) |counter, i| {
             if (i > 0) try writer.print(", ", .{});
-            try writer.print("{s: >4}", .{@tagName(entry.key)});
+            try writer.print("{s: >4}", .{@tagName(counter)});
         }
-        inline for (std.enums.values(DerivedCounter), 0..) |derived_counter, i| {
-            _ = measurement.compute_derived(derived_counter) orelse continue;
+        try writer.print(", ", .{});
+        for (std.enums.values(DerivedCounter), 0..) |derived_counter, i| {
             if (i > 0) try writer.print(", ", .{});
-            try writer.print("{s: >4}", .{derived_counter.name});
+            try writer.print("{s: >4}", .{@tagName(derived_counter)});
         }
-        try writer.print(", scale", .{});
+        try writer.print(", {[scale]s: <[scale_width]}, {[checksum]s: <[checksum_width]]}\n", .{
+            .scale = "scale",
+            .scale_width = @as(usize, @intFromFloat(std.math.log10(measurement.scale)) + 1),
+            .checksum = "checksum",
+            .checksum_width = @as(usize, @intFromFloat(std.math.log(u64, 16, measurement.checksum)) + 1),
+        });
     }
 
     pub fn write_csv_values(
         measurement: *const PerfMeasurement,
-        writer: *std.Io.Writer,
-        elapsed_ns: u64,
-        scale: f64,
-    ) std.Io.Writer.Error!void {
+        writer: anytype,
+    ) !void {
+        try writer.print("{d: >10}, ", .{measurement.elapsed.ns / std.time.ns_per_ms});
         const value_format_string: []const u8 = "{[counter_value]d: >[counter_width].2}";
-        for (&measurement.counters, 0..) |*entry, i| {
+        for (std.enums.values(CounterType), 0..) |counter, i| {
             if (i > 0) try writer.print(", ", .{});
-            try writer.print(value_format_string, .{entry.value.get_counter(scale)});
+            try writer.print(value_format_string, .{
+                .counter_value = measurement.get_counter(counter),
+                .counter_width = @tagName(counter).len,
+            });
         }
         try writer.print(", ", .{});
-        inline for (std.enums.values(DerivedCounter), 0..) |derived_counter, i| {
+        for (std.enums.values(DerivedCounter), 0..) |derived_counter, i| {
             const derived = measurement.compute_derived(derived_counter) orelse continue;
             if (i > 0) try writer.print(", ", .{});
             try writer.print(value_format_string, .{
@@ -124,49 +163,12 @@ pub const PerfMeasurement = struct {
                 .counter_width = @tagName(derived_counter).len,
             });
         }
-        try writer.print(", ", .{});
-        try writer.print(", {d:.2}", .{scale});
+        try writer.print(", {d: >5.2}, {X}", .{ measurement.scale, measurement.checksum });
     }
 };
 
-const mode = @import("test_options").benchmark_mode;
-
-pub fn PerfType(comptime benchmark_mode: @TypeOf(mode)) type {
-    comptime {
-        if (benchmark_mode == .assert) {
-            assert(builtin.os.tag == .linux);
-        }
-    }
-    const PerfCountersLinux = @import("./perf_linux.zig").PerfCounters;
-    return switch (benchmark_mode) {
-        .smoke => PerfTimer,
-        .benchmark => if (builtin.os.tag == .linux) PerfCountersLinux else PerfTimer,
-        .assert => PerfCountersLinux,
-    };
-}
-
-/// Performance Counters Interface that only counts time
-/// for use in smoke mode or on windows/macos
-const PerfTimer = struct {
-    time: Time = .{},
-    timer: ?Instant = null,
-
-    pub fn init() !PerfTimer {
-        return .{};
-    }
-
-    pub fn deinit(perf: *PerfTimer) void {
-        _ = perf;
-    }
-
-    pub fn start(perf: *PerfTimer) !void {
-        perf.timer = perf.time.monotonic();
-    }
-
-    pub fn read(perf: *PerfTimer, scale: f64) !PerfMeasurement {
-        assert(perf != null);
-        assert(perf.timer != null);
-        _ = scale;
-        return .{ .counters = .init(.{}), .elapsed = perf.timer.?.elapsed(perf.time.monotonic()) };
-    }
+const PerfCountersLinux = @import("./perf_linux.zig").PerfCounters;
+const PerfCounters = switch (builtin.target.os.tag) {
+    .linux => PerfCountersLinux,
+    else => @compileError("PerfCounters only supported on linux"),
 };
