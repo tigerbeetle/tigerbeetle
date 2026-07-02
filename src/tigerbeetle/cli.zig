@@ -75,6 +75,7 @@ const CLIArgs = union(enum) {
         limit_storage: ?ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
         limit_request: ?ByteSize = null,
+        memory: ?ByteSize = null,
         cache_accounts: ?ByteSize = null,
         cache_transfers: ?ByteSize = null,
         cache_transfers_pending: ?ByteSize = null,
@@ -133,6 +134,7 @@ const CLIArgs = union(enum) {
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
+        memory: ?[]const u8 = null,
         account_count: u64 = 10_000,
         account_count_hot: u32 = 0,
         log_debug: bool = false,
@@ -499,6 +501,27 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
+const MemorySplit = struct {
+    cache_grid: u8,
+    cache_accounts: u8,
+    cache_transfers: u8,
+    cache_transfers_pending: u8,
+
+    const default_value: MemorySplit = .{
+        .cache_grid = 64,
+        .cache_accounts = 32,
+        .cache_transfers = 0,
+        .cache_transfers_pending = 4,
+    };
+};
+
+const CacheSizes = struct {
+    cache_grid: ByteSize,
+    cache_accounts: ByteSize,
+    cache_transfers: ByteSize,
+    cache_transfers_pending: ByteSize,
+};
+
 /// While CLIArgs store raw arguments as passed on the command line, Command ensures that arguments
 /// are properly validated and desugared (e.g, sizes converted to counts where appropriate).
 pub const Command = union(enum) {
@@ -591,6 +614,7 @@ pub const Command = union(enum) {
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
         cache_grid: ?[]const u8,
+        memory: ?[]const u8,
         log_debug: bool,
         log_debug_replica: bool,
         account_count: u64,
@@ -865,6 +889,30 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
+    if (start.memory != null) {
+        inline for (.{
+            .{ start.cache_grid, "--cache-grid" },
+            .{ start.cache_accounts, "--cache-accounts" },
+            .{ start.cache_transfers, "--cache-transfers" },
+            .{ start.cache_transfers_pending, "--cache-transfers-pending" },
+        }) |cache_arg| {
+            if (cache_arg[0] != null) {
+                vsr.fatal(.cli, "--memory is mutually exclusive with {s}", .{cache_arg[1]});
+            }
+        }
+    }
+
+    const cache_sizes = if (start.memory) |memory|
+        memory_split_cache_sizes(memory, MemorySplit.default_value)
+    else
+        CacheSizes{
+            .cache_grid = start.cache_grid orelse defaults.cache_grid,
+            .cache_accounts = start.cache_accounts orelse defaults.cache_accounts,
+            .cache_transfers = start.cache_transfers orelse defaults.cache_transfers,
+            .cache_transfers_pending = start.cache_transfers_pending orelse
+                defaults.cache_transfers_pending,
+        };
+
     const start_limit_storage: ByteSize = start.limit_storage orelse
         .{ .value = constants.storage_size_limit_default };
     const start_memory_lsm_manifest: ByteSize = start.memory_lsm_manifest orelse
@@ -1050,25 +1098,25 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .cache_accounts = parse_cache_size_to_count(
             tigerbeetle.Account,
             AccountsValuesCache,
-            start.cache_accounts orelse defaults.cache_accounts,
+            cache_sizes.cache_accounts,
             "--cache-accounts",
         ),
         .cache_transfers = parse_cache_size_to_count(
             tigerbeetle.Transfer,
             TransfersValuesCache,
-            start.cache_transfers orelse defaults.cache_transfers,
+            cache_sizes.cache_transfers,
             "--cache-transfers",
         ),
         .cache_transfers_pending = parse_cache_size_to_count(
             vsr.state_machine.TransferPending,
             TransfersPendingValuesCache,
-            start.cache_transfers_pending orelse defaults.cache_transfers_pending,
+            cache_sizes.cache_transfers_pending,
             "--cache-transfers-pending",
         ),
         .cache_grid_blocks = parse_cache_size_to_count(
             [constants.block_size]u8,
             Grid.Cache,
-            start.cache_grid orelse defaults.cache_grid,
+            cache_sizes.cache_grid,
             "--cache-grid",
         ),
         .lsm_forest_compaction_block_count = lsm_forest_compaction_block_count,
@@ -1161,6 +1209,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .cache_transfers = benchmark.cache_transfers,
         .cache_transfers_pending = benchmark.cache_transfers_pending,
         .cache_grid = benchmark.cache_grid,
+        .memory = benchmark.memory,
         .log_debug = benchmark.log_debug,
         .log_debug_replica = benchmark.log_debug_replica,
         .account_count = benchmark.account_count,
@@ -1401,6 +1450,24 @@ fn parse_cache_size_to_count(
     assert(@as(u64, result) * @sizeOf(T) <= size.bytes());
 
     return result;
+}
+
+fn memory_split_cache_sizes(memory: ByteSize, split: MemorySplit) CacheSizes {
+    const memory_bytes = memory.bytes();
+
+    return .{
+        .cache_grid = .{ .value = memory_split_bytes(memory_bytes, split.cache_grid) },
+        .cache_accounts = .{ .value = memory_split_bytes(memory_bytes, split.cache_accounts) },
+        .cache_transfers = .{ .value = memory_split_bytes(memory_bytes, split.cache_transfers) },
+        .cache_transfers_pending = .{
+            .value = memory_split_bytes(memory_bytes, split.cache_transfers_pending),
+        },
+    };
+}
+
+fn memory_split_bytes(memory_bytes: u64, percent: u8) u64 {
+    assert(percent <= 100);
+    return @intCast(@divFloor(@as(u128, memory_bytes) * percent, 100));
 }
 
 fn parse_timeout_to_ticks(timeout_ms: ?u64, cli_flag: []const u8) ?u64 {
