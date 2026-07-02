@@ -3458,6 +3458,8 @@ pub fn ReplicaType(
             assert(message.header.protocol <= vsr.Version);
             maybe(message.header.protocol < vsr.Version);
             assert(self.grid_repair_writes.available() > 0);
+            assert(self.grid.blocks_missing.repair_blocks_available() >=
+                self.grid_repair_writes.available());
 
             if (self.release.value < message.header.release.value) {
                 log.debug("{}: on_block: ignoring; release={} (address={} checksum={x:0>32})", .{
@@ -3503,6 +3505,19 @@ pub fn ReplicaType(
                     message.header.checksum,
                     @tagName(message.header.block_type),
                 });
+
+                // GridBlocksMissing has finite capacity. This is fine for syncing table blocks,
+                // since tables are synced in their entirety via sync_table(). But for non-table
+                // blocks, we must ensure that each makes their way through GridBlocksMissing.
+                // To ensure none are dropped, we add them just-in-time before we start the repair,
+                // by using read_global_queue (which has no maximum capacity).
+                //
+                // (At this point, the block we are queueing may already be in GridBlocksMissing,
+                // but adding it is idempotent.)
+                self.grid.blocks_missing.repair_block(
+                    message.header.address,
+                    message.header.checksum,
+                );
             }
 
             const grid_repair =
@@ -3520,6 +3535,13 @@ pub fn ReplicaType(
                 write.* = .{ .replica = self };
                 self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
             } else {
+                if (grid_fulfill) {
+                    assert(self.grid.blocks_missing.block_writing(
+                        message.header.address,
+                        message.header.checksum,
+                    ));
+                }
+
                 self.grid_repair_writes.release(write);
                 // A recipient of fulfill_block() may be borrowing this block.
                 self.grid.block_unref(write_block.*);
@@ -3845,7 +3867,11 @@ pub fn ReplicaType(
                 constants.grid_scrubber_interval_ticks_max,
             );
 
-            while (self.grid.blocks_missing.repair_blocks_available() > 0) {
+            const grid_scrubber_writes_count =
+                self.grid.blocks_missing.repair_blocks_available() -
+                self.grid_repair_writes.available();
+            assert(grid_scrubber_writes_count <= constants.grid_scrubber_writes_max);
+            for (0..grid_scrubber_writes_count) |_| {
                 const fault = blk: {
                     while (self.grid_scrubber.read_result_next()) |result| {
                         if (result.status == .repair) {

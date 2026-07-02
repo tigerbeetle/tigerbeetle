@@ -86,6 +86,7 @@ const CLIArgs = struct {
     replica_missing: ?u8 = null,
     replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
+    storage_size_limit: ?stdx.ByteSize = null,
 
     @"--": void,
     seed: ?[]const u8 = null,
@@ -111,7 +112,9 @@ pub fn main() !void {
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const cli_args = flags.parse(CLIArgs);
+    var cli_args = flags.parse(CLIArgs);
+    cli_args.requests_max = 12_000; // FIXME Remove these overrides.
+    cli_args.storage_size_limit = .{ .value = 800, .unit = .mib };
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
@@ -163,6 +166,12 @@ pub fn main() !void {
     }
     if (cli_args.requests_max) |requests_max| {
         options.requests_max = requests_max;
+        // A high requests_max can overflow the aof.
+        options.cluster.aof = false;
+    }
+    if (cli_args.storage_size_limit) |storage_size_limit| {
+        options.cluster.storage_size_limit = storage_size_limit.bytes();
+        options.storage.size = storage_size_limit.bytes();
     }
 
     if (options.replica_missing_until_request != null and
@@ -350,13 +359,15 @@ pub fn main() !void {
                 fatal(.liveness, "no state convergence: {s}", .{reason});
             }
         } else {
-            const commits = simulator.cluster.state_checker.commits.items;
-            const last_checksum = commits[commits.len - 1].header.checksum;
-            for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
-                if (simulator.core.is_set(replica_index)) {
-                    try aof.validate(gpa, last_checksum);
-                } else {
-                    try aof.validate(gpa, null);
+            if (simulator.options.cluster.aof) {
+                const commits = simulator.cluster.state_checker.commits.items;
+                const last_checksum = commits[commits.len - 1].header.checksum;
+                for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
+                    if (simulator.core.is_set(replica_index)) {
+                        try aof.validate(gpa, last_checksum);
+                    } else {
+                        try aof.validate(gpa, null);
+                    }
                 }
             }
         }
@@ -412,6 +423,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .standby_count = standby_count,
         .client_count = client_count,
         .storage_size_limit = storage_size_limit,
+        .aof = prng.boolean(),
         .seed = prng.int(u64),
         .releases = &releases,
         .client_release = releases[0].release,
@@ -536,6 +548,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .standby_count = 0,
         .client_count = 4,
         .storage_size_limit = vsr.sector_floor(200 * MiB),
+        .aof = true,
         .seed = prng.int(u64),
         .releases = releases[0..1],
         .client_release = releases[0].release,

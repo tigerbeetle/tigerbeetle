@@ -132,9 +132,9 @@ const ConfigProcess = struct {
     grid_cache_size_default: u64 = GiB,
     grid_repair_request_max: u16 = 4,
     grid_repair_reads_max: u16 = 4,
-    grid_missing_blocks_max: u32 = 30,
     grid_missing_tables_max: u32 = 6,
     grid_scrubber_reads_max: u16 = 1,
+    grid_scrubber_writes_max: u16 = 1,
     grid_scrubber_cycle: stdx.Duration = .ms(std.time.ms_per_day * 180),
     grid_scrubber_interval_min: stdx.Duration = .ms(50),
     grid_scrubber_interval_max: stdx.Duration = .seconds(10),
@@ -246,7 +246,6 @@ pub const configs = struct {
             .grid_iops_write_max = 8,
             .grid_repair_request_max = 4,
             .grid_repair_reads_max = 4,
-            .grid_missing_blocks_max = 3,
             .grid_missing_tables_max = 2,
             .grid_scrubber_reads_max = 2,
             .grid_scrubber_cycle = .ms(std.time.ms_per_hour),
@@ -260,6 +259,7 @@ pub const configs = struct {
             .message_size_max = Config.Cluster.message_size_max_min(4),
 
             .block_size = sector_size,
+            .lsm_levels = 8,
             .lsm_compaction_ops = 4,
             .lsm_growth_factor = 4,
             // (This is higher than the production default value because the block size is smaller.)
