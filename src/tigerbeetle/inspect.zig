@@ -470,6 +470,7 @@ fn print_tree_schema(
     const block_index = comptime schema.TableIndex.init(.{
         .key_size = @sizeOf(Tree.Table.Key),
         .value_block_count_max = Tree.Table.layout.value_block_count_max,
+        .tree_id = tree_id,
     });
     try output.print("IL={d}+{d},{d}/{d}+{d},{d}+{d},{d}+{d} ", .{
         block_index.value_checksums_offset,
@@ -486,6 +487,7 @@ fn print_tree_schema(
     const block_value = comptime schema.TableValue.init(.{
         .value_size = @sizeOf(Tree.Table.Value),
         .value_count_max = Tree.Table.layout.block_value_count_max,
+        .tree_id = tree_id,
     });
 
     try output.print("VL={d}+{d},{d}+{d}\n", .{

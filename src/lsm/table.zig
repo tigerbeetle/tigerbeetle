@@ -57,8 +57,11 @@ pub fn TableType(
     /// The maximum number of values per table.
     comptime table_value_count_max: usize,
     comptime table_usage: TableUsage,
+    /// The id of the tree this table type belongs to.
+    comptime table_tree_id: u16,
 ) type {
     comptime assert(@typeInfo(TableKey) == .int or @typeInfo(TableKey) == .comptime_int);
+    comptime assert(table_tree_id > 0);
 
     return struct {
         const Table = @This();
@@ -136,11 +139,13 @@ pub fn TableType(
         pub const index = schema.TableIndex.init(.{
             .key_size = key_size,
             .value_block_count_max = value_block_count_max,
+            .tree_id = table_tree_id,
         });
 
         pub const data = schema.TableValue.init(.{
             .value_count_max = layout.block_value_count_max,
             .value_size = value_size,
+            .tree_id = table_tree_id,
         });
 
         const compile_log_layout = false;
@@ -295,7 +300,6 @@ pub fn TableType(
                 release: vsr.Release,
                 address: u64,
                 snapshot_min: u64,
-                tree_id: u16,
             };
 
             pub fn value_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -315,7 +319,7 @@ pub fn TableType(
                         .value_count_max = data.value_count_max,
                         .value_count = builder.value_count,
                         .value_size = value_size,
-                        .tree_id = options.tree_id,
+                        .tree_id = table_tree_id,
                     }),
                     .address = options.address,
                     .snapshot = options.snapshot_min,
@@ -400,7 +404,6 @@ pub fn TableType(
                 release: vsr.Release,
                 address: u64,
                 snapshot_min: u64,
-                tree_id: u16,
             };
 
             pub fn index_block_finish(
@@ -421,7 +424,7 @@ pub fn TableType(
                     .metadata_bytes = @bitCast(schema.TableIndex.Metadata{
                         .value_block_count = builder.value_block_count,
                         .value_block_count_max = index.value_block_count_max,
-                        .tree_id = options.tree_id,
+                        .tree_id = table_tree_id,
                         .key_size = index.key_size,
                     }),
                     .address = options.address,
@@ -549,11 +552,10 @@ pub fn TableType(
 
         pub fn verify_value_block(
             value_block: BlockPtrConst,
-            tree_id: u16,
             key_min: Key,
             key_max: Key,
         ) void {
-            data.assert_matching_block_schema(value_block, tree_id);
+            data.assert_matching_block_schema(value_block);
 
             const values = Table.value_block_values_used(value_block);
             assert(values.len > 0);
@@ -577,11 +579,10 @@ pub fn TableType(
 
         pub fn verify_index_block(
             index_block: BlockPtrConst,
-            tree_id: u16,
             key_min: Key,
             key_max: Key,
         ) schema.TableIndex {
-            const index_schema = index.from_block_with_schema(index_block, tree_id);
+            const index_schema = index.from_block_with_schema(index_block);
 
             const keys_min = index_value_keys_used(index_block, .key_min);
             const keys_max = index_value_keys_used(index_block, .key_max);
@@ -602,7 +603,6 @@ pub fn TableType(
             index_address: u64,
             key_min: ?Key,
             key_max: ?Key,
-            tree_id: u16,
         ) void {
             if (Storage != @import("../testing/storage.zig").Storage)
                 // Too complicated to do async verification
@@ -613,7 +613,7 @@ pub fn TableType(
             const value_block_checksums = index.value_checksums_used(index_block);
 
             if (key_min != null and key_max != null) {
-                _ = Table.verify_index_block(index_block, tree_id, key_min.?, key_max.?);
+                _ = Table.verify_index_block(index_block, key_min.?, key_max.?);
             }
 
             for (
@@ -628,7 +628,6 @@ pub fn TableType(
 
                 Table.verify_value_block(
                     value_block,
-                    tree_id,
                     Table.index_value_keys_used(index_block, .key_min)[value_block_index],
                     Table.index_value_keys_used(index_block, .key_max)[value_block_index],
                 );
@@ -666,6 +665,7 @@ test "Table" {
         CompositeKey.tombstone_from_key,
         1, // Doesn't matter for this test.
         .general,
+        1, // Doesn't matter for this test.
     );
 
     std.testing.refAllDecls(Table.Builder);

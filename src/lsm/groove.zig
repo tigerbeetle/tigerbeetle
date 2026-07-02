@@ -55,6 +55,7 @@ fn UniqueKeyTreeType(
     comptime Storage: type,
     comptime Field: type,
     comptime table_value_count_max: usize,
+    comptime tree_id: u16,
 ) type {
     const UniqueKey = UniqueKeyType(IndexType(Field));
     const Table = TableType(
@@ -66,6 +67,7 @@ fn UniqueKeyTreeType(
         UniqueKey.tombstone_from_key,
         table_value_count_max,
         .general,
+        tree_id,
     );
 
     return TreeType(Table, Storage);
@@ -76,6 +78,7 @@ fn IndexTreeType(
     comptime Storage: type,
     comptime Field: type,
     comptime table_value_count_max: usize,
+    comptime tree_id: u16,
 ) type {
     const CompositeKey = CompositeKeyType(IndexType(Field));
     const Table = TableType(
@@ -87,6 +90,7 @@ fn IndexTreeType(
         CompositeKey.tombstone_from_key,
         table_value_count_max,
         .secondary_index,
+        tree_id,
     );
 
     return TreeType(Table, Storage);
@@ -320,12 +324,13 @@ pub fn GrooveType(
             unique_key = unique_key or std.mem.eql(u8, field.name, unique_key_name);
         }
 
+        const tree_id = @field(groove_options.ids, field.name);
         const table_value_count_max = constants.lsm_compaction_ops *
             @field(groove_options.batch_value_count_max, field.name);
         const IndexTree = if (unique_key)
-            UniqueKeyTreeType(Storage, field.type, table_value_count_max)
+            UniqueKeyTreeType(Storage, field.type, table_value_count_max, tree_id)
         else
-            IndexTreeType(Storage, field.type, table_value_count_max);
+            IndexTreeType(Storage, field.type, table_value_count_max, tree_id);
 
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
             .{
@@ -373,12 +378,14 @@ pub fn GrooveType(
         }
 
         const DerivedType = derive_return_type.optional.child;
+
+        const tree_id = @field(groove_options.ids, field.name);
         const table_value_count_max = constants.lsm_compaction_ops *
             @field(groove_options.batch_value_count_max, field.name);
         const IndexTree = if (unique_key)
-            UniqueKeyTreeType(Storage, DerivedType, table_value_count_max)
+            UniqueKeyTreeType(Storage, DerivedType, table_value_count_max, tree_id)
         else
-            IndexTreeType(Storage, DerivedType, table_value_count_max);
+            IndexTreeType(Storage, DerivedType, table_value_count_max, tree_id);
         index_fields = index_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
@@ -416,6 +423,7 @@ pub fn GrooveType(
             ObjectTreeHelper.tombstone_from_key,
             table_value_count_max,
             .general,
+            @field(groove_options.ids, "timestamp"),
         );
         break :T TreeType(Table, Storage);
     };

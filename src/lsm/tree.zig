@@ -434,7 +434,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
-                _ = Table.index.from_block_with_schema(index_block, context.tree.config.id);
+                _ = Table.index.from_block_with_schema(index_block);
 
                 const keys_min = Table.index_value_keys_used(index_block, .key_min);
                 const keys_max = Table.index_value_keys_used(index_block, .key_max);
@@ -471,7 +471,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
-                Table.data.assert_matching_block_schema(value_block, context.tree.config.id);
+                Table.data.assert_matching_block_schema(value_block);
 
                 const values = Table.value_block_values_used(value_block);
                 const values_key_min = Table.key_from_value(&values[0]);
@@ -545,7 +545,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.compaction_op = tree.grid.superblock.working.vsr_state.checkpoint.header.op;
             tree.key_range = tree.manifest.key_range();
 
-            tree.manifest.verify(snapshot_latest, tree.config.id);
+            tree.manifest.verify(snapshot_latest);
             assert(tree.compaction_op.? == 0 or
                 (tree.compaction_op.? + 1) % constants.lsm_compaction_ops == 0);
             maybe(tree.key_range == null);

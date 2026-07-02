@@ -939,6 +939,8 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
+    const tree_id = prng.int(u16);
+
     var storage = try fixtures.init_storage(gpa, .{
         .size = constants.storage_size_limit_default,
         .seed = prng.int(u64),
@@ -953,7 +955,7 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
 
     switch (table_usage) {
         inline else => |usage| {
-            try EnvironmentType(usage).run(gpa, &storage, block_count, fuzz_ops);
+            try EnvironmentType(usage, tree_id).run(gpa, &storage, block_count, fuzz_ops);
         },
     }
 

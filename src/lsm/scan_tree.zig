@@ -787,7 +787,6 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             const index_schema = Table.verify_index_block(
                 index_block,
-                self.scan.tree.config.id,
                 state.loading_index.table_key_min,
                 state.loading_index.table_key_max,
             );
@@ -895,7 +894,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.values == .fetching);
             assert(self.scan.state == .buffering);
             assert(self.scan.state.buffering.pending_count > 0);
-            Table.data.assert_matching_block_schema(value_block, self.scan.tree.config.id);
+            Table.data.assert_matching_block_schema(value_block);
 
             const values = Table.value_block_values_used(value_block);
             const key_min = key_from_value(&values[0]);

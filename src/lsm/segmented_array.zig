@@ -1428,6 +1428,7 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
         CompositeKey.tombstone_from_key,
         1, // Doesn't matter for this test.
         .general,
+        1, // Doesn't matter for this test.
     ));
 
     const CompareInt = struct {

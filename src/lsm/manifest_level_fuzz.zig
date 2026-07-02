@@ -60,6 +60,7 @@ const Table = @import("table.zig").TableType(
     tombstone_from_key,
     1, // Doesn't matter for this test.
     .general,
+    1, // Doesn't matter for this test.
 );
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {

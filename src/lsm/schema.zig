@@ -100,6 +100,7 @@ pub const TableIndex = struct {
 
     key_size: u32,
     value_block_count_max: u32,
+    tree_id: u16,
 
     size: u32,
     value_checksums_offset: u32,
@@ -115,12 +116,14 @@ pub const TableIndex = struct {
     const Parameters = struct {
         key_size: u32,
         value_block_count_max: u32,
+        tree_id: u16,
     };
 
     pub fn init(parameters: Parameters) TableIndex {
         assert(parameters.key_size > 0);
         assert(parameters.value_block_count_max > 0);
         assert(parameters.value_block_count_max <= constants.lsm_table_value_blocks_max);
+        assert(parameters.tree_id > 0);
 
         const value_checksums_offset = @sizeOf(vsr.Header);
         const value_checksums_size = parameters.value_block_count_max * checksum_size;
@@ -144,6 +147,7 @@ pub const TableIndex = struct {
         return .{
             .key_size = parameters.key_size,
             .value_block_count_max = parameters.value_block_count_max,
+            .tree_id = parameters.tree_id,
             .size = size,
             .value_checksums_offset = value_checksums_offset,
             .value_checksums_size = value_checksums_size,
@@ -168,6 +172,7 @@ pub const TableIndex = struct {
         const index = TableIndex.init(.{
             .key_size = header_metadata.key_size,
             .value_block_count_max = header_metadata.value_block_count_max,
+            .tree_id = header_metadata.tree_id,
         });
 
         for (index.padding(index_block)) |padding_area| {
@@ -180,16 +185,15 @@ pub const TableIndex = struct {
     pub fn from_block_with_schema(
         schema: *const TableIndex,
         index_block: BlockPtrConst,
-        tree_id: u16,
     ) TableIndex {
-        const header_metadata = metadata(index_block);
-        assert(header_metadata.tree_id == tree_id);
-        assert(header_metadata.key_size == schema.key_size);
-        assert(header_metadata.value_block_count_max == schema.value_block_count_max);
+        const block_schema = from_block_without_schema(index_block);
+        assert(schema.tree_id == block_schema.tree_id);
+        assert(schema.key_size == block_schema.key_size);
+        assert(schema.value_block_count_max == block_schema.value_block_count_max);
         // The other schema fields are computed from key_size and value_block_count_max at runtime
         // and not saved in metadata. There is currently no way to detect whether this computation
         // itself has changed between versions.
-        return from_block_without_schema(index_block);
+        return block_schema;
     }
 
     pub fn metadata(index_block: BlockPtrConst) *const Metadata {
@@ -307,6 +311,8 @@ pub const TableValue = struct {
     value_size: u32,
     // The maximum number of values in a value block.
     value_count_max: u32,
+    // The id of the containing tree
+    tree_id: u16,
 
     values_offset: u32,
     values_size: u32,
@@ -317,11 +323,13 @@ pub const TableValue = struct {
     pub const Parameters = struct {
         value_count_max: u32,
         value_size: u32,
+        tree_id: u16,
     };
 
     pub fn init(parameters: Parameters) TableValue {
         assert(parameters.value_count_max > 0);
         assert(parameters.value_size > 0);
+        assert(parameters.tree_id > 0);
         assert(std.math.isPowerOfTwo(parameters.value_size));
 
         const value_count_max = parameters.value_count_max;
@@ -335,6 +343,7 @@ pub const TableValue = struct {
         return .{
             .value_size = parameters.value_size,
             .value_count_max = value_count_max,
+            .tree_id = parameters.tree_id,
             .values_offset = values_offset,
             .values_size = values_size,
             .padding_offset = padding_offset,
@@ -354,26 +363,18 @@ pub const TableValue = struct {
         return TableValue.init(.{
             .value_count_max = header_metadata.value_count_max,
             .value_size = header_metadata.value_size,
+            .tree_id = header_metadata.tree_id,
         });
     }
 
     pub fn assert_matching_block_schema(
         schema: *const TableValue,
         value_block: BlockPtrConst,
-        tree_id: u16,
     ) void {
-        const header = header_from_block(value_block);
-        assert(header.command == .block);
-        assert(header.block_type == .value);
-        assert(header.address > 0);
-        assert(header.snapshot > 0);
-
-        const header_metadata = metadata(value_block);
-
-        assert(header_metadata.tree_id == tree_id);
-        assert(header_metadata.value_size == schema.value_size);
-        assert(header_metadata.value_count_max == schema.value_count_max);
-        assert(stdx.zeroed(&header_metadata.reserved));
+        const block_schema = from(value_block);
+        assert(block_schema.tree_id == schema.tree_id);
+        assert(block_schema.value_size == schema.value_size);
+        assert(block_schema.value_count_max == schema.value_count_max);
         // The other schema fields are computed from value_size and value_count_max at runtime and
         // not saved in metadata. There is currently no way to detect whether this computation
         // itself has changed between versions.

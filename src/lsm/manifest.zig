@@ -715,7 +715,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             return true;
         }
 
-        pub fn verify(manifest: *const Manifest, snapshot: u64, tree_id: u16) void {
+        pub fn verify(manifest: *const Manifest, snapshot: u64) void {
             assert(snapshot <= snapshot_latest);
 
             switch (Table.usage) {
@@ -768,7 +768,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                             table_info.address,
                             table_info.key_min,
                             table_info.key_max,
-                            tree_id,
                         );
                     }
                 }

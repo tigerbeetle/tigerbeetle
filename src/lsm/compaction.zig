@@ -103,7 +103,6 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             verify: struct {
                 key_min: u256,
                 key_max: u256,
-                tree_id: u16,
             },
         };
 
@@ -1211,7 +1210,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                         if (index_block.stage == .read_index_block_done) {
                             const index_schema = Table.index.from_block_with_schema(
                                 index_block.ptr,
-                                compaction.tree.config.id,
                             );
                             const value_blocks_count =
                                 index_schema.value_blocks_used(index_block.ptr);
@@ -1241,10 +1239,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 // Read level B value block.
                 if (compaction.level_b_index_block.head()) |index_block| {
                     if (index_block.stage == .read_index_block_done) {
-                        const index_schema = Table.index.from_block_with_schema(
-                            index_block.ptr,
-                            compaction.tree.config.id,
-                        );
+                        const index_schema = Table.index.from_block_with_schema(index_block.ptr);
                         const value_blocks_count =
                             index_schema.value_blocks_used(index_block.ptr);
 
@@ -1409,7 +1404,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .verify = .{
                     .key_min = table_ref.table_info.key_min,
                     .key_max = table_ref.table_info.key_max,
-                    .tree_id = compaction.tree.config.id,
                 },
             };
 
@@ -1431,7 +1425,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
             _ = Table.verify_index_block(
                 index_block,
-                read.verify.tree_id,
                 @intCast(read.verify.key_min),
                 @intCast(read.verify.key_max),
             );
@@ -1487,14 +1480,10 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .verify = .{
                     .key_min = key_min,
                     .key_max = key_max,
-                    .tree_id = compaction.tree.config.id,
                 },
             };
 
-            const index_schema = Table.index.from_block_with_schema(
-                index_block,
-                compaction.tree.config.id,
-            );
+            const index_schema = Table.index.from_block_with_schema(index_block);
             const value_block_addresses = index_schema.value_addresses_used(index_block);
             const value_block_address = value_block_addresses[value_block_index];
             const value_block_checksum =
@@ -1515,10 +1504,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             compaction: *Compaction,
             index_block: BlockPtrConst,
         ) void {
-            const index_schema = Table.index.from_block_with_schema(
-                index_block,
-                compaction.tree.config.id,
-            );
+            const index_schema = Table.index.from_block_with_schema(index_block);
             const index_block_address = Table.block_address(index_block);
             const value_block_addresses = index_schema.value_addresses_used(index_block);
 
@@ -1543,7 +1529,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
             assert(read.block.stage == .read_value_block);
             Table.verify_value_block(
                 value_block,
-                read.verify.tree_id,
                 @intCast(read.verify.key_min),
                 @intCast(read.verify.key_max),
             );
@@ -1877,10 +1862,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
                         const index_block = compaction.level_a_index_block.head().?;
                         assert(index_block.stage == .read_index_block_done);
-                        const index_schema = Table.index.from_block_with_schema(
-                            index_block.ptr,
-                            compaction.tree.config.id,
-                        );
+                        const index_schema = Table.index.from_block_with_schema(index_block.ptr);
                         const value_blocks_count =
                             index_schema.value_blocks_used(index_block.ptr);
 
@@ -1924,10 +1906,7 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
 
                     const index_block = compaction.level_b_index_block.head().?;
                     assert(index_block.stage == .read_index_block_done);
-                    const index_schema = Table.index.from_block_with_schema(
-                        index_block.ptr,
-                        compaction.tree.config.id,
-                    );
+                    const index_schema = Table.index.from_block_with_schema(index_block.ptr);
                     const value_blocks_count =
                         index_schema.value_blocks_used(index_block.ptr);
 
@@ -1973,7 +1952,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .release = compaction.grid.superblock.working.vsr_state.checkpoint.release,
                 .address = options.address,
                 .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
-                .tree_id = compaction.tree.config.id,
             });
             assert(compaction.table_builder.state == .index_block);
             compaction.table_builder_value_block = null;
@@ -2002,7 +1980,6 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 .release = compaction.grid.superblock.working.vsr_state.checkpoint.release,
                 .address = options.address,
                 .snapshot_min = snapshot_min_for_table_output(compaction.op_min),
-                .tree_id = compaction.tree.config.id,
             });
             assert(compaction.table_builder.state == .no_blocks);
             compaction.table_builder_index_block = null;
