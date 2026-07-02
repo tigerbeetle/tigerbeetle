@@ -3,8 +3,7 @@
 /// These only count cycles in the current process, and not, for exampole, sleep time.
 /// The closest matching clock implementation semantics are provided by CLOCK_MONOTONIC,
 /// which is what we use here. To distinguish towards vsr.time.Time.monotonic(),
-/// we call this `benchmark_monotonic()`
-/// https://github.com/ziglang/zig/pull/933#discussion_r656021295.
+/// we call this `benchmark_monotonic()`.
 const std = @import("std");
 const builtin = @import("builtin");
 
@@ -19,7 +18,7 @@ const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
 
-const BenchmarkTimer = @This();
+const BenchmarkTime = @This();
 
 // BenchmarkTime is used to test algorithm runtime and is not critical for safety.
 // We still guard against non-monotonicity bugs in OS time sources
