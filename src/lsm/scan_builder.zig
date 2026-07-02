@@ -63,7 +63,7 @@ pub fn ScanBuilderConfigType(comptime Forest: type) type {
 pub fn ScanBuilderType(
     comptime Storage: type,
     comptime Forest: type,
-    /// `Groove`s can be joined in the same scan, as long they produce
+    /// `Groove`s can be joined in the same scan, as long as they produce
     /// `timestamps` for the same objects.
     /// For example, indexes from the Grooves `Transfers` and `TransfersPending` can be
     /// used together in the same query, and the timestamp they produce can be used for

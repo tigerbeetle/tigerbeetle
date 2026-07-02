@@ -1271,18 +1271,16 @@ const TestContext = struct {
             },
         );
 
-        // Usually, `pulse_next_timestamp` starts in an unknown state,
-        // signaling that the state machine needs a `pulse` to scan for
-        // pending transfers and correctly determine when to process the
-        // next expiry. However, this initial `pulse` unnecessarily bumps
-        // time, making unit tests that depend on the `timestamp` harder
-        // to reason about.
+        // Usually, `expire_pending_transfers` starts in an unknown state, signaling that the state
+        // machine needs a `pulse` to scan for pending transfers and correctly determine when to
+        // process the next expiry. However, this initial `pulse` unnecessarily bumps time, making
+        // unit tests that depend on the `timestamp` harder to reason about.
         //
-        // Since this is a newly created state machine, we can bypass the
-        // initial check, ensuring that there will be no `timestamp` bumps
-        // between operations unless actual pending transfers get expired.
-        context.state_machine.expire_pending_transfers
-            .pulse_next_timestamp = TimestampRange.timestamp_max;
+        // Since this is a newly created state machine, we can bypass the initial check, ensuring
+        // that there will be no `timestamp` bumps between operations unless actual pending
+        // transfers get expired.
+        context.state_machine.pulse.expire_pending_transfers.timestamp_next =
+            TimestampRange.timestamp_max;
     }
 
     fn submit(context: *TestContext, packet_list: *Packet) !void {
