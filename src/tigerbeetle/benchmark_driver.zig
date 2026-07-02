@@ -71,6 +71,7 @@ pub fn command_benchmark(
             "cache_transfers",
             "cache_transfers_pending",
             "cache_grid",
+            "memory",
             "statsd",
             "trace",
             "file",
@@ -175,6 +176,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
         .{ options.args.cache_transfers, "cache-transfers" },
         .{ options.args.cache_transfers_pending, "cache-transfers-pending" },
         .{ options.args.cache_grid, "cache-grid" },
+        .{ options.args.memory, "memory" },
         .{ options.args.statsd, "statsd" },
         .{ options.args.trace, "trace" },
     };
