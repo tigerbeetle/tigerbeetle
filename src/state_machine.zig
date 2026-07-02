@@ -4822,9 +4822,13 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .code = batch_create_accounts,
                     .imported = batch_create_accounts,
 
-                    // Transfers mutate the account balance and the closed flag.
-                    // Each transfer modifies two accounts.
+                    // Each transfer modifies the balance of two accounts.
                     .timestamp = @max(batch_create_accounts, 2 * batch_create_transfers),
+                    // Transfers mutate the `closed` flag of two accounts.
+                    // Updating secondary indexes would also require an additional 2x
+                    // factor due to the remove + put. However, when toggling flags
+                    // (`field == void`), either the remove for the old value or the put
+                    // for the new value is skipped.
                     .closed = @max(batch_create_accounts, 2 * batch_create_transfers),
                 },
                 .transfers = .{
@@ -4844,8 +4848,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                     .closing = batch_create_transfers,
                 },
                 .transfers_pending = .{
-                    // Objects are mutated when the pending transfer is posted/voided/expired.
-                    .timestamp = 2 * batch_create_transfers,
+                    .timestamp = batch_create_transfers,
+                    // The status is mutated when the two-phase transfer is completed.
+                    // Updating secondary indexes requires inserting a tombstone to
+                    // override the old value, followed by inserting the new value.
                     .status = 2 * batch_create_transfers,
                 },
                 .account_events = .{
