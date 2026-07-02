@@ -145,7 +145,7 @@ pub const TestContext = struct {
             },
         );
         errdefer ctx.state_machine.deinit(allocator);
-        // Usually, `pulse_next_timestamp` starts in an unknown state, signaling that the state
+        // Usually, `expire_pending_transfers` starts in an unknown state, signaling that the state
         // machine needs a `pulse` to scan for pending transfers and correctly determine when to
         // process the next expiry. However, this initial `pulse` unnecessarily bumps time, making
         // unit tests that depend on the `timestamp` harder to reason about.
@@ -153,8 +153,8 @@ pub const TestContext = struct {
         // Since this is a newly created state machine, we can bypass the initial check, ensuring
         // that there will be no `timestamp` bumps between operations unless actual pending
         // transfers get expired.
-        ctx.state_machine.expire_pending_transfers
-            .pulse_next_timestamp = TimestampRange.timestamp_max;
+        ctx.state_machine.pulse.expire_pending_transfers.timestamp_next =
+            TimestampRange.timestamp_max;
 
         ctx.op = 1;
         ctx.busy = false;
