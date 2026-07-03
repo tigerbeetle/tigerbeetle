@@ -23,3 +23,5 @@ as a series of loosely connected guides which can be read in any order.
   <br>
   Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
   to receive notifications about breaking changes!
+- [Best Practices](./best-practices.md) demonstrates how your application can make the most of
+  TigerBeetle's Safety and Performance guarantees.
