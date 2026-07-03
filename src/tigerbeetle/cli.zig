@@ -501,18 +501,23 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
+/// Invariant: Fields sum to 100.
 const MemorySplit = struct {
     cache_grid: u8,
     cache_accounts: u8,
     cache_transfers: u8,
     cache_transfers_pending: u8,
-
-    const default_value: MemorySplit = .{
+    const default: MemorySplit = .{
         .cache_grid = 64,
         .cache_accounts = 32,
         .cache_transfers = 0,
         .cache_transfers_pending = 4,
     };
+
+    comptime {
+        assert(default.cache_accounts + default.cache_grid + default.cache_transfers +
+            default.cache_transfers_pending == 100);
+    }
 };
 
 const CacheSizes = struct {
@@ -903,7 +908,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     }
 
     const cache_sizes = if (start.memory) |memory|
-        memory_split_cache_sizes(memory, MemorySplit.default_value)
+        memory_split_cache_sizes(memory, MemorySplit.default)
     else
         CacheSizes{
             .cache_grid = start.cache_grid orelse defaults.cache_grid,
@@ -1453,6 +1458,9 @@ fn parse_cache_size_to_count(
 }
 
 fn memory_split_cache_sizes(memory: ByteSize, split: MemorySplit) CacheSizes {
+    assert(split.cache_accounts + split.cache_grid + split.cache_transfers +
+        split.cache_transfers_pending == 100);
+
     const memory_bytes = memory.bytes();
 
     return .{
