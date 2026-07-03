@@ -18,8 +18,8 @@ test "benchmark: performance counter tutorial" {
 
     try perf.start();
 
-    for (0..scale) |i| {
-        checksum *= i;
+    for (1..scale) |i| {
+        checksum += i * i;
     }
 
     const measurements = try perf.read(scale, checksum);
@@ -133,11 +133,11 @@ pub const PerfMeasurement = struct {
             if (i > 0) try writer.print(", ", .{});
             try writer.print("{s: >4}", .{@tagName(derived_counter)});
         }
-        try writer.print(", {[scale]s: <[scale_width]}, {[checksum]s: <[checksum_width]]}\n", .{
+        try writer.print(", {[scale]s: >[scale_width]}, {[checksum]s: >[checksum_width]}\n", .{
             .scale = "scale",
-            .scale_width = @as(usize, @intFromFloat(std.math.log10(measurement.scale)) + 1),
+            .scale_width = @as(usize, @intFromFloat(std.math.log10(measurement.scale))) + 1,
             .checksum = "checksum",
-            .checksum_width = @as(usize, @intFromFloat(std.math.log(u64, 16, measurement.checksum)) + 1),
+            .checksum_width = 1 + @divFloor((64 - @clz(measurement.checksum)), 4),
         });
     }
 
@@ -163,7 +163,7 @@ pub const PerfMeasurement = struct {
                 .counter_width = @tagName(derived_counter).len,
             });
         }
-        try writer.print(", {d: >5.2}, {X}", .{ measurement.scale, measurement.checksum });
+        try writer.print(", {d: >5}, {X: >8}", .{ measurement.scale, measurement.checksum });
     }
 };
 
