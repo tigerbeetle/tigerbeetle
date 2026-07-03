@@ -3513,6 +3513,7 @@ pub fn ReplicaType(
                 self.grid.blocks_missing.repair_block(
                     message.header.address,
                     message.header.checksum,
+                    .{ .scrub = false },
                 );
             }
 
@@ -3864,9 +3865,8 @@ pub fn ReplicaType(
             );
 
             const grid_scrubber_writes_count =
-                self.grid.blocks_missing.repair_blocks_available() -
-                self.grid_repair_writes.available();
-            assert(grid_scrubber_writes_count <= constants.grid_scrubber_writes_max);
+                constants.grid_scrubber_writes_max -
+                self.grid.blocks_missing.enqueued_blocks_repair_scrub;
             for (0..grid_scrubber_writes_count) |_| {
                 const fault = blk: {
                     while (self.grid_scrubber.read_result_next()) |result| {
@@ -3888,6 +3888,7 @@ pub fn ReplicaType(
                 self.grid.blocks_missing.repair_block(
                     fault.block_address,
                     fault.block_checksum,
+                    .{ .scrub = true },
                 );
             }
 
