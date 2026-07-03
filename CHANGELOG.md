@@ -3,19 +3,31 @@
 Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes and critical issues!
 
-## TigerBeetle (unreleased)
+## TigerBeetle (0.17.9)
 
-Released: 2026-06-26
+Released: 2026-07-03
 
 ### Safety And Performance
 
 - [#3810](https://github.com/tigerbeetle/tigerbeetle/pull/3810)
 
-  Revert unique keys, which caused compatibility issues (see [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802)).
+  Revert unique keys, which caused compatibility issues
+  (see [#3802](https://github.com/tigerbeetle/tigerbeetle/pull/3802)).
 
-- [#3822](https://github.com/tigerbeetle/tigerbeetle/pull/3822)
+- [#3822](https://github.com/tigerbeetle/tigerbeetle/pull/3822),
+  [#3844](https://github.com/tigerbeetle/tigerbeetle/pull/3844)
 
-  Extend `inspect constants` to catch schema changes.
+  Extend `inspect constants` to catch schema changes and prints
+  the `Checkpoint Schedule` section.
+
+- [#3845](https://github.com/tigerbeetle/tigerbeetle/pull/3845)
+
+  Micro-optimization to the radix sort algorithm to avoid copies when dealing
+  with large stack-allocated values.
+
+- [#3840](https://github.com/tigerbeetle/tigerbeetle/pull/3840)
+
+  Online schema validation, ensuring coherent `key_min`/`key_max` when reading data.
 
 ### Features
 
@@ -23,13 +35,14 @@ Released: 2026-06-26
 
   Improve the Ruby client migration guide.
 
-- [#3836](https://github.com/tigerbeetle/tigerbeetle/pull/3836)
-  [#3832](https://github.com/tigerbeetle/tigerbeetle/pull/3832)
-  [#3835](https://github.com/tigerbeetle/tigerbeetle/pull/3835)
+- [#3836](https://github.com/tigerbeetle/tigerbeetle/pull/3836),
+  [#3832](https://github.com/tigerbeetle/tigerbeetle/pull/3832),
+  [#3835](https://github.com/tigerbeetle/tigerbeetle/pull/3835),
+  [#3834](https://github.com/tigerbeetle/tigerbeetle/pull/3834)
 
   Various docs improvements, including adding the Ruby client and print layout support.
 
-- [#3830](https://github.com/tigerbeetle/tigerbeetle/pull/3830)
+- [#3830](https://github.com/tigerbeetle/tigerbeetle/pull/3830),
   [#3811](https://github.com/tigerbeetle/tigerbeetle/pull/3811)
 
   Add a u128 bounds check in the Ruby client and make its status return type more idiomatic.
@@ -38,9 +51,14 @@ Released: 2026-06-26
 
   Improve the Rust client, removing the bitflags dependency and enabling overflow checks.
 
+- [#3852](https://github.com/tigerbeetle/tigerbeetle/pull/3852)
+
+  Experimental CLI `--memory` flag that automatically sizes the grid and object caches to use
+  all assigned memory.
+
 ### Internals
 
-- [#3825](https://github.com/tigerbeetle/tigerbeetle/pull/3825)
+- [#3825](https://github.com/tigerbeetle/tigerbeetle/pull/3825),
   [#3831](https://github.com/tigerbeetle/tigerbeetle/pull/3831)
 
   Improve various code comments.

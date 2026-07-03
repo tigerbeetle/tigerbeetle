@@ -62,8 +62,8 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
     try buffer.print(
         \\# Changelog
         \\
-        \\Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
-        \\to receive notifications about breaking changes!
+        \\Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+        \\to receive notifications about breaking changes and critical issues!
         \\
         \\
     , .{});
