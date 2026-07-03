@@ -67,9 +67,9 @@ pub const DerivedCounter = enum {
 };
 
 pub const CounterInterpretation = enum {
-    /// The counted event is interpreted raw, as returned by the OS
+    /// The counter counts raw events, as returned by the OS
     event_count,
-    /// The counted event is interpreted through a scaling factor,
+    /// The event count is interpreted through a scaling factor,
     /// e.g., per element, per operation, etc.
     event_count_scaled,
 };
@@ -83,21 +83,27 @@ pub const PerfMeasurement = struct {
     pub fn compute_derived(
         measurement: *const PerfMeasurement,
         counter_derived: DerivedCounter,
-    ) ?f64 {
+    ) f64 {
         switch (counter_derived) {
             .ipc => {
                 const instructions = measurement.get_counter(.instructions);
                 const cycles_cpu = measurement.get_counter(.cycles_cpu);
+                assert(cycles_cpu > 0);
+                assert(instructions > 0);
                 return instructions / cycles_cpu;
             },
             .ghz => {
                 const cycles_cpu = measurement.get_counter(.cycles_cpu);
                 const task_clock = measurement.get_counter(.task_clock);
+                assert(cycles_cpu > 0);
+                assert(task_clock > 0);
                 return cycles_cpu / task_clock;
             },
             .cores => {
                 const task_clock = measurement.get_counter(.task_clock);
                 const elapsed_ns = measurement.elapsed.ns;
+                assert(task_clock > 0);
+                assert(elapsed_ns > 0);
                 return task_clock / @as(f64, @floatFromInt(elapsed_ns));
             },
         }

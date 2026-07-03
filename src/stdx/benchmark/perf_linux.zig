@@ -112,11 +112,13 @@ const PerfEventCounter = struct {
         // we are allowed to restart the counters
         maybe(counter.prev == null);
         maybe(counter.current == null);
+
         // reset and enable the counter
         const success_reset = std.os.linux.ioctl(counter.fd, PERF.EVENT_IOC.RESET, 0);
         if (success_reset > 0) return error.PerfCounterInit;
         const success_enable = std.os.linux.ioctl(counter.fd, PERF.EVENT_IOC.ENABLE, 0);
         if (success_enable > 0) return error.PerfCounterInit;
+
         // read the start value
         counter.prev = PerfEventCounter.read_perf_event_fd(counter.fd) catch {
             return error.PerfCounterRead;
@@ -127,6 +129,7 @@ const PerfEventCounter = struct {
     fn read(counter: *PerfEventCounter) !void {
         assert(counter.prev != null);
         maybe(counter.current == null);
+
         counter.current = PerfEventCounter.read_perf_event_fd(counter.fd) catch {
             return error.PerfCounterRead;
         };
@@ -135,18 +138,21 @@ const PerfEventCounter = struct {
     fn duration_enabled(counter: *const PerfEventCounter) u64 {
         assert(counter.prev != null);
         assert(counter.current != null);
+
         return counter.current.?.time_enabled - counter.prev.?.time_enabled;
     }
 
     fn duration_running(counter: *const PerfEventCounter) u64 {
         assert(counter.prev != null);
         assert(counter.current != null);
+
         return counter.current.?.time_running - counter.prev.?.time_running;
     }
 
     fn event_count(counter: *const PerfEventCounter) u64 {
         assert(counter.prev != null);
         assert(counter.current != null);
+
         return counter.current.?.value - counter.prev.?.value;
     }
 
@@ -259,15 +265,12 @@ fn event_config_from_event_type(event_type: CounterType) EventConfig {
 }
 
 pub const PerfCounters = struct {
-    counters: CounterMap,
+    counters: std.enums.EnumArray(CounterType, PerfEventCounter),
     time: Time = .{},
     timer: ?Instant = null,
 
-    const CounterMap = std.enums.EnumArray(CounterType, PerfEventCounter);
-    const DerivedCounters = struct { ipc: f64, ghz: f64, cores: f64 };
-
     pub fn init() !PerfCounters {
-        var counters = CounterMap.initUndefined();
+        var counters = .initUndefined();
         inline for (comptime std.enums.values(CounterType)) |event_type| {
             const counter_config = event_config_from_event_type(event_type);
             counters.set(event_type, try .init(counter_config));
