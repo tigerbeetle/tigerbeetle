@@ -19,7 +19,7 @@ const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
 
-const BenchmarkTimer = @This();
+const BenchmarkTime = @This();
 
 // BenchmarkTime is used to test algorithm runtime and is not critical for safety.
 // We still guard against non-monotonicity bugs in OS time sources
