@@ -1251,6 +1251,7 @@ comptime {
     _ = @import("net.zig");
     _ = @import("prng.zig");
     _ = @import("radix.zig");
+    _ = @import("radix_benchmark.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("shell.zig");
     _ = @import("sort_test.zig");

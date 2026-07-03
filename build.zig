@@ -894,6 +894,7 @@ fn build_test(
         }),
         .filters = b.args orelse &.{},
     });
+    stdx_unit_tests.root_module.addOptions("test_options", test_options);
     const unit_tests = b.addTest(.{
         .name = "test-unit",
         .root_module = b.createModule(.{
