@@ -21,6 +21,7 @@ test "benchmark: radix sort" {
 
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_instance.deinit();
+
     const arena = arena_instance.allocator();
 
     var prng = stdx.PRNG.from_seed(bench.seed);
