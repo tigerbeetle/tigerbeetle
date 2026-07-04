@@ -26,6 +26,8 @@ test "inspect constants snapshot" {
         \\
         \\LSM:
         \\compaction_ops                  32
+        \\tree_table_count_max            2396744
+        \\forest_table_count_max          2396744
         \\
         \\Checkpoint Schedule:
         \\checkpoint_ops      journal_slot_count  checkpoint          trigger             prepare_ok_max      prepare_max         checkpoint_next

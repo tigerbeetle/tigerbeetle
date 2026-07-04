@@ -167,8 +167,16 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
     const trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint).?;
 
     try output.print("LSM:\n", .{});
+
     try print_header(output, 0, "compaction_ops");
     try output.print("{}\n", .{constants.lsm_compaction_ops});
+
+    try print_header(output, 0, "tree_table_count_max");
+    try output.print("{}\n", .{vsr.lsm.tree.table_count_max});
+
+    try print_header(output, 0, "forest_table_count_max");
+    try output.print("{}\n", .{vsr.lsm.forest.table_count_max});
+
     try output.print("\n", .{});
 
     try output.print("Checkpoint Schedule:\n", .{});
