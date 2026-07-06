@@ -6,11 +6,9 @@ const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 const Instant = stdx.Instant;
 
-const perf = @import("perf.zig");
 const Time = @import("time.zig");
-const CounterType = perf.CounterType;
-const CounterInterpretation = perf.CounterInterpretation;
-const PerfMeasurement = perf.PerfMeasurement;
+const CounterType = @import("perf.zig").CounterType;
+const PerfMeasurement = @import("perf.zig").PerfMeasurement;
 
 /// Bitflags specifying events from which domain
 /// the given performance counter should include
@@ -88,7 +86,6 @@ const EventConfig = struct {
     event_type: PERF.TYPE,
     event_id: u64,
     event_domain: PerfEventDomain,
-    interpretation: CounterInterpretation,
 };
 
 const PerfEventCounter = struct {
@@ -100,12 +97,11 @@ const PerfEventCounter = struct {
     count_initial: ?ReadFormat = null,
     count_current: ?ReadFormat = null,
     fd: std.posix.fd_t,
-    interpretation: CounterInterpretation,
 
     fn init(config: EventConfig) !PerfEventCounter {
         // open the file descriptor for this event
         const fd = try PerfEventCounter.register_perf_event_fd(&config);
-        return .{ .fd = fd, .interpretation = config.interpretation };
+        return .{ .fd = fd };
     }
 
     pub fn start(counter: *PerfEventCounter) !void {
@@ -204,49 +200,41 @@ fn event_config_from_event_type(event_type: CounterType) EventConfig {
             .event_type = PERF.TYPE.HARDWARE,
             .event_id = @intFromEnum(PERF.COUNT.HW.CPU_CYCLES),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .cycles_kernel => .{
             .event_type = PERF.TYPE.HARDWARE,
             .event_id = @intFromEnum(PERF.COUNT.HW.CPU_CYCLES),
             .event_domain = PerfEventDomain.kernel_only(),
-            .interpretation = .event_count_scaled,
         },
         .cycles_stall => .{
             .event_type = PERF.TYPE.RAW,
             .event_id = 0x43FFAE,
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .instructions => .{
             .event_type = PERF.TYPE.HARDWARE,
             .event_id = @intFromEnum(PERF.COUNT.HW.INSTRUCTIONS),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .cache_references => .{
             .event_type = PERF.TYPE.HARDWARE,
             .event_id = @intFromEnum(PERF.COUNT.HW.CACHE_REFERENCES),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .cache_misses => .{
             .event_type = PERF.TYPE.HARDWARE,
             .event_id = @intFromEnum(PERF.COUNT.HW.CACHE_MISSES),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .branch_misses => .{
             .event_type = PERF.TYPE.HARDWARE,
             .event_id = @intFromEnum(PERF.COUNT.HW.BRANCH_MISSES),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .task_clock => .{
             .event_type = PERF.TYPE.SOFTWARE,
             .event_id = @intFromEnum(PERF.COUNT.SW.TASK_CLOCK),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
         .dtlb_load_misses => .{
             .event_type = PERF.TYPE.HW_CACHE,
@@ -256,7 +244,6 @@ fn event_config_from_event_type(event_type: CounterType) EventConfig {
                 PERF.COUNT.HW.CACHE.RESULT.MISS,
             ),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count_scaled,
         },
     };
 }
@@ -268,10 +255,24 @@ pub const PerfCounters = struct {
 
     pub fn init() !PerfCounters {
         var counters = std.enums.EnumArray(CounterType, PerfEventCounter).initUndefined();
+
+        inline for (comptime std.enums.values(CounterType)) |event_type| {
+            counters.getPtr(event_type).fd = -1;
+        }
+
         inline for (comptime std.enums.values(CounterType)) |event_type| {
             const counter_config = event_config_from_event_type(event_type);
-            counters.set(event_type, try .init(counter_config));
+            const counter = try PerfEventCounter.init(counter_config);
+            counters.set(event_type, counter);
         }
+
+        errdefer {
+            inline for (comptime std.enums.values(CounterType)) |event_type| {
+                const counter = counters.get(event_type);
+                if (counter.fd != -1) counter.deinit();
+            }
+        }
+
         return .{ .counters = counters };
     }
 

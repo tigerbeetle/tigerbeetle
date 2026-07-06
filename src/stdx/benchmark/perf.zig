@@ -79,21 +79,13 @@ pub const DerivedCounter = enum {
     cores,
 };
 
-pub const CounterInterpretation = enum {
-    /// The counter counts raw events, as returned by the OS
-    event_count,
-    /// The event count is interpreted through a scaling factor,
-    /// e.g., per element, per operation, etc.
-    event_count_scaled,
-};
-
 pub const PerfMeasurement = struct {
     counters: std.enums.EnumArray(CounterType, f64),
     elapsed: Duration,
     checksum: u64,
     scale: f64,
 
-    pub fn compute_derived(
+    fn compute_derived(
         measurement: *const PerfMeasurement,
         counter_derived: DerivedCounter,
     ) f64 {
@@ -218,7 +210,7 @@ pub const PerfMeasurement = struct {
 };
 
 const PerfCountersLinux = @import("./perf_linux.zig").PerfCounters;
-const PerfCounters = switch (builtin.target.os.tag) {
+pub const PerfCounters = switch (builtin.target.os.tag) {
     .linux => PerfCountersLinux,
     else => @compileError("PerfCounters only supported on linux"),
 };
