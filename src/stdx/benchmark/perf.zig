@@ -13,8 +13,8 @@ test "benchmark: performance counter tutorial" {
     var perf = try PerfCounters.init();
     defer perf.deinit();
 
-    const scale = 1_000_000;
-    var checksum: u64 = 1;
+    const scale = 1_000_000_000;
+    var checksum: u128 = 0;
 
     try perf.start();
 
@@ -22,8 +22,11 @@ test "benchmark: performance counter tutorial" {
         checksum += i * i;
     }
 
-    const measurements = try perf.read(scale, checksum);
-    try measurements.print_csv(.header);
+    const measurements = try perf.read(scale, @truncate(checksum));
+    try measurements.print_csv(.header, .{
+        .op = "*",
+        .context = "test",
+    });
 }
 
 pub const CounterType = enum {
@@ -116,54 +119,85 @@ pub const PerfMeasurement = struct {
     pub fn print_csv(
         measurement: *const PerfMeasurement,
         mode: enum { header, noheader },
+        parameters: anytype,
     ) !void {
         const writer = std.io.getStdErr().writer();
         switch (mode) {
-            .header => try measurement.write_csv_header(writer),
+            .header => try measurement.write_csv_header(writer, parameters),
             .noheader => {},
         }
-        try measurement.write_csv_values(writer);
+        try measurement.write_csv_values(writer, parameters);
     }
 
     pub fn write_csv_header(
         measurement: *const PerfMeasurement,
         writer: anytype,
+        parameters: anytype,
     ) !void {
-        try writer.print("elapsed_ms, ", .{});
-        for (std.enums.values(CounterType), 0..) |counter, i| {
-            if (i > 0) try writer.print(", ", .{});
+        assert(@typeInfo(@TypeOf(parameters)) == .@"struct");
+        var column: u32 = 0;
+        inline for (comptime std.meta.fieldNames(@TypeOf(parameters))) |field_name| {
+            if (column > 0) try writer.print(", ", .{});
+            column += 1;
+            try writer.print("{s: >}", .{field_name});
+        }
+        if (column > 0) try writer.print(", ", .{});
+        try writer.print("elapsed_ms", .{});
+        for (std.enums.values(CounterType)) |counter| {
+            try writer.print(", ", .{});
             try writer.print("{s: >4}", .{@tagName(counter)});
         }
-        try writer.print(", ", .{});
-        for (std.enums.values(DerivedCounter), 0..) |derived_counter, i| {
-            if (i > 0) try writer.print(", ", .{});
+        for (std.enums.values(DerivedCounter)) |derived_counter| {
+            try writer.print(", ", .{});
             try writer.print("{s: >4}", .{@tagName(derived_counter)});
         }
         try writer.print(", {[scale]s: >[scale_width]}, {[checksum]s: >[checksum_width]}\n", .{
             .scale = "scale",
             .scale_width = @as(usize, @intFromFloat(std.math.log10(measurement.scale))) + 1,
             .checksum = "checksum",
-            .checksum_width = 1 + @divFloor((64 - @clz(measurement.checksum)), 4),
+            .checksum_width = if (measurement.checksum == 0) 1 else @divFloor(
+                (64 + 3 - @clz(measurement.checksum)),
+                4,
+            ),
         });
     }
 
     pub fn write_csv_values(
         measurement: *const PerfMeasurement,
         writer: anytype,
+        parameters: anytype,
     ) !void {
-        try writer.print("{d: >10}, ", .{measurement.elapsed.ns / std.time.ns_per_ms});
+        assert(@typeInfo(@TypeOf(parameters)) == .@"struct");
+        var column: u32 = 0;
+        inline for (comptime std.meta.fields(@TypeOf(parameters))) |field| {
+            if (column > 0) try writer.print(", ", .{});
+            column += 1;
+            const field_fmt = switch (@typeInfo(field.type)) {
+                .int => "{[field_value]d: >[field_width]}",
+                .float => "{[field_value]d: >[field_width].2}",
+                .pointer => "{[field_value]s: >[field_width]}",
+                .bool => "{: >[field_width]}",
+                .@"enum" => "{[field_value]any: >[field_width]}",
+                else => @panic("Type not supported for serialization"),
+            };
+            try writer.print(field_fmt, .{
+                .field_value = @field(parameters, field.name),
+                .field_width = field.name.len,
+            });
+        }
+        if (column > 0) try writer.print(", ", .{});
+        try writer.print("{d: >10}", .{measurement.elapsed.ns / std.time.ns_per_ms});
         const value_format_string: []const u8 = "{[counter_value]d: >[counter_width].2}";
-        for (std.enums.values(CounterType), 0..) |counter, i| {
-            if (i > 0) try writer.print(", ", .{});
+        for (std.enums.values(CounterType)) |counter| {
+            try writer.print(", ", .{});
             try writer.print(value_format_string, .{
                 .counter_value = measurement.get_counter(counter),
                 .counter_width = @tagName(counter).len,
             });
         }
-        try writer.print(", ", .{});
-        for (std.enums.values(DerivedCounter), 0..) |derived_counter, i| {
-            const derived = measurement.compute_derived(derived_counter) orelse continue;
-            if (i > 0) try writer.print(", ", .{});
+        for (std.enums.values(DerivedCounter)) |derived_counter| {
+            const derived = measurement.compute_derived(derived_counter);
+            try writer.print(", ", .{});
             try writer.print(value_format_string, .{
                 .counter_value = derived,
                 .counter_width = @tagName(derived_counter).len,

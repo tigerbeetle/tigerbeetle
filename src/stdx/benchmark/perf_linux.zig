@@ -249,7 +249,7 @@ fn event_config_from_event_type(event_type: CounterType) EventConfig {
             .event_type = PERF.TYPE.SOFTWARE,
             .event_id = @intFromEnum(PERF.COUNT.SW.TASK_CLOCK),
             .event_domain = PerfEventDomain.all(),
-            .interpretation = .event_count,
+            .interpretation = .event_count_scaled,
         },
         .dtlb_load_misses => .{
             .event_type = PERF.TYPE.HW_CACHE,
@@ -270,7 +270,7 @@ pub const PerfCounters = struct {
     timer: ?Instant = null,
 
     pub fn init() !PerfCounters {
-        var counters = .initUndefined();
+        var counters = std.enums.EnumArray(CounterType, PerfEventCounter).initUndefined();
         inline for (comptime std.enums.values(CounterType)) |event_type| {
             const counter_config = event_config_from_event_type(event_type);
             counters.set(event_type, try .init(counter_config));
