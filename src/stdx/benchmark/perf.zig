@@ -28,9 +28,8 @@ const stdx = @import("../stdx.zig");
 const Duration = stdx.Duration;
 
 test "perf: usage example" {
-    if (comptime builtin.target.os.tag != .linux) {
-        std.debug.print("not on linux; skipping performance counter usage example\n", .{});
-        return;
+    if (builtin.target.os.tag != .linux) {
+        return error.SkipZigTest;
     }
 
     var perf = PerfCounters.init() catch |err| switch (err) {
