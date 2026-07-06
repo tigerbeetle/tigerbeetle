@@ -1,9 +1,9 @@
-/// In microbenchmarks, we often measure both time and other performance counters
-/// such as how many cycles were used, how many branch misses were incurred, and more.
-/// These only count cycles in the current process, and not, for exampole, sleep time.
-/// The closest matching clock implementation semantics are provided by CLOCK_MONOTONIC,
-/// which is what we use here. To distinguish towards vsr.time.Time.monotonic(),
-/// we call this `benchmark_monotonic()`.
+//! In microbenchmarks, we often measure both time and other performance counters
+//! such as how many cycles were used, how many branch misses were incurred, and more.
+//! These only count cycles in the current process, and not, for exampole, sleep time.
+//! The closest matching clock implementation semantics are provided by CLOCK_MONOTONIC,
+//! which is what we use here. To distinguish towards vsr.time.Time.monotonic(),
+//! we call this `benchmark_monotonic()`.
 const std = @import("std");
 const builtin = @import("builtin");
 
