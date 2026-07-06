@@ -1,48 +1,66 @@
-/// For ad-hoc performance measurements and algorithm optimization, it is often useful to
-/// get performance metrics for a small subsection of code. For example:
-///
-/// - how many cache misses does this data structure incur per lookup?
-/// - in some operation, how many of the cpu cycles are stall cycles?
-/// - how many instructions does this algorithm execute per cycle?
-/// - how many cpu cycles are spent in the kernel?
-///
-/// Whereas external tools such as `perf` allow answering such questions for the entire program,
-/// `PerfCounters` allows examining only the subsection of the program we're interested in.
-/// It is intended to be used ad-hoc, when needed, not to be permanently included in tests etc.,
-/// and currently works only on linux with `kernel.perf_event_paranoid` set to -1.
-///
-/// Example usage:
-/// ```
-/// var perf = try PerfCounters.init();
-/// defer perf.deinit();
-///
-/// const scale = 1_000_000_000;
-/// try perf.start();
-///
-/// var checksum: u128 = 0;
-/// for (1..scale) |i| {
-///     checksum += i * i;
-/// }
-///
-/// const measurements = try perf.read(scale, @truncate(checksum));
-/// try measurements.print_csv(.header, .{
-///     .op = "*",
-///     .context = "test",
-/// });
-/// ```
-/// This outputs a CSV, directly usable for plotting / analysis (some columns omitted):
-/// ```
-/// op, context, elapsed_ms, cycles_cpu, instructions,   ipc,  ghz,      scale,         checksum
-///  *,    test,        687,       1.37,         6.34,  4.62, 2.00, 1000000000, 2E5524BA83927700
-/// ```
-/// Cycle and instruction counters are normalized per operation/element, set by the scale parameter.
-/// Interface inspired by: https://github.com/viktorleis/perfevent/tree/master
+//! For ad-hoc performance measurements and algorithm optimization, it is often useful to
+//! get performance metrics for a small subsection of code. For example:
+//!
+//! - how many cache misses does this data structure incur per lookup?
+//! - in some operation, how many of the cpu cycles are stall cycles?
+//! - how many instructions does this algorithm execute per cycle?
+//! - how many cpu cycles are spent in the kernel?
+//!
+//! Whereas external tools such as `perf` allow answering such questions for the entire program,
+//! `PerfCounters` allows examining only the subsection of the program we're interested in.
+//! It is intended to be used ad-hoc, when needed, not to be permanently included in tests etc.,
+//! and currently works only on linux with `kernel.perf_event_paranoid` set to -1.
+//!
+//! For example, the test below outputs a CSV like this, which directly usable for
+//! plotting / analysis (some columns omitted):
+//! ```
+//! op, context, elapsed_ms, cycles_cpu, instructions,   ipc,  ghz,      scale,         checksum
+//!  *,    test,        687,       1.37,         6.34,  4.62, 2.00, 1000000000, 2E5524BA83927700
+//! ```
+//! Cycle and instruction counters are normalized per operation/element, set by the scale parameter.
+//! This normalization allows for more intuition, e.g., "is 6 instructions per element reasonable?".
+//! Interface inspired by: https://github.com/viktorleis/perfevent
 const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
 const stdx = @import("../stdx.zig");
 const Duration = stdx.Duration;
+
+test "perf: usage example" {
+    if (comptime builtin.target.os.tag != .linux) {
+        std.debug.print("not on linux; skipping performance counter usage example\n", .{});
+        return;
+    }
+
+    var perf = PerfCounters.init() catch |err| switch (err) {
+        error.PermissionDenied => {
+            std.debug.print(
+                \\ Insufficient permmissions for opening linux performance counters. Try running
+                \\    sudo sysctl -w kernel.perf_event_paranoid=-1
+                \\ This may not be possible when running in a virtualized environment. 
+                \\
+            , .{});
+            return;
+        },
+        else => return err,
+    };
+    defer perf.deinit();
+
+    const scale = 1_000_000_000;
+    try perf.start();
+
+    var checksum: u128 = 0;
+    for (1..scale) |i| {
+        checksum += i * i;
+    }
+
+    const measurements = try perf.read(scale, @truncate(checksum));
+    try measurements.print_csv(.header, .{
+        .op = "*",
+        .context = "test",
+    });
+}
 
 pub const CounterType = enum {
     cycles_cpu,
