@@ -43,7 +43,7 @@ pub const IPAddress = extern struct {
     const IPv4_prefix_octets: [12]u8 =
         @as([16]u8, @bitCast(std.mem.nativeToBig(u128, IPv4_prefix)))[0..12].*;
 
-    pub const @"127.0.0.1" = parse("127.0.0.1") catch unreachable;
+    pub const @"127.0.0.1": IPAddress = .ip("127.0.0.1");
 
     comptime {
         // The code is endianness-clean, aspirationally. Audit before running on your PowerPC!
@@ -65,9 +65,18 @@ pub const IPAddress = extern struct {
         return .{ .big = big };
     }
 
-    pub fn family(ip: IPAddress) Family {
-        if ((ip.as_u128() >> 32) == (IPv4_prefix >> 32)) return .IPv4;
+    pub fn family(address: IPAddress) Family {
+        if ((address.as_u128() >> 32) == (IPv4_prefix >> 32)) return .IPv4;
         return .IPv6;
+    }
+
+    pub inline fn ip(comptime text: []const u8) IPAddress {
+        return comptime parse(text) catch @compileError("invalid IP: " ++ text);
+    }
+
+    test ip {
+        const v6: IPAddress = .ip("::1:2:3:4");
+        comptime assert(std.mem.endsWith(u8, &v6.big, &.{ 0, 1, 0, 2, 0, 3, 0, 4 }));
     }
 
     pub fn parse(text: []const u8) error{InvalidIPAddress}!IPAddress {
@@ -90,7 +99,7 @@ pub const IPAddress = extern struct {
     }
 
     fn parse_v6(text: []const u8) error{InvalidIPAddress}!IPAddress {
-        const prefix, const suffix =
+        const prefix, const suffix: ?[]const u8 =
             stdx.cut(text, "::") orelse .{ text, null };
 
         inline for (.{ prefix, suffix orelse "" }) |affix| {
@@ -145,27 +154,27 @@ pub const IPAddress = extern struct {
     }
 
     pub fn format(
-        ip: IPAddress,
+        address: IPAddress,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) !void {
         comptime assert(fmt.len == 0);
         _ = options;
-        switch (ip.family()) {
-            .IPv4 => try ip.format_v4(writer),
-            .IPv6 => try ip.format_v6(writer),
+        switch (address.family()) {
+            .IPv4 => try address.format_v4(writer),
+            .IPv6 => try address.format_v6(writer),
         }
     }
 
-    fn format_v4(ip: IPAddress, writer: anytype) !void {
-        const octets = ip.as_v4().?;
+    fn format_v4(address: IPAddress, writer: anytype) !void {
+        const octets = address.as_v4().?;
         try writer.print("{}.{}.{}.{}", .{ octets[0], octets[1], octets[2], octets[3] });
     }
 
     // https://en.wikipedia.org/wiki/IPv6#Address_representation
-    fn format_v6(ip: IPAddress, writer: anytype) !void {
-        const quibbles_big: [8]u16 = @bitCast(ip.big);
+    fn format_v6(address: IPAddress, writer: anytype) !void {
+        const quibbles_big: [8]u16 = @bitCast(address.big);
 
         const run = compressable_run(quibbles_big);
 
@@ -212,13 +221,13 @@ pub const IPAddress = extern struct {
         return longest.?;
     }
 
-    fn as_v4(ip: IPAddress) ?[4]u8 {
-        if (ip.family() != .IPv4) return null;
-        return ip.big[12..].*;
+    fn as_v4(address: IPAddress) ?[4]u8 {
+        if (address.family() != .IPv4) return null;
+        return address.big[12..].*;
     }
 
-    fn as_u128(ip: IPAddress) u128 {
-        return std.mem.bigToNative(u128, @bitCast(ip.big));
+    fn as_u128(address: IPAddress) u128 {
+        return std.mem.bigToNative(u128, @bitCast(address.big));
     }
 
     fn arbitrary(prng: *stdx.PRNG) IPAddress {
