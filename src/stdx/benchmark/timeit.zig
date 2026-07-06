@@ -1,24 +1,43 @@
 const std = @import("std");
+const Time = @import("./time.zig");
+const Instant = @import("../time_units.zig").Instant;
 
-/// Utility function for ad-hoc profiling.
+/// Utility function for quick, cross-platform, ad-hoc timing.
+/// For in-depth profiling of performance metrics, use `PerfCounters`.
 ///
-/// A thin wrapper around `std.time.Timer` which handles the boilerplate of
+/// `timeit` wraps a time source and handles the boilerplate of
 /// printing to stderr and formatting times in some (unspecified) readable way.
 pub fn timeit() TimeIt {
-    return TimeIt{ .inner = std.time.Timer.start() catch unreachable };
+    var time: Time = .{};
+    return .{ .time = time, .timer = time.benchmark_monotonic() };
+}
+
+test "timeit usage" {
+    var timer = timeit();
+    defer timer.print_if_longer_than_ms(1000, "timeit test");
+
+    const scale = 1_000_000;
+    var checksum: u128 = 0;
+    for (1..scale) |i| {
+        checksum += i * i;
+    }
 }
 
 const TimeIt = struct {
-    inner: std.time.Timer,
+    time: Time = .{},
+    timer: Instant,
 
     /// Prints elapsed time to stderr and resets the internal timer.
     pub fn print(self: *TimeIt, comptime label: []const u8) void {
         const label_alignment = comptime " " ** (1 + (12 -| label.len));
 
-        const elapsed_ns = self.inner.lap();
+        const now = self.time.benchmark_monotonic();
+        const elapsed = self.timer.elapsed(now);
+        self.timer = now;
+
         std.debug.print(
             label ++ ":" ++ label_alignment ++ "{}\n",
-            .{std.fmt.fmtDuration(elapsed_ns)},
+            .{std.fmt.fmtDuration(elapsed.ns)},
         );
     }
 
@@ -44,22 +63,13 @@ const TimeIt = struct {
         threshold_ms: u64,
         backtrace: bool,
     ) void {
-        const elapsed_ns = self.inner.lap();
-        if (elapsed_ns > threshold_ms * std.time.ns_per_ms) {
-            std.debug.print(label ++ ": {}\n", .{std.fmt.fmtDuration(elapsed_ns)});
+        const now = self.time.benchmark_monotonic();
+        const elapsed = self.timer.elapsed(now);
+        self.timer = now;
+
+        if (elapsed.ns > threshold_ms * std.time.ns_per_ms) {
+            std.debug.print(label ++ ": {}\n", .{std.fmt.fmtDuration(elapsed.ns)});
             if (backtrace) std.debug.dumpCurrentStackTrace(null);
         }
     }
 };
-
-/// Utility for print-if debugging, a-la Rust's dbg! macro.
-///
-/// dbg prints the value with the prefix, while also returning the value, which makes it convenient
-/// to drop it in the middle of a complex expression.
-pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
-    std.debug.print("{s} = {any}\n", .{
-        prefix,
-        std.json.fmt(value, .{ .whitespace = .indent_2 }),
-    });
-    return value;
-}

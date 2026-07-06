@@ -99,7 +99,7 @@ fn benchmark_monotonic_darwin() u64 {
 fn benchmark_monotonic_linux() u64 {
     assert(is_linux);
     const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch {
-        @panic("CLOCK_BOOTTIME required");
+        @panic("CLOCK_MONOTONIC required");
     };
     return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
 }
