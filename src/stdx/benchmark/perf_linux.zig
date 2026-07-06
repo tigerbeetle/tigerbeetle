@@ -156,7 +156,7 @@ const PerfEventCounter = struct {
         return counter.count_current.?.value - counter.count_initial.?.value;
     }
 
-    fn event_count(counter: *const PerfEventCounter, scale: f64) f64 {
+    fn event_count(counter: *const PerfEventCounter) f64 {
         const time_enabled: f64 = @floatFromInt(counter.duration_enabled());
         const time_running: f64 = @floatFromInt(counter.duration_running());
         // read the event count, corrected by a calculated multiplexing factor, since
@@ -164,10 +164,7 @@ const PerfEventCounter = struct {
         // than traced performance events
         const count_measured: f64 = @floatFromInt(counter.event_count_raw());
         const count_inferred = count_measured * (time_enabled / time_running);
-        return switch (counter.interpretation) {
-            .event_count => count_inferred,
-            .event_count_scaled => count_inferred / scale,
-        };
+        return count_inferred;
     }
 
     fn deinit(counter: *PerfEventCounter) void {
@@ -306,13 +303,13 @@ pub const PerfCounters = struct {
             .scale = scale,
         };
         inline for (comptime std.enums.values(CounterType)) |counter_type| {
-            measurement.counters.set(counter_type, perf_counters.event_count(counter_type, scale));
+            measurement.counters.set(counter_type, perf_counters.event_count(counter_type));
         }
         return measurement;
     }
 
-    pub fn event_count(perf_counters: *PerfCounters, event_type: CounterType, scale: f64) f64 {
+    pub fn event_count(perf_counters: *PerfCounters, event_type: CounterType) f64 {
         const counter = perf_counters.counters.getPtr(event_type);
-        return counter.event_count(scale);
+        return counter.event_count();
     }
 };

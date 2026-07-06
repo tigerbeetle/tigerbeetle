@@ -184,7 +184,7 @@ pub const PerfMeasurement = struct {
         for (std.enums.values(CounterType)) |counter| {
             try writer.print(", ", .{});
             try writer.print(value_format_string, .{
-                .counter_value = measurement.get_counter(counter),
+                .counter_value = measurement.get_counter(counter) / measurement.scale,
                 .counter_width = @tagName(counter).len,
             });
         }
