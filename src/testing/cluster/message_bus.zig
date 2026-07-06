@@ -27,7 +27,7 @@ pub const MessageBus = struct {
     header_callback: *const fn (
         context: *anyopaque,
         header: HeaderEncrypted,
-    ) anyerror!u32,
+    ) anyerror!HeaderCallbackResult,
 
     message_callback: *const fn (
         context: *anyopaque,
@@ -48,7 +48,7 @@ pub const MessageBus = struct {
         header_callback: *const fn (
             context: *anyopaque,
             header: HeaderEncrypted,
-        ) anyerror!u32,
+        ) anyerror!HeaderCallbackResult,
         message_callback: *const fn (
             context: *anyopaque,
             message: []const u8,

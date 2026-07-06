@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const stdx = @import("stdx");
 const vsr = @import("vsr.zig");
 
+const maybe = stdx.maybe;
 const assert = std.debug.assert;
 const Header = vsr.Header;
 const HeaderEncrypted = vsr.HeaderEncrypted;
@@ -12,6 +13,7 @@ const MessageStorage = Message.Storage;
 const aegis = std.crypto.aead.aegis;
 const aegis_auth = std.crypto.auth.aegis;
 const hkdf = std.crypto.kdf.hkdf;
+const log = std.log.scoped(.encryption);
 
 pub const encryption_version: u8 = 1;
 
@@ -183,16 +185,21 @@ pub const EncryptionTransitContext = struct {
     self_id: u128,
     self_peer: PeerType,
 
-    // Receiving a message requires looking up a session by key id.
-    session_id_mapping: std.AutoHashMapUnmanaged(u128, *SessionTypes),
+    // Receiving a message requires looking up a cipher by physical identifier (key id).
+    key_id_cipher: std.AutoHashMapUnmanaged(u128, *CipherTypes),
 
-    // Sending a message requires looking up a session by logical identifier.
-    replica_sessions: []?SessionTypes,
-    client_sessions: std.AutoHashMapUnmanaged(u128, SessionTypes),
+    // Sending a message requires looking up a cipher by logical identifier.
+    replica_cipher: []?CipherTypes,
+    client_cipher: std.AutoHashMapUnmanaged(u128, CipherTypes),
 
-    const SessionTypes = union(enum) {
-        encrypted: EncryptionTransit,
-        unencrypted: EncryptionTransit2,
+    handshakes_pending: std.AutoArrayHashMapUnmanaged(u128, HandshakeTypes),
+
+    const HandshakeTypes = union(enum) {
+        insecure: HandshakeInsecure,
+    };
+
+    const CipherTypes = union(enum) {
+        aegis_256_nonce_128: CipherAegis256Nonce128,
     };
 
     pub fn init(
@@ -206,89 +213,102 @@ pub const EncryptionTransitContext = struct {
     ) !EncryptionTransitContext {
         const capacity = options.clients_max + options.replicas_max;
 
-        const replica_sessions: []?SessionTypes = try gpa.alloc(?SessionTypes, capacity);
-        errdefer gpa.free(replica_sessions);
-        for (replica_sessions) |*session| {
-            session.* = null;
+        const replica_cipher: []?CipherTypes = try gpa.alloc(?CipherTypes, capacity);
+        errdefer gpa.free(replica_cipher);
+        for (replica_cipher) |*encryption_transit| {
+            encryption_transit.* = null;
         }
 
-        var client_sessions: std.AutoHashMapUnmanaged(u128, SessionTypes) = .{};
-        try client_sessions.ensureTotalCapacity(gpa, options.clients_max);
-        errdefer client_sessions.deinit(gpa);
+        var client_cipher: std.AutoHashMapUnmanaged(u128, CipherTypes) = .{};
+        try client_cipher.ensureTotalCapacity(gpa, options.clients_max);
+        errdefer client_cipher.deinit(gpa);
 
-        var session_id_mapping: std.AutoHashMapUnmanaged(u128, *SessionTypes) = .{};
-        try session_id_mapping.ensureTotalCapacity(gpa, options.replicas_max + options.clients_max);
-        errdefer session_id_mapping.deinit(gpa);
+        var key_id_cipher: std.AutoHashMapUnmanaged(u128, *CipherTypes) = .{};
+        try key_id_cipher.ensureTotalCapacity(gpa, options.replicas_max + options.clients_max);
+        errdefer key_id_cipher.deinit(gpa);
+
+        var handshakes_pending: std.AutoArrayHashMapUnmanaged(u128, HandshakeTypes) = .{};
+        try handshakes_pending.ensureTotalCapacity(gpa, capacity);
+        errdefer handshakes_pending.deinit(gpa);
 
         return .{
             .self_id = options.self_id,
             .self_peer = options.self_peer,
-            .replica_sessions = replica_sessions,
-            .client_sessions = client_sessions,
-            .session_id_mapping = session_id_mapping,
+            .replica_cipher = replica_cipher,
+            .client_cipher = client_cipher,
+            .key_id_cipher = key_id_cipher,
+            .handshakes_pending = handshakes_pending,
         };
     }
 
     pub fn deinit(context: *EncryptionTransitContext, gpa: std.mem.Allocator) void {
-        assert(context.session_id_mapping.count() == 0);
-        context.session_id_mapping.deinit(gpa);
+        assert(context.handshakes_pending.count() == 0);
+        context.handshakes_pending.deinit(gpa);
 
-        assert(context.client_sessions.count() == 0);
-        context.client_sessions.deinit(gpa);
+        assert(context.key_id_cipher.count() == 0);
+        context.key_id_cipher.deinit(gpa);
 
-        for (context.replica_sessions) |*session| {
-            assert(session.* == null);
+        assert(context.client_cipher.count() == 0);
+        context.client_cipher.deinit(gpa);
+
+        for (context.replica_cipher) |*encryption_transit| {
+            assert(encryption_transit.* == null);
         }
-        gpa.free(context.replica_sessions);
+        gpa.free(context.replica_cipher);
         context.* = undefined;
     }
 
-    pub fn is_handshake(header: *const HeaderEncrypted) bool {
-        return header.header_tag == 1;
-    }
-
-    pub fn handshake_message_size(header: *const HeaderEncrypted) ?u32 {
-        return if (is_handshake(header)) @sizeOf(Header.Handshake) +
-            @sizeOf(KeyExchangeInsecure.KeyExchangeMessage) else null;
+    pub fn message_type(header: *const HeaderEncrypted) union(enum) { encrypted, handshake: u32 } {
+        if (header.header_tag == 1) {
+            return .{ .handshake = @sizeOf(HandshakeMessage) };
+        }
+        return .encrypted;
     }
 
     pub fn decrypt_header(
         context: *const EncryptionTransitContext,
         header: *const HeaderEncrypted,
     ) !Header {
-        const session = context.session_id_mapping.get(header.header_key_id) orelse
+        const cipher = context.key_id_cipher.get(header.header_key_id) orelse
             return error.InvalidKeyId;
-        switch (session.*) {
-            inline else => |*session_implementation| {
-                return session_implementation.decrypt_header(header);
+
+        assert(message_type(header) == .encrypted);
+
+        switch (cipher.*) {
+            inline else => |*cipher_impl| {
+                return cipher_impl.decrypt_header(header);
             },
         }
     }
 
     pub fn session_established(context: *EncryptionTransitContext, peer: vsr.Peer) bool {
-        const session = switch (peer) {
-            .replica => |replica| &(context.replica_sessions[replica] orelse return false),
-            .client => |client_id| context.client_sessions.getPtr(client_id) orelse return false,
+        switch (peer) {
+            .replica => |replica| return context.replica_cipher[replica] != null,
+            .client => |client_id| return context.client_cipher.contains(client_id),
             else => unreachable,
-        };
-
-        switch (session.*) {
-            inline else => |*session_implementation| {
-                return session_implementation.established();
-            },
         }
     }
 
     pub fn initiator_handshake(
         context: *EncryptionTransitContext,
-        replica: u8,
-    ) KeyExchangeInsecure.KeyExchangeMessage {
-        if (context.replica_sessions[replica] == null) {
-            context.replica_sessions[replica] = .{ .encrypted = EncryptionTransit.initiator(context.self_id, context.self_peer) };
+    ) HandshakeMessage {
+        const handshake = HandshakeInsecure.initiator(.{ .id = context.self_id, .peer = context.self_peer });
+
+        log.debug("initiator_handshake: creating handshake id  ({d})", .{handshake.handshake_id});
+
+        if (context.handshakes_pending.count() == context.handshakes_pending.capacity()) {
+            const handshake_id = context.handshakes_pending.entries.get(0).key;
+            log.warn("initiator_handshake: dropping handshake id ({d})", .{handshake_id});
+            // TODO: maybe optimize this to avoid shifting on every remove.
+            context.handshakes_pending.orderedRemoveAt(0);
         }
-        switch (context.replica_sessions[replica].?) {
-            inline else => |*session_implementation| {
-                const handshake_result = session_implementation.handshake(null);
+        const gop = context.handshakes_pending.getOrPutAssumeCapacity(handshake.handshake_id);
+        assert(!gop.found_existing);
+        gop.value_ptr.* = .{ .insecure = handshake };
+
+        switch (gop.value_ptr.*) {
+            inline else => |*handshake_impl| {
+                const handshake_result = handshake_impl.feed(null);
                 assert(handshake_result == .send);
                 return handshake_result.send;
             },
@@ -297,44 +317,92 @@ pub const EncryptionTransitContext = struct {
 
     pub fn consume_handshake(context: *EncryptionTransitContext, source: []const u8) union(enum) {
         peer: vsr.Peer,
-        send: KeyExchangeInsecure.KeyExchangeMessage,
+        send: HandshakeMessage,
         err: anyerror,
     } {
-        var header_encrypted: HeaderEncrypted = undefined;
+        defer context.verify_state();
+
+        var handshake_message: HandshakeMessage = undefined;
         stdx.copy_disjoint(
             .exact,
             u8,
-            std.mem.asBytes(&header_encrypted),
-            source[0..@sizeOf(HeaderEncrypted)],
-        );
-        assert(handshake_message_size(&header_encrypted) != null);
-
-        var key_exchange_message: KeyExchangeInsecure.KeyExchangeMessage = undefined;
-        stdx.copy_disjoint(
-            .exact,
-            u8,
-            std.mem.asBytes(&key_exchange_message),
-            source[@sizeOf(HeaderEncrypted)..],
+            std.mem.asBytes(&handshake_message),
+            source,
         );
 
-        const session = context.session_id_mapping.get(header_encrypted.header_key_id).?;
-        switch (session.*) {
-            inline else => |*session_implementation| {
-                switch (session_implementation.handshake(key_exchange_message)) {
+        assert(message_type(&handshake_message.header) == .handshake);
+
+        const gop_handshake = context.handshakes_pending.getOrPutAssumeCapacity(handshake_message.header.header_key_id);
+
+        if (!gop_handshake.found_existing) {
+            switch (context.self_peer) {
+                .client => {
+                    log.warn(
+                        "consume_handshake: dropping message for unknown handshake id  ({d})",
+                        .{handshake_message.header.header_key_id},
+                    );
+                    return .{ .err = error.HandshakeFailed };
+                },
+                .replica => {
+                    const handshake = HandshakeInsecure.responder(
+                        .{ .id = context.self_id, .peer = context.self_peer },
+                        handshake_message.header.header_key_id,
+                    );
+                    gop_handshake.value_ptr.* = .{ .insecure = handshake };
+                },
+            }
+        }
+
+        switch (gop_handshake.value_ptr.*) {
+            inline else => |*handshake_impl| {
+                log.debug("consume_handshake: received message for handshake id  ({d})", .{handshake_impl.handshake_id});
+                switch (handshake_impl.feed(handshake_message)) {
                     .send => |response| {
                         return .{ .send = response };
                     },
                     .recv => unreachable,
-                    .done => {
-                        assert(session_implementation.established());
-                        return .{ .peer = session_implementation.other() };
+                    .done => |result| {
+                        const other_peer: Peer = .{ .id = result.peer_id, .peer = result.peer_type };
+                        // TODO: maybe fix this to avoid shifting.
+                        const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                        assert(remove_result);
+                        const cipher = CipherAegis256Nonce128.init(
+                            result.shared_secret,
+                            .{ .peer = context.self_peer, .id = context.self_id },
+                            other_peer,
+                        );
+                        switch (result.peer_type) {
+                            .client => {
+                                const gop = context.client_cipher.getOrPutAssumeCapacity(
+                                    result.peer_id,
+                                );
+                                maybe(gop.found_existing);
+                                gop.value_ptr.* =
+                                    .{ .aegis_256_nonce_128 = cipher };
+                                context.key_id_cipher.putAssumeCapacity(cipher.key_id, gop.value_ptr);
+                            },
+                            .replica => {
+                                assert(result.peer_id < context.replica_cipher.len);
+                                context.replica_cipher[@intCast(result.peer_id)] = .{ .aegis_256_nonce_128 = cipher };
+                                context.key_id_cipher.putAssumeCapacity(cipher.key_id, &context.replica_cipher[@intCast(result.peer_id)].?);
+                            },
+                        }
+                        return .{ .peer = other_peer.to_vsr_peer() };
                     },
-                    .failed => {
-                        return .{ .err = error.KeyExchangeFailed };
+                    .terminate => {
+                        log.info("consume_handshake: terminating handshake", .{});
+                        const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                        assert(remove_result);
+                        return .{ .err = error.HandshakeFailed };
                     },
                 }
             },
         }
+    }
+
+    fn verify_state(context: *EncryptionTransitContext) void {
+        // TOOD: check all maps are in sync
+        _ = context;
     }
 
     pub fn encrypt_message(
@@ -343,14 +411,14 @@ pub const EncryptionTransitContext = struct {
         target: []u8,
         source: *const Message,
     ) void {
-        const session = switch (peer) {
-            .replica => |replica| &(context.replica_sessions[replica].?),
-            .client => |client_id| context.client_sessions.getPtr(client_id).?,
+        const encryption_transit = switch (peer) {
+            .replica => |replica| &(context.replica_cipher[replica].?),
+            .client => |client_id| context.client_cipher.getPtr(client_id).?,
             else => unreachable,
         };
-        switch (session.*) {
-            inline else => |*session_implementation| {
-                session_implementation.encrypt_message(target, source);
+        switch (encryption_transit.*) {
+            inline else => |*encryption_transit_implementation| {
+                encryption_transit_implementation.encrypt_message(target, source);
             },
         }
     }
@@ -367,183 +435,68 @@ pub const EncryptionTransitContext = struct {
             std.mem.asBytes(&header_encrypted),
             source[0..@sizeOf(HeaderEncrypted)],
         );
-        const session = context.session_id_mapping.get(header_encrypted.header_key_id) orelse
+        const cipher = context.key_id_cipher.get(header_encrypted.header_key_id) orelse
             return error.InvalidKeyId;
 
-        switch (session.*) {
-            inline else => |*session_implementation| {
-                try session_implementation.decrypt_message(target, source);
-                return session_implementation.other();
+        switch (cipher.*) {
+            inline else => |*cipher_impl| {
+                try cipher_impl.decrypt_message(target, source);
+                return cipher_impl.other.to_vsr_peer();
             },
         }
     }
 
-    pub fn session_exists(context: *EncryptionTransitContext, session_id: u128) bool {
-        return context.session_id_mapping.contains(session_id);
+    pub fn session_exists(context: *EncryptionTransitContext, handshake_id: u128) bool {
+        return context.key_id_cipher.contains(handshake_id);
     }
 };
 
-pub const EncryptionTransit2 = struct {
-    pub fn initiator(
-        _: u128,
-        _: PeerType,
-    ) EncryptionTransit2 {
-        unreachable;
-    }
-    pub fn decrypt_header(_: *EncryptionTransit2, _: *const HeaderEncrypted) !Header {
-        unreachable;
-    }
+const SharedSecret = [32]u8;
 
-    pub fn decrypt_message(_: *EncryptionTransit2, _: *Message, _: []const u8) !void {
-        unreachable;
-    }
-
-    pub fn encrypt_message(_: *EncryptionTransit2, _: []u8, _: *const Message) void {}
-
-    pub fn handshake(
-        _: *EncryptionTransit2,
-        _: ?KeyExchangeInsecure.KeyExchangeMessage,
-    ) HandshakeResult {
-        unreachable;
-    }
-    pub fn other(_: *EncryptionTransit2) vsr.Peer {
-        unreachable;
-    }
-
-    pub fn established(_: *EncryptionTransit2) bool {
-        unreachable;
-    }
+pub const HandshakeResult = struct {
+    shared_secret: SharedSecret,
+    peer_id: u128,
+    peer_type: PeerType,
 };
 
-const HandshakeResult = union(enum) {
-    send: KeyExchangeInsecure.KeyExchangeMessage,
-    recv,
-    done: u128,
-    failed,
-};
+pub const HandshakeMessage = extern struct {
+    pub fn init(
+        handshake_id: u128,
+        peer_type: PeerType,
+        peer_id: u128,
+        public_key: [32]u8,
+    ) HandshakeMessage {
+        const header_encrypted: HeaderEncrypted = .{
+            .header_tag = 1,
+            .header_key_id = handshake_id,
+            .header_nonce = 0,
+            .encrypted_data = @splat(0),
+        };
 
-pub const EncryptionTransit = struct {
-    session_id: u128,
-    key_exchange: ?KeyExchangeInsecure,
-    cipher: ?SymmetricCipher,
-    self: Peer,
+        assert(EncryptionTransitContext.message_type(&header_encrypted) == .handshake);
 
-    pub const KeyExchangeMessage = KeyExchangeInsecure.KeyExchangeMessage;
-    pub const handshake_header_tag: u128 = 0;
-
-    pub fn initiator(
-        self_id: u128,
-        self_peer: PeerType,
-    ) EncryptionTransit {
-        // The initiator decides on a random handshake id.
-        const self: Peer = .{ .id = self_id, .peer = self_peer };
         return .{
-            .session_id = std.crypto.random.int(u128),
-            .key_exchange = null,
-            .cipher = null,
-            .self = self,
+            .header = header_encrypted,
+            .peer_type = peer_type,
+            .peer_id = peer_id,
+            .public_key = public_key,
         };
     }
-
-    pub fn responder(session_id: u128, self_id: u128, self_peer: PeerType) EncryptionTransit {
-        // The initiator decides on a random handshake id.
-        return .{
-            .session_id = session_id,
-            .key_exchange = null,
-            .cipher = null,
-            .self = .{ .id = self_id, .peer = self_peer },
-        };
-    }
-
-    pub fn handshake(
-        encryption: *EncryptionTransit,
-        message: ?KeyExchangeInsecure.KeyExchangeMessage,
-    ) HandshakeResult {
-        if (encryption.key_exchange == null) {
-            if (message == null) {
-                encryption.key_exchange = .init(.responder, encryption.self);
-            } else {
-                encryption.key_exchange = .init(.initiator, encryption.self);
-            }
-        }
-
-        assert(encryption.key_exchange != null);
-
-        switch (encryption.key_exchange.?.feed(message)) {
-            .send => |msg| {
-                return .{ .send = msg };
-            },
-            .recv => {
-                return .recv;
-            },
-            .done => |result| {
-                const other_peer: Peer = .{ .id = result.peer_id, .peer = result.peer_type };
-                encryption.key_exchange = null;
-                encryption.cipher = SymmetricCipher.init(result.shared_secret, encryption.self, other_peer);
-                return .{ .done = encryption.cipher.?.key_id };
-            },
-            .terminate => {
-                encryption.key_exchange = null;
-                return .failed;
-            },
-        }
-    }
-
-    pub fn other(encryption: *EncryptionTransit) vsr.Peer {
-        assert(encryption.established());
-        return encryption.cipher.?.other.to_vsr_peer();
-    }
-
-    pub fn established(encryption: *EncryptionTransit) bool {
-        return encryption.cipher != null;
-    }
-
-    pub fn encrypt_message(encryption: *EncryptionTransit, target: []u8, source: *const Message) void {
-        assert(encryption.established());
-        encryption.cipher.?.encrypt_message(encryption.session_id, target, source);
-    }
-
-    pub fn decrypt_message(encryption: *EncryptionTransit, target: *Message, source: []const u8) !void {
-        assert(encryption.established());
-        return encryption.cipher.?.decrypt_message(target, source, encryption.session_id);
-    }
-
-    pub fn decrypt_header(encryption: *EncryptionTransit, header_encrypted: *const HeaderEncrypted) !Header {
-        assert(encryption.established());
-        return encryption.cipher.?.decrypt_header(header_encrypted, encryption.session_id);
-    }
-
-    pub fn decrypt_body(
-        encryption: *EncryptionTransit,
-        target: *Message,
-        header: *const Header,
-        body_encrypted: []const u8,
-    ) !void {
-        assert(encryption.established());
-
-        const enc = &encryption.cipher.?;
-        target.header.* = header.*;
-
-        try enc.decrypt_body(
-            .{ .body_tag = header.body_tag, .body_nonce = header.body_nonce },
-            target.body_used(),
-            body_encrypted,
-        );
-
-        target.header.set_checksum_body(target.body_used());
-        target.header.set_zeroes();
-        target.header.set_checksum();
-    }
+    header: vsr.HeaderEncrypted,
+    peer_type: PeerType,
+    peer_id: u128,
+    public_key: [32]u8,
 };
 
 // TODO(georg): How would be put that into messages?
 // Use magic value of HeaderEncrypted
-pub const KeyExchangeInsecure = struct {
+pub const HandshakeInsecure = struct {
+    handshake_id: u128,
     state: State,
     self_id: u128,
     self_type: PeerType,
     key_pair: X25519.KeyPair,
-    result: ?KeyExchangeResult = null,
+    result: ?HandshakeResult = null,
 
     const State = union(Role) {
         initiator: DHState,
@@ -561,42 +514,70 @@ pub const KeyExchangeInsecure = struct {
         responder,
     };
 
-    const SharedSecret = [32]u8;
-
-    pub const KeyExchangeResult = struct {
-        shared_secret: SharedSecret,
-        peer_id: u128,
-        peer_type: PeerType,
-    };
-
-    pub const KeyExchangeMessage = extern struct {
-        peer_type: PeerType,
-        peer_id: u128,
-        public_key: [32]u8,
-    };
-
     const Action = union(enum) {
-        send: KeyExchangeMessage,
+        send: HandshakeMessage,
         recv,
-        done: KeyExchangeResult,
+        done: HandshakeResult,
         terminate,
     };
 
-    pub fn init(role: Role, self: Peer) KeyExchangeInsecure {
+    pub fn initiator_deterministic(
+        self: Peer,
+        seed: [X25519.seed_length]u8,
+        handshake_id: u128,
+    ) !HandshakeInsecure {
+        const key_pair = try X25519.KeyPair.generateDeterministic(seed);
         return .{
-            .state = switch (role) {
-                .responder => .{ .responder = .recv_dh },
-                .initiator => .{ .initiator = .send_dh },
-            },
+            .handshake_id = handshake_id,
+            .state = .{ .initiator = .send_dh },
             .self_id = self.id,
             .self_type = self.peer,
-            .key_pair = X25519.KeyPair.generate(),
+            .key_pair = key_pair,
         };
     }
 
+    pub fn initiator(self: Peer) HandshakeInsecure {
+        const handshake_id = stdx.unique_u128();
+
+        var random_seed: [X25519.seed_length]u8 = undefined;
+        while (true) {
+            std.crypto.random.bytes(&random_seed);
+            return initiator_deterministic(self, random_seed, handshake_id) catch {
+                @branchHint(.unlikely);
+                continue;
+            };
+        }
+    }
+
+    pub fn responder_deterministic(
+        self: Peer,
+        seed: [X25519.seed_length]u8,
+        handshake_id: u128,
+    ) !HandshakeInsecure {
+        const key_pair = try X25519.KeyPair.generateDeterministic(seed);
+        return .{
+            .handshake_id = handshake_id,
+            .state = .{ .responder = .recv_dh },
+            .self_id = self.id,
+            .self_type = self.peer,
+            .key_pair = key_pair,
+        };
+    }
+
+    pub fn responder(self: Peer, handshake_id: u128) HandshakeInsecure {
+        var random_seed: [X25519.seed_length]u8 = undefined;
+        while (true) {
+            std.crypto.random.bytes(&random_seed);
+            return responder_deterministic(self, random_seed, handshake_id) catch {
+                @branchHint(.unlikely);
+                continue;
+            };
+        }
+    }
+
     pub fn feed(
-        kex: *KeyExchangeInsecure,
-        maybe_msg: ?KeyExchangeMessage,
+        kex: *HandshakeInsecure,
+        maybe_msg: ?HandshakeMessage,
     ) Action {
         switch (kex.state) {
             .initiator => |state| {
@@ -604,11 +585,14 @@ pub const KeyExchangeInsecure = struct {
                     .send_dh => {
                         if (maybe_msg != null) return .terminate;
                         kex.state.initiator = .recv_dh;
-                        return .{ .send = .{
-                            .public_key = kex.key_pair.public_key,
-                            .peer_id = kex.self_id,
-                            .peer_type = kex.self_type,
-                        } };
+                        return .{
+                            .send = .init(
+                                kex.handshake_id,
+                                kex.self_type,
+                                kex.self_id,
+                                kex.key_pair.public_key,
+                            ),
+                        };
                     },
                     .recv_dh => {
                         if (maybe_msg) |msg| {
@@ -626,11 +610,14 @@ pub const KeyExchangeInsecure = struct {
                             };
                             return .{ .done = kex.result.? };
                         } else {
-                            return .{ .send = .{
-                                .public_key = kex.key_pair.public_key,
-                                .peer_id = kex.self_id,
-                                .peer_type = kex.self_type,
-                            } };
+                            return .{
+                                .send = .init(
+                                    kex.handshake_id,
+                                    kex.self_type,
+                                    kex.self_id,
+                                    kex.key_pair.public_key,
+                                ),
+                            };
                         }
                     },
                     .derive_secret => {
@@ -656,11 +643,15 @@ pub const KeyExchangeInsecure = struct {
                                 .peer_id = msg.peer_id,
                             };
                             kex.state.responder = .send_dh;
-                            return .{ .send = .{
-                                .public_key = kex.key_pair.public_key,
-                                .peer_id = kex.self_id,
-                                .peer_type = kex.self_type,
-                            } };
+                            return .{
+                                .send = .init(
+                                    kex.handshake_id,
+
+                                    kex.self_type,
+                                    kex.self_id,
+                                    kex.key_pair.public_key,
+                                ),
+                            };
                         } else {
                             return .recv;
                         }
@@ -680,15 +671,15 @@ pub const KeyExchangeInsecure = struct {
     }
 };
 
-test "KeyExchangeInsecure" {
-    var initiator_kex: KeyExchangeInsecure = .init(.initiator, .{ .id = 1, .peer = .replica });
-    var responder_kex: KeyExchangeInsecure = .init(.responder, .{ .id = 2, .peer = .replica });
+test "HandshakeInsecure" {
+    var initiator_kex: HandshakeInsecure = .init(.initiator, .{ .id = 1, .peer = .replica });
+    var responder_kex: HandshakeInsecure = .init(.responder, .{ .id = 2, .peer = .replica });
 
-    var initiator_result: ?KeyExchangeInsecure.KeyExchangeResult = null;
-    var responder_result: ?KeyExchangeInsecure.KeyExchangeResult = null;
+    var initiator_result: ?HandshakeInsecure.HandshakeResult = null;
+    var responder_result: ?HandshakeInsecure.HandshakeResult = null;
 
-    var maybe_initiator_action: ?KeyExchangeInsecure.Action = null;
-    var maybe_responder_action: ?KeyExchangeInsecure.Action = null;
+    var maybe_initiator_action: ?HandshakeInsecure.Action = null;
+    var maybe_responder_action: ?HandshakeInsecure.Action = null;
     while (initiator_result == null or responder_result == null) {
         const initiator_action = maybe_initiator_action orelse initiator_kex.feed(null);
         maybe_initiator_action = null;
@@ -742,7 +733,7 @@ test "KeyExchangeInsecure" {
     );
 }
 
-pub const SymmetricCipher = struct {
+pub const CipherAegis256Nonce128 = struct {
     const BodyTagNonce = struct { body_nonce: u128, body_tag: u128 };
     key_id: u128,
 
@@ -756,7 +747,7 @@ pub const SymmetricCipher = struct {
     // recv_header_window: NonceWindow = .{},
     key_recv_body: [32]u8,
 
-    pub fn init(ephemeral_secret: [32]u8, peer_self: Peer, peer_other: Peer) SymmetricCipher {
+    pub fn init(ephemeral_secret: [32]u8, peer_self: Peer, peer_other: Peer) CipherAegis256Nonce128 {
         const key_id = KeyId.init(encryption_version, peer_self, peer_other);
 
         const intent_send_header = Intent{
@@ -808,14 +799,13 @@ pub const SymmetricCipher = struct {
         };
     }
 
-    pub fn deinit(enc: *SymmetricCipher) void {
+    pub fn deinit(enc: *CipherAegis256Nonce128) void {
         std.crypto.utils.secureZero(u8, std.mem.asBytes(enc));
         enc.* = undefined;
     }
 
     pub fn encrypt_message(
-        cipher: *SymmetricCipher,
-        key_id: u128,
+        cipher: *CipherAegis256Nonce128,
         target: []u8,
         source: *const Message,
     ) void {
@@ -830,7 +820,7 @@ pub const SymmetricCipher = struct {
 
         // TODO: When sending a message, assert the last 16 bytes are not zero.
         @memset(target[source.header.size..], 0);
-        const header_encrypted = cipher.encrypt_header(&header, key_id);
+        const header_encrypted = cipher.encrypt_header(&header);
 
         stdx.copy_disjoint(
             .exact,
@@ -841,15 +831,14 @@ pub const SymmetricCipher = struct {
     }
 
     pub fn decrypt_message(
-        cipher: *SymmetricCipher,
+        cipher: *CipherAegis256Nonce128,
         target: *Message,
         source: []const u8,
-        key_id: u128,
     ) !void {
         var header_encrypted: HeaderEncrypted = undefined;
         stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&header_encrypted), source[0..@sizeOf(HeaderEncrypted)]);
 
-        target.header.* = try cipher.decrypt_header(&header_encrypted, key_id);
+        target.header.* = try cipher.decrypt_header(&header_encrypted);
 
         try cipher.decrypt_body(
             .{
@@ -866,12 +855,11 @@ pub const SymmetricCipher = struct {
     }
 
     pub fn encrypt_header(
-        cipher: *SymmetricCipher,
+        cipher: *CipherAegis256Nonce128,
         header: *const Header,
-        key_id: u128,
     ) HeaderEncrypted {
         const key = cipher.key_send_header;
-        const nonce = std.crypto.random.int(u128);
+        const nonce = stdx.unique_u128();
 
         assert(header.body_tag != 0);
         assert(!stdx.zeroed(&key));
@@ -892,7 +880,7 @@ pub const SymmetricCipher = struct {
 
         const tag = std.mem.asBytes(&encrypted.header_tag);
         encrypted.header_nonce = nonce;
-        encrypted.header_key_id = key_id;
+        encrypted.header_key_id = cipher.key_id;
         const ad = encrypted.slice_associated_data();
 
         std.log.info("header encryption key: {any}", .{key});
@@ -909,15 +897,14 @@ pub const SymmetricCipher = struct {
     }
 
     pub fn decrypt_header(
-        cipher: *SymmetricCipher,
+        cipher: *CipherAegis256Nonce128,
         header: *const HeaderEncrypted,
-        key_id: u128,
     ) !Header {
         const key = cipher.key_recv_header;
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
-        if (header.header_key_id != key_id) {
+        if (header.header_key_id != cipher.key_id) {
             return error.InvalidKeyId;
         }
 
@@ -965,12 +952,12 @@ pub const SymmetricCipher = struct {
     }
 
     fn encrypt_body(
-        cipher: *SymmetricCipher,
+        cipher: *CipherAegis256Nonce128,
         target: []u8,
         source: []const u8,
     ) BodyTagNonce {
         const key = cipher.key_send_body;
-        const nonce = std.crypto.random.int(u128);
+        const nonce = stdx.unique_u128();
 
         assert(target.len == source.len);
         assert(!stdx.zeroed(&key));
@@ -993,7 +980,7 @@ pub const SymmetricCipher = struct {
     }
 
     pub fn decrypt_body(
-        cipher: *SymmetricCipher,
+        cipher: *CipherAegis256Nonce128,
         body_tag_nonce: BodyTagNonce,
         target: []u8,
         source: []const u8,
@@ -1331,10 +1318,10 @@ test "EncryptTransit" {
 
     const peer_a = Peer.replica(1);
     const peer_b = Peer.replica(2);
-    var enc_a = SymmetricCipher.init(ephemeral_secret, peer_a, peer_b);
+    var enc_a = CipherAegis256Nonce128.init(ephemeral_secret, peer_a, peer_b);
     defer enc_a.deinit();
 
-    var enc_b = SymmetricCipher.init(ephemeral_secret, peer_b, peer_a);
+    var enc_b = CipherAegis256Nonce128.init(ephemeral_secret, peer_b, peer_a);
     defer enc_b.deinit();
 
     try std.testing.expectEqual(enc_a.key_id, enc_b.key_id);
@@ -1487,10 +1474,10 @@ test "EncryptTransit Bit Fuzzer" {
 
     const peer_a = Peer.replica(1);
     const peer_b = Peer.replica(2);
-    var enc_a = SymmetricCipher.init(ephemeral_secret, peer_a, peer_b);
+    var enc_a = CipherAegis256Nonce128.init(ephemeral_secret, peer_a, peer_b);
     defer enc_a.deinit();
 
-    var enc_b = SymmetricCipher.init(ephemeral_secret, peer_b, peer_a);
+    var enc_b = CipherAegis256Nonce128.init(ephemeral_secret, peer_b, peer_a);
     defer enc_b.deinit();
 
     var prepare = Header.Prepare.root(0);
@@ -1538,13 +1525,17 @@ test "EncryptTransit Bit Fuzzer" {
     }
 }
 
-test "SessionManager Unit Test" {
+test "EncryptionTransitContext Unit Test" {
     const gpa = std.testing.allocator;
-    const capacity: u32 = 64;
 
-    var session_manager = try EncryptionTransitContext.init(
+    var encryption_transit_context = try EncryptionTransitContext.init(
         gpa,
-        capacity,
+        .{
+            .replicas_max = 6,
+            .clients_max = 4,
+            .self_id = 0,
+            .self_peer = .replica,
+        },
     );
-    defer session_manager.deinit(gpa);
+    defer encryption_transit_context.deinit(gpa);
 }

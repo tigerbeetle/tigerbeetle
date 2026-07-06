@@ -17,7 +17,7 @@ const HeaderEncrypted = vsr.HeaderEncrypted;
 const QueueType = @import("./queue.zig").QueueType;
 const Tracer = vsr.trace.Tracer;
 const encryption = @import("encryption.zig");
-const KeyExchange = encryption.KeyExchangeInsecure;
+const KeyExchange = encryption.HandshakeInsecure;
 const Peer = vsr.Peer;
 
 const RecvState = struct {
@@ -126,6 +126,7 @@ pub const MessageNetwork = struct {
 
 pub const HeaderCallbackResult = struct {
     message_size: u32,
+    handshake_id: ?u128,
 };
 
 // TODO: revisit and think about if this should indicate if a handshake is completed.
@@ -211,7 +212,7 @@ pub fn MessageBusType(comptime IO: type) type {
         header_callback: *const fn (
             context: *anyopaque,
             header: HeaderEncrypted,
-        ) anyerror!u32,
+        ) anyerror!HeaderCallbackResult,
 
         message_callback: *const fn (
             context: *anyopaque,
@@ -262,7 +263,7 @@ pub fn MessageBusType(comptime IO: type) type {
             header_callback: *const fn (
                 context: *anyopaque,
                 header: HeaderEncrypted,
-            ) anyerror!u32,
+            ) anyerror!HeaderCallbackResult,
             message_callback: *const fn (
                 context: *anyopaque,
                 message: []const u8,
@@ -346,6 +347,9 @@ pub fn MessageBusType(comptime IO: type) type {
                 .trace = options.trace,
             };
 
+            try bus.handshakes.ensureTotalCapacity(allocator, connections_max);
+            errdefer bus.handshakes.deinit(allocator);
+
             switch (process_id) {
                 .replica => {
                     // Pre-allocate enough memory to hold all possible connections
@@ -389,6 +393,8 @@ pub fn MessageBusType(comptime IO: type) type {
         }
 
         pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
+            bus.handshakes.deinit(allocator);
+
             bus.clients.deinit(allocator);
 
             if (bus.accept_fd) |fd| {
@@ -722,6 +728,7 @@ pub fn MessageBusType(comptime IO: type) type {
             bus.replicas_connect_attempts[connection.peer.replica] = 0;
 
             bus.assert_connection_initial_state(connection);
+            bus.recv(connection);
 
             assert(connection.state == .connected);
         }
@@ -742,6 +749,7 @@ pub fn MessageBusType(comptime IO: type) type {
         ///
         /// Kickstarted by `accept` and `connect`, and loops onto itself via `recv_buffer_drain`.
         fn recv(bus: *MessageBus, connection: *Connection) void {
+            log.info("recv: receive issued", .{});
             assert(connection.state == .connected);
             assert(connection.fd != null);
 
@@ -799,12 +807,15 @@ pub fn MessageBusType(comptime IO: type) type {
 
             if (connection.recv.message_size == null) {
                 if (connection.recv.peek_header()) |header_encrypted| {
-                    const message_size = bus.header_callback(bus, header_encrypted) catch |err| {
+                    const header_callback_result = bus.header_callback(bus, header_encrypted) catch |err| {
                         log.warn("{}: recv_callback: err {}", .{ bus.id, err });
                         bus.terminate(connection, .shutdown);
                         return;
                     };
-                    connection.recv.message_size = message_size;
+                    connection.recv.message_size = header_callback_result.message_size;
+                    if (header_callback_result.handshake_id) |handshake_id| {
+                        bus.handshakes.putAssumeCapacityNoClobber(handshake_id, connection);
+                    }
                 }
             }
 
@@ -825,6 +836,9 @@ pub fn MessageBusType(comptime IO: type) type {
                             bus.terminate(connection, .shutdown);
                             return;
                         }
+                    },
+                    .handshaking => |handshake_id| {
+                        assert(bus.handshakes.contains(handshake_id));
                     },
                     else => {},
                 }
@@ -881,10 +895,9 @@ pub fn MessageBusType(comptime IO: type) type {
             handshake_id: u128,
             size: u32,
         ) ?[]u8 {
-            assert(bus.process == .replica);
-            assert(bus.clients.capacity() > 0);
+            assert(bus.handshakes.capacity() > 0);
 
-            if (bus.clients.get(handshake_id)) |connection| {
+            if (bus.handshakes.get(handshake_id)) |connection| {
                 return bus.send_message(connection, size);
             } else {
                 log.warn(

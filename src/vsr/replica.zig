@@ -25,6 +25,7 @@ const Time = @import("../time.zig").Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
+const HeaderCallbackResult = @import("../message_bus.zig").HeaderCallbackResult;
 const encryption = @import("../encryption.zig");
 const EncryptionTransitContext = encryption.EncryptionTransitContext;
 
@@ -1535,12 +1536,15 @@ pub fn ReplicaType(
         pub fn header_callback(
             context: *anyopaque,
             header: HeaderEncrypted,
-        ) anyerror!u32 {
+        ) anyerror!HeaderCallbackResult {
             const message_bus: *MessageBus = @ptrCast(@alignCast(context));
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
 
-            if (EncryptionTransitContext.handshake_message_size(&header)) |message_size| {
-                return message_size;
+            switch (EncryptionTransitContext.message_type(&header)) {
+                .handshake => |message_size| {
+                    return .{ .message_size = message_size, .handshake_id = header.header_key_id };
+                },
+                .encrypted => {},
             }
 
             const header_decrypted = self.encryption_transit_context.decrypt_header(&header) catch |err| {
@@ -1553,7 +1557,8 @@ pub fn ReplicaType(
             if (header_decrypted.cluster != self.cluster) {
                 return error.InvalidHeader;
             }
-            return header_decrypted.size;
+
+            return .{ .message_size = header_decrypted.size, .handshake_id = null };
         }
 
         pub fn message_callback(
@@ -1571,13 +1576,27 @@ pub fn ReplicaType(
                 message_encrypted[0..@sizeOf(HeaderEncrypted)],
             );
 
-            if (EncryptionTransitContext.is_handshake(&header_encrypted)) {
+            if (EncryptionTransitContext.message_type(&header_encrypted) == .handshake) {
+                log.info("message_callback: received handshake message", .{});
                 switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
-                    .peer => |peer| return peer,
-                    .send => |key_exhange_message| {
-                        _ = key_exhange_message;
-                        // TODO: send
-                        unreachable;
+                    .peer => |peer| {
+                        log.info("message_callback: handshake completed", .{});
+                        return peer;
+                    },
+                    .send => |handshake_message| {
+                        const maybe_message_buffer = self.message_bus.send_message_handshake(
+                            header_encrypted.header_key_id,
+                            @sizeOf(encryption.HandshakeMessage),
+                        );
+                        if (maybe_message_buffer) |message_buffer| {
+                            stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
+                        } else {
+                            log.warn("{}: message_callback: drop message header={}", .{
+                                self.log_prefix(),
+                                header_encrypted,
+                            });
+                        }
+                        return .{ .handshaking = header_encrypted.header_key_id };
                     },
                     .err => |err| {
                         log.err("{}: message_callback: handshake failed: {}", .{

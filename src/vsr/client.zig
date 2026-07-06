@@ -13,6 +13,7 @@ const Time = vsr.time.Time;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const MessageNetwork = @import("../message_bus.zig").MessageNetwork;
 const Message = @import("../message_pool.zig").MessagePool.Message;
+const HeaderCallbackResult = @import("../message_bus.zig").HeaderCallbackResult;
 const encryption = @import("../encryption.zig");
 const EncryptionTransitContext = encryption.EncryptionTransitContext;
 
@@ -220,20 +221,19 @@ pub fn ClientType(
         pub fn header_callback(
             context: *anyopaque,
             header: HeaderEncrypted,
-        ) anyerror!u32 {
+        ) anyerror!HeaderCallbackResult {
             const message_bus: *MessageBus = @ptrCast(@alignCast(context));
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
 
-            if (EncryptionTransitContext.handshake_message_size(&header)) |message_size| {
-                if (!self.encryption_transit_context.session_exists(header.header_key_id)) {
-                    return error.HandshakeFailed;
-                }
-                return message_size;
+            switch (EncryptionTransitContext.message_type(&header)) {
+                .handshake => |message_size| {
+                    return .{ .message_size = message_size, .handshake_id = header.header_key_id };
+                },
+                .encrypted => {
+                    const header_decrypted = try self.encryption_transit_context.decrypt_header(&header);
+                    return .{ .message_size = header_decrypted.size, .handshake_id = null };
+                },
             }
-
-            const header_decrypted = try self.encryption_transit_context.decrypt_header(&header);
-
-            return header_decrypted.size;
         }
 
         pub fn message_callback(
@@ -243,6 +243,8 @@ pub fn ClientType(
             const message_bus: *MessageBus = @ptrCast(@alignCast(context));
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
 
+            log.info("message_callback: received message", .{});
+
             var header_encrypted: HeaderEncrypted = undefined;
             stdx.copy_disjoint(
                 .exact,
@@ -251,11 +253,22 @@ pub fn ClientType(
                 message_encrypted[0..@sizeOf(HeaderEncrypted)],
             );
 
-            if (EncryptionTransitContext.is_handshake(&header_encrypted)) {
+            if (EncryptionTransitContext.message_type(&header_encrypted) == .handshake) {
                 switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
-                    .send => |key_exchange_message| {
-                        // TODO: send
-                        _ = key_exchange_message;
+                    .send => |handshake_message| {
+                        const maybe_message_buffer = self.message_bus.send_message_handshake(
+                            header_encrypted.header_key_id,
+                            @sizeOf(encryption.HandshakeMessage),
+                        );
+                        if (maybe_message_buffer) |message_buffer| {
+                            stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
+                        } else {
+                            log.warn("{}: message_callback: drop message header={}", .{
+                                self.id,
+                                header_encrypted,
+                            });
+                        }
+                        return .{ .handshaking = header_encrypted.header_key_id };
                     },
                     .peer => |peer| {
                         return peer;
@@ -792,9 +805,19 @@ pub fn ClientType(
             const peer: vsr.Peer = .{ .replica = replica };
 
             if (!self.encryption_transit_context.session_established(peer)) {
-                const key_exchange_message = self.encryption_transit_context.initiator_handshake(replica);
-                _ = key_exchange_message;
-                // TODO: send
+                const handshake_message = self.encryption_transit_context.initiator_handshake();
+                const maybe_message_buffer = self.message_bus.send_message_to_replica(
+                    replica,
+                    @sizeOf(encryption.HandshakeMessage),
+                );
+                if (maybe_message_buffer) |message_buffer| {
+                    stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
+                } else {
+                    log.warn("{}: send_message_to_replica: drop message header={}", .{
+                        self.id,
+                        message.header,
+                    });
+                }
                 return;
             }
 
