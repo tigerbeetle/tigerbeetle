@@ -97,8 +97,8 @@ const PerfEventCounter = struct {
         time_enabled: u64 = 0,
         time_running: u64 = 0,
     };
-    prev: ?ReadFormat = null,
-    current: ?ReadFormat = null,
+    count_initial: ?ReadFormat = null,
+    count_current: ?ReadFormat = null,
     fd: std.posix.fd_t,
     interpretation: CounterInterpretation,
 
@@ -110,8 +110,8 @@ const PerfEventCounter = struct {
 
     pub fn start(counter: *PerfEventCounter) !void {
         // we are allowed to restart the counters
-        maybe(counter.prev == null);
-        maybe(counter.current == null);
+        maybe(counter.count_initial == null);
+        maybe(counter.count_current == null);
 
         // reset and enable the counter
         const success_reset = std.os.linux.ioctl(counter.fd, PERF.EVENT_IOC.RESET, 0);
@@ -120,49 +120,49 @@ const PerfEventCounter = struct {
         if (success_enable > 0) return error.PerfCounterInit;
 
         // read the start value
-        counter.prev = PerfEventCounter.read_perf_event_fd(counter.fd) catch {
+        counter.count_initial = PerfEventCounter.read_perf_event_fd(counter.fd) catch {
             return error.PerfCounterRead;
         };
-        counter.current = null;
+        counter.count_current = null;
     }
 
     fn read(counter: *PerfEventCounter) !void {
-        assert(counter.prev != null);
-        maybe(counter.current == null);
+        assert(counter.count_initial != null);
+        maybe(counter.count_current == null);
 
-        counter.current = PerfEventCounter.read_perf_event_fd(counter.fd) catch {
+        counter.count_current = PerfEventCounter.read_perf_event_fd(counter.fd) catch {
             return error.PerfCounterRead;
         };
     }
 
     fn duration_enabled(counter: *const PerfEventCounter) u64 {
-        assert(counter.prev != null);
-        assert(counter.current != null);
+        assert(counter.count_initial != null);
+        assert(counter.count_current != null);
 
-        return counter.current.?.time_enabled - counter.prev.?.time_enabled;
+        return counter.count_current.?.time_enabled - counter.count_initial.?.time_enabled;
     }
 
     fn duration_running(counter: *const PerfEventCounter) u64 {
-        assert(counter.prev != null);
-        assert(counter.current != null);
+        assert(counter.count_initial != null);
+        assert(counter.count_current != null);
 
-        return counter.current.?.time_running - counter.prev.?.time_running;
+        return counter.count_current.?.time_running - counter.count_initial.?.time_running;
     }
 
-    fn event_count(counter: *const PerfEventCounter) u64 {
-        assert(counter.prev != null);
-        assert(counter.current != null);
+    fn event_count_raw(counter: *const PerfEventCounter) u64 {
+        assert(counter.count_initial != null);
+        assert(counter.count_current != null);
 
-        return counter.current.?.value - counter.prev.?.value;
+        return counter.count_current.?.value - counter.count_initial.?.value;
     }
 
-    fn get_counter(counter: *const PerfEventCounter, scale: f64) f64 {
+    fn event_count(counter: *const PerfEventCounter, scale: f64) f64 {
         const time_enabled: f64 = @floatFromInt(counter.duration_enabled());
         const time_running: f64 = @floatFromInt(counter.duration_running());
         // read the event count, corrected by a calculated multiplexing factor, since
         // the hardware swaps out the underlying counters if there are fewer performance registers
         // than traced performance events
-        const count_measured: f64 = @floatFromInt(counter.event_count());
+        const count_measured: f64 = @floatFromInt(counter.event_count_raw());
         const count_inferred = count_measured * (time_enabled / time_running);
         return switch (counter.interpretation) {
             .event_count => count_inferred,
@@ -306,13 +306,13 @@ pub const PerfCounters = struct {
             .scale = scale,
         };
         inline for (comptime std.enums.values(CounterType)) |counter_type| {
-            measurement.counters.set(counter_type, perf_counters.get_counter(counter_type, scale));
+            measurement.counters.set(counter_type, perf_counters.event_count(counter_type, scale));
         }
         return measurement;
     }
 
-    pub fn get_counter(perf_counters: *PerfCounters, event_type: CounterType, scale: f64) f64 {
+    pub fn event_count(perf_counters: *PerfCounters, event_type: CounterType, scale: f64) f64 {
         const counter = perf_counters.counters.getPtr(event_type);
-        return counter.get_counter(scale);
+        return counter.event_count(scale);
     }
 };
