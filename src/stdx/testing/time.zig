@@ -58,20 +58,20 @@ fn benchmark_monotonic_windows() u64 {
     //
     // https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data
     // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
-    const qpc = os.windows.QueryPerformanceCounter();
-    const qpf = os.windows.QueryPerformanceFrequency();
+    const counter = os.windows.QueryPerformanceCounter();
+    const frequency = os.windows.QueryPerformanceFrequency();
 
     // 10Mhz (1 qpc tick every 100ns) is a common QPF on modern systems.
     // We can optimize towards this by converting to ns via a single multiply.
     //
     // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
-    const common_qpf = 10_000_000;
-    if (qpf == common_qpf) return qpc * (std.time.ns_per_s / common_qpf);
+    const common_frequency = 10_000_000;
+    if (frequency == common_frequency) return counter * (std.time.ns_per_s / common_frequency);
 
     // Convert qpc to nanos using fixed point to avoid expensive extra divs and
     // overflow.
-    const scale = (std.time.ns_per_s << 32) / qpf;
-    return @as(u64, @truncate((@as(u96, qpc) * scale) >> 32));
+    const scale = (std.time.ns_per_s << 32) / frequency;
+    return @as(u64, @truncate((@as(u96, counter) * scale) >> 32));
 }
 
 fn benchmark_monotonic_darwin() u64 {
