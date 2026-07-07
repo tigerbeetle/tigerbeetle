@@ -370,6 +370,10 @@ pub const GridBlocksMissing = struct {
 
                     queue.enqueued_blocks_repair -= 1;
                     queue.enqueued_blocks_sync += 1;
+                    if (fault.cause.repair.scrub) {
+                        queue.enqueued_blocks_repair_scrub -= 1;
+                    }
+
                     fault.cause = cause;
                     return .{ .replace = fault };
                 },
