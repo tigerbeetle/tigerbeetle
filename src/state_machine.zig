@@ -5106,9 +5106,29 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             const expires_at_timestamp_next: u64 = scan_builder.expires_at_timestamp_next(
                 scan_lookup.state,
             );
-            assert(worker.timestamp_next < expires_at_timestamp_next);
-            maybe(expires_at_timestamp_next == TimestampRange.timestamp_max);
-            worker.timestamp_next = expires_at_timestamp_next;
+            assert(worker.timestamp_next <= expires_at_timestamp_next);
+            if (worker.timestamp_next == expires_at_timestamp_next) {
+                // Transfers that expire at the same timestamp may span multiple batches.
+                assert(expires_at_timestamp_next != TimestampRange.timestamp_max);
+                assert(results.len > 0);
+                if (constants.verify) {
+                    for (results) |*transfer| {
+                        const expires_at: u64 = transfer.timestamp + transfer.timeout_ns();
+                        assert(expires_at == expires_at_timestamp_next);
+                    }
+                }
+            } else {
+                maybe(expires_at_timestamp_next == TimestampRange.timestamp_max);
+                maybe(results.len == 0);
+                if (constants.verify) {
+                    for (results) |*transfer| {
+                        const expires_at: u64 = transfer.timestamp + transfer.timeout_ns();
+                        assert(expires_at <= expires_at_timestamp_next);
+                    }
+                }
+
+                worker.timestamp_next = expires_at_timestamp_next;
+            }
 
             state_machine.scan_lookup = .null;
             state_machine.scan_builder = .null;
