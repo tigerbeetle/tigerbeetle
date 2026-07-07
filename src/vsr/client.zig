@@ -243,8 +243,6 @@ pub fn ClientType(
             const message_bus: *MessageBus = @ptrCast(@alignCast(context));
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
 
-            log.info("message_callback: received message", .{});
-
             var header_encrypted: HeaderEncrypted = undefined;
             stdx.copy_disjoint(
                 .exact,
