@@ -131,6 +131,14 @@ const PerfEventCounter = struct {
         };
     }
 
+    fn start_new_lap(counter: *PerfEventCounter) void {
+        assert(counter.count_initial != null);
+        assert(counter.count_current != null);
+
+        counter.count_initial = counter.count_current;
+        counter.count_current = null;
+    }
+
     fn duration_enabled(counter: *const PerfEventCounter) u64 {
         assert(counter.count_initial != null);
         assert(counter.count_current != null);
@@ -289,7 +297,7 @@ pub const PerfCounters = struct {
         perf_counters.timer = perf_counters.time.benchmark_monotonic();
     }
 
-    pub fn read(perf_counters: *PerfCounters, scale: f64, checksum: u64) !PerfMeasurement {
+    fn read(perf_counters: *PerfCounters, scale: f64, checksum: u64) !PerfMeasurement {
         assert(perf_counters.timer != null);
         assert(scale != 0);
 
@@ -305,6 +313,17 @@ pub const PerfCounters = struct {
         };
         inline for (comptime std.enums.values(CounterType)) |counter_type| {
             measurement.counters.set(counter_type, perf_counters.event_count(counter_type));
+        }
+        return measurement;
+    }
+
+    pub fn lap(perf_counters: *PerfCounters, scale: f64, checksum: u64) !PerfMeasurement {
+        assert(perf_counters.timer != null);
+        assert(scale != 0);
+
+        const measurement = perf_counters.read(scale, checksum);
+        for (&perf_counters.counters.values) |*counter| {
+            counter.start_new_lap();
         }
         return measurement;
     }

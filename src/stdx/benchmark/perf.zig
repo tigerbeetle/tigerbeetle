@@ -54,7 +54,7 @@ test "perf: usage example" {
         checksum += i * i;
     }
 
-    const measurements = try perf.read(scale, @truncate(checksum));
+    const measurements = try perf.lap(scale, @truncate(checksum));
     try measurements.print_csv(.header, .{
         .op = "*",
         .context = "test",
