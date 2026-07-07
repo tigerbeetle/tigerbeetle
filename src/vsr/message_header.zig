@@ -164,7 +164,6 @@ pub const Header = extern struct {
             .eviction => Eviction,
             .request_blocks => RequestBlocks,
             .block => Block,
-            .handshake => Handshake,
             .deprecated_12 => Deprecated,
             .deprecated_21 => Deprecated,
             .deprecated_22 => Deprecated,
@@ -1856,46 +1855,6 @@ pub const Header = extern struct {
             if (!self.block_type.valid()) return "block_type invalid";
             if (self.block_type == .reserved) return "block_type == .reserved";
             // TODO When manifest blocks include a snapshot, verify that snapshot≠0.
-            return null;
-        }
-    };
-
-    pub const Handshake = extern struct {
-        header_tag: u128 = 0,
-        header_key_id: u128 = 0,
-        header_nonce: u128 = 0,
-        body_tag: u128 = 0,
-        body_nonce: u128 = 0,
-        cluster: u128 = 0,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        /// The release that generated this block.
-        release: vsr.Release,
-        protocol: u16 = vsr.Version,
-        command: Command,
-        replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = @splat(0),
-
-        client: u128,
-        reserved: [112]u8 = @splat(0),
-
-        pub const frame = HeaderFunctionsType(@This()).frame;
-        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
-        pub const invalid = HeaderFunctionsType(@This()).invalid;
-        pub const invalid_memory = HeaderFunctionsType(@This()).invalid_memory;
-        pub const checksum = HeaderFunctionsType(@This()).checksum;
-        pub const checksum_body = HeaderFunctionsType(@This()).checksum_body;
-        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
-        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
-        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
-        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
-        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
-        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
-        pub const format = HeaderFunctionsType(@This()).format;
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .handshake);
             return null;
         }
     };

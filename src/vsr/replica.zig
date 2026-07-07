@@ -1949,7 +1949,6 @@ pub fn ReplicaType(
                 .headers => |m| self.on_headers(m),
                 .request_blocks => |m| self.on_request_blocks(m),
                 .block => |m| self.on_block(m),
-                .handshake => unreachable,
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
@@ -3677,12 +3676,6 @@ pub fn ReplicaType(
                     message.header.checksum(),
                 });
             }
-        }
-
-        fn on_handshake(self: *Replica, message: *const Message.Handshake) void {
-            _ = self;
-            _ = message;
-            assert(false);
         }
 
         fn grid_repair_block_callback(grid_write: *Grid.Write) void {
@@ -9125,8 +9118,7 @@ pub fn ReplicaType(
         fn send_message_to_client_base(self: *Replica, client: u128, message: *Message) void {
             assert(message.header.command == .pong_client or
                 message.header.command == .eviction or
-                message.header.command == .reply or
-                message.header.command == .handshake);
+                message.header.command == .reply);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
@@ -9167,10 +9159,6 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(header.release.value == self.release.value);
                     assert(header.view <= self.log_view_durable());
-                },
-                .handshake => |header| {
-                    assert(false);
-                    _ = header;
                 },
 
                 .reserved,
@@ -9458,10 +9446,6 @@ pub fn ReplicaType(
                 .block => |header| {
                     assert(!self.standby());
                     assert(header.release.value <= self.release.value);
-                },
-                .handshake => |header| {
-                    assert(false);
-                    _ = header;
                 },
             }
             // Critical:
