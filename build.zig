@@ -526,8 +526,8 @@ fn build_ci(
     const default = all or mode == .default;
 
     if (default or mode == .smoke) {
-        build_ci_step(b, step_ci, .{"test:fmt"});
-        build_ci_step(b, step_ci, .{"check"});
+        build_ci_step(b, step_ci, .{"test:fmt"}, .{});
+        build_ci_step(b, step_ci, .{"check"}, .{});
 
         const build_docs = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
         build_docs.has_side_effects = true;
@@ -535,11 +535,11 @@ fn build_ci(
         step_ci.dependOn(&build_docs.step);
     }
     if (default or mode == .@"test") {
-        build_ci_step(b, step_ci, .{"test"});
-        build_ci_step(b, step_ci, .{"clients:c:sample"});
+        build_ci_step(b, step_ci, .{"test"}, .{ .max_rss = 4 * GiB });
+        build_ci_step(b, step_ci, .{"clients:c:sample"}, .{});
         build_ci_script(b, step_ci, options.scripts, &.{"--help"});
 
-        build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
+        build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" }, .{ .max_rss = 3 * GiB });
         inline for (.{ "testing", "accounting" }) |state_machine| {
             build_ci_step(b, step_ci, .{
                 "vopr",
@@ -547,7 +547,7 @@ fn build_ci(
                 "-Drelease",
                 "--",
                 options.git_commit,
-            });
+            }, .{ .max_rss = 3 * GiB });
         }
     }
     if (default or mode == .amqp) {
@@ -566,8 +566,8 @@ fn build_ci(
     inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python, .ruby }) |language| {
         if (default or mode == .clients or mode == language) {
             // Client tests expect vortex to exist.
-            build_ci_step(b, step_ci, .{"vortex:build"});
-            build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)});
+            build_ci_step(b, step_ci, .{"vortex:build"}, .{});
+            build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)}, .{});
         }
         if (all or mode == .clients or mode == language) {
             build_ci_script(b, step_ci, options.scripts, &.{
@@ -596,12 +596,14 @@ fn build_ci_step(
     b: *std.Build,
     step_ci: *std.Build.Step,
     command: anytype,
+    options: struct { max_rss: u64 = 0 },
 ) void {
     const argv = .{ b.graph.zig_exe, "build" } ++ command;
     const system_command = b.addSystemCommand(&argv);
     const name = std.mem.join(b.allocator, " ", &command) catch @panic("OOM");
     system_command.max_stdio_size = 128 * MiB; // Prevent error.StreamTooLong.
     system_command.setName(name);
+    system_command.step.max_rss = options.max_rss;
     hide_stderr(system_command);
     step_ci.dependOn(&system_command.step);
 }
@@ -2505,4 +2507,5 @@ fn fetch_objcopy(b: *std.Build) std.Build.LazyPath {
     }
 }
 
-const MiB = 1024 * 1024;
+const MiB = 1 << 20;
+const GiB = 1 << 30;
