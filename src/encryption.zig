@@ -242,19 +242,39 @@ pub const EncryptionTransitContext = struct {
     }
 
     pub fn deinit(context: *EncryptionTransitContext, gpa: std.mem.Allocator) void {
-        assert(context.handshakes_pending.count() == 0);
+        var handshake_iterator = context.handshakes_pending.iterator();
+        while (handshake_iterator.next()) |entry| {
+            switch (entry.value_ptr.*) {
+                inline else => |*handshake_impl| {
+                    handshake_impl.deinit();
+                },
+            }
+        }
         context.handshakes_pending.deinit(gpa);
 
-        assert(context.key_id_cipher.count() == 0);
-        context.key_id_cipher.deinit(gpa);
-
-        assert(context.client_cipher.count() == 0);
+        var client_cipher_iterator = context.client_cipher.iterator();
+        while (client_cipher_iterator.next()) |entry| {
+            switch (entry.value_ptr.*) {
+                inline else => |*cipher_impl| {
+                    cipher_impl.deinit();
+                },
+            }
+        }
         context.client_cipher.deinit(gpa);
 
-        for (context.replica_cipher) |*encryption_transit| {
-            assert(encryption_transit.* == null);
+        for (context.replica_cipher) |*maybe_cipher| {
+            if (maybe_cipher.*) |*cipher| {
+                switch (cipher.*) {
+                    inline else => |*cipher_impl| {
+                        cipher_impl.deinit();
+                    },
+                }
+            }
         }
         gpa.free(context.replica_cipher);
+
+        context.key_id_cipher.deinit(gpa);
+
         context.* = undefined;
     }
 
@@ -309,15 +329,15 @@ pub const EncryptionTransitContext = struct {
         switch (gop.value_ptr.*) {
             inline else => |*handshake_impl| {
                 const handshake_result = handshake_impl.feed(null);
-                assert(handshake_result == .send);
-                return handshake_result.send;
+                assert(handshake_result == .operation);
+                assert(handshake_result.operation.message != null);
+                return handshake_result.operation.message.?;
             },
         }
     }
 
     pub fn consume_handshake(context: *EncryptionTransitContext, source: []const u8) union(enum) {
-        peer: vsr.Peer,
-        send: HandshakeMessage,
+        operation: struct { message: ?HandshakeMessage, peer: ?vsr.Peer },
         err: anyerror,
     } {
         defer context.verify_state();
@@ -355,42 +375,47 @@ pub const EncryptionTransitContext = struct {
 
         switch (gop_handshake.value_ptr.*) {
             inline else => |*handshake_impl| {
-                log.debug("consume_handshake: received message for handshake id  ({d})", .{handshake_impl.handshake_id});
                 switch (handshake_impl.feed(handshake_message)) {
-                    .send => |response| {
-                        return .{ .send = response };
-                    },
-                    .recv => unreachable,
-                    .done => |result| {
-                        const other_peer: Peer = .{ .id = result.peer_id, .peer = result.peer_type };
-                        // TODO: maybe fix this to avoid shifting.
-                        const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
-                        assert(remove_result);
-                        const cipher = CipherAegis256Nonce128.init(
-                            result.shared_secret,
-                            .{ .peer = context.self_peer, .id = context.self_id },
-                            other_peer,
-                        );
-                        switch (result.peer_type) {
-                            .client => {
-                                const gop = context.client_cipher.getOrPutAssumeCapacity(
-                                    result.peer_id,
-                                );
-                                maybe(gop.found_existing);
-                                gop.value_ptr.* =
-                                    .{ .aegis_256_nonce_128 = cipher };
-                                context.key_id_cipher.putAssumeCapacity(cipher.key_id, gop.value_ptr);
-                            },
-                            .replica => {
-                                assert(result.peer_id < context.replica_cipher.len);
-                                context.replica_cipher[@intCast(result.peer_id)] = .{ .aegis_256_nonce_128 = cipher };
-                                context.key_id_cipher.putAssumeCapacity(cipher.key_id, &context.replica_cipher[@intCast(result.peer_id)].?);
-                            },
+                    .operation => |operation| {
+                        assert(operation.result != null or operation.message != null);
+                        var peer: ?vsr.Peer = null;
+                        if (operation.result) |result| {
+                            const other_peer: Peer = .{ .id = result.peer_id, .peer = result.peer_type };
+                            peer = other_peer.to_vsr_peer();
+
+                            // TODO: maybe fix this to avoid shifting.
+                            const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                            assert(remove_result);
+                            const cipher = CipherAegis256Nonce128.init(
+                                result.shared_secret,
+                                .{ .peer = context.self_peer, .id = context.self_id },
+                                other_peer,
+                            );
+                            switch (result.peer_type) {
+                                .client => {
+                                    const gop = context.client_cipher.getOrPutAssumeCapacity(
+                                        result.peer_id,
+                                    );
+                                    maybe(gop.found_existing);
+                                    gop.value_ptr.* =
+                                        .{ .aegis_256_nonce_128 = cipher };
+                                    context.key_id_cipher.putAssumeCapacity(cipher.key_id, gop.value_ptr);
+                                },
+                                .replica => {
+                                    assert(result.peer_id < context.replica_cipher.len);
+                                    context.replica_cipher[@intCast(result.peer_id)] = .{ .aegis_256_nonce_128 = cipher };
+                                    context.key_id_cipher.putAssumeCapacity(cipher.key_id, &context.replica_cipher[@intCast(result.peer_id)].?);
+                                },
+                            }
+                            log.info("consume_handshake: handshake completed handshake id ({d})", .{handshake_message.header.header_key_id});
                         }
-                        return .{ .peer = other_peer.to_vsr_peer() };
+                        return .{ .operation = .{ .message = operation.message, .peer = peer } };
                     },
                     .terminate => {
-                        log.info("consume_handshake: terminating handshake", .{});
+                        log.warn(
+                            "consume_handshake: terminating handshake handshake id  ({d})",
+                            .{handshake_message.header.header_key_id},
+                        );
                         const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
                         assert(remove_result);
                         return .{ .err = error.HandshakeFailed };
@@ -460,11 +485,20 @@ pub const HandshakeResult = struct {
 };
 
 pub const HandshakeMessage = extern struct {
+    header: vsr.HeaderEncrypted,
+    peer_type: PeerType,
+    peer_id: u128,
+    public_key: [32]u8,
+    message_type: MessageType,
+
+    const MessageType = enum(u8) { diffie_hellman, identity, unknown };
+
     pub fn init(
         handshake_id: u128,
         peer_type: PeerType,
         peer_id: u128,
         public_key: [32]u8,
+        message_type: MessageType,
     ) HandshakeMessage {
         const header_encrypted: HeaderEncrypted = .{
             .header_tag = 1,
@@ -480,12 +514,9 @@ pub const HandshakeMessage = extern struct {
             .peer_type = peer_type,
             .peer_id = peer_id,
             .public_key = public_key,
+            .message_type = message_type,
         };
     }
-    header: vsr.HeaderEncrypted,
-    peer_type: PeerType,
-    peer_id: u128,
-    public_key: [32]u8,
 };
 
 // TODO(georg): How would be put that into messages?
@@ -499,14 +530,20 @@ pub const HandshakeInsecure = struct {
     result: ?HandshakeResult = null,
 
     const State = union(Role) {
-        initiator: DHState,
-        responder: DHState,
+        initiator: InitiatorState,
+        responder: ResponderState,
     };
 
-    const DHState = enum {
-        recv_dh,
+    const InitiatorState = enum {
         send_dh,
-        derive_secret,
+        send_identity,
+        done,
+    };
+
+    const ResponderState = enum {
+        recv_dh,
+        recv_identity,
+        done,
     };
 
     const Role = enum {
@@ -516,7 +553,7 @@ pub const HandshakeInsecure = struct {
 
     const Action = union(enum) {
         send: HandshakeMessage,
-        recv,
+        send_and_done: struct { message: HandshakeMessage, result: HandshakeResult },
         done: HandshakeResult,
         terminate,
     };
@@ -575,95 +612,130 @@ pub const HandshakeInsecure = struct {
         }
     }
 
+    pub fn deinit(handshake: *HandshakeInsecure) void {
+        std.crypto.utils.secureZero(u8, std.mem.asBytes(handshake));
+        handshake.* = undefined;
+    }
+
     pub fn feed(
-        kex: *HandshakeInsecure,
+        handshake: *HandshakeInsecure,
         maybe_msg: ?HandshakeMessage,
-    ) Action {
-        switch (kex.state) {
+    ) union(enum) {
+        operation: struct { message: ?HandshakeMessage, result: ?HandshakeResult },
+        terminate,
+    } {
+        switch (handshake.state) {
             .initiator => |state| {
                 switch (state) {
                     .send_dh => {
                         if (maybe_msg != null) return .terminate;
-                        kex.state.initiator = .recv_dh;
+                        log.info("feed: (initator) send dh", .{});
+                        handshake.state.initiator = .send_identity;
                         return .{
-                            .send = .init(
-                                kex.handshake_id,
-                                kex.self_type,
-                                kex.self_id,
-                                kex.key_pair.public_key,
-                            ),
+                            .operation = .{ .message = .init(
+                                handshake.handshake_id,
+                                handshake.self_type,
+                                handshake.self_id,
+                                handshake.key_pair.public_key,
+                                .diffie_hellman,
+                            ), .result = null },
                         };
                     },
-                    .recv_dh => {
-                        if (maybe_msg) |msg| {
-                            const shared_secret = X25519.scalarmult(
-                                kex.key_pair.secret_key,
-                                msg.public_key,
-                            ) catch {
-                                return .terminate;
-                            };
-
-                            kex.result = .{
-                                .shared_secret = shared_secret,
-                                .peer_type = msg.peer_type,
-                                .peer_id = msg.peer_id,
-                            };
-                            return .{ .done = kex.result.? };
-                        } else {
-                            return .{
-                                .send = .init(
-                                    kex.handshake_id,
-                                    kex.self_type,
-                                    kex.self_id,
-                                    kex.key_pair.public_key,
-                                ),
-                            };
+                    .send_identity => {
+                        if (maybe_msg == null) {
+                            return .terminate;
                         }
+                        const msg = maybe_msg.?;
+                        if (msg.message_type != .diffie_hellman) {
+                            return .terminate;
+                        }
+                        log.info("feed: (initator) received dh", .{});
+
+                        const shared_secret = X25519.scalarmult(
+                            handshake.key_pair.secret_key,
+                            msg.public_key,
+                        ) catch {
+                            return .terminate;
+                        };
+
+                        handshake.result = .{
+                            .shared_secret = shared_secret,
+                            .peer_type = msg.peer_type,
+                            .peer_id = msg.peer_id,
+                        };
+                        handshake.state.initiator = .send_identity;
+                        log.info("feed: (initator) send identity", .{});
+
+                        return .{
+                            .operation = .{ .message = .init(
+                                handshake.handshake_id,
+                                handshake.self_type,
+                                handshake.self_id,
+                                handshake.key_pair.public_key,
+                                .identity,
+                            ), .result = handshake.result.? },
+                        };
                     },
-                    .derive_secret => {
-                        if (maybe_msg != null) return .terminate;
-                        return .{ .done = kex.result.? };
+                    .done => {
+                        return .terminate;
                     },
                 }
             },
             .responder => |state| {
                 switch (state) {
                     .recv_dh => {
-                        if (maybe_msg) |msg| {
-                            const shared_secret = X25519.scalarmult(
-                                kex.key_pair.secret_key,
-                                msg.public_key,
-                            ) catch {
-                                return .terminate;
-                            };
-
-                            kex.result = .{
-                                .shared_secret = shared_secret,
-                                .peer_type = msg.peer_type,
-                                .peer_id = msg.peer_id,
-                            };
-                            kex.state.responder = .send_dh;
-                            return .{
-                                .send = .init(
-                                    kex.handshake_id,
-
-                                    kex.self_type,
-                                    kex.self_id,
-                                    kex.key_pair.public_key,
-                                ),
-                            };
-                        } else {
-                            return .recv;
+                        if (maybe_msg == null) {
+                            return .terminate;
                         }
+                        const msg = maybe_msg.?;
+                        if (msg.message_type != .diffie_hellman) {
+                            return .terminate;
+                        }
+                        log.info("feed: (responder) received dh", .{});
+
+                        const shared_secret = X25519.scalarmult(
+                            handshake.key_pair.secret_key,
+                            msg.public_key,
+                        ) catch {
+                            return .terminate;
+                        };
+
+                        handshake.result = .{
+                            .shared_secret = shared_secret,
+                            .peer_type = msg.peer_type,
+                            .peer_id = msg.peer_id,
+                        };
+                        handshake.state.responder = .recv_identity;
+                        log.info("feed: (responder) send dh", .{});
+
+                        return .{
+                            .operation = .{ .message = .init(
+                                handshake.handshake_id,
+                                handshake.self_type,
+                                handshake.self_id,
+                                handshake.key_pair.public_key,
+                                .diffie_hellman,
+                            ), .result = null },
+                        };
                     },
-                    .send_dh => {
-                        if (maybe_msg != null) return .terminate;
-                        kex.state.responder = .derive_secret;
-                        return .{ .done = kex.result.? };
+                    .recv_identity => {
+                        if (maybe_msg == null) {
+                            return .terminate;
+                        }
+                        const msg = maybe_msg.?;
+                        if (msg.message_type != .identity) {
+                            return .terminate;
+                        }
+
+                        log.info("feed: (responder) received identity", .{});
+
+                        return .{ .operation = .{
+                            .message = null,
+                            .result = handshake.result.?,
+                        } };
                     },
-                    .derive_secret => {
-                        if (maybe_msg != null) return .terminate;
-                        return .{ .done = kex.result.? };
+                    .done => {
+                        return .terminate;
                     },
                 }
             },
@@ -747,7 +819,11 @@ pub const CipherAegis256Nonce128 = struct {
     // recv_header_window: NonceWindow = .{},
     key_recv_body: [32]u8,
 
-    pub fn init(ephemeral_secret: [32]u8, peer_self: Peer, peer_other: Peer) CipherAegis256Nonce128 {
+    pub fn init(
+        ephemeral_secret: [32]u8,
+        peer_self: Peer,
+        peer_other: Peer,
+    ) CipherAegis256Nonce128 {
         const key_id = KeyId.init(encryption_version, peer_self, peer_other);
 
         const intent_send_header = Intent{
@@ -883,7 +959,6 @@ pub const CipherAegis256Nonce128 = struct {
         encrypted.header_key_id = cipher.key_id;
         const ad = encrypted.slice_associated_data();
 
-        std.log.info("header encryption key: {any}", .{key});
         aegis.Aegis256.encrypt(
             bytes_ciphertext,
             tag,
@@ -904,9 +979,7 @@ pub const CipherAegis256Nonce128 = struct {
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
-        if (header.header_key_id != cipher.key_id) {
-            return error.InvalidKeyId;
-        }
+        assert(header.header_key_id == cipher.key_id);
 
         if (header.header_nonce == 0 or header.header_nonce == undefined_u128) {
             return error.InvalidHeaderNonce;
@@ -918,9 +991,6 @@ pub const CipherAegis256Nonce128 = struct {
         const ad = header.slice_associated_data_const();
 
         const bytes_cleartext = decrypted.slice_encrypted();
-
-        std.log.info("header encrypted: {}", .{header});
-        std.log.info("header decryption key: {any}", .{key});
 
         try aegis.Aegis256.decrypt(
             bytes_cleartext,

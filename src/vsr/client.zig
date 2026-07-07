@@ -255,23 +255,24 @@ pub fn ClientType(
 
             if (EncryptionTransitContext.message_type(&header_encrypted) == .handshake) {
                 switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
-                    .send => |handshake_message| {
-                        const maybe_message_buffer = self.message_bus.send_message_handshake(
-                            header_encrypted.header_key_id,
-                            @sizeOf(encryption.HandshakeMessage),
-                        );
-                        if (maybe_message_buffer) |message_buffer| {
-                            stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
-                        } else {
-                            log.warn("{}: message_callback: drop message header={}", .{
-                                self.id,
-                                header_encrypted,
-                            });
+                    .operation => |operation| {
+                        assert(operation.message != null or operation.peer != null);
+
+                        if (operation.message) |message| {
+                            const maybe_message_buffer = self.message_bus.send_message_handshake(
+                                header_encrypted.header_key_id,
+                                @sizeOf(encryption.HandshakeMessage),
+                            );
+                            if (maybe_message_buffer) |message_buffer| {
+                                stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&message));
+                            } else {
+                                log.warn("{}: message_callback: drop message header={}", .{
+                                    self.id,
+                                    header_encrypted,
+                                });
+                            }
                         }
-                        return .{ .handshaking = header_encrypted.header_key_id };
-                    },
-                    .peer => |peer| {
-                        return peer;
+                        return operation.peer orelse .unknown;
                     },
                     .err => |err| {
                         log.err("{}: message_callback: handshake failed: {}", .{
@@ -813,7 +814,7 @@ pub fn ClientType(
                 if (maybe_message_buffer) |message_buffer| {
                     stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
                 } else {
-                    log.warn("{}: send_message_to_replica: drop message header={}", .{
+                    log.warn("{}: send_message_to_replica: drop message no encrypted connection header={}", .{
                         self.id,
                         message.header,
                     });

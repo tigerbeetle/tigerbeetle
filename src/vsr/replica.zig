@@ -1579,24 +1579,24 @@ pub fn ReplicaType(
             if (EncryptionTransitContext.message_type(&header_encrypted) == .handshake) {
                 log.info("message_callback: received handshake message", .{});
                 switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
-                    .peer => |peer| {
-                        log.info("message_callback: handshake completed", .{});
-                        return peer;
-                    },
-                    .send => |handshake_message| {
-                        const maybe_message_buffer = self.message_bus.send_message_handshake(
-                            header_encrypted.header_key_id,
-                            @sizeOf(encryption.HandshakeMessage),
-                        );
-                        if (maybe_message_buffer) |message_buffer| {
-                            stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
-                        } else {
-                            log.warn("{}: message_callback: drop message header={}", .{
-                                self.log_prefix(),
-                                header_encrypted,
-                            });
+                    .operation => |operation| {
+                        assert(operation.message != null or operation.peer != null);
+
+                        if (operation.message) |message| {
+                            const maybe_message_buffer = self.message_bus.send_message_handshake(
+                                header_encrypted.header_key_id,
+                                @sizeOf(encryption.HandshakeMessage),
+                            );
+                            if (maybe_message_buffer) |message_buffer| {
+                                stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&message));
+                            } else {
+                                log.warn("{}: message_callback: drop message header={}", .{
+                                    self.log_prefix(),
+                                    header_encrypted,
+                                });
+                            }
                         }
-                        return .{ .handshaking = header_encrypted.header_key_id };
+                        return operation.peer orelse .unknown;
                     },
                     .err => |err| {
                         log.err("{}: message_callback: handshake failed: {}", .{
@@ -9210,12 +9210,11 @@ pub fn ReplicaType(
                 message.header.size,
             );
             if (maybe_message_buffer) |message_buffer| {
-                // FIXME: use session
-                // self.encryption_transit.encrypt_message(
-                //     message_network.buffer,
-                //     message,
-                // );
-                _ = message_buffer;
+                self.encryption_transit_context.encrypt_message(
+                    .{ .client = client },
+                    message_buffer,
+                    message,
+                );
             } else {
                 log.warn("send_message_to_client_base: drop message header={}", .{
                     message.header,
@@ -9528,12 +9527,11 @@ pub fn ReplicaType(
                     message.header.size,
                 );
                 if (maybe_message_buffer) |message_buffer| {
-                    // FIXME: use session
-                    // self.encryption_transit.encrypt_message(
-                    //     message_network.buffer,
-                    //     message,
-                    // );
-                    _ = message_buffer;
+                    self.encryption_transit_context.encrypt_message(
+                        .{ .replica = replica },
+                        message_buffer,
+                        message,
+                    );
                 } else {
                     log.warn("send_message_to_replica_base: drop message header={}", .{
                         message.header,

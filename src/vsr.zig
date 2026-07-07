@@ -90,7 +90,6 @@ pub const Peer = union(enum) {
     replica: u8,
     client: u128,
     client_likely: u128,
-    handshaking: u128,
 
     pub fn transition(old: Peer, new: Peer) enum { retain, update, reject } {
         return switch (old) {
@@ -106,28 +105,18 @@ pub const Peer = union(enum) {
                 .client => if (old.client_likely == new.client) .update else .reject,
                 .replica => .update,
                 .unknown => .retain,
-                .handshaking => .reject,
             },
 
             .replica => switch (new) {
                 .replica => if (std.meta.eql(old, new)) .retain else .reject,
                 .client => .reject,
                 .client_likely, .unknown => .retain,
-                .handshaking => .reject,
             },
             .client => switch (new) {
                 .client => if (std.meta.eql(old, new)) .retain else .reject,
                 .client_likely => if (old.client == new.client_likely) .retain else .reject,
                 .replica => .reject,
                 .unknown => .retain,
-                .handshaking => .reject,
-            },
-            .handshaking => switch (new) {
-                .client => .update,
-                .replica => .update,
-                .handshaking => .retain,
-                .client_likely => .reject,
-                .unknown => .reject,
             },
         };
     }

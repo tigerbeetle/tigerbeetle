@@ -179,6 +179,8 @@ pub fn MessageBusType(comptime IO: type) type {
         send: SendState = .{},
 
         peer: Peer = .unknown,
+
+        handshake_id: ?u128 = null,
     };
 
     return struct {
@@ -515,8 +517,9 @@ pub fn MessageBusType(comptime IO: type) type {
             _: *IO.Completion,
             result: IO.AcceptError!IO.socket_t,
         ) void {
+            defer bus.verify_state();
+
             assert(bus.process == .replica);
-            std.log.info("accept_callback: on replica: {d}", .{bus.process.replica});
 
             assert(bus.accept_connection != null);
             const connection: *Connection = bus.accept_connection.?;
@@ -701,6 +704,8 @@ pub fn MessageBusType(comptime IO: type) type {
             completion: *IO.Completion,
             result: IO.ConnectError!void,
         ) void {
+            defer bus.verify_state();
+
             const connection: *Connection = @alignCast(
                 @fieldParentPtr("recv_completion", completion),
             );
@@ -723,7 +728,6 @@ pub fn MessageBusType(comptime IO: type) type {
                 return;
             };
 
-            log.info("{}: connect_callback: connected", .{bus.id});
             assert(connection.peer == .replica);
             bus.replicas_connect_attempts[connection.peer.replica] = 0;
 
@@ -749,7 +753,6 @@ pub fn MessageBusType(comptime IO: type) type {
         ///
         /// Kickstarted by `accept` and `connect`, and loops onto itself via `recv_buffer_drain`.
         fn recv(bus: *MessageBus, connection: *Connection) void {
-            log.info("recv: receive issued", .{});
             assert(connection.state == .connected);
             assert(connection.fd != null);
 
@@ -792,8 +795,6 @@ pub fn MessageBusType(comptime IO: type) type {
                 return;
             };
 
-            std.log.info("recv_callback: received {d} bytes", .{bytes_received});
-
             // No bytes received means that the peer closed its side of the connection.
             if (bytes_received == 0) {
                 log.info("{}: recv_callback: orderly shutdown", .{bus.id});
@@ -809,12 +810,31 @@ pub fn MessageBusType(comptime IO: type) type {
                 if (connection.recv.peek_header()) |header_encrypted| {
                     const header_callback_result = bus.header_callback(bus, header_encrypted) catch |err| {
                         log.warn("{}: recv_callback: err {}", .{ bus.id, err });
-                        bus.terminate(connection, .shutdown);
-                        return;
+                        return bus.terminate(connection, .shutdown);
                     };
                     connection.recv.message_size = header_callback_result.message_size;
                     if (header_callback_result.handshake_id) |handshake_id| {
-                        bus.handshakes.putAssumeCapacityNoClobber(handshake_id, connection);
+                        const gop = bus.handshakes.getOrPutAssumeCapacity(handshake_id);
+
+                        if (gop.found_existing) {
+                            if (gop.value_ptr.* == connection) {
+                                assert(connection.handshake_id != null);
+                                assert(connection.handshake_id.? == handshake_id);
+                            }
+                        } else {
+                            // If `handshakes` already contains a connection for `handshake_id`
+                            // we don't overwrite it, because a replayed message should not
+                            // cause redirection of future replies.
+                            gop.value_ptr.* = connection;
+                        }
+
+                        if (connection.handshake_id) |handshake_id_existing| {
+                            if (handshake_id_existing != handshake_id) {
+                                const remove_result = bus.handshakes.remove(handshake_id_existing);
+                                maybe(remove_result);
+                            }
+                        }
+                        connection.handshake_id = handshake_id;
                     }
                 }
             }
@@ -833,42 +853,82 @@ pub fn MessageBusType(comptime IO: type) type {
                                 bus.id,
                                 replica_idx,
                             });
-                            bus.terminate(connection, .shutdown);
-                            return;
+                            return bus.terminate(connection, .shutdown);
                         }
-                    },
-                    .handshaking => |handshake_id| {
-                        assert(bus.handshakes.contains(handshake_id));
                     },
                     else => {},
                 }
 
-                switch (connection.peer.transition(peer)) {
-                    .update => {
-                        connection.peer = peer;
-                        switch (connection.peer) {
-                            .client => |client_id| {
-                                const client_gop = bus.clients.getOrPutAssumeCapacity(client_id);
-                                client_gop.value_ptr.* = connection;
-                            },
-                            .replica => |replica_idx| {
-                                assert(replica_idx < constants.replicas_max);
-                                bus.replicas[replica_idx] = connection;
-                            },
-                            else => {},
-                        }
-                    },
-                    .retain => {},
-                    .reject => {
-                        log.warn("{}: recv_callback: bad peer transition", .{bus.id});
-                        bus.terminate(connection, .shutdown);
-                    },
+                if (peer != .unknown) {
+                    switch (connection.peer.transition(peer)) {
+                        .update => {
+                            switch (peer) {
+                                .client => |client_id| {
+                                    const client_gop = bus.clients.getOrPutAssumeCapacity(client_id);
+                                    client_gop.value_ptr.* = connection;
+                                    // TODO: find out why we cannot assert handshake_id != null here.
+                                    if (connection.handshake_id) |handshake_id| {
+                                        const remove_result = bus.handshakes.remove(handshake_id);
+                                        assert(remove_result);
+                                        connection.handshake_id = null;
+                                    }
+                                },
+                                .replica => |replica_idx| {
+                                    assert(replica_idx < constants.replicas_max);
+                                    bus.replicas[replica_idx] = connection;
+                                    if (connection.handshake_id) |handshake_id| {
+                                        const remove_result = bus.handshakes.remove(handshake_id);
+                                        assert(remove_result);
+                                        connection.handshake_id = null;
+                                    }
+                                },
+                                else => {},
+                            }
+                            connection.peer = peer;
+                        },
+                        .retain => {},
+                        .reject => {
+                            log.warn("{}: recv_callback: bad peer transition 2", .{bus.id});
+                            return bus.terminate(connection, .shutdown);
+                        },
+                    }
                 }
 
                 connection.recv.copy_left();
             }
 
             bus.recv(connection);
+        }
+
+        fn verify_state(bus: *MessageBus) void {
+            // TODO: decide if we want to guard this by `constants.verify`
+            for (bus.connections) |*connection| {
+                if (connection.state == .free) {
+                    assert(connection.peer == .unknown);
+                    assert(connection.handshake_id == null);
+                    continue;
+                }
+
+                if (connection.handshake_id) |handshake_id| {
+                    const maybe_connection = bus.handshakes.get(handshake_id);
+                    assert(maybe_connection != null);
+                    maybe(maybe_connection.? == connection);
+                }
+
+                switch (connection.peer) {
+                    .replica => |replica| {
+                        const maybe_connection = bus.replicas[replica];
+                        assert(maybe_connection != null);
+                        assert(maybe_connection.? == connection);
+                    },
+                    .client, .client_likely => |client_id| {
+                        const maybe_connection = bus.clients.get(client_id);
+                        assert(maybe_connection != null);
+                        assert(maybe_connection.? == connection);
+                    },
+                    .unknown => {},
+                }
+            }
         }
 
         pub fn send_message_to_client(
@@ -901,7 +961,7 @@ pub fn MessageBusType(comptime IO: type) type {
                 return bus.send_message(connection, size);
             } else {
                 log.warn(
-                    "{}: send_message_to_handshake: no connection to={}",
+                    "{}: send_message_to_handshake: no connection for handshake_id={}",
                     .{ bus.id, handshake_id },
                 );
                 return null;
@@ -955,6 +1015,9 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Kickstarted by `connect` and loops onto itself until all enqueue messages are sent.
         /// `accept` doesn't start the send loop because it doesn't know the identity of the peer.
         fn issue_send(bus: *MessageBus, connection: *Connection) void {
+            if (connection.state != .connected) {
+                std.log.err("send state: {}", .{connection.state});
+            }
             assert(connection.state == .connected);
             assert(connection.fd != null);
             assert(!connection.send_submitted);
@@ -1003,8 +1066,6 @@ pub fn MessageBusType(comptime IO: type) type {
                 bus.terminate(connection, .shutdown);
                 return;
             };
-
-            std.log.info("send_callback: sent {d} bytes", .{write_size});
 
             assert(write_size <= constants.message_size_max);
             connection.send.progress += @intCast(write_size);
@@ -1165,10 +1226,11 @@ pub fn MessageBusType(comptime IO: type) type {
                         stdx.maybe(bus.replicas[replica] == null);
                     }
                 },
-                .handshaking => |handshake_id| {
-                    _ = handshake_id;
-                    // TODO: same as client
-                },
+            }
+
+            if (connection.handshake_id) |handshake_id| {
+                const remove_result = bus.handshakes.remove(handshake_id);
+                maybe(remove_result);
             }
 
             // Reset the connection to its initial state.
@@ -1316,7 +1378,6 @@ test "MessageBus unit test" {
         fn header_callback(context: *anyopaque, header: HeaderEncrypted) anyerror!HeaderCallbackResult {
             const message_bus: *MessageBus = @ptrCast(@alignCast(context));
             const parent: *Parent = @fieldParentPtr("bus", message_bus);
-            std.log.info("received header {} for context {*}", .{ header, context });
             const session = parent.session;
             assert(session.established());
 
@@ -1343,7 +1404,6 @@ test "MessageBus unit test" {
 
             try session.decrypt_body(message, &parent.header.?, body_encrypted);
 
-            std.log.info("Decrypted body", .{});
             parent.header = null;
         }
     }.message_callback;
@@ -1414,13 +1474,6 @@ test "MessageBus unit test" {
         is_one = !is_one;
     }
 
-    std.log.info("session1 key id: {x}", .{session1.state.established.key_id});
-    std.log.info("session1 key_send_header : {any}", .{session1.state.established.key_send_header});
-    std.log.info("session1 key_recv_header : {any}", .{session1.state.established.key_recv_header});
-    std.log.info("session2 key id: {x}", .{session2.state.established.key_id});
-    std.log.info("session2 key_send_header : {any}", .{session2.state.established.key_send_header});
-    std.log.info("session2 key_recv_header : {any}", .{session2.state.established.key_recv_header});
-
     try bus1.listen();
     try bus2.listen();
 
@@ -1436,9 +1489,6 @@ test "MessageBus unit test" {
     const message_network = bus1.send_message_to_replica(1, message.header.size) orelse unreachable;
 
     session1.encrypt_message(message_network.buffer, message);
-
-    const header_encrypted: *HeaderEncrypted = @alignCast(std.mem.bytesAsValue(HeaderEncrypted, message_network.buffer[0..@sizeOf(HeaderEncrypted)]));
-    std.log.info("header after encryption: {}", .{header_encrypted});
 
     bus1.send(message_network);
 
