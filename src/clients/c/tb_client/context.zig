@@ -885,6 +885,9 @@ pub fn ContextType(
 
             if (!operation.is_multi_batch()) {
                 assert(packet_list.multi_batch_next == null);
+                // Replies must contain a whole number of results, matching the
+                // `@divExact` invariant enforced on the multi-batch path below.
+                assert(reply.len % operation.result_size() == 0);
                 return self.notify_completion(packet_list, .{
                     .timestamp = timestamp,
                     .reply = reply,
