@@ -6,7 +6,6 @@ comptime {
     _ = @import("clients/c/tb_client.zig");
     _ = @import("clients/c/tb_client/context.zig");
     _ = @import("clients/c/tb_client/signal.zig");
-    _ = @import("clients/c/test.zig");
     _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
     _ = @import("ewah_benchmark.zig");

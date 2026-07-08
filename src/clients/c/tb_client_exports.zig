@@ -108,7 +108,7 @@ pub fn init(
         break :blk cluster_id;
     };
 
-    tb.init(
+    tb.Context.init(
         std.heap.c_allocator,
         tb_client_out.cast(),
         cluster_id,
