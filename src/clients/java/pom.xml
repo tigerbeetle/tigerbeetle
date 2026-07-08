@@ -164,6 +164,7 @@
               <exclude>com/tigerbeetle/JNILoader$Abi.class</exclude>
 
               <!-- Excluding enums -->
+              <exclude>com/tigerbeetle/TBOperation.class</exclude>
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
               <exclude>com/tigerbeetle/PacketAcquireStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
@@ -190,6 +191,7 @@
               <exclude>com/tigerbeetle/CreateTransferStatus.java</exclude>
               <exclude>com/tigerbeetle/CreateTransferResultBatch.java</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.java</exclude>
+              <exclude>com/tigerbeetle/TBOperation.java</exclude>
               <exclude>com/tigerbeetle/ClientStatus.java</exclude>
               <exclude>com/tigerbeetle/PacketStatus.java</exclude>
               <exclude>com/tigerbeetle/TBClient.java</exclude>
