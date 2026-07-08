@@ -20,14 +20,7 @@ const DefaultContext = blk: {
     break :blk ContextType(Client);
 };
 
-const TestingContext = blk: {
-    const EchoClientType = @import("tb_client/echo_client.zig").EchoClientType;
-    const EchoClient = EchoClientType(MessageBus);
-    break :blk ContextType(EchoClient);
-};
-
 pub const init = DefaultContext.init;
-pub const init_echo = TestingContext.init;
 
 test {
     std.testing.refAllDecls(DefaultContext);

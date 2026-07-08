@@ -87,18 +87,6 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
                 filter.batch);
     }
 
-    public static BlockingRequest<AccountBatch> echo(final NativeClient nativeClient,
-            final AccountBatch batch) {
-        return new BlockingRequest<AccountBatch>(nativeClient, Request.Operations.ECHO_ACCOUNTS,
-                batch);
-    }
-
-    public static BlockingRequest<TransferBatch> echo(final NativeClient nativeClient,
-            final TransferBatch batch) {
-        return new BlockingRequest<TransferBatch>(nativeClient, Request.Operations.ECHO_TRANSFERS,
-                batch);
-    }
-
     public boolean isDone() {
         return result != null || exception != null;
     }

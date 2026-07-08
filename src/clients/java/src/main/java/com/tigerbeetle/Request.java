@@ -38,10 +38,7 @@ abstract class Request<TResponse extends Batch> {
         GET_ACCOUNT_TRANSFERS(142),
         GET_ACCOUNT_BALANCES(143),
         QUERY_ACCOUNTS(144),
-        QUERY_TRANSFERS(145),
-
-        ECHO_ACCOUNTS(146),
-        ECHO_TRANSFERS(147);
+        QUERY_TRANSFERS(145);
 
         byte value;
 
@@ -119,7 +116,6 @@ abstract class Request<TResponse extends Batch> {
                             break;
                         }
 
-                        case ECHO_ACCOUNTS:
                         case LOOKUP_ACCOUNTS: {
                             result = new AccountBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
@@ -127,7 +123,6 @@ abstract class Request<TResponse extends Batch> {
                             break;
                         }
 
-                        case ECHO_TRANSFERS:
                         case LOOKUP_TRANSFERS: {
                             result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
