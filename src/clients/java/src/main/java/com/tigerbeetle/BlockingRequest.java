@@ -31,7 +31,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
     private TResponse result;
     private Throwable exception;
 
-    BlockingRequest(final NativeClient nativeClient, final Operations operation,
+    BlockingRequest(final NativeClient nativeClient, final TBOperation operation,
             final Batch batch) {
         super(nativeClient, operation, batch);
 
@@ -42,48 +42,46 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
     public static BlockingRequest<CreateAccountResultBatch> createAccounts(
             final NativeClient nativeClient, final AccountBatch batch) {
         return new BlockingRequest<CreateAccountResultBatch>(nativeClient,
-                Request.Operations.CREATE_ACCOUNTS, batch);
+                TBOperation.CreateAccounts, batch);
     }
 
     public static BlockingRequest<AccountBatch> lookupAccounts(final NativeClient nativeClient,
             final IdBatch batch) {
-        return new BlockingRequest<AccountBatch>(nativeClient, Request.Operations.LOOKUP_ACCOUNTS,
-                batch);
+        return new BlockingRequest<AccountBatch>(nativeClient, TBOperation.LookupAccounts, batch);
     }
 
     public static BlockingRequest<CreateTransferResultBatch> createTransfers(
             final NativeClient nativeClient, final TransferBatch batch) {
         return new BlockingRequest<CreateTransferResultBatch>(nativeClient,
-                Request.Operations.CREATE_TRANSFERS, batch);
+                TBOperation.CreateTransfers, batch);
     }
 
     public static BlockingRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,
             final IdBatch batch) {
-        return new BlockingRequest<TransferBatch>(nativeClient, Request.Operations.LOOKUP_TRANSFERS,
-                batch);
+        return new BlockingRequest<TransferBatch>(nativeClient, TBOperation.LookupTransfers, batch);
     }
 
     public static BlockingRequest<TransferBatch> getAccountTransfers(
             final NativeClient nativeClient, final AccountFilter filter) {
-        return new BlockingRequest<TransferBatch>(nativeClient,
-                Request.Operations.GET_ACCOUNT_TRANSFERS, filter.batch);
+        return new BlockingRequest<TransferBatch>(nativeClient, TBOperation.GetAccountTransfers,
+                filter.batch);
     }
 
     public static BlockingRequest<AccountBalanceBatch> getAccountBalances(
             final NativeClient nativeClient, final AccountFilter filter) {
         return new BlockingRequest<AccountBalanceBatch>(nativeClient,
-                Request.Operations.GET_ACCOUNT_BALANCES, filter.batch);
+                TBOperation.GetAccountBalances, filter.batch);
     }
 
     public static BlockingRequest<AccountBatch> queryAccounts(final NativeClient nativeClient,
             final QueryFilter filter) {
-        return new BlockingRequest<AccountBatch>(nativeClient, Request.Operations.QUERY_ACCOUNTS,
+        return new BlockingRequest<AccountBatch>(nativeClient, TBOperation.QueryAccounts,
                 filter.batch);
     }
 
     public static BlockingRequest<TransferBatch> queryTransfers(final NativeClient nativeClient,
             final QueryFilter filter) {
-        return new BlockingRequest<TransferBatch>(nativeClient, Request.Operations.QUERY_TRANSFERS,
+        return new BlockingRequest<TransferBatch>(nativeClient, TBOperation.QueryTransfers,
                 filter.batch);
     }
 
