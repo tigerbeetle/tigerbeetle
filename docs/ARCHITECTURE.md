@@ -210,7 +210,7 @@ example, TigerBeetle doesn't need to have _explicit_ code for handling backpress
 has a limit, there's nothing to grow without bound to begin with. Backpressure arises from the entire
 system of components needing to honor each-other's limits.
 
-Another interesting consequence of static limits is runway concurrency. In highly concurrent
+Another interesting consequence of static limits is runaway concurrency. In highly concurrent
 applications, there are more concurrent tasks than the number of underlying resources available. This
 leads to oversubscription. A concurrent task is usually a closure allocated somewhere on the heap
 and registered with an event loop (a `Box<dyn Future>`). TigerBeetle _can't_ heap allocate
