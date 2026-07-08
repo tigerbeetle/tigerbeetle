@@ -21,6 +21,7 @@ pub const PacketSimulatorOptions = struct {
     one_way_delay_mean: Duration,
     one_way_delay_min: Duration,
 
+    // TODO: maybe add packet redirect.
     packet_loss_probability: Ratio = Ratio.zero(),
     packet_replay_probability: Ratio = Ratio.zero(),
 
@@ -84,7 +85,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         const PacketSimulator = @This();
 
         const VTable = struct {
-            packet_command: *const fn (*PacketSimulator, Packet) vsr.Command,
+            packet_header: *const fn (*PacketSimulator, Packet, Path) vsr.Header,
             packet_clone: *const fn (*PacketSimulator, Packet) Packet,
             packet_deinit: *const fn (*PacketSimulator, Packet) void,
             packet_deliver: *const fn (*PacketSimulator, Packet, Path) void,
@@ -101,28 +102,25 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
         };
 
-        pub const LinkDropPacket = struct {
-            context: ?*anyopaque,
-            function: *const fn (context: ?*anyopaque, packet: Packet) bool,
-        };
+        pub const LinkDropPacketFn = *const fn (packet: Packet, header: vsr.Header) bool;
 
         const Link = struct {
             queue: std.PriorityQueue(LinkPacket, void, LinkPacket.less_than),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
-            drop_packet: ?LinkDropPacket = null,
+            drop_packet: ?LinkDropPacketFn = null,
             /// Commands in the set are recorded for a later replay.
             record: LinkFilter = .{},
             /// We can arbitrary clog a path until a given moment.
             clogged_till: Instant = .{ .ns = 0 },
 
-            fn should_drop(link: *const @This(), packet: Packet, command: vsr.Command) bool {
-                if (!link.filter.contains(command)) {
+            fn should_drop(link: *const @This(), packet: Packet, header: vsr.Header) bool {
+                if (!link.filter.contains(header.command)) {
                     return true;
                 }
                 if (link.drop_packet) |drop_packet| {
-                    return drop_packet.function(drop_packet.context, packet);
+                    return drop_packet(packet, header);
                 }
                 return false;
             }
@@ -234,7 +232,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return &self.links[self.path_index(path)].filter;
         }
 
-        pub fn link_drop_packet(self: *PacketSimulator, path: Path) *?LinkDropPacket {
+        pub fn link_drop_packet_fn(self: *PacketSimulator, path: Path) *?LinkDropPacketFn {
             return &self.links[self.path_index(path)].drop_packet;
         }
 
@@ -447,7 +445,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 .packet = packet,
             }) catch unreachable;
 
-            const command = self.packet_command(packet);
+            const command = self.packet_header(packet, path).command;
             const recording = self.links[self.path_index(path)].record.contains(command);
             if (recording) {
                 self.recorded.addOneAssumeCapacity().* = .{
@@ -459,17 +457,14 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         fn submit_packet_finish(self: *PacketSimulator, path: Path, link_packet: LinkPacket) void {
             assert(link_packet.ready_at.ns <= self.tick_instant().ns);
-            const command = self.packet_command(link_packet.packet);
-            if (self.links[self.path_index(path)].should_drop(link_packet.packet, command)) {
+            const header = self.packet_header(link_packet.packet, path);
+            if (self.links[self.path_index(path)].should_drop(link_packet.packet, header)) {
                 log.warn(
                     "dropped packet (different partitions): from={} to={}: {}",
                     .{
                         path.source,
                         path.target,
-                        if (@typeInfo(Packet) == .pointer)
-                            link_packet.packet.header
-                        else
-                            link_packet.packet,
+                        header,
                     },
                 );
                 return;
@@ -479,10 +474,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 log.warn("dropped packet from={} to={}: {}", .{
                     path.source,
                     path.target,
-                    if (@typeInfo(Packet) == .pointer)
-                        link_packet.packet.header
-                    else
-                        link_packet.packet,
+                    header,
                 });
                 return;
             }
@@ -503,8 +495,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return .{ .ns = self.ticks * constants.tick_ms * std.time.ns_per_ms };
         }
 
-        fn packet_command(self: *PacketSimulator, packet: Packet) vsr.Command {
-            return self.vtable.packet_command(self, packet);
+        pub fn packet_header(self: *PacketSimulator, packet: Packet, path: Path) vsr.Header {
+            return self.vtable.packet_header(self, packet, path);
         }
 
         fn packet_clone(self: *PacketSimulator, packet: Packet) Packet {

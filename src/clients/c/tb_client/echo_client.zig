@@ -63,8 +63,7 @@ pub fn EchoClientType(comptime MessageBus: type) type {
         }
 
         /// EchoClient has no real IO to drain.
-        pub fn shutdown(_: *EchoClient) void {}
-        pub fn shutdown_complete(_: *const EchoClient) bool {
+        pub fn shutdown(_: *EchoClient) bool {
             return true;
         }
 

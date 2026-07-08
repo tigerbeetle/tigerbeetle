@@ -9,7 +9,7 @@ const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
-const MessageNetwork = MessagePool.Message;
+const Message = MessagePool.Message;
 
 const MessageBus = @import("message_bus.zig").MessageBus;
 const Process = @import("message_bus.zig").Process;
@@ -18,13 +18,15 @@ const PacketSimulatorType = @import("../packet_simulator.zig").PacketSimulatorTy
 const PacketSimulatorOptions = @import("../packet_simulator.zig").PacketSimulatorOptions;
 const PacketSimulatorPath = @import("../packet_simulator.zig").Path;
 
+const EncryptionNetwork = @import("../../encryption.zig").EncryptionNetwork;
+
 const log = std.log.scoped(.network);
 
 pub const NetworkOptions = PacketSimulatorOptions;
 pub const LinkFilter = @import("../packet_simulator.zig").LinkFilter;
 
 pub const Network = struct {
-    const PacketSimulator = PacketSimulatorType(*MessageNetwork);
+    const PacketSimulator = PacketSimulatorType(*Message);
 
     pub const Path = struct {
         source: Process,
@@ -46,6 +48,7 @@ pub const Network = struct {
 
     buses: std.ArrayListUnmanaged(*MessageBus),
     buses_enabled: std.ArrayListUnmanaged(bool),
+    encryptions: std.ArrayListUnmanaged(*EncryptionNetwork),
     processes: std.ArrayListUnmanaged(u128),
     /// A pool of messages that are in the network (sent, but not yet delivered).
     message_pool: MessagePool,
@@ -63,11 +66,14 @@ pub const Network = struct {
         var buses_enabled = try std.ArrayListUnmanaged(bool).initCapacity(allocator, process_count);
         errdefer buses_enabled.deinit(allocator);
 
+        var encryptions = try std.ArrayListUnmanaged(*EncryptionNetwork).initCapacity(allocator, process_count);
+        errdefer encryptions.deinit(allocator);
+
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
 
         var packet_simulator = try PacketSimulator.init(allocator, options, .{
-            .packet_command = &packet_command,
+            .packet_header = &packet_header,
             .packet_clone = &packet_clone,
             .packet_deinit = &packet_deinit,
             .packet_deliver = &packet_deliver,
@@ -96,6 +102,7 @@ pub const Network = struct {
             .packet_simulator = packet_simulator,
             .buses = buses,
             .buses_enabled = buses_enabled,
+            .encryptions = encryptions,
             .processes = processes,
             .message_pool = message_pool,
             .message_summary = .{},
@@ -103,11 +110,12 @@ pub const Network = struct {
     }
 
     pub fn deinit(network: *Network) void {
-        network.buses.deinit(network.allocator);
-        network.buses_enabled.deinit(network.allocator);
-        network.processes.deinit(network.allocator);
-        network.packet_simulator.deinit(network.allocator);
         network.message_pool.deinit(network.allocator);
+        network.packet_simulator.deinit(network.allocator);
+        network.processes.deinit(network.allocator);
+        network.encryptions.deinit(network.allocator);
+        network.buses_enabled.deinit(network.allocator);
+        network.buses.deinit(network.allocator);
     }
 
     pub fn step(network: *Network) bool {
@@ -155,7 +163,7 @@ pub const Network = struct {
         }
     }
 
-    pub fn link(network: *Network, process: Process, message_bus: *MessageBus) void {
+    pub fn link(network: *Network, process: Process, message_bus: *MessageBus, encryption: *EncryptionNetwork) void {
         const raw_process = switch (process) {
             .replica => |replica| replica,
             .client => |client| blk: {
@@ -178,8 +186,10 @@ pub const Network = struct {
             network.processes.appendAssumeCapacity(raw_process);
             network.buses.appendAssumeCapacity(message_bus);
             network.buses_enabled.appendAssumeCapacity(true);
+            network.encryptions.appendAssumeCapacity(encryption);
         }
         assert(network.processes.items.len == network.buses.items.len);
+        assert(network.processes.items.len == network.encryptions.items.len);
     }
 
     pub fn process_enable(network: *Network, process: Process) void {
@@ -206,8 +216,8 @@ pub const Network = struct {
         });
     }
 
-    pub fn link_drop_packet(network: *Network, path: Path) *?PacketSimulator.LinkDropPacket {
-        return network.packet_simulator.link_drop_packet(.{
+    pub fn link_drop_packet_fn(network: *Network, path: Path) *?PacketSimulator.LinkDropPacketFn {
+        return network.packet_simulator.link_drop_packet_fn(.{
             .source = network.process_to_address(path.source),
             .target = network.process_to_address(path.target),
         });
@@ -224,46 +234,7 @@ pub const Network = struct {
         return network.packet_simulator.replay_recorded();
     }
 
-    pub fn send_message(network: *Network, message: *MessageNetwork, path: Path) void {
-        network.message_summary.add(message.metadata);
-        log.debug("send_message: {} > {}: {}", .{
-            path.source,
-            path.target,
-            message.header.command,
-        });
-
-        // TODO: figure out if you can reintroduce these asserts
-        // switch (message.header.peer_type()) {
-        //     .unknown => {},
-        //     .client_likely => |client_id| {
-        //         // Requests may be forwarded by replicas, but peer_type always returns client ID,
-        //         // as it is useful for the production MessageBus. Specifically, a replica that
-        //         // receives a request from a client can immediately cache the connection in the
-        //         // client map, instead of waiting for an infrequent PingClient message to do so.
-        //         assert(message.header.command == .request);
-        //         if (path.source == .client) assert(path.source.client == client_id);
-        //     },
-        //     .client => |client_id| assert(std.meta.eql(path.source, .{ .client = client_id })),
-        //     .replica => |index| assert(std.meta.eql(path.source, .{ .replica = index })),
-        // }
-
-        const network_message = network.message_pool.get_message_network();
-        defer network.message_pool.unref(network_message);
-
-        stdx.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
-        network_message.metadata = message.metadata;
-        network_message.header = undefined;
-
-        network.packet_simulator.submit_packet(
-            network_message.ref(),
-            .{
-                .source = network.process_to_address(path.source),
-                .target = network.process_to_address(path.target),
-            },
-        );
-    }
-
-    fn process_to_address(network: *const Network, process: Process) u8 {
+    pub fn process_to_address(network: *const Network, process: Process) u8 {
         for (network.processes.items, 0..) |p, i| {
             if (std.meta.eql(raw_process_to_process(p), process)) {
                 switch (process) {
@@ -281,22 +252,25 @@ pub const Network = struct {
         return network.buses.items[network.process_to_address(process)];
     }
 
-    fn packet_command(_: *PacketSimulator, message: *MessageNetwork) vsr.Command {
-        return message.header.command;
+    fn packet_header(packet_simulator: *PacketSimulator, message_encrypted: *Message, path: PacketSimulatorPath) vsr.Header {
+        const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
+        const target_encryption: *EncryptionNetwork = network.encryptions.items[path.target];
+        const header_encrypted = std.mem.bytesAsValue(vsr.HeaderEncrypted, message_encrypted.buffer[0..@sizeOf(vsr.HeaderEncrypted)]);
+        return target_encryption.decrypt_header(header_encrypted) catch unreachable;
     }
 
-    fn packet_clone(_: *PacketSimulator, message: *MessageNetwork) *MessageNetwork {
+    fn packet_clone(_: *PacketSimulator, message: *Message) *Message {
         return message.ref();
     }
 
-    fn packet_deinit(packet_simulator: *PacketSimulator, message: *MessageNetwork) void {
+    fn packet_deinit(packet_simulator: *PacketSimulator, message: *Message) void {
         const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
         network.message_pool.unref(message);
     }
 
     fn packet_deliver(
         packet_simulator: *PacketSimulator,
-        message: *MessageNetwork,
+        message_encrypted: *Message,
         path: PacketSimulatorPath,
     ) void {
         const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
@@ -305,11 +279,12 @@ pub const Network = struct {
             .target = raw_process_to_process(network.processes.items[path.target]),
         };
 
+        const header = packet_simulator.packet_header(message_encrypted, path);
         if (!network.buses_enabled.items[path.target]) {
             log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
                 process_path.source,
                 process_path.target,
-                message.header.command,
+                header.command,
             });
             return;
         }
@@ -317,39 +292,11 @@ pub const Network = struct {
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
             process_path.target,
-            message.header.command,
+            header.command,
         });
 
-        const target_bus: *MessageBus = network.buses.items[path.target];
-
-        if (target_bus.recv_size + message.header.size >
-            target_bus.recv_buffer.len)
-        {
-            log.debug("deliver_message: {} > {}: {} (dropped; buffer is full)", .{
-                process_path.source,
-                process_path.target,
-                message.header.command,
-            });
-            return;
-        }
-
-        stdx.copy_disjoint(
-            .inexact,
-            u8,
-            target_bus.recv_buffer[target_bus.recv_size..],
-            message.buffer[0..message.header.size],
-        );
-
-        target_bus.recv_size += @as(u32, @intCast(message.header.size));
-
-        const header: vsr.HeaderEncrypted = undefined;
-
-        const result = target_bus.header_callback(target_bus, header) catch |err| {
-            std.log.err("err: {}", .{err});
-            return;
-        };
-
-        _ = result;
+        const target_bus = network.buses.items[path.target];
+        target_bus.message_from_network(message_encrypted);
     }
 
     fn raw_process_to_process(raw: u128) Process {
@@ -368,10 +315,10 @@ pub const MessageSummary = struct {
 
     const Map = std.EnumArray(vsr.Command, struct { count: u32, size: u64 });
 
-    pub fn add(summary: *MessageSummary, metadata: MessagePool.Metadata) void {
-        const entry = summary.map.getPtr(metadata.command());
+    pub fn add(summary: *MessageSummary, header: *const vsr.Header) void {
+        const entry = summary.map.getPtr(header.command);
         entry.count += 1;
-        entry.size += metadata.size();
+        entry.size += header.size;
     }
 
     pub fn format(

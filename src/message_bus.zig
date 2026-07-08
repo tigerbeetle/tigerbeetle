@@ -119,19 +119,9 @@ const SendState = struct {
     requested: u32 = 0,
 };
 
-pub const MessageNetwork = struct {
-    context: ?*anyopaque,
-    buffer: []u8,
-};
-
 pub const HeaderCallbackResult = struct {
     message_size: u32,
     handshake_id: ?u128,
-};
-
-// TODO: revisit and think about if this should indicate if a handshake is completed.
-pub const MessageCallbackResult = struct {
-    peer: Peer,
 };
 
 pub fn MessageBusType(comptime IO: type) type {
@@ -212,12 +202,12 @@ pub fn MessageBusType(comptime IO: type) type {
         connections_used: u32 = 0,
 
         header_callback: *const fn (
-            context: *anyopaque,
+            message_bus_erased: *anyopaque,
             header: HeaderEncrypted,
         ) anyerror!HeaderCallbackResult,
 
         message_callback: *const fn (
-            context: *anyopaque,
+            message_bus_erased: *anyopaque,
             message: []const u8,
         ) anyerror!Peer,
 
@@ -243,6 +233,8 @@ pub fn MessageBusType(comptime IO: type) type {
 
         trace: ?*Tracer,
 
+        send_tokens_outstanding: u64 = 0,
+
         comptime {
             // Assert it is correct to use u32 to track sizes.
             assert(constants.message_size_max < std.math.maxInt(u32));
@@ -257,17 +249,49 @@ pub fn MessageBusType(comptime IO: type) type {
         const Address = std.net.Address;
         const MessageBus = @This();
 
+        pub const MessageToken = struct {
+            target: []u8,
+            connection: *Connection,
+            bus: *MessageBus,
+
+            fn create(bus: *MessageBus, connection: *Connection, size: u32) ?MessageToken {
+                if (size > connection.send.buffer.len - connection.send.requested) {
+                    log.debug("{}: acquire: out of memory for connection to={}", .{
+                        bus.id,
+                        connection.peer,
+                    });
+                    return null;
+                }
+
+                bus.send_tokens_outstanding += 1;
+
+                const buffer = connection.send.buffer[connection.send.requested..];
+                connection.send.requested += size;
+
+                return .{ .target = buffer[0..size], .connection = connection, .bus = bus };
+            }
+
+            pub fn send(token: MessageToken) void {
+                assert(token.bus.send_tokens_outstanding > 0);
+                token.bus.send_tokens_outstanding -= 1;
+
+                if (!token.connection.send_submitted) {
+                    token.bus.issue_send(token.connection);
+                }
+            }
+        };
+
         /// Initialize the MessageBus for the given configuration and replica/client process.
         pub fn init(
             allocator: mem.Allocator,
             process_id: ProcessID,
             message_pool: *MessagePool,
             header_callback: *const fn (
-                context: *anyopaque,
+                message_bus_erased: *anyopaque,
                 header: HeaderEncrypted,
             ) anyerror!HeaderCallbackResult,
             message_callback: *const fn (
-                context: *anyopaque,
+                message_bus_erased: *anyopaque,
                 message: []const u8,
             ) anyerror!Peer,
             options: Options,
@@ -368,11 +392,14 @@ pub fn MessageBusType(comptime IO: type) type {
         /// Begin a graceful shutdown of every active connection.
         ///
         /// After this is called, the caller must continue to drive `io.run_for_ns()` until
-        /// `shutdown_complete()` returns true. Only then is it safe to call `deinit()` or
+        /// `shutdown()` returns true. Only then is it safe to call `deinit()` or
         /// to tear down the underlying IO.
         ///
         /// Idempotent: connections already terminating are left alone.
-        pub fn shutdown(bus: *MessageBus) void {
+        ///
+        /// True when every connection has fully closed, so no outstanding kernel operation
+        /// references this bus's memory.
+        pub fn shutdown(bus: *MessageBus) bool {
             for (bus.connections) |*connection| {
                 switch (connection.state) {
                     .free, .terminating => {},
@@ -386,11 +413,6 @@ pub fn MessageBusType(comptime IO: type) type {
                     },
                 }
             }
-        }
-
-        /// True when every connection initiated by `shutdown()` has fully closed, so no
-        /// outstanding kernel operation references this bus's memory.
-        pub fn shutdown_complete(bus: *const MessageBus) bool {
             return bus.connections_used == 0;
         }
 
@@ -457,6 +479,7 @@ pub fn MessageBusType(comptime IO: type) type {
 
         pub fn tick(bus: *MessageBus) void {
             assert(bus.process == .replica);
+            assert(bus.send_tokens_outstanding == 0);
             bus.tick_connect();
             bus.tick_accept(); // Only replicas accept connections from other replicas and clients.
         }
@@ -465,6 +488,7 @@ pub fn MessageBusType(comptime IO: type) type {
         // to not add dead accept code to client libraries.
         pub fn tick_client(bus: *MessageBus) void {
             assert(bus.process == .client);
+            assert(bus.send_tokens_outstanding == 0);
             bus.tick_connect();
         }
 
@@ -935,12 +959,12 @@ pub fn MessageBusType(comptime IO: type) type {
             bus: *MessageBus,
             client_id: u128,
             size: u32,
-        ) ?[]u8 {
+        ) ?MessageToken {
             assert(bus.process == .replica);
             assert(bus.clients.capacity() > 0);
 
             if (bus.clients.get(client_id)) |connection| {
-                return bus.send_message(connection, size);
+                return MessageToken.create(bus, connection, size);
             } else {
                 log.warn(
                     "{}: send_message_to_client: no connection to={}",
@@ -954,11 +978,11 @@ pub fn MessageBusType(comptime IO: type) type {
             bus: *MessageBus,
             handshake_id: u128,
             size: u32,
-        ) ?[]u8 {
+        ) ?MessageToken {
             assert(bus.handshakes.capacity() > 0);
 
             if (bus.handshakes.get(handshake_id)) |connection| {
-                return bus.send_message(connection, size);
+                return MessageToken.create(bus, connection, size);
             } else {
                 log.warn(
                     "{}: send_message_to_handshake: no connection for handshake_id={}",
@@ -972,12 +996,12 @@ pub fn MessageBusType(comptime IO: type) type {
             bus: *MessageBus,
             replica: u8,
             size: u32,
-        ) ?[]u8 {
+        ) ?MessageToken {
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (bus.process == .replica) assert(replica != bus.process.replica);
 
             if (bus.replicas[replica]) |connection| {
-                return bus.send_message(connection, size);
+                return MessageToken.create(bus, connection, size);
             } else {
                 log.warn("{}: send_message_to_replica: no connection to={}", .{
                     bus.id,
@@ -985,29 +1009,6 @@ pub fn MessageBusType(comptime IO: type) type {
                 });
                 return null;
             }
-        }
-
-        fn send_message(
-            bus: *MessageBus,
-            connection: *Connection,
-            size: u32,
-        ) ?[]u8 {
-            if (size > connection.send.buffer.len - connection.send.requested) {
-                log.debug("{}: acquire: out of memory for connection to={}", .{
-                    bus.id,
-                    connection.peer,
-                });
-                return null;
-            }
-
-            const buffer = connection.send.buffer[connection.send.requested..];
-            connection.send.requested += size;
-
-            if (!connection.send_submitted) {
-                bus.issue_send(connection);
-            }
-
-            return buffer[0..size];
         }
 
         /// Send loop.
@@ -1334,16 +1335,17 @@ fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
 }
 
 test "MessageBus unit test" {
-    std.testing.log_level = .debug;
     const IO = @import("message_bus_fuzz.zig").IO;
     const MessageBus = MessageBusType(IO);
     const gpa = std.testing.allocator;
 
     const Parent = struct {
         message_pool: *MessagePool,
-        session: *encryption.EncryptionTransit,
+        encryption: *encryption.EncryptionNetwork,
         header: ?Header,
         bus: MessageBus,
+        handshake_done: bool = false,
+        encrypted_message_received: bool = false,
     };
 
     var message_pool = try MessagePool.init_capacity(gpa, 128);
@@ -1375,127 +1377,189 @@ test "MessageBus unit test" {
     };
 
     const header_callback = struct {
-        fn header_callback(context: *anyopaque, header: HeaderEncrypted) anyerror!HeaderCallbackResult {
-            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+        fn header_callback(
+            message_bus_erased: *anyopaque,
+            header: HeaderEncrypted,
+        ) anyerror!HeaderCallbackResult {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
             const parent: *Parent = @fieldParentPtr("bus", message_bus);
-            const session = parent.session;
-            assert(session.established());
 
-            const header_decrypted = try session.decrypt_header(&header);
-            parent.header = header_decrypted;
-
-            return .{ .peer = session.other(), .message_size = @sizeOf(HeaderEncrypted) };
+            switch (encryption.EncryptionNetwork.message_type(&header)) {
+                .handshake => |message_size| {
+                    return .{ .handshake_id = header.header_key_id, .message_size = message_size };
+                },
+                .encrypted => {
+                    const header_decrypted = try parent.encryption.decrypt_header(&header);
+                    return .{ .message_size = header_decrypted.size, .handshake_id = null };
+                },
+            }
         }
     }.header_callback;
 
     const message_callback = struct {
         pub fn message_callback(
-            context: *anyopaque,
-            body_encrypted: []const u8,
-        ) anyerror!MessageCallbackResult {
-            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            message_bus_erased: *anyopaque,
+            message_encrypted: []const u8,
+        ) anyerror!vsr.Peer {
+            const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
             const parent: *Parent = @fieldParentPtr("bus", message_bus);
-            const session = parent.session;
-            assert(session.established());
-            assert(parent.header != null);
 
-            const message = parent.message_pool.get_message(null);
-            defer parent.message_pool.unref(message);
+            var header_encrypted: HeaderEncrypted = undefined;
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                std.mem.asBytes(&header_encrypted),
+                message_encrypted[0..@sizeOf(HeaderEncrypted)],
+            );
 
-            try session.decrypt_body(message, &parent.header.?, body_encrypted);
+            if (encryption.EncryptionNetwork.message_type(&header_encrypted) == .handshake) {
+                switch (parent.encryption.handshake_consume(message_encrypted)) {
+                    .operation => |operation| {
+                        assert(operation.message != null or operation.peer != null);
 
-            parent.header = null;
+                        if (operation.message) |message| {
+                            const maybe_token = parent.bus.send_message_handshake(
+                                header_encrypted.header_key_id,
+                                @sizeOf(encryption.HandshakeMessage),
+                            );
+                            if (maybe_token) |token| {
+                                stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
+                                token.send();
+                            } else {
+                                log.warn("message_callback: drop message header={}", .{
+                                    header_encrypted,
+                                });
+                            }
+                        }
+                        if (operation.peer != null) {
+                            parent.handshake_done = true;
+                        }
+                        return operation.peer orelse .unknown;
+                    },
+                    .err => |err| {
+                        log.err("message_callback: handshake failed: {}", .{
+                            err,
+                        });
+                        return error.HandshakeFailed;
+                    },
+                }
+            }
+
+            const message = parent.bus.get_message(null);
+            defer parent.bus.unref(message);
+
+            const peer = parent.encryption.decrypt_message(message, message_encrypted) catch unreachable;
+            parent.encrypted_message_received = true;
+            log.info("message_callback: received message from peer {}", .{peer});
+            return peer;
         }
     }.message_callback;
 
-    var session1 = encryption.EncryptionTransit.connect(.{ .self_id = 0, .self_peer = .replica, .other_id = 1, .other_peer = .replica });
-    var session2 = encryption.EncryptionTransit.accept(session1.routing_id, 1, .replica);
+    var encryption1 = encryption.EncryptionNetwork.init(gpa, .{
+        .replicas_max = 2,
+        .clients_max = 0,
+        .self_id = 0,
+        .self_peer = .replica,
+    }) catch unreachable;
+    defer encryption1.deinit(gpa);
 
-    var bus1 = try MessageBus.init(
-        gpa,
-        .{ .replica = 0 },
-        &message_pool,
-        header_callback,
-        message_callback,
-        .{
-            .configuration = configuration,
-            .io = &io,
-            .clients_limit = clients_limit,
-            .trace = null,
-        },
-    );
-    defer bus1.deinit(gpa);
+    var encryption2 = encryption.EncryptionNetwork.init(gpa, .{
+        .replicas_max = 2,
+        .clients_max = 0,
+        .self_id = 1,
+        .self_peer = .replica,
+    }) catch unreachable;
+    defer encryption2.deinit(gpa);
 
-    var bus2 = try MessageBus.init(
-        gpa,
-        .{ .replica = 1 },
-        &message_pool,
-        header_callback,
-        message_callback,
-        .{
-            .configuration = configuration,
-            .io = &io,
-            .clients_limit = clients_limit,
-            .trace = null,
-        },
-    );
-    defer bus2.deinit(gpa);
-
-    const parent1: Parent = .{
+    var parent1: Parent = .{
         .message_pool = &message_pool,
-        .session = &session1,
+        .encryption = &encryption1,
         .header = null,
-        .bus = bus1,
+        .bus = try MessageBus.init(
+            gpa,
+            .{ .replica = 0 },
+            &message_pool,
+            header_callback,
+            message_callback,
+            .{
+                .configuration = configuration,
+                .io = &io,
+                .clients_limit = clients_limit,
+                .trace = null,
+            },
+        ),
+        .handshake_done = false,
+        .encrypted_message_received = false,
     };
+    defer parent1.bus.deinit(gpa);
 
-    const parent2: Parent = .{
+    var parent2: Parent = .{
         .message_pool = &message_pool,
-        .session = &session2,
+        .encryption = &encryption2,
         .header = null,
-        .bus = bus2,
+        .bus = try MessageBus.init(
+            gpa,
+            .{ .replica = 1 },
+            &message_pool,
+            header_callback,
+            message_callback,
+            .{
+                .configuration = configuration,
+                .io = &io,
+                .clients_limit = clients_limit,
+                .trace = null,
+            },
+        ),
+        .handshake_done = false,
+        .encrypted_message_received = false,
     };
+    defer parent2.bus.deinit(gpa);
 
-    _ = parent1;
-    _ = parent2;
-
-    var step = session1.handshake(null);
-    var is_one: bool = false;
-    while (!session1.established() or !session2.established()) {
-        switch (step.status) {
-            .handshaking, .established => {},
-            .failed => unreachable,
-        }
-
-        if (is_one) {
-            step = session1.handshake(step.send);
-        } else {
-            step = session2.handshake(step.send);
-        }
-        is_one = !is_one;
-    }
-
-    try bus1.listen();
-    try bus2.listen();
+    try parent1.bus.listen();
+    try parent2.bus.listen();
 
     for (0..1000) |_| {
         try io.run();
-        bus1.tick();
-        bus2.tick();
+        parent1.bus.tick();
+        parent2.bus.tick();
     }
 
-    const message = create_message_from_command(&message_pool, &prng, .ping);
-    defer message_pool.unref(message);
+    const handshake_message = parent1.encryption.handshake_initiate();
+    const handshake_token = parent1.bus.send_message_to_replica(
+        1,
+        @sizeOf(encryption.HandshakeMessage),
+    ) orelse unreachable;
+    stdx.copy_disjoint(.exact, u8, handshake_token.target, std.mem.asBytes(&handshake_message));
+    handshake_token.send();
 
-    const message_network = bus1.send_message_to_replica(1, message.header.size) orelse unreachable;
-
-    session1.encrypt_message(message_network.buffer, message);
-
-    bus1.send(message_network);
-
-    for (0..1000) |_| {
+    for (0..10_000) |_| {
+        if (parent1.handshake_done and parent2.handshake_done) {
+            break;
+        }
         try io.run();
-        bus1.tick();
-        bus2.tick();
+        parent1.bus.tick();
+        parent2.bus.tick();
+    } else {
+        unreachable;
+    }
+
+    const ping_message = create_message_from_command(&message_pool, &prng, .ping);
+    defer message_pool.unref(ping_message);
+
+    const ping_token = parent1.bus.send_message_to_replica(1, ping_message.header.size) orelse unreachable;
+
+    parent1.encryption.encrypt_message(.{ .replica = 1 }, ping_token.target, ping_message);
+    ping_token.send();
+
+    for (0..10_000) |_| {
+        if (parent2.encrypted_message_received) {
+            break;
+        }
+        try io.run();
+        parent1.bus.tick();
+        parent2.bus.tick();
+    } else {
+        unreachable;
     }
 }
 

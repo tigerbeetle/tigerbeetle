@@ -469,7 +469,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (clients) |*client| {
                 client.*.?.on_reply_context = cluster;
                 client.*.?.on_reply_callback = client_on_reply;
-                network.link(client.*.?.message_bus.process, &client.*.?.message_bus);
+                network.link(client.*.?.message_bus.process, &client.*.?.message_bus, &client.*.?.encryption_network);
             }
 
             return cluster;
@@ -758,7 +758,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(replica.standby_count == cluster.standby_count);
 
             replica.event_callback = on_replica_event;
-            cluster.network.link(replica.message_bus.process, &replica.message_bus);
+            cluster.network.link(replica.message_bus.process, &replica.message_bus, &replica.encryption_network);
         }
 
         fn replica_multiversion(replica_context: *Replica) Multiversion {

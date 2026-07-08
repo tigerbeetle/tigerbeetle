@@ -27,7 +27,7 @@ const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
 const HeaderCallbackResult = @import("../message_bus.zig").HeaderCallbackResult;
 const encryption = @import("../encryption.zig");
-const EncryptionTransitContext = encryption.EncryptionTransitContext;
+const EncryptionNetwork = encryption.EncryptionNetwork;
 
 const marks = @import("../testing/marks.zig");
 
@@ -627,7 +627,7 @@ pub fn ReplicaType(
         aof: ?*AOF,
         aof_recovery: bool,
 
-        encryption_transit_context: EncryptionTransitContext,
+        encryption_network: EncryptionNetwork,
 
         const OpenOptions = struct {
             node_count: u8,
@@ -1309,13 +1309,13 @@ pub fn ReplicaType(
 
             try self.message_bus.listen();
 
-            var encryption_transit_context = try EncryptionTransitContext.init(allocator, .{
+            var encryption_network = try EncryptionNetwork.init(allocator, .{
                 .self_id = replica_index,
                 .self_peer = .replica,
                 .clients_max = constants.clients_max,
                 .replicas_max = constants.replicas_max,
             });
-            errdefer encryption_transit_context.deinit(allocator);
+            errdefer encryption_network.deinit(allocator);
 
             self.* = .{
                 .static_allocator = self.static_allocator,
@@ -1470,7 +1470,7 @@ pub fn ReplicaType(
                 .test_context = self.test_context,
                 .aof = options.aof,
                 .aof_recovery = options.aof_recovery,
-                .encryption_transit_context = encryption_transit_context,
+                .encryption_network = encryption_network,
             };
 
             log.info("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
@@ -1489,7 +1489,7 @@ pub fn ReplicaType(
         pub fn deinit(self: *Replica, allocator: Allocator) void {
             self.static_allocator.transition_from_static_to_deinit();
 
-            self.encryption_transit_context.deinit(allocator);
+            self.encryption_network.deinit(allocator);
 
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
@@ -1540,14 +1540,14 @@ pub fn ReplicaType(
             const message_bus: *MessageBus = @ptrCast(@alignCast(context));
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
 
-            switch (EncryptionTransitContext.message_type(&header)) {
+            switch (EncryptionNetwork.message_type(&header)) {
                 .handshake => |message_size| {
                     return .{ .message_size = message_size, .handshake_id = header.header_key_id };
                 },
                 .encrypted => {},
             }
 
-            const header_decrypted = self.encryption_transit_context.decrypt_header(&header) catch |err| {
+            const header_decrypted = self.encryption_network.decrypt_header(&header) catch |err| {
                 log.info("{}: header_callback: received invalid header err: {}", .{
                     self.log_prefix(),
                     err,
@@ -1562,10 +1562,10 @@ pub fn ReplicaType(
         }
 
         pub fn message_callback(
-            context: *anyopaque,
+            message_bus_erased: *anyopaque,
             message_encrypted: []const u8,
         ) anyerror!vsr.Peer {
-            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
 
             var header_encrypted: HeaderEncrypted = undefined;
@@ -1576,19 +1576,20 @@ pub fn ReplicaType(
                 message_encrypted[0..@sizeOf(HeaderEncrypted)],
             );
 
-            if (EncryptionTransitContext.message_type(&header_encrypted) == .handshake) {
+            if (EncryptionNetwork.message_type(&header_encrypted) == .handshake) {
                 log.info("message_callback: received handshake message", .{});
-                switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
+                switch (self.encryption_network.handshake_consume(message_encrypted)) {
                     .operation => |operation| {
                         assert(operation.message != null or operation.peer != null);
 
                         if (operation.message) |message| {
-                            const maybe_message_buffer = self.message_bus.send_message_handshake(
+                            const maybe_token = self.message_bus.send_message_handshake(
                                 header_encrypted.header_key_id,
                                 @sizeOf(encryption.HandshakeMessage),
                             );
-                            if (maybe_message_buffer) |message_buffer| {
-                                stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&message));
+                            if (maybe_token) |token| {
+                                stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
+                                token.send();
                             } else {
                                 log.warn("{}: message_callback: drop message header={}", .{
                                     self.log_prefix(),
@@ -1610,7 +1611,7 @@ pub fn ReplicaType(
 
             const target = self.message_bus.get_message(null);
             defer self.message_bus.unref(target);
-            const peer = try self.encryption_transit_context.decrypt_message(target, message_encrypted);
+            const peer = try self.encryption_network.decrypt_message(target, message_encrypted);
 
             assert(target.references == 1);
 
@@ -1752,7 +1753,7 @@ pub fn ReplicaType(
         pub fn decrypt_header(context: ?*anyopaque, header_encrypted: *const Header) !Header {
             const message_bus: *MessageBus = @ptrCast(@alignCast(context.?));
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
-            return self.encryption_transit.decrypt_header(header_encrypted);
+            return self.encryption_network.decrypt_header(header_encrypted);
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
@@ -1784,7 +1785,7 @@ pub fn ReplicaType(
         //         const message = self.message_bus.get_message(null);
         //         defer self.message_bus.unref(message);
         //
-        //         self.encryption_transit.decrypt_message(message, message_encrypted) catch |err|
+        //         self.encryption_network.decrypt_message(message, message_encrypted) catch |err|
         //             {
         //                 log.err("{}: on_messages: decryption failed: {}", .{
         //                     self.log_prefix(),
@@ -9193,16 +9194,17 @@ pub fn ReplicaType(
                 .command = message.header.command,
             } }, 1);
 
-            const maybe_message_buffer = self.message_bus.send_message_to_client(
+            const mabye_token = self.message_bus.send_message_to_client(
                 client,
                 message.header.size,
             );
-            if (maybe_message_buffer) |message_buffer| {
-                self.encryption_transit_context.encrypt_message(
+            if (mabye_token) |token| {
+                self.encryption_network.encrypt_message(
                     .{ .client = client },
-                    message_buffer,
+                    token.target,
                     message,
                 );
+                token.send();
             } else {
                 log.warn("send_message_to_client_base: drop message header={}", .{
                     message.header,
@@ -9506,16 +9508,18 @@ pub fn ReplicaType(
 
                 if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
 
-                const maybe_message_buffer = self.message_bus.send_message_to_replica(
+                const maybe_token = self.message_bus.send_message_to_replica(
                     replica,
                     message.header.size,
                 );
-                if (maybe_message_buffer) |message_buffer| {
-                    self.encryption_transit_context.encrypt_message(
+                if (maybe_token) |token| {
+                    // FIXME: initate handshake if not exists.
+                    self.encryption_network.encrypt_message(
                         .{ .replica = replica },
-                        message_buffer,
+                        token.target,
                         message,
                     );
+                    token.send();
                 } else {
                     log.warn("send_message_to_replica_base: drop message header={}", .{
                         message.header,

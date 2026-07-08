@@ -11,11 +11,10 @@ const HeaderEncrypted = vsr.HeaderEncrypted;
 const Time = vsr.time.Time;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
-const MessageNetwork = @import("../message_bus.zig").MessageNetwork;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const HeaderCallbackResult = @import("../message_bus.zig").HeaderCallbackResult;
 const encryption = @import("../encryption.zig");
-const EncryptionTransitContext = encryption.EncryptionTransitContext;
+const EncryptionNetwork = encryption.EncryptionNetwork;
 
 const log = stdx.log.scoped(.client);
 
@@ -131,7 +130,7 @@ pub fn ClientType(
             eviction: *const Message.Eviction,
         ) void = null,
 
-        encryption_transit_context: EncryptionTransitContext,
+        encryption_network: EncryptionNetwork,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -166,13 +165,13 @@ pub fn ClientType(
             );
             errdefer message_bus.deinit(allocator);
 
-            var encryption_transit_context = try EncryptionTransitContext.init(allocator, .{
+            var encryption_network = try EncryptionNetwork.init(allocator, .{
                 .self_id = options.id,
                 .self_peer = .client,
                 .clients_max = 0,
                 .replicas_max = constants.replicas_max,
             });
-            errdefer encryption_transit_context.deinit(allocator);
+            errdefer encryption_network.deinit(allocator);
 
             var self = Client{
                 .message_bus = message_bus,
@@ -194,7 +193,7 @@ pub fn ClientType(
                 },
                 .prng = stdx.PRNG.from_seed(@as(u64, @truncate(options.id))),
                 .on_eviction_callback = options.eviction_callback,
-                .encryption_transit_context = encryption_transit_context,
+                .encryption_network = encryption_network,
             };
 
             self.ping_timeout.start();
@@ -202,45 +201,41 @@ pub fn ClientType(
         }
 
         pub fn deinit(self: *Client, allocator: std.mem.Allocator) void {
-            self.encryption_transit_context.deinit(allocator);
+            self.encryption_network.deinit(allocator);
             if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
             self.message_bus.deinit(allocator);
         }
 
         /// Begin a graceful shutdown of the underlying message bus connections. The caller
-        /// must continue to drive `io.run_for_ns()` until `shutdown_complete()` returns true
+        /// must continue to drive `io.run_for_ns()` until `shutdown()` returns true
         /// before calling `deinit()`.
-        pub fn shutdown(self: *Client) void {
-            self.message_bus.shutdown();
-        }
-
-        pub fn shutdown_complete(self: *const Client) bool {
-            return self.message_bus.shutdown_complete();
+        pub fn shutdown(self: *Client) bool {
+            return self.message_bus.shutdown();
         }
 
         pub fn header_callback(
-            context: *anyopaque,
+            message_bus_erased: *anyopaque,
             header: HeaderEncrypted,
         ) anyerror!HeaderCallbackResult {
-            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
 
-            switch (EncryptionTransitContext.message_type(&header)) {
+            switch (EncryptionNetwork.message_type(&header)) {
                 .handshake => |message_size| {
                     return .{ .message_size = message_size, .handshake_id = header.header_key_id };
                 },
                 .encrypted => {
-                    const header_decrypted = try self.encryption_transit_context.decrypt_header(&header);
+                    const header_decrypted = try self.encryption_network.decrypt_header(&header);
                     return .{ .message_size = header_decrypted.size, .handshake_id = null };
                 },
             }
         }
 
         pub fn message_callback(
-            context: *anyopaque,
+            message_bus_erased: *anyopaque,
             message_encrypted: []const u8,
         ) anyerror!vsr.Peer {
-            const message_bus: *MessageBus = @ptrCast(@alignCast(context));
+            const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
 
             var header_encrypted: HeaderEncrypted = undefined;
@@ -251,18 +246,19 @@ pub fn ClientType(
                 message_encrypted[0..@sizeOf(HeaderEncrypted)],
             );
 
-            if (EncryptionTransitContext.message_type(&header_encrypted) == .handshake) {
-                switch (self.encryption_transit_context.consume_handshake(message_encrypted)) {
+            if (EncryptionNetwork.message_type(&header_encrypted) == .handshake) {
+                switch (self.encryption_network.handshake_consume(message_encrypted)) {
                     .operation => |operation| {
                         assert(operation.message != null or operation.peer != null);
 
                         if (operation.message) |message| {
-                            const maybe_message_buffer = self.message_bus.send_message_handshake(
+                            const maybe_token = self.message_bus.send_message_handshake(
                                 header_encrypted.header_key_id,
                                 @sizeOf(encryption.HandshakeMessage),
                             );
-                            if (maybe_message_buffer) |message_buffer| {
-                                stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&message));
+                            if (maybe_token) |token| {
+                                stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
+                                token.send();
                             } else {
                                 log.warn("{}: message_callback: drop message header={}", .{
                                     self.id,
@@ -285,7 +281,7 @@ pub fn ClientType(
             const message = self.message_bus.get_message(null);
             defer self.message_bus.unref(message);
 
-            const peer = self.encryption_transit_context.decrypt_message(message, message_encrypted) catch |err|
+            const peer = self.encryption_network.decrypt_message(message, message_encrypted) catch |err|
                 {
                     log.warn("{}: message_callback: decryption failed: {}", .{
                         self.id,
@@ -803,14 +799,15 @@ pub fn ClientType(
 
             const peer: vsr.Peer = .{ .replica = replica };
 
-            if (!self.encryption_transit_context.session_established(peer)) {
-                const handshake_message = self.encryption_transit_context.initiator_handshake();
-                const maybe_message_buffer = self.message_bus.send_message_to_replica(
+            if (!self.encryption_network.handshake_completed(peer)) {
+                const handshake_message = self.encryption_network.handshake_initiate();
+                const maybe_token = self.message_bus.send_message_to_replica(
                     replica,
                     @sizeOf(encryption.HandshakeMessage),
                 );
-                if (maybe_message_buffer) |message_buffer| {
-                    stdx.copy_disjoint(.exact, u8, message_buffer, std.mem.asBytes(&handshake_message));
+                if (maybe_token) |token| {
+                    stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&handshake_message));
+                    token.send();
                 } else {
                     log.warn("{}: send_message_to_replica: drop message no encrypted connection header={}", .{
                         self.id,
@@ -820,12 +817,13 @@ pub fn ClientType(
                 return;
             }
 
-            const maybe_message_buffer = self.message_bus.send_message_to_replica(
+            const maybe_token = self.message_bus.send_message_to_replica(
                 replica,
                 message.header.size,
             );
-            if (maybe_message_buffer) |message_buffer| {
-                self.encryption_transit_context.encrypt_message(peer, message_buffer, message);
+            if (maybe_token) |token| {
+                self.encryption_network.encrypt_message(peer, token.target, message);
+                token.send();
             } else {
                 log.warn("{}: send_message_to_replica: drop message header={}", .{
                     self.id,

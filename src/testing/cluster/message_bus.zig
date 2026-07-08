@@ -4,7 +4,7 @@ const vsr = @import("../../vsr.zig");
 const constants = @import("../../constants.zig");
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
-const MessageNetwork = @import("../../message_bus.zig").MessageNetwork;
+const Message = MessagePool.Message;
 const HeaderCallbackResult = @import("../../message_bus.zig").HeaderCallbackResult;
 const Header = vsr.Header;
 const HeaderEncrypted = vsr.HeaderEncrypted;
@@ -34,15 +34,51 @@ pub const MessageBus = struct {
         message: []const u8,
     ) anyerror!vsr.Peer,
 
-    recv_buffer: []u8,
-    recv_size: u32 = 0,
+    send_tokens_outstanding: u64 = 0,
 
     pub const Options = struct {
         network: *Network,
     };
 
+    // For the real message bus, which is asynchronous, we could avoid splitting
+    // acquiring the buffer and sending the buffer into two steps, because it is asynchronous.
+    // For the testing MessageBus, we cannot do that because it is synchronous.
+    pub const MessageToken = struct {
+        target: []u8,
+        other: Process,
+        message: *MessagePool.Message,
+        bus: *MessageBus,
+
+        fn create(bus: *MessageBus, other: Process, size: u32) MessageToken {
+            const message = bus.network.message_pool.get_message(null);
+            bus.send_tokens_outstanding += 1;
+
+            return .{
+                .target = message.buffer[0..size],
+                .other = other,
+                .message = message,
+                .bus = bus,
+            };
+        }
+
+        pub fn send(token: MessageToken) void {
+            defer token.bus.network.message_pool.unref(token.message);
+
+            assert(token.bus.send_tokens_outstanding > 0);
+            token.bus.send_tokens_outstanding -= 1;
+
+            token.bus.network.packet_simulator.submit_packet(
+                token.message.ref(),
+                .{
+                    .source = token.bus.network.process_to_address(token.bus.process),
+                    .target = token.bus.network.process_to_address(token.other),
+                },
+            );
+        }
+    };
+
     pub fn init(
-        gpa: std.mem.Allocator,
+        _: std.mem.Allocator,
         process: Process,
         message_pool: *MessagePool,
         header_callback: *const fn (
@@ -55,34 +91,48 @@ pub const MessageBus = struct {
         ) anyerror!vsr.Peer,
         options: Options,
     ) !MessageBus {
-        const recv_buffer = try gpa.alloc(u8, constants.message_size_max);
-        errdefer gpa.free(recv_buffer);
-
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
             .process = process,
             .header_callback = header_callback,
             .message_callback = message_callback,
-            .recv_buffer = recv_buffer,
         };
     }
 
-    pub fn deinit(bus: *MessageBus, gpa: std.mem.Allocator) void {
+    pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
         bus.resume_scheduled = false;
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
-        gpa.free(bus.recv_buffer);
     }
 
     pub fn trace_gauge(_: *MessageBus) void {}
 
     pub fn listen(_: *MessageBus) !void {}
 
-    pub fn tick(_: *MessageBus) void {}
+    pub fn tick(bus: *MessageBus) void {
+        assert(bus.send_tokens_outstanding == 0);
+    }
 
     pub fn tick_client(bus: *MessageBus) void {
         bus.tick();
+    }
+
+    pub fn message_from_network(
+        bus: *MessageBus,
+        message_encrypted: *Message,
+    ) void {
+        const header_encrypted = std.mem.bytesAsValue(
+            vsr.HeaderEncrypted,
+            message_encrypted.buffer[0..@sizeOf(vsr.HeaderEncrypted)],
+        );
+
+        const result = bus.header_callback(bus, header_encrypted.*) catch unreachable;
+
+        _ = bus.message_callback(
+            bus,
+            message_encrypted.buffer[0..result.message_size],
+        ) catch unreachable;
     }
 
     pub fn get_message(
@@ -99,35 +149,25 @@ pub const MessageBus = struct {
         bus.pool.unref(message);
     }
 
-    pub fn send_message_to_client(
-        bus: *MessageBus,
-        client: u128,
-        size: u32,
-    ) ?[]u8 {
-        _ = bus;
-        _ = client;
-        _ = size;
-        return null;
-        // assert(bus.process == .replica);
-        //
-        // bus.network.send_message(message, .{
-        //     .source = bus.process,
-        //     .target = .{ .client = client_id },
-        // });
+    pub fn send_message_to_client(bus: *MessageBus, client_id: u128, size: u32) ?MessageToken {
+        assert(bus.process == .replica);
+        return MessageToken.create(bus, .{ .client = client_id }, size);
     }
+
     pub fn send_message_handshake(
         _: *MessageBus,
         _: u128,
         _: u32,
-    ) ?[]u8 {
+    ) ?MessageToken {
         return null;
+        // return MessageToken.create(bus, .{ .client = client_id }, size);
     }
 
     pub fn send_message_to_replica(
         bus: *MessageBus,
         replica: u8,
         size: u32,
-    ) ?[]u8 {
+    ) ?MessageToken {
         _ = bus;
         _ = replica;
         _ = size;

@@ -790,7 +790,7 @@ test "ideal clocks get clamped to cluster time" {
 const PacketSimulatorOptions = @import("../testing/packet_simulator.zig").PacketSimulatorOptions;
 const PacketSimulatorType = @import("../testing/packet_simulator.zig").PacketSimulatorType;
 const Path = @import("../testing/packet_simulator.zig").Path;
-const Command = @import("../vsr.zig").Command;
+const vsr = @import("../vsr.zig");
 const ClockSimulator = struct {
     const Packet = struct {
         m0: u64,
@@ -815,7 +815,7 @@ const ClockSimulator = struct {
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
         var network = try PacketSimulator.init(allocator, options.network_options, .{
-            .packet_command = &packet_command,
+            .packet_header = &packet_header,
             .packet_clone = &packet_clone,
             .packet_deinit = &packet_deinit,
             .packet_deliver = &packet_deliver,
@@ -899,8 +899,12 @@ const ClockSimulator = struct {
         }
     }
 
-    fn packet_command(_: *PacketSimulator, _: Packet) Command {
-        return .ping; // Value doesn't matter.
+    fn packet_header(_: *PacketSimulator, _: Packet, _: Path) vsr.Header {
+        // Value doesn't matter.
+        var header = std.mem.zeroes(vsr.Header);
+        header.command = .ping;
+        header.size = @sizeOf(vsr.Header);
+        return header;
     }
 
     fn packet_clone(_: *PacketSimulator, packet: Packet) Packet {

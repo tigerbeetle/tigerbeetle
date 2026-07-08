@@ -181,7 +181,7 @@ comptime {
 
 const X25519 = std.crypto.dh.X25519;
 
-pub const EncryptionTransitContext = struct {
+pub const EncryptionNetwork = struct {
     self_id: u128,
     self_peer: PeerType,
 
@@ -210,13 +210,13 @@ pub const EncryptionTransitContext = struct {
             self_id: u128,
             self_peer: PeerType,
         },
-    ) !EncryptionTransitContext {
+    ) !EncryptionNetwork {
         const capacity = options.clients_max + options.replicas_max;
 
         const replica_cipher: []?CipherTypes = try gpa.alloc(?CipherTypes, capacity);
         errdefer gpa.free(replica_cipher);
-        for (replica_cipher) |*encryption_transit| {
-            encryption_transit.* = null;
+        for (replica_cipher) |*encryption_network| {
+            encryption_network.* = null;
         }
 
         var client_cipher: std.AutoHashMapUnmanaged(u128, CipherTypes) = .{};
@@ -241,8 +241,8 @@ pub const EncryptionTransitContext = struct {
         };
     }
 
-    pub fn deinit(context: *EncryptionTransitContext, gpa: std.mem.Allocator) void {
-        var handshake_iterator = context.handshakes_pending.iterator();
+    pub fn deinit(encryption: *EncryptionNetwork, gpa: std.mem.Allocator) void {
+        var handshake_iterator = encryption.handshakes_pending.iterator();
         while (handshake_iterator.next()) |entry| {
             switch (entry.value_ptr.*) {
                 inline else => |*handshake_impl| {
@@ -250,9 +250,9 @@ pub const EncryptionTransitContext = struct {
                 },
             }
         }
-        context.handshakes_pending.deinit(gpa);
+        encryption.handshakes_pending.deinit(gpa);
 
-        var client_cipher_iterator = context.client_cipher.iterator();
+        var client_cipher_iterator = encryption.client_cipher.iterator();
         while (client_cipher_iterator.next()) |entry| {
             switch (entry.value_ptr.*) {
                 inline else => |*cipher_impl| {
@@ -260,9 +260,9 @@ pub const EncryptionTransitContext = struct {
                 },
             }
         }
-        context.client_cipher.deinit(gpa);
+        encryption.client_cipher.deinit(gpa);
 
-        for (context.replica_cipher) |*maybe_cipher| {
+        for (encryption.replica_cipher) |*maybe_cipher| {
             if (maybe_cipher.*) |*cipher| {
                 switch (cipher.*) {
                     inline else => |*cipher_impl| {
@@ -271,11 +271,11 @@ pub const EncryptionTransitContext = struct {
                 }
             }
         }
-        gpa.free(context.replica_cipher);
+        gpa.free(encryption.replica_cipher);
 
-        context.key_id_cipher.deinit(gpa);
+        encryption.key_id_cipher.deinit(gpa);
 
-        context.* = undefined;
+        encryption.* = undefined;
     }
 
     pub fn message_type(header: *const HeaderEncrypted) union(enum) { encrypted, handshake: u32 } {
@@ -285,44 +285,20 @@ pub const EncryptionTransitContext = struct {
         return .encrypted;
     }
 
-    pub fn decrypt_header(
-        context: *const EncryptionTransitContext,
-        header: *const HeaderEncrypted,
-    ) !Header {
-        const cipher = context.key_id_cipher.get(header.header_key_id) orelse
-            return error.InvalidKeyId;
-
-        assert(message_type(header) == .encrypted);
-
-        switch (cipher.*) {
-            inline else => |*cipher_impl| {
-                return cipher_impl.decrypt_header(header);
-            },
-        }
-    }
-
-    pub fn session_established(context: *EncryptionTransitContext, peer: vsr.Peer) bool {
-        switch (peer) {
-            .replica => |replica| return context.replica_cipher[replica] != null,
-            .client => |client_id| return context.client_cipher.contains(client_id),
-            else => unreachable,
-        }
-    }
-
-    pub fn initiator_handshake(
-        context: *EncryptionTransitContext,
+    pub fn handshake_initiate(
+        encryption: *EncryptionNetwork,
     ) HandshakeMessage {
-        const handshake = HandshakeInsecure.initiator(.{ .id = context.self_id, .peer = context.self_peer });
+        const handshake = HandshakeInsecure.initiator(.{ .id = encryption.self_id, .peer = encryption.self_peer });
 
         log.debug("initiator_handshake: creating handshake id  ({d})", .{handshake.handshake_id});
 
-        if (context.handshakes_pending.count() == context.handshakes_pending.capacity()) {
-            const handshake_id = context.handshakes_pending.entries.get(0).key;
+        if (encryption.handshakes_pending.count() == encryption.handshakes_pending.capacity()) {
+            const handshake_id = encryption.handshakes_pending.entries.get(0).key;
             log.warn("initiator_handshake: dropping handshake id ({d})", .{handshake_id});
             // TODO: maybe optimize this to avoid shifting on every remove.
-            context.handshakes_pending.orderedRemoveAt(0);
+            encryption.handshakes_pending.orderedRemoveAt(0);
         }
-        const gop = context.handshakes_pending.getOrPutAssumeCapacity(handshake.handshake_id);
+        const gop = encryption.handshakes_pending.getOrPutAssumeCapacity(handshake.handshake_id);
         assert(!gop.found_existing);
         gop.value_ptr.* = .{ .insecure = handshake };
 
@@ -336,11 +312,14 @@ pub const EncryptionTransitContext = struct {
         }
     }
 
-    pub fn consume_handshake(context: *EncryptionTransitContext, source: []const u8) union(enum) {
+    pub fn handshake_consume(
+        encryption: *EncryptionNetwork,
+        source: []const u8,
+    ) union(enum) {
         operation: struct { message: ?HandshakeMessage, peer: ?vsr.Peer },
         err: anyerror,
     } {
-        defer context.verify_state();
+        defer encryption.verify_state();
 
         var handshake_message: HandshakeMessage = undefined;
         stdx.copy_disjoint(
@@ -352,10 +331,10 @@ pub const EncryptionTransitContext = struct {
 
         assert(message_type(&handshake_message.header) == .handshake);
 
-        const gop_handshake = context.handshakes_pending.getOrPutAssumeCapacity(handshake_message.header.header_key_id);
+        const gop_handshake = encryption.handshakes_pending.getOrPutAssumeCapacity(handshake_message.header.header_key_id);
 
         if (!gop_handshake.found_existing) {
-            switch (context.self_peer) {
+            switch (encryption.self_peer) {
                 .client => {
                     log.warn(
                         "consume_handshake: dropping message for unknown handshake id  ({d})",
@@ -365,7 +344,7 @@ pub const EncryptionTransitContext = struct {
                 },
                 .replica => {
                     const handshake = HandshakeInsecure.responder(
-                        .{ .id = context.self_id, .peer = context.self_peer },
+                        .{ .id = encryption.self_id, .peer = encryption.self_peer },
                         handshake_message.header.header_key_id,
                     );
                     gop_handshake.value_ptr.* = .{ .insecure = handshake };
@@ -384,39 +363,39 @@ pub const EncryptionTransitContext = struct {
                             peer = other_peer.to_vsr_peer();
 
                             // TODO: maybe fix this to avoid shifting.
-                            const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                            const remove_result = encryption.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
                             assert(remove_result);
                             const cipher = CipherAegis256Nonce128.init(
                                 result.shared_secret,
-                                .{ .peer = context.self_peer, .id = context.self_id },
+                                .{ .peer = encryption.self_peer, .id = encryption.self_id },
                                 other_peer,
                             );
                             switch (result.peer_type) {
                                 .client => {
-                                    const gop = context.client_cipher.getOrPutAssumeCapacity(
+                                    const gop = encryption.client_cipher.getOrPutAssumeCapacity(
                                         result.peer_id,
                                     );
                                     maybe(gop.found_existing);
                                     gop.value_ptr.* =
                                         .{ .aegis_256_nonce_128 = cipher };
-                                    context.key_id_cipher.putAssumeCapacity(cipher.key_id, gop.value_ptr);
+                                    encryption.key_id_cipher.putAssumeCapacity(cipher.key_id, gop.value_ptr);
                                 },
                                 .replica => {
-                                    assert(result.peer_id < context.replica_cipher.len);
-                                    context.replica_cipher[@intCast(result.peer_id)] = .{ .aegis_256_nonce_128 = cipher };
-                                    context.key_id_cipher.putAssumeCapacity(cipher.key_id, &context.replica_cipher[@intCast(result.peer_id)].?);
+                                    assert(result.peer_id < encryption.replica_cipher.len);
+                                    encryption.replica_cipher[@intCast(result.peer_id)] = .{ .aegis_256_nonce_128 = cipher };
+                                    encryption.key_id_cipher.putAssumeCapacity(cipher.key_id, &encryption.replica_cipher[@intCast(result.peer_id)].?);
                                 },
                             }
-                            log.info("consume_handshake: handshake completed handshake id ({d})", .{handshake_message.header.header_key_id});
+                            log.info("handshake_consume: handshake completed handshake id ({d})", .{handshake_message.header.header_key_id});
                         }
                         return .{ .operation = .{ .message = operation.message, .peer = peer } };
                     },
                     .terminate => {
                         log.warn(
-                            "consume_handshake: terminating handshake handshake id  ({d})",
+                            "handshake_consume: terminating handshake handshake id  ({d})",
                             .{handshake_message.header.header_key_id},
                         );
-                        const remove_result = context.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                        const remove_result = encryption.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
                         assert(remove_result);
                         return .{ .err = error.HandshakeFailed };
                     },
@@ -425,31 +404,55 @@ pub const EncryptionTransitContext = struct {
         }
     }
 
-    fn verify_state(context: *EncryptionTransitContext) void {
+    pub fn handshake_completed(encryption: *EncryptionNetwork, peer: vsr.Peer) bool {
+        switch (peer) {
+            .replica => |replica| return encryption.replica_cipher[replica] != null,
+            .client => |client_id| return encryption.client_cipher.contains(client_id),
+            else => unreachable,
+        }
+    }
+
+    pub fn decrypt_header(
+        encryption: *const EncryptionNetwork,
+        header: *const HeaderEncrypted,
+    ) !Header {
+        const cipher = encryption.key_id_cipher.get(header.header_key_id) orelse
+            return error.InvalidKeyId;
+
+        assert(message_type(header) == .encrypted);
+
+        switch (cipher.*) {
+            inline else => |*cipher_impl| {
+                return cipher_impl.decrypt_header(header);
+            },
+        }
+    }
+
+    fn verify_state(encryption: *EncryptionNetwork) void {
         // TOOD: check all maps are in sync
-        _ = context;
+        _ = encryption;
     }
 
     pub fn encrypt_message(
-        context: *EncryptionTransitContext,
+        encryption: *EncryptionNetwork,
         peer: vsr.Peer,
         target: []u8,
         source: *const Message,
     ) void {
-        const encryption_transit = switch (peer) {
-            .replica => |replica| &(context.replica_cipher[replica].?),
-            .client => |client_id| context.client_cipher.getPtr(client_id).?,
+        const encryption_network = switch (peer) {
+            .replica => |replica| &(encryption.replica_cipher[replica].?),
+            .client => |client_id| encryption.client_cipher.getPtr(client_id).?,
             else => unreachable,
         };
-        switch (encryption_transit.*) {
-            inline else => |*encryption_transit_implementation| {
-                encryption_transit_implementation.encrypt_message(target, source);
+        switch (encryption_network.*) {
+            inline else => |*encryption_network_implementation| {
+                encryption_network_implementation.encrypt_message(target, source);
             },
         }
     }
 
     pub fn decrypt_message(
-        context: *EncryptionTransitContext,
+        encryption: *EncryptionNetwork,
         target: *Message,
         source: []const u8,
     ) !vsr.Peer {
@@ -460,7 +463,7 @@ pub const EncryptionTransitContext = struct {
             std.mem.asBytes(&header_encrypted),
             source[0..@sizeOf(HeaderEncrypted)],
         );
-        const cipher = context.key_id_cipher.get(header_encrypted.header_key_id) orelse
+        const cipher = encryption.key_id_cipher.get(header_encrypted.header_key_id) orelse
             return error.InvalidKeyId;
 
         switch (cipher.*) {
@@ -469,10 +472,6 @@ pub const EncryptionTransitContext = struct {
                 return cipher_impl.other.to_vsr_peer();
             },
         }
-    }
-
-    pub fn session_exists(context: *EncryptionTransitContext, handshake_id: u128) bool {
-        return context.key_id_cipher.contains(handshake_id);
     }
 };
 
@@ -507,7 +506,7 @@ pub const HandshakeMessage = extern struct {
             .encrypted_data = @splat(0),
         };
 
-        assert(EncryptionTransitContext.message_type(&header_encrypted) == .handshake);
+        assert(EncryptionNetwork.message_type(&header_encrypted) == .handshake);
 
         return .{
             .header = header_encrypted,
@@ -551,11 +550,9 @@ pub const HandshakeInsecure = struct {
         responder,
     };
 
-    const Action = union(enum) {
-        send: HandshakeMessage,
-        send_and_done: struct { message: HandshakeMessage, result: HandshakeResult },
-        done: HandshakeResult,
-        terminate,
+    pub const Operation = struct {
+        message: ?HandshakeMessage,
+        result: ?HandshakeResult,
     };
 
     pub fn initiator_deterministic(
@@ -621,7 +618,7 @@ pub const HandshakeInsecure = struct {
         handshake: *HandshakeInsecure,
         maybe_msg: ?HandshakeMessage,
     ) union(enum) {
-        operation: struct { message: ?HandshakeMessage, result: ?HandshakeResult },
+        operation: Operation,
         terminate,
     } {
         switch (handshake.state) {
@@ -744,64 +741,79 @@ pub const HandshakeInsecure = struct {
 };
 
 test "HandshakeInsecure" {
-    var initiator_kex: HandshakeInsecure = .init(.initiator, .{ .id = 1, .peer = .replica });
-    var responder_kex: HandshakeInsecure = .init(.responder, .{ .id = 2, .peer = .replica });
+    var prng = stdx.PRNG.from_seed_testing();
 
-    var initiator_result: ?HandshakeInsecure.HandshakeResult = null;
-    var responder_result: ?HandshakeInsecure.HandshakeResult = null;
+    const handshake_id = prng.int(u128);
+    var seed_initiator: [X25519.seed_length]u8 = undefined;
+    prng.fill(&seed_initiator);
+    var seed_responder: [X25519.seed_length]u8 = undefined;
+    prng.fill(&seed_responder);
+    var handshake_initiator = HandshakeInsecure.initiator_deterministic(
+        .{ .id = 1, .peer = .replica },
+        seed_initiator,
+        handshake_id,
+    ) catch unreachable;
+    var handshake_responder = HandshakeInsecure.responder_deterministic(
+        .{ .id = 2, .peer = .replica },
+        seed_responder,
+        handshake_id,
+    ) catch unreachable;
 
-    var maybe_initiator_action: ?HandshakeInsecure.Action = null;
-    var maybe_responder_action: ?HandshakeInsecure.Action = null;
-    while (initiator_result == null or responder_result == null) {
-        const initiator_action = maybe_initiator_action orelse initiator_kex.feed(null);
-        maybe_initiator_action = null;
-        switch (initiator_action) {
-            .done => |shared_secret| {
-                initiator_result = shared_secret;
-            },
-            .send => |msg| {
-                maybe_responder_action = responder_kex.feed(msg);
-            },
-            else => unreachable,
-        }
+    var result_initiator: ?HandshakeResult = null;
+    var result_responder: ?HandshakeResult = null;
 
-        const responder_action = maybe_responder_action orelse responder_kex.feed(null);
-        maybe_responder_action = null;
-        switch (responder_action) {
-            .done => |shared_secret| {
-                responder_result = shared_secret;
+    var in_flight: struct {
+        message: ?HandshakeMessage,
+        source: enum { initiator, responder },
+    } = .{ .message = null, .source = .responder };
+
+    while (result_initiator == null or result_responder == null) {
+        switch (in_flight.source) {
+            .responder => {
+                if (result_initiator != null) {
+                    continue;
+                }
+                const operation = handshake_initiator.feed(in_flight.message).operation;
+                result_initiator = operation.result;
+                in_flight.message = operation.message;
+                in_flight.source = .initiator;
             },
-            .send => |msg| {
-                maybe_initiator_action = initiator_kex.feed(msg);
+            .initiator => {
+                if (result_responder != null) {
+                    continue;
+                }
+                const operation = handshake_responder.feed(in_flight.message).operation;
+                result_responder = operation.result;
+                in_flight.message = operation.message;
+                in_flight.source = .responder;
             },
-            else => unreachable,
         }
     }
 
     try std.testing.expectEqualSlices(
         u8,
-        &initiator_result.?.shared_secret,
-        &responder_result.?.shared_secret,
+        &result_initiator.?.shared_secret,
+        &result_responder.?.shared_secret,
     );
 
     try std.testing.expectEqual(
-        initiator_result.?.peer_type,
-        responder_kex.self_type,
+        result_initiator.?.peer_type,
+        handshake_responder.self_type,
     );
 
     try std.testing.expectEqual(
-        initiator_result.?.peer_id,
-        responder_kex.self_id,
+        result_initiator.?.peer_id,
+        handshake_responder.self_id,
     );
 
     try std.testing.expectEqual(
-        responder_result.?.peer_type,
-        initiator_kex.self_type,
+        result_responder.?.peer_type,
+        handshake_initiator.self_type,
     );
 
     try std.testing.expectEqual(
-        responder_result.?.peer_id,
-        initiator_kex.self_id,
+        result_responder.?.peer_id,
+        handshake_initiator.self_id,
     );
 }
 
@@ -912,7 +924,12 @@ pub const CipherAegis256Nonce128 = struct {
         source: []const u8,
     ) !void {
         var header_encrypted: HeaderEncrypted = undefined;
-        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&header_encrypted), source[0..@sizeOf(HeaderEncrypted)]);
+        stdx.copy_disjoint(
+            .exact,
+            u8,
+            std.mem.asBytes(&header_encrypted),
+            source[0..@sizeOf(HeaderEncrypted)],
+        );
 
         target.header.* = try cipher.decrypt_header(&header_encrypted);
 
@@ -979,11 +996,17 @@ pub const CipherAegis256Nonce128 = struct {
         assert(!stdx.zeroed(&key));
         assert(!std.mem.eql(u8, &key, &@as([32]u8, @splat(undefined_u8))));
 
+        if (header.header_key_id != cipher.key_id) {
+            return error.AuthenticationFailed;
+        }
+
         assert(header.header_key_id == cipher.key_id);
 
         if (header.header_nonce == 0 or header.header_nonce == undefined_u128) {
             return error.InvalidHeaderNonce;
         }
+
+        assert(header.header_nonce != 0 and header.header_nonce != undefined_u128);
 
         var decrypted: Header = std.mem.bytesAsValue(Header, std.mem.asBytes(header)).*;
         const bytes_ciphertext = header.slice_encrypted_const();
@@ -1533,7 +1556,7 @@ test "EncryptStorage Bit Fuzzer" {
     }
 }
 
-test "EncryptTransit Bit Fuzzer" {
+test "EncryptionNetwork Bit Fuzzer" {
     var prng = stdx.PRNG.from_seed_testing();
 
     const ephemeral_secret: [32]u8 = blk: {
@@ -1595,10 +1618,10 @@ test "EncryptTransit Bit Fuzzer" {
     }
 }
 
-test "EncryptionTransitContext Unit Test" {
+test "EncryptionNetwork Unit Test" {
     const gpa = std.testing.allocator;
 
-    var encryption_transit_context = try EncryptionTransitContext.init(
+    var encryption_network = try EncryptionNetwork.init(
         gpa,
         .{
             .replicas_max = 6,
@@ -1607,5 +1630,5 @@ test "EncryptionTransitContext Unit Test" {
             .self_peer = .replica,
         },
     );
-    defer encryption_transit_context.deinit(gpa);
+    defer encryption_network.deinit(gpa);
 }

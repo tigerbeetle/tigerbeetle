@@ -411,7 +411,7 @@ pub fn ContextType(
             assert(self.pending.pop() == null);
             maybe(self.eviction_reason != null);
 
-            assert(self.client.shutdown_complete());
+            assert(self.client.shutdown());
             self.signal.deinit();
             self.client.deinit(self.gpa.allocator());
             self.message_pool.deinit(self.gpa.allocator());
@@ -464,8 +464,7 @@ pub fn ContextType(
 
             // Close every connection and drain outstanding IO before tearing the
             // client down.
-            self.client.shutdown();
-            while (!self.client.shutdown_complete()) {
+            while (!self.client.shutdown()) {
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed during shutdown: {s}", .{
                         self.client_id,
