@@ -50,9 +50,8 @@ const NativeClient = struct {
         ReflectionHelper.unload(env);
     }
 
-    /// Native clientInit and clientInitEcho implementation.
+    /// Native clientInit implementation.
     fn client_init(
-        comptime echo_client: bool,
         env: *jni.JNIEnv,
         client: *tb.ClientInterface,
         cluster_id: u128,
@@ -67,9 +66,8 @@ const NativeClient = struct {
         };
         defer env.release_string_utf_chars(addresses_obj, addresses.ptr);
 
-        const init_fn = if (echo_client) tb.init_echo else tb.init;
         const jvm = JNIHelper.get_java_vm(env);
-        init_fn(
+        tb.init(
             global_allocator,
             client,
             cluster_id,
@@ -212,32 +210,9 @@ comptime {
             defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
 
             NativeClient.client_init(
-                false,
                 env,
                 ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
                 @bitCast(cluster_id_elements[0..16].*),
-                addresses,
-            );
-        }
-
-        fn client_init_echo(
-            env: *jni.JNIEnv,
-            class: jni.JClass,
-            tb_client_buffer: jni.JObject,
-            cluster_id: jni.JByteArray,
-            addresses: jni.JString,
-        ) callconv(.c) void {
-            _ = class;
-            assert(env.get_array_length(cluster_id) == 16);
-
-            const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
-            defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
-
-            NativeClient.client_init(
-                true,
-                env,
-                ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
-                @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
             );
         }
@@ -272,7 +247,6 @@ comptime {
     @export(&Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .strong });
 
     @export(&Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .strong });
-    @export(&Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .strong });
     @export(&Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .strong });
     @export(&Exports.submit, .{ .name = prefix ++ "submit", .linkage = .strong });
 }

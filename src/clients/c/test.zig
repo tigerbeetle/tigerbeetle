@@ -99,138 +99,6 @@ test "u128 consistency test" {
     try testing.expectEqual(pair, @as(@TypeOf(pair), @bitCast(decimal)));
 }
 
-// When initialized with `init_echo`, the tb_client uses a test context that echoes
-// the data back without creating an actual client or connecting to a cluster.
-//
-// This same test should be implemented by all the target programming languages, asserting that:
-// 1. the tb_client api was initialized correctly.
-// 2. the application can submit messages and receive replies through the completion callback.
-// 3. the data marshaling is correct, and exactly the same data sent was received back.
-test "tb_client echo" {
-    // Using the create_accounts operation for this test.
-    const RequestContext = RequestContextType(constants.message_body_size_max);
-
-    // Test multiple operations to prevent all requests from ending up in the same batch.
-    // Query operations are not included because the `limit` field cannot be randomized.
-    const operations = [_]tb_client.Operation{
-        tb_client.Operation.create_accounts,
-        tb_client.Operation.create_transfers,
-        tb_client.Operation.lookup_accounts,
-        tb_client.Operation.lookup_transfers,
-    };
-
-    // Initializing an echo client for testing purposes.
-    // We ensure that the retry mechanism is being tested
-    // by allowing more simultaneous packets than "client_request_queue_max".
-    var client: tb_client.ClientInterface = undefined;
-    const cluster_id: u128 = 0;
-    const address = "3000";
-    const concurrency_max: u32 = constants.client_request_queue_max * operations.len;
-    const tb_context: usize = 42;
-    try tb_client.init_echo(
-        testing.allocator,
-        &client,
-        cluster_id,
-        address,
-        tb_context,
-        RequestContext.on_complete,
-    );
-
-    defer client.deinit() catch unreachable;
-
-    var prng = stdx.PRNG.from_seed(tb_context);
-
-    const requests: []RequestContext = try testing.allocator.alloc(
-        RequestContext,
-        concurrency_max,
-    );
-    defer testing.allocator.free(requests);
-
-    // Repeating the same test multiple times to stress the
-    // cycle of message exhaustion followed by completions.
-    const repetitions_max = 100;
-    var repetition: u32 = 0;
-    var operation_current: ?tb_client.Operation = null;
-    while (repetition < repetitions_max) : (repetition += 1) {
-        var completion = Completion{ .pending = concurrency_max };
-
-        const operation: tb_client.Operation = operation: {
-            if (operation_current == null or
-                // Sometimes repeat the same operation for testing multi-batch.
-                prng.boolean())
-            {
-                operation_current = operations[prng.index(operations)];
-            }
-            break :operation operation_current.?;
-        };
-
-        const event_size: u32, const event_request_max: u32 = switch (operation) {
-            // All multi-batched operations require a minimum trailer size of one element:
-            .create_accounts => .{
-                @sizeOf(tb.Account),
-                @divExact(constants.message_body_size_max, @sizeOf(tb.Account)) - 1,
-            },
-            .create_transfers => .{
-                @sizeOf(tb.Transfer),
-                @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
-            },
-            .lookup_accounts => .{
-                @sizeOf(u128),
-                @divExact(constants.message_body_size_max, @sizeOf(tb.Account)) - 1,
-            },
-            .lookup_transfers => .{
-                @sizeOf(u128),
-                @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
-            },
-            else => unreachable,
-        };
-
-        // Submitting some random data to be echoed back:
-        for (requests) |*request| {
-            request.* = .{
-                .packet = undefined,
-                .completion = &completion,
-                .sent_data_size = prng.range_inclusive(
-                    u32,
-                    1,
-                    event_request_max,
-                ) * event_size,
-            };
-            prng.fill(request.sent_data[0..request.sent_data_size]);
-
-            const packet = &request.packet;
-            packet.operation = @intFromEnum(operation);
-            packet.user_data = request;
-            packet.data = &request.sent_data;
-            packet.data_size = request.sent_data_size;
-            packet.user_tag = 0;
-            packet.status = .ok;
-
-            try client.submit(packet);
-        }
-
-        // Waiting until the c_client thread has processed all submitted requests:
-        completion.wait_pending();
-
-        // Checking if the received echo matches the data we sent:
-        for (requests) |*request| {
-            try testing.expect(request.reply != null);
-            try testing.expectEqual(tb_context, request.reply.?.tb_context);
-            try testing.expectEqual(tb_client.PacketStatus.ok, request.packet.status);
-            try testing.expectEqual(
-                @intFromPtr(&request.packet),
-                @intFromPtr(request.reply.?.tb_packet),
-            );
-            try testing.expect(request.reply.?.result != null);
-            try testing.expectEqual(request.sent_data_size, request.reply.?.result_size);
-
-            const sent_data = request.sent_data[0..request.sent_data_size];
-            const reply = request.reply.?.result.?[0..request.reply.?.result_size];
-            try testing.expectEqualSlices(u8, sent_data, reply);
-        }
-    }
-}
-
 // Asserts the validation rules associated with the `init*` functions.
 test "tb_client init" {
     const assert_status = struct {
@@ -241,7 +109,7 @@ test "tb_client init" {
             var client_out: tb_client.ClientInterface = undefined;
             const cluster_id: u128 = 0;
             const tb_context: usize = 0;
-            const result = tb_client.init_echo(
+            const result = tb_client.init(
                 testing.allocator,
                 &client_out,
                 cluster_id,
@@ -283,7 +151,7 @@ test "tb_client client status" {
     const cluster_id: u128 = 0;
     const addresses = "3000";
     const tb_context: usize = 0;
-    try tb_client.init_echo(
+    try tb_client.init(
         testing.allocator,
         &client,
         cluster_id,
@@ -310,10 +178,10 @@ test "tb_client client status" {
 
     // Sanity test to verify that the client is working.
     try client.submit(packet);
-    completion.wait_pending();
 
     // Deinit the client.
     try client.deinit();
+    completion.wait_pending();
 
     // Cannot submit after deinit.
     try testing.expectError(error.ClientInvalid, client.submit(packet));
@@ -330,7 +198,7 @@ test "tb_client PacketStatus" {
     const cluster_id: u128 = 0;
     const addresses = "3000";
     const tb_context: usize = 42;
-    try tb_client.init_echo(
+    try tb_client.init(
         testing.allocator,
         &client_out,
         cluster_id,

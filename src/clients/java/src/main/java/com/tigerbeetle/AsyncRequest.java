@@ -72,18 +72,6 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
                 filter.batch);
     }
 
-    public static AsyncRequest<AccountBatch> echo(final NativeClient nativeClient,
-            final AccountBatch batch) {
-        return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.ECHO_ACCOUNTS,
-                batch);
-    }
-
-    public static AsyncRequest<TransferBatch> echo(final NativeClient nativeClient,
-            final TransferBatch batch) {
-        return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.ECHO_TRANSFERS,
-                batch);
-    }
-
     public CompletableFuture<TResponse> getFuture() {
         return future;
     }
