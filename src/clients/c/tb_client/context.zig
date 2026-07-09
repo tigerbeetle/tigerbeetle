@@ -533,9 +533,17 @@ pub fn ContextType(
 
                 const slice: []const u8 = packet.slice();
                 assert(slice.len == packet.data_size);
-                maybe(slice.len == 0);
                 if (slice.len % event_size != 0) {
                     return self.notify_completion(packet, error.InvalidDataSize);
+                }
+
+                if (operation.is_batchable()) {
+                    maybe(slice.len == 0);
+                } else {
+                    // Non-batched operations (e.g. queries) require exactly one event.
+                    if (slice.len != event_size) {
+                        return self.notify_completion(packet, error.InvalidDataSize);
+                    }
                 }
 
                 const event_count: u32 = @intCast(@divExact(slice.len, event_size));
