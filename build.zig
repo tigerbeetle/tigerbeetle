@@ -528,6 +528,9 @@ fn build_ci(
     if (default or mode == .smoke) {
         build_ci_step(b, step_ci, .{"test:fmt"}, .{});
         build_ci_step(b, step_ci, .{"check"}, .{});
+        build_ci_script(b, step_ci, options.scripts, &.{
+            "tbclient",
+        });
 
         const build_docs = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
         build_docs.has_side_effects = true;
