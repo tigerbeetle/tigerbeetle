@@ -450,7 +450,7 @@ const CLIArgs = union(enum) {
         \\
         \\  tigerbeetle amqp --addresses=3000,3001,3002 --cluster=0 \
         \\      --host=127.0.0.1 --vhost=/ --user=guest --password=guest \
-        \\      --publish-exchange=my_exhange_name
+        \\      --publish-exchange=my_exchange_name
         \\
     , .{
         .default_address = constants.address,
