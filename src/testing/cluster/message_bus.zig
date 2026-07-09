@@ -1,12 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("../../vsr.zig");
-const constants = @import("../../constants.zig");
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const HeaderCallbackResult = @import("../../message_bus.zig").HeaderCallbackResult;
-const Header = vsr.Header;
 const HeaderEncrypted = vsr.HeaderEncrypted;
 const ProcessType = vsr.ProcessType;
 
@@ -33,6 +31,8 @@ pub const MessageBus = struct {
         context: *anyopaque,
         message: []const u8,
     ) anyerror!vsr.Peer,
+
+    handshakes: std.AutoArrayHashMapUnmanaged(u128, Process) = .{},
 
     send_tokens_outstanding: u64 = 0,
 
@@ -62,13 +62,11 @@ pub const MessageBus = struct {
         }
 
         pub fn send(token: MessageToken) void {
-            defer token.bus.network.message_pool.unref(token.message);
-
             assert(token.bus.send_tokens_outstanding > 0);
             token.bus.send_tokens_outstanding -= 1;
 
             token.bus.network.packet_simulator.submit_packet(
-                token.message.ref(),
+                token.message,
                 .{
                     .source = token.bus.network.process_to_address(token.bus.process),
                     .target = token.bus.network.process_to_address(token.other),
@@ -78,7 +76,7 @@ pub const MessageBus = struct {
     };
 
     pub fn init(
-        _: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         process: Process,
         message_pool: *MessagePool,
         header_callback: *const fn (
@@ -91,16 +89,27 @@ pub const MessageBus = struct {
         ) anyerror!vsr.Peer,
         options: Options,
     ) !MessageBus {
-        return MessageBus{
+        var bus: MessageBus = .{
             .network = options.network,
             .pool = message_pool,
             .process = process,
             .header_callback = header_callback,
             .message_callback = message_callback,
         };
+
+        try bus.handshakes.ensureTotalCapacity(
+            gpa,
+            options.network.options.client_count + options.network.options.node_count,
+        );
+        errdefer bus.handshakes.deinit(gpa);
+
+        return bus;
     }
 
-    pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
+    pub fn deinit(bus: *MessageBus, gpa: std.mem.Allocator) void {
+        assert(bus.send_tokens_outstanding == 0);
+        bus.handshakes.deinit(gpa);
+
         bus.resume_scheduled = false;
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
@@ -118,16 +127,54 @@ pub const MessageBus = struct {
         bus.tick();
     }
 
+    pub fn insert_existing(bus: *MessageBus, other: *MessageBus) void {
+        if (bus == other) {
+            return;
+        }
+        assert(bus.network == other.network);
+        assert(std.meta.eql(bus.process, other.process));
+
+        bus.resume_scheduled = other.resume_scheduled;
+        bus.send_tokens_outstanding = other.send_tokens_outstanding;
+
+        assert(bus.handshakes.capacity() == other.handshakes.capacity());
+        bus.handshakes.clearRetainingCapacity();
+        var handshakes_iterator = other.handshakes.iterator();
+        while (handshakes_iterator.next()) |handshake| {
+            bus.handshakes.putAssumeCapacity(handshake.key_ptr.*, handshake.value_ptr.*);
+        }
+    }
+
     pub fn message_from_network(
         bus: *MessageBus,
         message_encrypted: *Message,
+        source: Process,
     ) void {
         const header_encrypted = std.mem.bytesAsValue(
             vsr.HeaderEncrypted,
             message_encrypted.buffer[0..@sizeOf(vsr.HeaderEncrypted)],
         );
 
-        const result = bus.header_callback(bus, header_encrypted.*) catch unreachable;
+        const result = bus.header_callback(bus, header_encrypted.*) catch {
+            std.log.warn("message_from_network: drop message", .{});
+            return;
+        };
+
+        if (result.handshake_id) |handshake_id| {
+            if (bus.handshakes.count() == bus.handshakes.capacity()) {
+                const handshake_id_existing = bus.handshakes.keys()[0];
+                std.log.warn(
+                    "message_from_network: evicting handshake id ({d})",
+                    .{handshake_id_existing},
+                );
+                bus.handshakes.orderedRemoveAt(0);
+            }
+
+            const gop = bus.handshakes.getOrPutAssumeCapacity(handshake_id);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = source;
+            }
+        }
 
         _ = bus.message_callback(
             bus,
@@ -155,12 +202,21 @@ pub const MessageBus = struct {
     }
 
     pub fn send_message_handshake(
-        _: *MessageBus,
-        _: u128,
-        _: u32,
+        bus: *MessageBus,
+        handshake_id: u128,
+        size: u32,
     ) ?MessageToken {
-        return null;
-        // return MessageToken.create(bus, .{ .client = client_id }, size);
+        assert(bus.handshakes.capacity() > 0);
+
+        if (bus.handshakes.get(handshake_id)) |process| {
+            return MessageToken.create(bus, process, size);
+        } else {
+            std.log.warn(
+                "send_message_to_handshake: no connection for handshake_id={}",
+                .{handshake_id},
+            );
+            return null;
+        }
     }
 
     pub fn send_message_to_replica(
@@ -168,16 +224,6 @@ pub const MessageBus = struct {
         replica: u8,
         size: u32,
     ) ?MessageToken {
-        _ = bus;
-        _ = replica;
-        _ = size;
-        return null;
-        // Messages sent by a process to itself should never be passed to the message bus
-        // if (bus.process == .replica) assert(replica != bus.process.replica);
-        //
-        // bus.network.send_message(message, .{
-        //     .source = bus.process,
-        //     .target = .{ .replica = replica },
-        // });
+        return MessageToken.create(bus, .{ .replica = replica }, size);
     }
 };

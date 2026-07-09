@@ -334,34 +334,40 @@ const Node = struct {
 
     fn send_message(node: *Node, target: u8, message: *Message) void {
         if (target < node.message_bus.replicas_addresses.len) {
-            const maybe_message_network = node.message_bus.acquire_replica(target, message.header.size);
-            if (maybe_message_network) |message_network| {
+            const maybe_token = node.message_bus.send_message_to_replica(
+                target,
+                message.header.size,
+            );
+            if (maybe_token) |token| {
+                defer token.send();
+
                 stdx.copy_disjoint(
                     .inexact,
                     u8,
-                    message_network.buffer,
+                    token.buffer,
                     message.buffer[0..message.header.size],
                 );
-                node.message_bus.send(message_network);
             } else {
                 log.warn("send_message: drop message header={}", .{
                     message.header,
                 });
             }
-
-            node.message_bus.send_message_to_replica(target, message.buffer);
         } else {
             assert(node.message_bus.process == .replica);
 
-            const maybe_message_network = node.message_bus.acquire_client(target, message.header.size);
-            if (maybe_message_network) |message_network| {
+            const maybe_token = node.message_bus.send_message_to_client(
+                target,
+                message.header.size,
+            );
+            if (maybe_token) |token| {
+                defer token.send();
+
                 stdx.copy_disjoint(
                     .inexact,
                     u8,
-                    message_network.buffer,
+                    token.target,
                     message.buffer[0..message.header.size],
                 );
-                node.message_bus.send(message_network);
             } else {
                 log.warn("send_message: drop message header={}", .{
                     message.header,

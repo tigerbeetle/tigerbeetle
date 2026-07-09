@@ -1,7 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
-const maybe = stdx.maybe;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
@@ -66,7 +65,10 @@ pub const Network = struct {
         var buses_enabled = try std.ArrayListUnmanaged(bool).initCapacity(allocator, process_count);
         errdefer buses_enabled.deinit(allocator);
 
-        var encryptions = try std.ArrayListUnmanaged(*EncryptionNetwork).initCapacity(allocator, process_count);
+        var encryptions = try std.ArrayListUnmanaged(*EncryptionNetwork).initCapacity(
+            allocator,
+            process_count,
+        );
         errdefer encryptions.deinit(allocator);
 
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
@@ -110,12 +112,12 @@ pub const Network = struct {
     }
 
     pub fn deinit(network: *Network) void {
-        network.message_pool.deinit(network.allocator);
-        network.packet_simulator.deinit(network.allocator);
-        network.processes.deinit(network.allocator);
-        network.encryptions.deinit(network.allocator);
-        network.buses_enabled.deinit(network.allocator);
         network.buses.deinit(network.allocator);
+        network.buses_enabled.deinit(network.allocator);
+        network.encryptions.deinit(network.allocator);
+        network.processes.deinit(network.allocator);
+        network.packet_simulator.deinit(network.allocator);
+        network.message_pool.deinit(network.allocator);
     }
 
     pub fn step(network: *Network) bool {
@@ -163,7 +165,12 @@ pub const Network = struct {
         }
     }
 
-    pub fn link(network: *Network, process: Process, message_bus: *MessageBus, encryption: *EncryptionNetwork) void {
+    pub fn link(
+        network: *Network,
+        process: Process,
+        message_bus: *MessageBus,
+        encryption: *EncryptionNetwork,
+    ) void {
         const raw_process = switch (process) {
             .replica => |replica| replica,
             .client => |client| blk: {
@@ -174,7 +181,12 @@ pub const Network = struct {
 
         for (network.processes.items, 0..) |existing_process, i| {
             if (existing_process == raw_process) {
+                const message_bus_old = network.buses.items[i];
+                const encryption_old = network.encryptions.items[i];
+                message_bus.insert_existing(message_bus_old);
+                encryption.insert_existing(encryption_old);
                 network.buses.items[i] = message_bus;
+                network.encryptions.items[i] = encryption;
                 break;
             }
         } else {
@@ -252,11 +264,37 @@ pub const Network = struct {
         return network.buses.items[network.process_to_address(process)];
     }
 
-    fn packet_header(packet_simulator: *PacketSimulator, message_encrypted: *Message, path: PacketSimulatorPath) vsr.Header {
+    fn packet_header(
+        packet_simulator: *PacketSimulator,
+        message_encrypted: *Message,
+        path: PacketSimulatorPath,
+    ) PacketSimulator.PacketHeaderResult {
         const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
+
+        if (!network.buses_enabled.items[path.target]) {
+            // FIXME: what to do when path disabled
+            return .handshake;
+        }
+
         const target_encryption: *EncryptionNetwork = network.encryptions.items[path.target];
-        const header_encrypted = std.mem.bytesAsValue(vsr.HeaderEncrypted, message_encrypted.buffer[0..@sizeOf(vsr.HeaderEncrypted)]);
-        return target_encryption.decrypt_header(header_encrypted) catch unreachable;
+
+        const header_encrypted = std.mem.bytesAsValue(
+            vsr.HeaderEncrypted,
+            message_encrypted.buffer[0..@sizeOf(vsr.HeaderEncrypted)],
+        );
+        switch (EncryptionNetwork.message_type(header_encrypted)) {
+            .handshake => {
+                return .handshake;
+            },
+            .encrypted => {
+                return .{
+                    .header = target_encryption.decrypt_header(header_encrypted) catch {
+                        // FIXME: what to do on encrypt fail
+                        return .handshake;
+                    },
+                };
+            },
+        }
     }
 
     fn packet_clone(_: *PacketSimulator, message: *Message) *Message {
@@ -279,9 +317,21 @@ pub const Network = struct {
             .target = raw_process_to_process(network.processes.items[path.target]),
         };
 
-        const header = packet_simulator.packet_header(message_encrypted, path);
+        const header = switch (network.packet_simulator.packet_header(message_encrypted, path)) {
+            .handshake => {
+                // TODO: fix this by adding header command
+                if (!network.buses_enabled.items[path.target]) {
+                    return;
+                }
+                const target_bus = network.buses.items[path.target];
+                target_bus.message_from_network(message_encrypted, process_path.source);
+                return;
+            },
+            .header => |header| header,
+        };
+
         if (!network.buses_enabled.items[path.target]) {
-            log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
+            log.debug("packet_deliver: {} > {}: {} (dropped; target is down)", .{
                 process_path.source,
                 process_path.target,
                 header.command,
@@ -289,14 +339,14 @@ pub const Network = struct {
             return;
         }
 
-        log.debug("deliver_message: {} > {}: {}", .{
+        log.debug("packet_deliver: {} > {}: {}", .{
             process_path.source,
             process_path.target,
             header.command,
         });
 
         const target_bus = network.buses.items[path.target];
-        target_bus.message_from_network(message_encrypted);
+        target_bus.message_from_network(message_encrypted, process_path.source);
     }
 
     fn raw_process_to_process(raw: u128) Process {

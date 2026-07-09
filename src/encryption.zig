@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const stdx = @import("stdx");
 const vsr = @import("vsr.zig");
 
-const maybe = stdx.maybe;
 const assert = std.debug.assert;
 const Header = vsr.Header;
 const HeaderEncrypted = vsr.HeaderEncrypted;
@@ -181,6 +180,8 @@ comptime {
 
 const X25519 = std.crypto.dh.X25519;
 
+// TODO:
+// Add metrics for e.g. # handshakes, # handshakes pending, # ciphers, etc..
 pub const EncryptionNetwork = struct {
     self_id: u128,
     self_peer: PeerType,
@@ -278,6 +279,70 @@ pub const EncryptionNetwork = struct {
         encryption.* = undefined;
     }
 
+    pub fn insert_existing(
+        encryption: *EncryptionNetwork,
+        other: *EncryptionNetwork,
+    ) void {
+        if (encryption == other) {
+            encryption.client_cipher.clearRetainingCapacity();
+            encryption.handshakes_pending.clearRetainingCapacity();
+            encryption.key_id_cipher.clearRetainingCapacity();
+            for (encryption.replica_cipher) |*replica_cipher| {
+                replica_cipher.* = null;
+            }
+            return;
+        }
+
+        assert(encryption.self_id == other.self_id);
+        assert(encryption.self_peer == other.self_peer);
+        assert(encryption.replica_cipher.len == other.replica_cipher.len);
+
+        stdx.copy_disjoint(.exact, ?CipherTypes, encryption.replica_cipher, other.replica_cipher);
+
+        encryption.client_cipher.clearRetainingCapacity();
+        var client_cipher_iterator = other.client_cipher.iterator();
+        while (client_cipher_iterator.next()) |cipher| {
+            encryption.client_cipher.putAssumeCapacity(cipher.key_ptr.*, cipher.value_ptr.*);
+        }
+
+        encryption.handshakes_pending.clearRetainingCapacity();
+        var handshakes_iterator = other.handshakes_pending.iterator();
+        while (handshakes_iterator.next()) |handshake| {
+            encryption.handshakes_pending.putAssumeCapacity(
+                handshake.key_ptr.*,
+                handshake.value_ptr.*,
+            );
+        }
+
+        encryption.key_id_cipher.clearRetainingCapacity();
+        var key_id_ciphers_iterator = other.key_id_cipher.iterator();
+
+        const replica_base = @intFromPtr(other.replica_cipher.ptr);
+        const replica_end = replica_base + other.replica_cipher.len * @sizeOf(?CipherTypes);
+
+        while (key_id_ciphers_iterator.next()) |key_id_cipher| {
+            const key_id = key_id_cipher.key_ptr.*;
+            const cihper_ptr_other = key_id_cipher.value_ptr.*;
+
+            const ptr_addr = @intFromPtr(cihper_ptr_other);
+
+            if (ptr_addr >= replica_base and ptr_addr < replica_end) {
+                // Cipher for communication with replica.
+                const index = (ptr_addr - replica_base) / @sizeOf(?CipherTypes);
+                encryption.key_id_cipher.putAssumeCapacity(
+                    key_id,
+                    &(encryption.replica_cipher[index].?),
+                );
+            } else {
+                // Cipher for communication with client.
+                encryption.key_id_cipher.putAssumeCapacity(
+                    key_id,
+                    encryption.client_cipher.getPtr(key_id).?,
+                );
+            }
+        }
+    }
+
     pub fn message_type(header: *const HeaderEncrypted) union(enum) { encrypted, handshake: u32 } {
         if (header.header_tag == 1) {
             return .{ .handshake = @sizeOf(HandshakeMessage) };
@@ -288,7 +353,10 @@ pub const EncryptionNetwork = struct {
     pub fn handshake_initiate(
         encryption: *EncryptionNetwork,
     ) HandshakeMessage {
-        const handshake = HandshakeInsecure.initiator(.{ .id = encryption.self_id, .peer = encryption.self_peer });
+        const handshake = HandshakeInsecure.initiator(.{
+            .id = encryption.self_id,
+            .peer = encryption.self_peer,
+        });
 
         log.debug("initiator_handshake: creating handshake id  ({d})", .{handshake.handshake_id});
 
@@ -331,7 +399,16 @@ pub const EncryptionNetwork = struct {
 
         assert(message_type(&handshake_message.header) == .handshake);
 
-        const gop_handshake = encryption.handshakes_pending.getOrPutAssumeCapacity(handshake_message.header.header_key_id);
+        if (encryption.handshakes_pending.capacity() == encryption.handshakes_pending.count()) {
+            const handshake_old = encryption.handshakes_pending.entries.get(0);
+            log.warn("handshake_consume: abort handshake: {d}", .{handshake_old.key});
+            encryption.handshakes_pending.orderedRemoveAt(0);
+        }
+        assert(encryption.handshakes_pending.capacity() > encryption.handshakes_pending.count());
+
+        const gop_handshake = encryption.handshakes_pending.getOrPutAssumeCapacity(
+            handshake_message.header.header_key_id,
+        );
 
         if (!gop_handshake.found_existing) {
             switch (encryption.self_peer) {
@@ -340,6 +417,10 @@ pub const EncryptionNetwork = struct {
                         "consume_handshake: dropping message for unknown handshake id  ({d})",
                         .{handshake_message.header.header_key_id},
                     );
+                    const remove_result = encryption.handshakes_pending.orderedRemove(
+                        handshake_message.header.header_key_id,
+                    );
+                    assert(remove_result);
                     return .{ .err = error.HandshakeFailed };
                 },
                 .replica => {
@@ -359,34 +440,69 @@ pub const EncryptionNetwork = struct {
                         assert(operation.result != null or operation.message != null);
                         var peer: ?vsr.Peer = null;
                         if (operation.result) |result| {
-                            const other_peer: Peer = .{ .id = result.peer_id, .peer = result.peer_type };
+                            const other_peer: Peer = .{
+                                .id = result.peer_id,
+                                .peer = result.peer_type,
+                            };
                             peer = other_peer.to_vsr_peer();
 
                             // TODO: maybe fix this to avoid shifting.
-                            const remove_result = encryption.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                            const remove_result = encryption.handshakes_pending.orderedRemove(
+                                handshake_message.header.header_key_id,
+                            );
                             assert(remove_result);
                             const cipher = CipherAegis256Nonce128.init(
                                 result.shared_secret,
                                 .{ .peer = encryption.self_peer, .id = encryption.self_id },
                                 other_peer,
                             );
+
                             switch (result.peer_type) {
                                 .client => {
                                     const gop = encryption.client_cipher.getOrPutAssumeCapacity(
                                         result.peer_id,
                                     );
-                                    maybe(gop.found_existing);
+                                    if (gop.found_existing) {
+                                        const old_key_id = switch (gop.value_ptr.*) {
+                                            inline else => |old_cipher| old_cipher.key_id,
+                                        };
+                                        const removed = encryption.key_id_cipher.remove(old_key_id);
+                                        assert(removed);
+                                    }
+
                                     gop.value_ptr.* =
                                         .{ .aegis_256_nonce_128 = cipher };
-                                    encryption.key_id_cipher.putAssumeCapacity(cipher.key_id, gop.value_ptr);
+                                    encryption.key_id_cipher.putAssumeCapacity(
+                                        cipher.key_id,
+                                        gop.value_ptr,
+                                    );
                                 },
                                 .replica => {
                                     assert(result.peer_id < encryption.replica_cipher.len);
-                                    encryption.replica_cipher[@intCast(result.peer_id)] = .{ .aegis_256_nonce_128 = cipher };
-                                    encryption.key_id_cipher.putAssumeCapacity(cipher.key_id, &encryption.replica_cipher[@intCast(result.peer_id)].?);
+                                    const index: usize = @intCast(result.peer_id);
+                                    if (encryption.replica_cipher[index]) |old_cipher| {
+                                        const old_key_id = switch (old_cipher) {
+                                            inline else => |c| c.key_id,
+                                        };
+                                        const removed = encryption.key_id_cipher.remove(old_key_id);
+                                        assert(removed);
+                                    }
+                                    encryption.replica_cipher[index] = .{
+                                        .aegis_256_nonce_128 = cipher,
+                                    };
+                                    encryption.key_id_cipher.putAssumeCapacity(
+                                        cipher.key_id,
+                                        &encryption.replica_cipher[index].?,
+                                    );
                                 },
                             }
-                            log.info("handshake_consume: handshake completed handshake id ({d})", .{handshake_message.header.header_key_id});
+
+                            log.debug("handshake_consume: cipher key id: ({d}) ", .{
+                                cipher.key_id,
+                            });
+                            log.debug("handshake_consume: completed handshake id ({d})", .{
+                                handshake_message.header.header_key_id,
+                            });
                         }
                         return .{ .operation = .{ .message = operation.message, .peer = peer } };
                     },
@@ -395,7 +511,9 @@ pub const EncryptionNetwork = struct {
                             "handshake_consume: terminating handshake handshake id  ({d})",
                             .{handshake_message.header.header_key_id},
                         );
-                        const remove_result = encryption.handshakes_pending.orderedRemove(handshake_message.header.header_key_id);
+                        const remove_result = encryption.handshakes_pending.orderedRemove(
+                            handshake_message.header.header_key_id,
+                        );
                         assert(remove_result);
                         return .{ .err = error.HandshakeFailed };
                     },
@@ -429,8 +547,42 @@ pub const EncryptionNetwork = struct {
     }
 
     fn verify_state(encryption: *EncryptionNetwork) void {
-        // TOOD: check all maps are in sync
-        _ = encryption;
+        var cipher_count: u64 = 0;
+
+        // Every non-null replica cipher must have a matching entry in key_id_cipher,
+        // keyed by its own key_id, pointing back at its actual storage slot.
+        for (encryption.replica_cipher, 0..) |*maybe_cipher, index| {
+            if (maybe_cipher.*) |cipher| {
+                const key_id = switch (cipher) {
+                    inline else => |cipher_impl| cipher_impl.key_id,
+                };
+                cipher_count += 1;
+
+                const ptr = encryption.key_id_cipher.get(key_id);
+                assert(ptr != null);
+                assert(ptr.? == &(encryption.replica_cipher[index].?));
+            }
+        }
+
+        // Every client cipher must have a matching entry in key_id_cipher,
+        // keyed by its own key_id, pointing back at its actual storage slot.
+        var client_cipher_iterator = encryption.client_cipher.iterator();
+        while (client_cipher_iterator.next()) |entry| {
+            const client_id = entry.key_ptr.*;
+            const cipher = entry.value_ptr.*;
+            const key_id = switch (cipher) {
+                inline else => |cipher_impl| cipher_impl.key_id,
+            };
+            cipher_count += 1;
+
+            const ptr = encryption.key_id_cipher.get(key_id);
+            assert(ptr != null);
+            assert(ptr.? == encryption.client_cipher.getPtr(client_id).?);
+        }
+
+        // No stale/orphaned entries: key_id_cipher must contain exactly the
+        // live ciphers found above, nothing more.
+        assert(encryption.key_id_cipher.count() == cipher_count);
     }
 
     pub fn encrypt_message(
@@ -1450,7 +1602,11 @@ test "EncryptTransit" {
     const header_encrypted = enc_a.encrypt_header(&header_unencrypted);
 
     try std.testing.expect(
-        !stdx.equal_bytes(HeaderEncrypted, std.mem.bytesAsValue(HeaderEncrypted, &header_unencrypted), &header_encrypted),
+        !stdx.equal_bytes(
+            HeaderEncrypted,
+            std.mem.bytesAsValue(HeaderEncrypted, &header_unencrypted),
+            &header_encrypted,
+        ),
     );
 
     try std.testing.expectError(

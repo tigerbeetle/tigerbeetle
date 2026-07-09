@@ -187,6 +187,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
 
             const client_count_total = options.cluster.client_count + options.cluster.reformats_max;
+            assert(client_count_total <= constants.clients_max);
+            // constants.clients_max = client_count_total;
             const node_count = options.cluster.replica_count + options.cluster.standby_count;
 
             var prng = stdx.PRNG.from_seed(options.cluster.seed);
@@ -469,7 +471,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (clients) |*client| {
                 client.*.?.on_reply_context = cluster;
                 client.*.?.on_reply_callback = client_on_reply;
-                network.link(client.*.?.message_bus.process, &client.*.?.message_bus, &client.*.?.encryption_network);
+                network.link(
+                    client.*.?.message_bus.process,
+                    &client.*.?.message_bus,
+                    &client.*.?.encryption_network,
+                );
             }
 
             return cluster;
@@ -730,6 +736,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.aofs[replica_index].reset();
             cluster.aof_ios[replica_index].reset();
             var replica = &cluster.replicas[replica_index];
+
             try replica.open(
                 cluster.allocator,
                 cluster.replica_times[replica_index].time(),
@@ -758,7 +765,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(replica.standby_count == cluster.standby_count);
 
             replica.event_callback = on_replica_event;
-            cluster.network.link(replica.message_bus.process, &replica.message_bus, &replica.encryption_network);
+            cluster.network.link(
+                replica.message_bus.process,
+                &replica.message_bus,
+                &replica.encryption_network,
+            );
         }
 
         fn replica_multiversion(replica_context: *Replica) Multiversion {

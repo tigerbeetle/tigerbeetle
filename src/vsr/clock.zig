@@ -899,12 +899,12 @@ const ClockSimulator = struct {
         }
     }
 
-    fn packet_header(_: *PacketSimulator, _: Packet, _: Path) vsr.Header {
+    fn packet_header(_: *PacketSimulator, _: Packet, _: Path) PacketSimulator.PacketHeaderResult {
         // Value doesn't matter.
         var header = std.mem.zeroes(vsr.Header);
         header.command = .ping;
         header.size = @sizeOf(vsr.Header);
-        return header;
+        return .{ .header = header };
     }
 
     fn packet_clone(_: *PacketSimulator, packet: Packet) Packet {

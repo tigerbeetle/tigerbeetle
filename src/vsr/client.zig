@@ -257,8 +257,14 @@ pub fn ClientType(
                                 @sizeOf(encryption.HandshakeMessage),
                             );
                             if (maybe_token) |token| {
-                                stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
-                                token.send();
+                                defer token.send();
+
+                                stdx.copy_disjoint(
+                                    .exact,
+                                    u8,
+                                    token.target,
+                                    std.mem.asBytes(&message),
+                                );
                             } else {
                                 log.warn("{}: message_callback: drop message header={}", .{
                                     self.id,
@@ -281,7 +287,10 @@ pub fn ClientType(
             const message = self.message_bus.get_message(null);
             defer self.message_bus.unref(message);
 
-            const peer = self.encryption_network.decrypt_message(message, message_encrypted) catch |err|
+            const peer = self.encryption_network.decrypt_message(
+                message,
+                message_encrypted,
+            ) catch |err|
                 {
                     log.warn("{}: message_callback: decryption failed: {}", .{
                         self.id,
@@ -773,7 +782,11 @@ pub fn ClientType(
             }
         }
 
-        fn send_message_to_replica(self: *Client, replica: u8, message: *Message) void {
+        fn send_message_to_replica(
+            self: *Client,
+            replica: u8,
+            message: *Message,
+        ) void {
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
@@ -800,18 +813,30 @@ pub fn ClientType(
             const peer: vsr.Peer = .{ .replica = replica };
 
             if (!self.encryption_network.handshake_completed(peer)) {
-                const handshake_message = self.encryption_network.handshake_initiate();
+                log.info("{}: send_message_to_replica: dropping message and " ++
+                    " initiating handshake with replica ({d})", .{
+                    self.id,
+                    replica,
+                });
                 const maybe_token = self.message_bus.send_message_to_replica(
                     replica,
                     @sizeOf(encryption.HandshakeMessage),
                 );
                 if (maybe_token) |token| {
-                    stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&handshake_message));
-                    token.send();
+                    defer token.send();
+
+                    const handshake_message = self.encryption_network.handshake_initiate();
+                    stdx.copy_disjoint(
+                        .exact,
+                        u8,
+                        token.target,
+                        std.mem.asBytes(&handshake_message),
+                    );
                 } else {
-                    log.warn("{}: send_message_to_replica: drop message no encrypted connection header={}", .{
+                    log.warn("{}: send_message_to_replica: dropping handshake " ++
+                        " with replica ({d})", .{
                         self.id,
-                        message.header,
+                        replica,
                     });
                 }
                 return;
@@ -822,8 +847,9 @@ pub fn ClientType(
                 message.header.size,
             );
             if (maybe_token) |token| {
+                defer token.send();
+
                 self.encryption_network.encrypt_message(peer, token.target, message);
-                token.send();
             } else {
                 log.warn("{}: send_message_to_replica: drop message header={}", .{
                     self.id,

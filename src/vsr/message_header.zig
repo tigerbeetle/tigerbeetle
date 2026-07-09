@@ -36,12 +36,16 @@ pub const HeaderEncrypted = extern struct {
 
     pub fn slice_associated_data(self: *HeaderEncrypted) []u8 {
         const bytes = std.mem.asBytes(self);
-        return bytes[@offsetOf(HeaderEncrypted, "header_key_id")..@offsetOf(HeaderEncrypted, "encrypted_data")];
+        const begin = @offsetOf(HeaderEncrypted, "header_key_id");
+        const end = @offsetOf(HeaderEncrypted, "encrypted_data");
+        return bytes[begin..end];
     }
 
     pub fn slice_associated_data_const(self: *const HeaderEncrypted) []const u8 {
         const bytes = std.mem.asBytes(self);
-        return bytes[@offsetOf(HeaderEncrypted, "header_key_id")..@offsetOf(HeaderEncrypted, "encrypted_data")];
+        const begin = @offsetOf(HeaderEncrypted, "header_key_id");
+        const end = @offsetOf(HeaderEncrypted, "encrypted_data");
+        return bytes[begin..end];
     }
 
     pub fn slice_encrypted(self: *HeaderEncrypted) []u8 {

@@ -1641,17 +1641,18 @@ test "Cluster: client: empty command=request operation=register body" {
             client_release: vsr.Release,
             eviction_reason: vsr.Header.Eviction.Reason,
         ) !void {
-            const t = try TestContext.init(.{ .replica_count = 1 });
-            defer t.deinit();
+            const context = try TestContext.init(.{ .replica_count = 1 });
+            defer context.deinit();
 
             // Wait for the primary to settle, since this test doesn't implement request retries.
-            t.run();
+            // Also, this functions performs handshakes between replica and clients.
+            context.run();
 
-            var client_bus = try t.client_bus(0);
+            var client_bus = try context.client_bus(0);
             defer client_bus.deinit();
 
             var request_header = vsr.Header.Request{
-                .cluster = t.cluster.options.cluster_id,
+                .cluster = context.cluster.options.cluster_id,
                 .size = @sizeOf(vsr.Header),
                 .client = client_bus.client_id,
                 .request = 0,
@@ -1663,8 +1664,8 @@ test "Cluster: client: empty command=request operation=register body" {
             request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
             request_header.set_checksum();
 
-            client_bus.request(t.replica(.A0).index(), &request_header, &.{});
-            t.run();
+            client_bus.request(context.replica(.A0).index(), &request_header, &.{});
+            context.run();
 
             const reply = std.mem.bytesAsValue(
                 vsr.Header.Eviction,
@@ -2178,13 +2179,16 @@ const TestContext = struct {
     client_requests: []usize,
     client_replies: []usize,
 
-    pub fn init(options: struct {
-        replica_count: u8,
-        standby_count: u8 = 0,
-        client_count: u8 = constants.clients_max,
-        client_release: vsr.Release = releases[0].release,
-        seed: u64 = 123,
-    }) !*TestContext {
+    pub fn init(
+        options: struct {
+            replica_count: u8,
+            standby_count: u8 = 0,
+            // reformats_max + client_count must not exceed constants.client_max.
+            client_count: u8 = constants.clients_max - 3,
+            client_release: vsr.Release = releases[0].release,
+            seed: u64 = 123,
+        },
+    ) !*TestContext {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
         var prng = stdx.PRNG.from_seed(options.seed);
@@ -2910,7 +2914,7 @@ const TestClientBus = struct {
         var encryption_network = try EncryptionNetwork.init(allocator, .{
             .self_id = client_id,
             .self_peer = .client,
-            .clients_max = constants.clients_max,
+            .clients_max = 0,
             .replicas_max = constants.replicas_max,
         });
         errdefer encryption_network.deinit(allocator);
@@ -2933,24 +2937,31 @@ const TestClientBus = struct {
         try client_bus.message_bus.listen();
 
         context.cluster.state_checker.clients_exhaustive = false;
-        context.cluster.network.link(client_bus.message_bus.process, &client_bus.message_bus, &client_bus.encryption_network);
+        context.cluster.network.link(
+            client_bus.message_bus.process,
+            &client_bus.message_bus,
+            &client_bus.encryption_network,
+        );
 
         return client_bus;
     }
 
-    pub fn deinit(t: *TestClientBus) void {
-        t.encryption_network.deinit(allocator);
-        if (t.reply) |reply| {
-            t.message_pool.unref(reply);
-            t.reply = null;
+    pub fn deinit(client_bus: *TestClientBus) void {
+        client_bus.encryption_network.deinit(allocator);
+        if (client_bus.reply) |reply| {
+            client_bus.message_pool.unref(reply);
+            client_bus.reply = null;
         }
-        t.message_bus.deinit(allocator);
-        t.message_pool.deinit(allocator);
-        allocator.destroy(t.message_pool);
-        allocator.destroy(t);
+        client_bus.message_bus.deinit(allocator);
+        client_bus.message_pool.deinit(allocator);
+        allocator.destroy(client_bus.message_pool);
+        allocator.destroy(client_bus);
     }
 
-    pub fn header_callback(message_bus_erased: *anyopaque, header: vsr.HeaderEncrypted) anyerror!HeaderCallbackResult {
+    pub fn header_callback(
+        message_bus_erased: *anyopaque,
+        header: vsr.HeaderEncrypted,
+    ) anyerror!HeaderCallbackResult {
         const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
         const self: *TestClientBus = @alignCast(@fieldParentPtr("message_bus", message_bus));
 
@@ -2971,9 +2982,52 @@ const TestClientBus = struct {
         return .{ .message_size = header_decrypted.size, .handshake_id = null };
     }
 
-    pub fn message_callback(message_bus_erased: *anyopaque, message_encrypted: []const u8) anyerror!vsr.Peer {
+    pub fn message_callback(
+        message_bus_erased: *anyopaque,
+        message_encrypted: []const u8,
+    ) anyerror!vsr.Peer {
         const message_bus: *MessageBus = @ptrCast(@alignCast(message_bus_erased));
         const self: *TestClientBus = @alignCast(@fieldParentPtr("message_bus", message_bus));
+
+        var header_encrypted: vsr.HeaderEncrypted = undefined;
+        stdx.copy_disjoint(
+            .exact,
+            u8,
+            std.mem.asBytes(&header_encrypted),
+            message_encrypted[0..@sizeOf(vsr.HeaderEncrypted)],
+        );
+
+        if (EncryptionNetwork.message_type(&header_encrypted) == .handshake) {
+            switch (self.encryption_network.handshake_consume(message_encrypted)) {
+                .operation => |operation| {
+                    assert(operation.message != null or operation.peer != null);
+
+                    if (operation.message) |message| {
+                        const maybe_token = self.message_bus.send_message_handshake(
+                            header_encrypted.header_key_id,
+                            @sizeOf(encryption.HandshakeMessage),
+                        );
+                        if (maybe_token) |token| {
+                            defer token.send();
+
+                            stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
+                        } else {
+                            log.warn("message_callback: drop message header={}", .{
+                                header_encrypted,
+                            });
+                        }
+                    }
+                    return operation.peer orelse .unknown;
+                },
+                .err => |err| {
+                    log.err("message_callback: handshake failed: {}", .{
+                        err,
+                    });
+                    return error.HandshakeFailed;
+                },
+            }
+        }
+
         const message = self.message_pool.get_message(null);
         defer self.message_pool.unref(message);
 
@@ -2991,29 +3045,57 @@ const TestClientBus = struct {
         return peer;
     }
 
+    pub fn handshake(client_bus: *TestClientBus, replica: u8) void {
+        const peer: vsr.Peer = .{ .replica = replica };
+        assert(!client_bus.encryption_network.handshake_completed(peer));
+
+        const maybe_token = client_bus.message_bus.send_message_to_replica(
+            replica,
+            @sizeOf(encryption.HandshakeMessage),
+        );
+        if (maybe_token) |token| {
+            defer token.send();
+
+            const handshake_message = client_bus.encryption_network.handshake_initiate();
+            stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&handshake_message));
+        } else {
+            log.warn("request: dropping handshake with replica ({d})", .{
+                replica,
+            });
+        }
+    }
+
     pub fn request(
-        t: *TestClientBus,
+        client_bus: *TestClientBus,
         replica: u8,
         header: *const vsr.Header.Request,
         body: []const u8,
     ) void {
-        assert(replica < t.context.cluster.replicas.len);
+        assert(replica < client_bus.context.cluster.replicas.len);
         assert(body.len <= constants.message_body_size_max);
 
-        const message = t.message_pool.get_message(.request);
-        defer t.message_pool.unref(message);
+        const message = client_bus.message_pool.get_message(.request);
+        defer client_bus.message_pool.unref(message);
 
         message.header.* = header.*;
         stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(vsr.Header)..], body);
 
-        const maybe_token = t.message_bus.send_message_to_replica(replica, message.header.size);
+        const peer: vsr.Peer = .{ .replica = replica };
+
+        assert(client_bus.encryption_network.handshake_completed(peer));
+
+        const maybe_token = client_bus.message_bus.send_message_to_replica(
+            replica,
+            message.header.size,
+        );
         if (maybe_token) |token| {
-            t.encryption_network.encrypt_message(
-                .{ .replica = replica },
+            defer token.send();
+
+            client_bus.encryption_network.encrypt_message(
+                peer,
                 token.target,
                 message.base(),
             );
-            token.send();
         } else {
             log.warn("request: drop message header={}", .{
                 message.header,

@@ -9,15 +9,12 @@ const vsr = @import("vsr.zig");
 
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
-const RingBufferType = stdx.RingBufferType;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const Header = vsr.Header;
 const HeaderEncrypted = vsr.HeaderEncrypted;
-const QueueType = @import("./queue.zig").QueueType;
 const Tracer = vsr.trace.Tracer;
 const encryption = @import("encryption.zig");
-const KeyExchange = encryption.HandshakeInsecure;
 const Peer = vsr.Peer;
 
 const RecvState = struct {
@@ -832,32 +829,35 @@ pub fn MessageBusType(comptime IO: type) type {
 
             if (connection.recv.message_size == null) {
                 if (connection.recv.peek_header()) |header_encrypted| {
-                    const header_callback_result = bus.header_callback(bus, header_encrypted) catch |err| {
+                    const header_callback_result = bus.header_callback(
+                        bus,
+                        header_encrypted,
+                    ) catch |err| {
                         log.warn("{}: recv_callback: err {}", .{ bus.id, err });
                         return bus.terminate(connection, .shutdown);
                     };
+
                     connection.recv.message_size = header_callback_result.message_size;
+
                     if (header_callback_result.handshake_id) |handshake_id| {
-                        const gop = bus.handshakes.getOrPutAssumeCapacity(handshake_id);
-
-                        if (gop.found_existing) {
-                            if (gop.value_ptr.* == connection) {
-                                assert(connection.handshake_id != null);
-                                assert(connection.handshake_id.? == handshake_id);
-                            }
-                        } else {
-                            // If `handshakes` already contains a connection for `handshake_id`
-                            // we don't overwrite it, because a replayed message should not
-                            // cause redirection of future replies.
-                            gop.value_ptr.* = connection;
-                        }
-
                         if (connection.handshake_id) |handshake_id_existing| {
                             if (handshake_id_existing != handshake_id) {
                                 const remove_result = bus.handshakes.remove(handshake_id_existing);
                                 maybe(remove_result);
                             }
                         }
+
+                        // Only overwrite `handshakes` if it doesn't contain a connection
+                        // for `handshake_id`, because a replayed message should not
+                        // cause redirection of future replies.
+                        const gop = bus.handshakes.getOrPutAssumeCapacity(handshake_id);
+                        if (!gop.found_existing) {
+                            gop.value_ptr.* = connection;
+                        }
+
+                        // However, on a connection the newest `handshake_id` always wins.
+                        // This is because if an attacker can interfere with a valid connection,
+                        // we accept that it will disrupt the handshake.
                         connection.handshake_id = handshake_id;
                     }
                 }
@@ -888,9 +888,11 @@ pub fn MessageBusType(comptime IO: type) type {
                         .update => {
                             switch (peer) {
                                 .client => |client_id| {
-                                    const client_gop = bus.clients.getOrPutAssumeCapacity(client_id);
+                                    const client_gop = bus.clients.getOrPutAssumeCapacity(
+                                        client_id,
+                                    );
                                     client_gop.value_ptr.* = connection;
-                                    // TODO: find out why we cannot assert handshake_id != null here.
+                                    // TODO: find out why we cannot assert handshake_id != null.
                                     if (connection.handshake_id) |handshake_id| {
                                         const remove_result = bus.handshakes.remove(handshake_id);
                                         assert(remove_result);
@@ -1259,7 +1261,11 @@ pub fn MessageBusType(comptime IO: type) type {
     };
 }
 
-fn create_message_from_command(message_pool: *MessagePool, prng: *stdx.PRNG, comptime command: vsr.Command) *Message {
+fn create_message_from_command(
+    message_pool: *MessagePool,
+    prng: *stdx.PRNG,
+    comptime command: vsr.Command,
+) *Message {
     const message = message_pool.get_message(command).base();
 
     const message_header: *vsr.Header =
@@ -1270,48 +1276,6 @@ fn create_message_from_command(message_pool: *MessagePool, prng: *stdx.PRNG, com
     message.header.set_checksum_body(&.{});
     message.header.set_checksum();
     return message;
-}
-
-fn create_message_with_body(message_pool: *MessagePool, body: []const u8) *Message {
-    assert(body.len <= constants.message_message_size_max);
-    const message = message_pool.get_message(.reserved).base();
-
-    const message_header: *vsr.Header =
-        @alignCast(std.mem.bytesAsValue(vsr.Header, message.buffer[0..@sizeOf(vsr.Header)]));
-
-    const message_body = message.buffer[@sizeOf(vsr.Header)..][0..body.len];
-
-    stdx.copy_disjoint(.exact, u8, message_body, body);
-
-    message_header.* =
-        .{
-            .header_tag = 0,
-            .header_key_id = 0,
-            .header_nonce = 0,
-            .body_tag = 0,
-            .body_nonce = 0,
-            .cluster = 123, // MessageBus doesn't check cluster.
-            .size = @sizeOf(vsr.Header) + @as(u32, @intCast(body.len)),
-            .epoch = 0,
-            .view = 10,
-            .release = vsr.Release.zero,
-            .protocol = vsr.Version,
-            .command = .reserved,
-            .replica = 0,
-            .reserved_frame = @splat(0),
-            .reserved_command = @splat(0),
-        };
-
-    const message_network: *Message = @ptrCast(message);
-    message_network.metadata = .{
-        .size_value = message.header.size,
-        .command_value = message.header.command,
-    };
-
-    message_network.header.set_checksum_body(message_network.body_used());
-    message_network.header.set_checksum();
-    message_network.header = undefined;
-    return message_network;
 }
 
 fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
@@ -1423,8 +1387,14 @@ test "MessageBus unit test" {
                                 @sizeOf(encryption.HandshakeMessage),
                             );
                             if (maybe_token) |token| {
-                                stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
-                                token.send();
+                                defer token.send();
+
+                                stdx.copy_disjoint(
+                                    .exact,
+                                    u8,
+                                    token.target,
+                                    std.mem.asBytes(&message),
+                                );
                             } else {
                                 log.warn("message_callback: drop message header={}", .{
                                     header_encrypted,
@@ -1448,7 +1418,8 @@ test "MessageBus unit test" {
             const message = parent.bus.get_message(null);
             defer parent.bus.unref(message);
 
-            const peer = parent.encryption.decrypt_message(message, message_encrypted) catch unreachable;
+            const peer = parent.encryption.decrypt_message(message, message_encrypted) catch
+                unreachable;
             parent.encrypted_message_received = true;
             log.info("message_callback: received message from peer {}", .{peer});
             return peer;
@@ -1546,7 +1517,11 @@ test "MessageBus unit test" {
     const ping_message = create_message_from_command(&message_pool, &prng, .ping);
     defer message_pool.unref(ping_message);
 
-    const ping_token = parent1.bus.send_message_to_replica(1, ping_message.header.size) orelse unreachable;
+    const ping_token = parent1.bus.send_message_to_replica(
+        1,
+        ping_message.header.size,
+    ) orelse
+        unreachable;
 
     parent1.encryption.encrypt_message(.{ .replica = 1 }, ping_token.target, ping_message);
     ping_token.send();

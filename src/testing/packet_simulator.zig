@@ -84,8 +84,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
     return struct {
         const PacketSimulator = @This();
 
+        pub const PacketHeaderResult = union(enum) { header: vsr.Header, handshake };
+
         const VTable = struct {
-            packet_header: *const fn (*PacketSimulator, Packet, Path) vsr.Header,
+            packet_header: *const fn (*PacketSimulator, Packet, Path) PacketHeaderResult,
             packet_clone: *const fn (*PacketSimulator, Packet) Packet,
             packet_deinit: *const fn (*PacketSimulator, Packet) void,
             packet_deliver: *const fn (*PacketSimulator, Packet, Path) void,
@@ -445,19 +447,34 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 .packet = packet,
             }) catch unreachable;
 
-            const command = self.packet_header(packet, path).command;
-            const recording = self.links[self.path_index(path)].record.contains(command);
-            if (recording) {
-                self.recorded.addOneAssumeCapacity().* = .{
-                    .packet = self.packet_clone(packet),
-                    .path = path,
-                };
+            switch (self.packet_header(packet, path)) {
+                .handshake => return,
+                .header => |header| {
+                    const command = header.command;
+                    const recording = self.links[self.path_index(path)].record.contains(command);
+                    if (recording) {
+                        self.recorded.addOneAssumeCapacity().* = .{
+                            .packet = self.packet_clone(packet),
+                            .path = path,
+                        };
+                    }
+                },
             }
         }
 
         fn submit_packet_finish(self: *PacketSimulator, path: Path, link_packet: LinkPacket) void {
             assert(link_packet.ready_at.ns <= self.tick_instant().ns);
-            const header = self.packet_header(link_packet.packet, path);
+
+            const header = switch (self.packet_header(link_packet.packet, path)) {
+                .handshake => {
+                    // TODO: add should_drop for handshake messages.
+                    log.debug("delivering packet from={} to={}", .{ path.source, path.target });
+                    self.packet_deliver(link_packet.packet, path);
+                    return;
+                },
+                .header => |header| header,
+            };
+
             if (self.links[self.path_index(path)].should_drop(link_packet.packet, header)) {
                 log.warn(
                     "dropped packet (different partitions): from={} to={}: {}",
@@ -495,7 +512,12 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return .{ .ns = self.ticks * constants.tick_ms * std.time.ns_per_ms };
         }
 
-        pub fn packet_header(self: *PacketSimulator, packet: Packet, path: Path) vsr.Header {
+        // TODO: fix this by adding vsr.Command for handshake.
+        pub fn packet_header(
+            self: *PacketSimulator,
+            packet: Packet,
+            path: Path,
+        ) PacketHeaderResult {
             return self.vtable.packet_header(self, packet, path);
         }
 

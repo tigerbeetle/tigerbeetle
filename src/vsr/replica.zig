@@ -1588,8 +1588,14 @@ pub fn ReplicaType(
                                 @sizeOf(encryption.HandshakeMessage),
                             );
                             if (maybe_token) |token| {
-                                stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&message));
-                                token.send();
+                                defer token.send();
+
+                                stdx.copy_disjoint(
+                                    .exact,
+                                    u8,
+                                    token.target,
+                                    std.mem.asBytes(&message),
+                                );
                             } else {
                                 log.warn("{}: message_callback: drop message header={}", .{
                                     self.log_prefix(),
@@ -1611,6 +1617,7 @@ pub fn ReplicaType(
 
             const target = self.message_bus.get_message(null);
             defer self.message_bus.unref(target);
+
             const peer = try self.encryption_network.decrypt_message(target, message_encrypted);
 
             assert(target.references == 1);
@@ -1754,108 +1761,6 @@ pub fn ReplicaType(
             const message_bus: *MessageBus = @ptrCast(@alignCast(context.?));
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
             return self.encryption_network.decrypt_header(header_encrypted);
-        }
-
-        /// Called by the MessageBus to deliver a message to the replica.
-        // fn on_messages_from_bus(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-        //     const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
-        //     self.on_messages(buffer);
-        // }
-
-        // pub fn on_messages(self: *Replica, buffer: *MessageBuffer) void {
-        //     var message_count: u32 = 0;
-        //     var message_suspended_count: u32 = 0;
-        //     while (buffer.next_header()) |header| {
-        //         message_count += 1;
-        //         if (header.cluster != self.cluster) {
-        //             buffer.invalidate(.header_cluster);
-        //             return;
-        //         }
-        //         if (self.suspend_message(&header)) {
-        //             buffer.suspend_message(&header);
-        //             message_suspended_count += 1;
-        //             continue;
-        //         }
-        //         const message_encrypted = buffer.consume_message(
-        //             self.message_bus.pool,
-        //             &header,
-        //         );
-        //         defer self.message_bus.unref(message_encrypted);
-        //
-        //         const message = self.message_bus.get_message(null);
-        //         defer self.message_bus.unref(message);
-        //
-        //         self.encryption_network.decrypt_message(message, message_encrypted) catch |err|
-        //             {
-        //                 log.err("{}: on_messages: decryption failed: {}", .{
-        //                     self.log_prefix(),
-        //                     err,
-        //                 });
-        //                 continue;
-        //             };
-        //
-        //         assert(message.references == 1);
-        //
-        //         // Avoid leaking sector padding for messages written to a block device:
-        //         if (message.header.command == .request or
-        //             message.header.command == .prepare or
-        //             message.header.command == .block or
-        //             message.header.command == .reply)
-        //         {
-        //             const sector_ceil = vsr.sector_ceil(message.header.size);
-        //             if (message.header.size != sector_ceil) {
-        //                 assert(message.header.size < sector_ceil);
-        //                 assert(message.buffer.len == constants.message_size_max);
-        //                 @memset(message.buffer[message.header.size..sector_ceil], 0);
-        //             }
-        //         }
-        //
-        //         if (message.header.into(.request)) |request_header| {
-        //             assert(request_header.client != 0 or self.aof_recovery);
-        //         }
-        //         self.trace.count(.{ .replica_messages_in = .{
-        //             .command = message.header.command,
-        //         } }, 1);
-        //         self.on_message(message);
-        //     }
-        //     if (message_count > constants.bus_message_burst_warn_min) {
-        //         log.warn("{}: on_messages: message count={} suspended={}", .{
-        //             self.log_prefix(),
-        //             message_count,
-        //             message_suspended_count,
-        //         });
-        //     }
-        // }
-
-        // See fn tick for an assert to verify that we don't miss resumption.
-        fn suspend_message(self: *const Replica, header: *const Header) bool {
-            switch (header.into_any()) {
-                .prepare => |header_prepare| if (self.journal.writes.available() == 0) {
-                    log.warn("{}: on_messages: suspending command=prepare " ++
-                        "op={} view={} checksum={x:0>32}", .{
-                        self.log_prefix(),
-                        header_prepare.op,
-                        header_prepare.view,
-                        header_prepare.checksum(),
-                    });
-                    return true;
-                },
-                .block => |header_block| {
-                    if (self.grid_repair_writes.available() == 0 or
-                        self.syncing == .updating_checkpoint)
-                    {
-                        log.warn("{}: on_messages: suspending command=block " ++
-                            "address={} checksum={x:0>32}", .{
-                            self.log_prefix(),
-                            header_block.address,
-                            header_block.checksum(),
-                        });
-                        return true;
-                    }
-                },
-                else => {},
-            }
-            return false;
         }
 
         fn on_message(self: *Replica, message: *Message) void {
@@ -9194,17 +9099,25 @@ pub fn ReplicaType(
                 .command = message.header.command,
             } }, 1);
 
-            const mabye_token = self.message_bus.send_message_to_client(
+            if (!self.encryption_network.handshake_completed(.{ .client = client })) {
+                log.warn("send_message_to_client_base: drop message header={}", .{
+                    message.header,
+                });
+                return;
+            }
+
+            const maybe_tooken = self.message_bus.send_message_to_client(
                 client,
                 message.header.size,
             );
-            if (mabye_token) |token| {
+            if (maybe_tooken) |token| {
+                defer token.send();
+
                 self.encryption_network.encrypt_message(
                     .{ .client = client },
                     token.target,
                     message,
                 );
-                token.send();
             } else {
                 log.warn("send_message_to_client_base: drop message header={}", .{
                     message.header,
@@ -9506,6 +9419,39 @@ pub fn ReplicaType(
                     .command = message.header.command,
                 } }, 1);
 
+                const peer: vsr.Peer = .{ .replica = replica };
+
+                if (!self.encryption_network.handshake_completed(peer)) {
+                    log.info("{}: send_message_to_replica: dropping message and " ++
+                        " initiating handshake with replica ({d})", .{
+                        self.log_prefix(),
+                        replica,
+                    });
+                    const maybe_token = self.message_bus.send_message_to_replica(
+                        replica,
+                        // FIXME: Use e.g. self.encryption_network.handshake_message_size()
+                        @sizeOf(encryption.HandshakeMessage),
+                    );
+                    if (maybe_token) |token| {
+                        defer token.send();
+
+                        const handshake_message = self.encryption_network.handshake_initiate();
+                        stdx.copy_disjoint(
+                            .exact,
+                            u8,
+                            token.target,
+                            std.mem.asBytes(&handshake_message),
+                        );
+                    } else {
+                        log.warn("{}: send_message_to_replica: dropping " ++
+                            " handshake with replica ({d})", .{
+                            self.log_prefix(),
+                            replica,
+                        });
+                    }
+                    return;
+                }
+
                 if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
 
                 const maybe_token = self.message_bus.send_message_to_replica(
@@ -9513,13 +9459,13 @@ pub fn ReplicaType(
                     message.header.size,
                 );
                 if (maybe_token) |token| {
-                    // FIXME: initate handshake if not exists.
+                    defer token.send();
+
                     self.encryption_network.encrypt_message(
-                        .{ .replica = replica },
+                        peer,
                         token.target,
                         message,
                     );
-                    token.send();
                 } else {
                     log.warn("send_message_to_replica_base: drop message header={}", .{
                         message.header,
