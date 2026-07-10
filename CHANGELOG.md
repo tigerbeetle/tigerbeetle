@@ -3,6 +3,30 @@
 Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes and critical issues!
 
+## TigerBeetle (unreleased)
+
+Released: 2026-07-10
+
+### Features
+
+- [#3857](https://github.com/tigerbeetle/tigerbeetle/pull/3857)
+
+  Report the maximum LSM forest table counts in the tigerbeetle inspect tool.
+
+### Internals
+
+- [#3861](https://github.com/tigerbeetle/tigerbeetle/pull/3861)
+
+  Introduce explicit memory limits per zig build step to prevent out-of-memory errors in the CI.
+
+- [#3855](https://github.com/tigerbeetle/tigerbeetle/pull/3855)
+
+  Move micro-benchmarking tooling into `stdx` and add a microbenchmark for the radix sort.
+
+### TigerTracks 🎧
+
+- [I'd love to Change the World](https://open.spotify.com/track/7n3WO6ESKS1uCI9fgkGs66)
+
 ## TigerBeetle 0.17.9
 
 Released: 2026-07-03
