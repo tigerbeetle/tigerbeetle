@@ -1277,6 +1277,27 @@ pub fn StateMachineType(comptime Storage: type) type {
                 Account,
                 self.prefetch_input.?,
             );
+            // Multi-batch prefetch flattens independently validated batches. A later imported
+            // account batch still needs its transfer timestamp keys prefetched.
+            if (accounts.len > 1 and !accounts[0].flags.imported) {
+                var imported_batch = false;
+                for (accounts[1..]) |*a| {
+                    if (a.flags.imported) {
+                        imported_batch = true;
+                        self.forest.grooves.transfers.prefetch_enqueue(.{
+                            .timestamp = a.timestamp,
+                        });
+                    }
+                }
+                if (imported_batch) {
+                    self.forest.grooves.transfers.prefetch(
+                        prefetch_create_accounts_transfers_callback,
+                        self.prefetch_context.get(.transfers),
+                    );
+                    return;
+                }
+            }
+
             if (accounts.len > 0 and
                 accounts[0].flags.imported)
             {
@@ -1368,6 +1389,18 @@ pub fn StateMachineType(comptime Storage: type) type {
                 } else {
                     self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.debit_account_id });
                     self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.credit_account_id });
+                }
+            }
+
+            // Multi-batch prefetch flattens independently validated batches. Enqueue account
+            // timestamp keys for imported transfers even when the first batch is ordinary.
+            if (transfers.len > 1 and !transfers[0].flags.imported) {
+                for (transfers[1..]) |*t| {
+                    if (t.flags.imported) {
+                        self.forest.grooves.accounts.prefetch_enqueue(.{
+                            .timestamp = t.timestamp,
+                        });
+                    }
                 }
             }
 

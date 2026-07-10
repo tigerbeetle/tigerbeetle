@@ -290,6 +290,13 @@ pub const TestContext = struct {
             .not_found => null,
         };
     }
+
+    fn get_transfer_from_cache(context: *TestContext, id: u128) ?Transfer {
+        return switch (context.state_machine.forest.grooves.transfers.get(id)) {
+            .found_object => |object| object,
+            .found_orphaned, .not_found => null,
+        };
+    }
 };
 
 const TestAction = union(enum) {
@@ -1997,6 +2004,128 @@ test "imported events: imported batch" {
         \\ transfer   T4 A1 A2    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _  _ _ 0 imported_event_not_expected
         \\ commit create_transfers
     );
+}
+
+test "imported events: ordinary then imported create multi-batch prefetch" {
+    const allocator = testing.allocator;
+    const input = try allocator.alignedAlloc(
+        u8,
+        constants.cache_line_size,
+        constants.message_body_size_max,
+    );
+    defer allocator.free(input);
+
+    var output: [constants.message_body_size_max]u8 align(constants.cache_line_size) = undefined;
+    var context: TestContext = undefined;
+    try context.init(allocator);
+    defer context.deinit(allocator);
+
+    const ordinary = TestCreateAccount.event(.{
+        .id = 1,
+        .ledger = 1,
+        .code = 1,
+        .status = .created,
+    });
+    stdx.copy_disjoint(.exact, u8, input[0..@sizeOf(Account)], mem.asBytes(&ordinary));
+    _ = context.submit(
+        .create_accounts,
+        input,
+        @sizeOf(Account),
+        &output,
+    );
+
+    const ordinary_created = context.get_account_from_cache(ordinary.id).?;
+    var imported = TestCreateAccount.event(.{
+        .id = 2,
+        .ledger = 1,
+        .code = 1,
+        .flags_imported = .IMP,
+        .timestamp = ordinary_created.timestamp + 1,
+        .status = .created,
+    });
+
+    var body_encoder = MultiBatchEncoder.init(input, .{
+        .element_size = @sizeOf(Account),
+    });
+    stdx.copy_disjoint(
+        .exact,
+        u8,
+        body_encoder.writable().?[0..@sizeOf(Account)],
+        mem.asBytes(&ordinary),
+    );
+    body_encoder.add(@sizeOf(Account));
+    stdx.copy_disjoint(
+        .exact,
+        u8,
+        body_encoder.writable().?[0..@sizeOf(Account)],
+        mem.asBytes(&imported),
+    );
+    body_encoder.add(@sizeOf(Account));
+    const body_size = body_encoder.finish();
+    const body: []align(constants.cache_line_size) const u8 = input[0..body_size];
+
+    context.prepare(.create_accounts, body);
+    _ = context.execute(context.op, .create_accounts, body, &output);
+    try testing.expect(context.get_account_from_cache(imported.id) != null);
+
+    const ordinary_transfer = TestCreateTransfer.event(.{
+        .id = 1,
+        .debit_account_id = ordinary.id,
+        .credit_account_id = imported.id,
+        .amount = 1,
+        .ledger = 1,
+        .code = 1,
+        .status = .created,
+    });
+    stdx.copy_disjoint(
+        .exact,
+        u8,
+        input[0..@sizeOf(Transfer)],
+        mem.asBytes(&ordinary_transfer),
+    );
+    _ = context.submit(
+        .create_transfers,
+        input,
+        @sizeOf(Transfer),
+        &output,
+    );
+
+    const ordinary_transfer_created = context.get_transfer_from_cache(ordinary_transfer.id).?;
+    var imported_transfer = TestCreateTransfer.event(.{
+        .id = 2,
+        .debit_account_id = ordinary.id,
+        .credit_account_id = imported.id,
+        .amount = 1,
+        .ledger = 1,
+        .code = 1,
+        .flags_imported = .IMP,
+        .timestamp = ordinary_transfer_created.timestamp + 1,
+        .status = .created,
+    });
+
+    body_encoder = MultiBatchEncoder.init(input, .{
+        .element_size = @sizeOf(Transfer),
+    });
+    stdx.copy_disjoint(
+        .exact,
+        u8,
+        body_encoder.writable().?[0..@sizeOf(Transfer)],
+        mem.asBytes(&ordinary_transfer),
+    );
+    body_encoder.add(@sizeOf(Transfer));
+    stdx.copy_disjoint(
+        .exact,
+        u8,
+        body_encoder.writable().?[0..@sizeOf(Transfer)],
+        mem.asBytes(&imported_transfer),
+    );
+    body_encoder.add(@sizeOf(Transfer));
+    const transfer_body_size = body_encoder.finish();
+    const transfer_body: []align(constants.cache_line_size) const u8 = input[0..transfer_body_size];
+
+    context.prepare(.create_transfers, transfer_body);
+    _ = context.execute(context.op, .create_transfers, transfer_body, &output);
+    try testing.expect(context.get_transfer_from_cache(imported_transfer.id) != null);
 }
 
 test "imported events: timestamp" {
