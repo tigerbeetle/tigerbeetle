@@ -145,7 +145,7 @@ pub const TestContext = struct {
             },
         );
         errdefer ctx.state_machine.deinit(allocator);
-        // Usually, `pulse_next_timestamp` starts in an unknown state, signaling that the state
+        // Usually, `expire_pending_transfers` starts in an unknown state, signaling that the state
         // machine needs a `pulse` to scan for pending transfers and correctly determine when to
         // process the next expiry. However, this initial `pulse` unnecessarily bumps time, making
         // unit tests that depend on the `timestamp` harder to reason about.
@@ -153,8 +153,8 @@ pub const TestContext = struct {
         // Since this is a newly created state machine, we can bypass the initial check, ensuring
         // that there will be no `timestamp` bumps between operations unless actual pending
         // transfers get expired.
-        ctx.state_machine.expire_pending_transfers
-            .pulse_next_timestamp = TimestampRange.timestamp_max;
+        ctx.state_machine.pulse.expire_pending_transfers.timestamp_next =
+            TimestampRange.timestamp_max;
 
         ctx.op = 1;
         ctx.busy = false;
@@ -1521,6 +1521,102 @@ test "create/lookup expired transfers" {
         \\ lookup_transfer T103 exists false
         \\ lookup_transfer T104 exists false
         \\ commit lookup_transfers
+    );
+}
+
+test "expire_pending_transfers: multiple pulses" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ created
+        \\ commit create_accounts
+
+        // One full batch of pending transfers (30 - 1 events in the testing state machine).
+        \\ transfer   T1 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T2 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T3 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T4 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T5 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T6 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T7 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T8 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer   T9 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T10 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T11 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T12 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T13 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T14 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T15 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T16 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T17 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T18 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T19 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T20 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T21 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T22 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T23 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T24 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T25 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T26 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T27 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T28 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T29 A1 A2   10   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ commit create_transfers
+
+        // Another full batch of pending transfers.
+        // Advance time by almost one second so that the transfers in the second
+        // batch have nearly the same `expires_at` timestamp as those in the first batch.
+
+        \\ tick 999999970 nanoseconds
+        \\ transfer  T30 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T31 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T32 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T33 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T34 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T35 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T36 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T37 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T38 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T39 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T40 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T41 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T42 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T43 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T44 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T45 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T46 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T47 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T48 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T49 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T50 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T51 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T52 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T53 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T54 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T55 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T56 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T57 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ transfer  T58 A1 A2   10   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ created
+        \\ commit create_transfers
+
+        // After 1 second, all transfers should still be pending, as the
+        // first batch has a 3s timeout and the second batch a 2s timeout.
+        \\ tick 1 seconds
+        \\ lookup_account A1 580  0    0  0  _
+        \\ lookup_account A2   0  0  580  0  _
+        \\ commit lookup_accounts
+
+        // After one more second, all transfers should have expired.
+        // However, each pulse can expire up to 30 transfers in the testing
+        // state machine, so it requires two pulses to expire both batches.
+        \\ tick 1 seconds
+        \\ lookup_account A1  280  0   0  0  _
+        \\ lookup_account A2    0  0 280  0  _
+        \\ commit lookup_accounts
+        \\
+        \\ tick 1 nanoseconds // To force another pulse.
+        \\ lookup_account A1  0  0  0  0  _
+        \\ lookup_account A2  0  0  0  0  _
+        \\ commit lookup_accounts
     );
 }
 
