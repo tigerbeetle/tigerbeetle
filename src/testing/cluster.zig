@@ -82,6 +82,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             client_count: u8,
             storage_size_limit: u64,
             reformats_max: u8,
+            aof: bool,
             seed: u64,
             /// A monotonically-increasing list of releases.
             /// Initially:
@@ -738,7 +739,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
                     .pipeline_requests_limit = cluster.replica_pipeline_requests_limit,
-                    .aof = &cluster.aofs[replica_index],
+                    .aof = if (cluster.options.aof) &cluster.aofs[replica_index] else null,
                     .aof_recovery = false,
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,

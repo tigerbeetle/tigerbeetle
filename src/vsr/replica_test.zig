@@ -2191,6 +2191,7 @@ const TestContext = struct {
                 .standby_count = options.standby_count,
                 .client_count = options.client_count,
                 .storage_size_limit = storage_size_limit,
+                .aof = true,
                 .seed = prng.int(u64),
                 .releases = &releases,
                 .client_release = options.client_release,
