@@ -71,6 +71,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     });
 
     {
+        @setEvalBranchQuota(10_000);
+
         // Verify that every tree id is unique.
         comptime var ids: []const u16 = &.{};
 

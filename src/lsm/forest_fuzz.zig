@@ -36,6 +36,7 @@ const FuzzOpAction = union(enum) {
     remove: u128,
     get_by_id: UniqueKey,
     get_by_timestamp: UniqueKey,
+    get_by_pending_id: UniqueKey,
     scan: ScanParams,
 };
 const FuzzOpActionTag = std.meta.Tag(FuzzOpAction);
@@ -312,13 +313,16 @@ const Environment = struct {
 
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove;
-                groove.prefetch_setup(getter._snapshot);
+                groove.prefetch_begin(getter._snapshot);
                 groove.prefetch_enqueue(getter._key);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 
             fn prefetch_callback(prefetch_context: *GrooveTransfers.PrefetchContext) void {
                 const context: *@This() = @fieldParentPtr("prefetch_context", prefetch_context);
+                const groove = context._groove;
+                groove.prefetch_finish();
+
                 assert(!context.finished);
                 context.finished = true;
             }
@@ -553,6 +557,7 @@ const Environment = struct {
                     .timestamp => |timestamp| ObjectTable.key_from_value(
                         &entry.transfer,
                     ) == timestamp,
+                    .pending_id => |id| id != 0 and entry.transfer.pending_id == id,
                 }) {
                     if (ObjectTable.tombstone(&entry.transfer)) return .tombstone;
                     return .{ .found = entry.transfer };
@@ -577,12 +582,21 @@ const Environment = struct {
                     assert(model.checkpointed.unique_keys.remove(.{
                         .timestamp = ObjectTable.key_from_value(&entry.transfer),
                     }));
+                    if (entry.transfer.pending_id != 0) {
+                        assert(model.checkpointed.unique_keys.remove(.{
+                            .pending_id = entry.transfer.pending_id,
+                        }));
+                    }
                     continue;
                 }
 
                 try model.checkpointed.objects.put(entry.transfer.id, entry.transfer);
                 try model.checkpointed.unique_keys.put(
                     .{ .timestamp = entry.transfer.timestamp },
+                    entry.transfer.id,
+                );
+                if (entry.transfer.pending_id != 0) try model.checkpointed.unique_keys.put(
+                    .{ .pending_id = entry.transfer.pending_id },
                     entry.transfer.id,
                 );
             }
@@ -757,6 +771,7 @@ const Environment = struct {
             },
             inline .get_by_id,
             .get_by_timestamp,
+            .get_by_pending_id,
             => |key, action| {
                 // Get object from lsm.
                 try env.prefetch(key, snapshot);
@@ -771,6 +786,13 @@ const Environment = struct {
                             assert(key == .timestamp);
                             assert(TimestampRange.valid(key.timestamp));
                             break :lsm_object env.get(key);
+                        },
+                        .get_by_pending_id => {
+                            assert(key == .pending_id);
+                            break :lsm_object if (key.pending_id == 0)
+                                null
+                            else
+                                env.get(key);
                         },
                         else => comptime unreachable,
                     }
@@ -797,7 +819,7 @@ const Environment = struct {
                     const prefix_current: u128 = switch (params.index) {
                         .expires_at => index: {
                             assert(object.timeout != 0);
-                            const value = object.timeout_ns();
+                            const value = object.timestamp + object.timeout_ns();
                             assert(value >= params.min and value <= params.max);
                             break :index value;
                         },
@@ -818,6 +840,7 @@ const Environment = struct {
                         },
                         inline else => |field| index: {
                             const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
+                            if (IndexHelper.is_deprecated) unreachable;
                             comptime assert(IndexHelper.Type != void);
 
                             const value = IndexHelper.get(object).?;
@@ -909,6 +932,7 @@ pub fn generate_fuzz_ops(
         // Maybe do some gets.
         .get_by_id = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         .get_by_timestamp = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
+        .get_by_pending_id = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
         .scan = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
     };
@@ -980,13 +1004,44 @@ pub fn generate_fuzz_ops(
                     fuzz_op_index + 1,
                 ) },
             },
+            .get_by_pending_id => FuzzOpAction{
+                .get_by_pending_id = .{
+                    .pending_id = id: {
+                        // Not all transfers have the pending_id,
+                        // so it may or may not be found.
+                        const it = id_to_object.keyIterator();
+                        for (0..it.len) |_| {
+                            const index = prng.int_inclusive(usize, it.len - 1);
+                            if (!it.metadata[index].isUsed()) continue;
+
+                            const id = it.items[index];
+                            const object = id_to_object.get(id).?;
+                            break :id object.pending_id;
+                        }
+
+                        break :id 0;
+                    },
+                },
+            },
             .scan => blk: {
                 @setEvalBranchQuota(10_000);
                 const Index = std.meta.FieldEnum(GrooveTransfers.IndexTrees);
-                const index = prng.enum_uniform(Index);
+                const EnumWeights = stdx.PRNG.EnumWeightsType(Index);
+                const index_weights: EnumWeights = index_weights: {
+                    // Exclude deprecated indexes.
+                    var index_weights: EnumWeights = undefined;
+                    inline for (comptime std.enums.values(Index)) |index| {
+                        const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(index));
+                        const weight = if (IndexHelper.is_deprecated) 0 else 1;
+                        @field(index_weights, @tagName(index)) = weight;
+                    }
+                    break :index_weights index_weights;
+                };
+                const index = prng.enum_weighted(Index, index_weights);
                 break :blk switch (index) {
                     inline else => |field| {
                         const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
+                        assert(!IndexHelper.is_deprecated);
                         const min: u128, const max: u128 = switch (IndexHelper.Type) {
                             void => .{ 0, 0 },
                             else => range: {
@@ -1057,6 +1112,7 @@ pub fn generate_fuzz_ops(
             .remove => puts_since_compact += 1,
             .get_by_id => {},
             .get_by_timestamp => {},
+            .get_by_pending_id => {},
             .scan => {},
         }
     }
