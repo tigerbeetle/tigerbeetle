@@ -191,17 +191,15 @@ pub const GridBlocksMissing = struct {
             queue.syncing_faulty_blocks,
         }) |faulty_blocks| {
             for (faulty_blocks.values()) |fault| {
-                switch (fault.cause) {
-                    .sync => enqueued_blocks_sync += 1,
-                    .repair => enqueued_blocks_repair += 1,
-                }
                 enqueued_blocks_aborting += @intFromBool(fault.state == .aborting);
 
                 switch (fault.cause) {
                     .repair => |repair| {
+                        enqueued_blocks_repair += 1;
                         enqueued_blocks_repair_scrub += @intFromBool(repair.scrub);
                     },
                     .sync => |sync| {
+                        enqueued_blocks_sync += 1;
                         // These are not exclusive because the replica may reuse a RepairTable while
                         // we are still aborting the old blocks.
                         assert(queue.faulty_tables.contains(sync.table) or
@@ -370,9 +368,7 @@ pub const GridBlocksMissing = struct {
 
                     queue.enqueued_blocks_repair -= 1;
                     queue.enqueued_blocks_sync += 1;
-                    if (fault.cause.repair.scrub) {
-                        queue.enqueued_blocks_repair_scrub -= 1;
-                    }
+                    queue.enqueued_blocks_repair_scrub -= @intFromBool(fault.cause.repair.scrub);
 
                     fault.cause = cause;
                     return .{ .replace = fault };
@@ -380,12 +376,11 @@ pub const GridBlocksMissing = struct {
             }
         } else {
             switch (cause) {
-                .repair => queue.enqueued_blocks_repair += 1,
+                .repair => |repair| {
+                    queue.enqueued_blocks_repair += 1;
+                    queue.enqueued_blocks_repair_scrub += @intFromBool(repair.scrub);
+                },
                 .sync => queue.enqueued_blocks_sync += 1,
-            }
-
-            if (cause == .repair and cause.repair.scrub) {
-                queue.enqueued_blocks_repair_scrub += 1;
             }
 
             fault_result.value_ptr.* = .{
@@ -539,11 +534,11 @@ pub const GridBlocksMissing = struct {
     fn release_fault(queue: *GridBlocksMissing, fault_index: usize) void {
         const cause = queue.faulty_blocks.values()[fault_index].cause;
         switch (cause) {
-            .repair => queue.enqueued_blocks_repair -= 1,
+            .repair => |repair| {
+                queue.enqueued_blocks_repair -= 1;
+                queue.enqueued_blocks_repair_scrub -= @intFromBool(repair.scrub);
+            },
             .sync => queue.enqueued_blocks_sync -= 1,
-        }
-        if (cause == .repair and cause.repair.scrub) {
-            queue.enqueued_blocks_repair_scrub -= 1;
         }
 
         queue.faulty_blocks.swapRemoveAt(fault_index);
