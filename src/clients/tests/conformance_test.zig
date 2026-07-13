@@ -4,7 +4,7 @@ const stdx = @import("stdx");
 const Ast = std.zig.Ast;
 
 const api = @import("conformance_test_api.zig");
-const types = @import("conformance_test_types.zig");
+pub const types = @import("conformance_test_types.zig");
 
 // In the generated test files, suites appear in the order defined here. We are
 // trying to structure this like a walkthrough for readers of the conformance
@@ -121,6 +121,15 @@ fn parse_case(parser: *Parser, node: Ast.Node.Index) !types.Case {
     }
     const literal = tree.tokenSlice(name_token);
     const description = literal[1 .. literal.len - 1];
+    for (description) |char| {
+        const allowed = std.ascii.isAlphanumeric(char) or switch (char) {
+            ' ', '_', ',', '-', '\'', '.' => true,
+            else => false,
+        };
+        if (!allowed) {
+            return parser.fail(name_token, "invalid character in description", .{});
+        }
+    }
 
     var steps: std.ArrayList(types.Step) = .empty;
     var buffer: [2]Ast.Node.Index = undefined;

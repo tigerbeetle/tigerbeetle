@@ -63,64 +63,6 @@ class TestAccountFilter < TigerBeetleIntegrationTest
     assert_equal([0, 20, 20, 60], balances.map(&:credits_posted))
   end
 
-  def test_get_account_transfers_filters_debits_and_credits
-    account_id = TigerBeetle.id
-    debit_account_id = TigerBeetle.id
-    credit_account_id = TigerBeetle.id
-    @client.create_accounts(
-      [
-        account(id: account_id),
-        account(id: debit_account_id),
-        account(id: credit_account_id)
-      ]
-    )
-
-    debit_transfer_id = TigerBeetle.id
-    credit_transfer_id = TigerBeetle.id
-    @client.create_transfers(
-      [
-        transfer(
-          id: debit_transfer_id,
-          debit_account_id: account_id,
-          credit_account_id: credit_account_id,
-          amount: 10
-        ),
-        transfer(
-          id: credit_transfer_id,
-          debit_account_id: debit_account_id,
-          credit_account_id: account_id,
-          amount: 20
-        )
-      ]
-    )
-
-    debit_transfers = @client.get_account_transfers(
-      TigerBeetle::AccountFilter.new(
-        account_id: account_id,
-        limit: 10,
-        flags: TigerBeetle::AccountFilterFlags::DEBITS
-      )
-    )
-    credit_transfers = @client.get_account_transfers(
-      TigerBeetle::AccountFilter.new(
-        account_id: account_id,
-        limit: 10,
-        flags: TigerBeetle::AccountFilterFlags::CREDITS
-      )
-    )
-
-    assert_equal([debit_transfer_id], debit_transfers.map(&:id))
-    assert_equal([credit_transfer_id], credit_transfers.map(&:id))
-  end
-
-  def test_get_account_transfers_empty_result
-    results = @client.get_account_transfers(
-      TigerBeetle::AccountFilter.new(account_id: TigerBeetle.id, limit: 10)
-    )
-
-    assert_empty(results)
-  end
-
   def test_get_account_balances_empty_result
     results = @client.get_account_balances(
       TigerBeetle::AccountFilter.new(account_id: TigerBeetle.id, limit: 10)
