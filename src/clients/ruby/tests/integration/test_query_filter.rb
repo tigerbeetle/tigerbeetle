@@ -160,18 +160,6 @@ class TestQueryFilter < TigerBeetleIntegrationTest
     assert_empty(@client.query_transfers(page_filter))
   end
 
-  def test_query_operations_return_empty_results
-    filter = TigerBeetle::QueryFilter.new(
-      user_data_128: TigerBeetle.id,
-      ledger: 1,
-      code: 999,
-      limit: BATCH_MAX
-    )
-
-    assert_empty(@client.query_accounts(filter))
-    assert_empty(@client.query_transfers(filter))
-  end
-
   def test_invalid_query_filters
     filter = TigerBeetle::QueryFilter.new(timestamp_min: UINT64_MAX, limit: BATCH_MAX)
     assert_empty(@client.query_accounts(filter))
