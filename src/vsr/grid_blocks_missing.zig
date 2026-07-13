@@ -47,7 +47,7 @@ pub const GridBlocksMissing = struct {
             /// - the grid scrubber
             /// - a grid read during prefetch/compaction
             /// - a grid read while opening the grid/forest
-            repair,
+            repair: struct { scrub: bool },
             /// State syncing the index or a value block of a table.
             /// NB: when a replica decides to sync a block, it might already be repairing.
             sync: struct {
@@ -107,6 +107,9 @@ pub const GridBlocksMissing = struct {
     /// - enqueued_blocks_sync ≤ options.tables_max * lsm_table_content_blocks_max
     enqueued_blocks_repair: usize = 0,
     enqueued_blocks_sync: usize = 0,
+
+    /// enqueued_blocks_repair_scrub ≤ enqueued_blocks_repair
+    enqueued_blocks_repair_scrub: usize = 0,
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
@@ -176,8 +179,11 @@ pub const GridBlocksMissing = struct {
     pub fn verify(queue: *const GridBlocksMissing) void {
         assert(queue.faulty_blocks.count() + queue.syncing_faulty_blocks.count() ==
             queue.enqueued_blocks_repair + queue.enqueued_blocks_sync);
+        assert(queue.enqueued_blocks_repair_scrub <= queue.enqueued_blocks_repair);
+        assert(queue.enqueued_blocks_repair_scrub <= constants.grid_scrubber_writes_max);
 
         var enqueued_blocks_repair: u32 = 0;
+        var enqueued_blocks_repair_scrub: u32 = 0;
         var enqueued_blocks_sync: u32 = 0;
         var enqueued_blocks_aborting: u32 = 0;
         for ([_]FaultyBlocks{
@@ -185,15 +191,15 @@ pub const GridBlocksMissing = struct {
             queue.syncing_faulty_blocks,
         }) |faulty_blocks| {
             for (faulty_blocks.values()) |fault| {
-                switch (fault.cause) {
-                    .sync => enqueued_blocks_sync += 1,
-                    .repair => enqueued_blocks_repair += 1,
-                }
                 enqueued_blocks_aborting += @intFromBool(fault.state == .aborting);
 
                 switch (fault.cause) {
-                    .repair => {},
+                    .repair => |repair| {
+                        enqueued_blocks_repair += 1;
+                        enqueued_blocks_repair_scrub += @intFromBool(repair.scrub);
+                    },
                     .sync => |sync| {
+                        enqueued_blocks_sync += 1;
                         // These are not exclusive because the replica may reuse a RepairTable while
                         // we are still aborting the old blocks.
                         assert(queue.faulty_tables.contains(sync.table) or
@@ -202,8 +208,9 @@ pub const GridBlocksMissing = struct {
                 }
             }
         }
-        assert(queue.enqueued_blocks_repair == enqueued_blocks_repair);
         assert(queue.enqueued_blocks_sync == enqueued_blocks_sync);
+        assert(queue.enqueued_blocks_repair == enqueued_blocks_repair);
+        assert(queue.enqueued_blocks_repair_scrub == enqueued_blocks_repair_scrub);
         if (enqueued_blocks_sync == 0) assert(queue.faulty_tables.empty());
 
         if (queue.state == .checkpoint_durable) {
@@ -258,28 +265,24 @@ pub const GridBlocksMissing = struct {
         assert(queue.enqueued_blocks_sync <=
             queue.options.tables_max * constants.lsm_table_value_blocks_max);
 
-        if (queue.state == .sync_jump) {
-            const faulty_blocks_free =
-                queue.faulty_blocks.capacity() -
-                queue.enqueued_blocks_repair;
-            return faulty_blocks_free;
-        } else {
-            const faulty_blocks_free =
-                queue.faulty_blocks.capacity() -
-                queue.enqueued_blocks_repair -
-                queue.options.tables_max * constants.lsm_table_value_blocks_max;
-            return faulty_blocks_free;
-        }
+        return queue.options.blocks_max - queue.enqueued_blocks_repair;
     }
 
     /// Queue a faulty block to request from the cluster and repair.
-    pub fn repair_block(queue: *GridBlocksMissing, address: u64, checksum: u128) void {
+    pub fn repair_block(
+        queue: *GridBlocksMissing,
+        address: u64,
+        checksum: u128,
+        repair: struct { scrub: bool },
+    ) void {
         assert(queue.repair_blocks_available() > 0);
         assert(queue.faulty_tables.count() <= queue.options.tables_max);
         assert(queue.faulty_blocks.count() + queue.syncing_faulty_blocks.count() ==
             queue.enqueued_blocks_repair + queue.enqueued_blocks_sync);
 
-        const enqueue = queue.enqueue_faulty_block(address, checksum, .repair);
+        const enqueue = queue.enqueue_faulty_block(address, checksum, .{
+            .repair = .{ .scrub = repair.scrub },
+        });
         switch (enqueue) {
             .insert => {},
             .duplicate => {},
@@ -365,13 +368,18 @@ pub const GridBlocksMissing = struct {
 
                     queue.enqueued_blocks_repair -= 1;
                     queue.enqueued_blocks_sync += 1;
+                    queue.enqueued_blocks_repair_scrub -= @intFromBool(fault.cause.repair.scrub);
+
                     fault.cause = cause;
                     return .{ .replace = fault };
                 },
             }
         } else {
             switch (cause) {
-                .repair => queue.enqueued_blocks_repair += 1,
+                .repair => |repair| {
+                    queue.enqueued_blocks_repair += 1;
+                    queue.enqueued_blocks_repair_scrub += @intFromBool(repair.scrub);
+                },
                 .sync => queue.enqueued_blocks_sync += 1,
             }
 
@@ -395,6 +403,12 @@ pub const GridBlocksMissing = struct {
         const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
         const fault = &queue.faulty_blocks.values()[fault_index];
         return fault.checksum == checksum and fault.state == .waiting;
+    }
+
+    pub fn block_writing(queue: *const GridBlocksMissing, address: u64, checksum: u128) bool {
+        const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
+        const fault = &queue.faulty_blocks.values()[fault_index];
+        return fault.checksum == checksum and fault.state == .writing;
     }
 
     pub fn write_commence(queue: *GridBlocksMissing, address: u64, checksum: u128) void {
@@ -518,8 +532,12 @@ pub const GridBlocksMissing = struct {
     }
 
     fn release_fault(queue: *GridBlocksMissing, fault_index: usize) void {
-        switch (queue.faulty_blocks.values()[fault_index].cause) {
-            .repair => queue.enqueued_blocks_repair -= 1,
+        const cause = queue.faulty_blocks.values()[fault_index].cause;
+        switch (cause) {
+            .repair => |repair| {
+                queue.enqueued_blocks_repair -= 1;
+                queue.enqueued_blocks_repair_scrub -= @intFromBool(repair.scrub);
+            },
             .sync => queue.enqueued_blocks_sync -= 1,
         }
 
