@@ -1,18 +1,24 @@
 //! This file specifies the DSL allowed in conformance suite files (`suites/*.zig`).
 //!
-//! Suite files import this module as `ct` and are parsed, never compiled or run. These stubs
-//! keep the corpus `zig ast-check`-clean and give go-to-definition and hover documentation
-//! in the editor. The generator decides what the calls mean.
+//! It serves both as documentation, and as a way to silence LSP warnings regarding calls to unknown
+//! functions.
 
-const tb = @import("../../tigerbeetle.zig");
+const tb = @import("vsr").tigerbeetle;
 
-pub const Account = tb.Account;
-pub const Transfer = tb.Transfer;
 pub const AccountBalance = tb.AccountBalance;
+pub const AccountFilterFlags = tb.AccountFilterFlags;
 pub const AccountFilter = tb.AccountFilter;
-pub const QueryFilter = tb.QueryFilter;
+pub const AccountFlags = tb.AccountFlags;
+pub const Account = tb.Account;
 pub const CreateAccountResult = tb.CreateAccountResult;
 pub const CreateTransferResult = tb.CreateTransferResult;
+pub const QueryFilterFlags = tb.QueryFilterFlags;
+pub const QueryFilter = tb.QueryFilter;
+pub const Transfer = tb.Transfer;
+pub const TransferFlags = tb.TransferFlags;
+
+/// Transpiles to language-specific u128 implementations where applicable.
+pub const U128 = struct { value: u128 };
 
 const ct_run_error = "attempted to run conformance test as Zig code";
 
@@ -78,6 +84,17 @@ pub fn concurrently(n: u32, call: anytype) void {
     @panic(ct_run_error);
 }
 
+pub fn sleep_ms(ms: u32) void {
+    _ = ms;
+    @panic(ct_run_error);
+}
+
+/// Restricts the case to clients whose integers are unbounded so we can test for things like u128
+/// overflow.
+pub fn requires_unbounded_integers() void {
+    @panic(ct_run_error);
+}
+
 /// Compares only the fields listed in `expected`.
 pub fn assert_equal(actual: anytype, expected: anytype) void {
     _ = actual;
@@ -97,6 +114,12 @@ pub fn assert_unique(ids: []const u128) void {
 
 pub fn assert_ascending(ids: []const u128) void {
     _ = ids;
+    @panic(ct_run_error);
+}
+
+pub fn assert_greater_than(actual: anytype, value: anytype) void {
+    _ = actual;
+    _ = value;
     @panic(ct_run_error);
 }
 
