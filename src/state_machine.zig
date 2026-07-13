@@ -4209,8 +4209,6 @@ pub fn StateMachineType(comptime Storage: type) type {
             });
 
             if (expires_at) |timestamp_expiry| {
-                assert(!t.flags.imported);
-                assert(timestamp_actual == timestamp_event);
                 assert(timestamp_expiry > timestamp_event);
                 // Removing the pending `expires_at` index.
                 // Invariant: Unique keys cannot be removed.

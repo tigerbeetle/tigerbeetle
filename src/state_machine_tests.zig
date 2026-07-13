@@ -2045,6 +2045,41 @@ test "imported events: timestamp" {
     );
 }
 
+test "imported events: resolve timed pending transfers" {
+    try check(
+        \\ tick 10 nanoseconds
+        \\
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ IMP _ _ 1 created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ IMP _ _ 2 created
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2 10  _ _ _ _ 60 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ transfer T2 A1 A2 20  _ _ _ _ 60 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ commit create_transfers
+        \\
+        \\ tick 10 nanoseconds
+        \\ transfer T3 A1 A2 10 T1 _ _ _  0 L1 C1 _   _ POS _   _ _ IMP _ _ _ 17 created
+        \\ transfer T4 A1 A2  0 T2 _ _ _  0 L1 C1 _   _ _   VOI _ _ IMP _ _ _ 18 created
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0 10 0  0 _
+        \\ lookup_account A2 0  0 0 10 _
+        \\ commit lookup_accounts
+        \\
+        // Crossing the original timeout must not find a stale expiry index entry.
+        \\ tick 60 seconds
+        \\ lookup_account A1 0 10 0  0 _
+        \\ lookup_account A2 0  0 0 10 _
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 timestamp 15
+        \\ lookup_transfer T2 timestamp 16
+        \\ lookup_transfer T3 timestamp 17
+        \\ lookup_transfer T4 timestamp 18
+        \\ commit lookup_transfers
+    );
+}
+
 test "imported events: pending transfers" {
     try check(
         \\ tick 10 nanoseconds
