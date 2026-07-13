@@ -160,6 +160,7 @@ pub fn build_with_options(
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
         .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
+        .conformance_dump = b.step("conformance:dump", "Dump the parsed conformance test model"),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -325,6 +326,15 @@ pub fn build_with_options(
         .vsr_module = vsr_module,
         .target = options.target,
         .mode = options.mode,
+    });
+
+    // zig build conformance:dump
+    build_conformance(b, .{
+        .check = build_steps.check,
+        .dump = build_steps.conformance_dump,
+    }, .{
+        .stdx_module = stdx_module,
+        .vsr_module = vsr_module,
     });
 
     // zig build, zig build run
@@ -745,6 +755,36 @@ fn build_check(
     tigerbeetle.root_module.addImport("stdx", options.stdx_module);
     tigerbeetle.root_module.addImport("vsr", options.vsr_module);
     step_check.dependOn(&tigerbeetle.step);
+}
+
+fn build_conformance(
+    b: *std.Build,
+    steps: struct {
+        check: *std.Build.Step,
+        dump: *std.Build.Step,
+    },
+    options: struct {
+        stdx_module: *std.Build.Module,
+        vsr_module: *std.Build.Module,
+    },
+) void {
+    const conformance_test = b.addExecutable(.{
+        .name = "conformance_test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/tests/conformance_test.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    conformance_test.root_module.addImport("stdx", options.stdx_module);
+    conformance_test.root_module.addImport("vsr", options.vsr_module);
+
+    const run = b.addRunArtifact(conformance_test);
+    steps.check.dependOn(&run.step);
+
+    const dump = b.addRunArtifact(conformance_test);
+    dump.addArg("--debug");
+    dump.has_side_effects = true;
+    steps.dump.dependOn(&dump.step);
 }
 
 fn build_tigerbeetle(
