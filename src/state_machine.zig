@@ -1254,6 +1254,15 @@ pub fn StateMachineType(comptime Storage: type) type {
             );
             for (accounts) |*a| {
                 self.forest.grooves.accounts.prefetch_enqueue(.{ .id = a.id });
+
+                if (a.flags.imported) {
+                    // Looking for transfers with the same timestamp to avoid collisions.
+                    // The `transfers` prefetch isn't run yet, but enqueue it here as well
+                    // to save an extra iteration over accounts.
+                    self.forest.grooves.transfers.prefetch_enqueue(.{
+                        .timestamp = a.timestamp,
+                    });
+                }
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -1272,28 +1281,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             self.prefetch_context = .null;
-            const accounts = stdx.bytes_as_slice(
-                .exact,
-                Account,
-                self.prefetch_input.?,
+            self.forest.grooves.transfers.prefetch(
+                prefetch_create_accounts_transfers_callback,
+                self.prefetch_context.get(.transfers),
             );
-            if (accounts.len > 0 and
-                accounts[0].flags.imported)
-            {
-                // Looking for transfers with the same timestamp.
-                for (accounts) |*a| {
-                    self.forest.grooves.transfers.prefetch_enqueue(.{
-                        .timestamp = a.timestamp,
-                    });
-                }
-
-                self.forest.grooves.transfers.prefetch(
-                    prefetch_create_accounts_transfers_callback,
-                    self.prefetch_context.get(.transfers),
-                );
-            } else {
-                self.prefetch_finish();
-            }
         }
 
         fn prefetch_create_accounts_transfers_callback(
@@ -1326,6 +1317,15 @@ pub fn StateMachineType(comptime Storage: type) type {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     self.forest.grooves.transfers.prefetch_enqueue(.{ .id = t.pending_id });
                 }
+
+                if (t.flags.imported) {
+                    // Looking for accounts with the same timestamp to avoid collisions.
+                    // The `accounts` prefetch isn't run yet, but enqueue it here as well
+                    // to save an extra iteration over transfers.
+                    self.forest.grooves.accounts.prefetch_enqueue(.{
+                        .timestamp = t.timestamp,
+                    });
+                }
             }
 
             self.forest.grooves.transfers.prefetch(
@@ -1344,7 +1344,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
-            const transfers = stdx.bytes_as_slice(
+            const transfers: []const Transfer = stdx.bytes_as_slice(
                 .exact,
                 Transfer,
                 self.prefetch_input.?,
@@ -1368,19 +1368,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                 } else {
                     self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.debit_account_id });
                     self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.credit_account_id });
-                }
-            }
-
-            if (transfers.len > 0 and
-                transfers[0].flags.imported)
-            {
-                // Looking for accounts with the same timestamp.
-                // This logic could be in the loop above, but we choose to iterate again,
-                // avoiding an extra comparison in the more common case of non-imported batches.
-                for (transfers) |*t| {
-                    self.forest.grooves.accounts.prefetch_enqueue(.{
-                        .timestamp = t.timestamp,
-                    });
                 }
             }
 
