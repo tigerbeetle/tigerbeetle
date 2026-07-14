@@ -835,6 +835,8 @@ pub fn GrooveType(
             groove.prefetch_keys = .{};
             try groove.prefetch_keys.ensureTotalCapacity(
                 allocator,
+                // The total prefetch capacity must account for reads and
+                // idempotency checks performed during insert/update.
                 options.prefetch_entries_for_read_max + options.prefetch_entries_for_update_max,
             );
             errdefer groove.prefetch_keys.deinit(allocator);

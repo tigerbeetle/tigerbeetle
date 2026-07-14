@@ -4670,14 +4670,18 @@ pub fn StateMachineType(comptime Storage: type) type {
             const tree_values_count_limit = tree_values_count(options.batch_size_limit);
             return .{
                 .accounts = .{
-                    // lookup_account() looks up 1 Account per item.
                     .prefetch_entries_for_read_max = @max(
+                        // `lookup_account()` looks up one `Account` per event.
                         prefetch_lookup_accounts_limit,
-                        prefetch_create_accounts_limit,
+                        // `create_transfers()` looks up at most one `Account` by timestamp
+                        // per event, to detect timestamp collisions when importing events.
+                        prefetch_create_transfers_limit,
                     ),
                     .prefetch_entries_for_update_max = @max(
-                        prefetch_create_accounts_limit, // create_account
-                        2 * prefetch_create_transfers_limit, // create_transfer dr and cr accounts.
+                        // `create_accounts()` inserts a single `Account` per event.
+                        prefetch_create_accounts_limit,
+                        // `create_transfers()` updates the dr and cr accounts per event.
+                        2 * prefetch_create_transfers_limit,
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
                     .tree_options_object = .{
@@ -4689,13 +4693,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                     ),
                 },
                 .transfers = .{
-                    // lookup_transfer() looks up 1 Transfer.
-                    // create_transfer() looks up at most 1 Transfer for posting/voiding.
                     .prefetch_entries_for_read_max = @max(
+                        // `lookup_transfer()` looks up one `Transfer` per event.
                         prefetch_lookup_transfers_limit,
+                        // `create_transfer()` looks up at most one pending `Transfer`
+                        // for posting or voiding.
                         prefetch_create_transfers_limit,
+                        // `create_accounts()` looks up at most one `Transfer` by timestamp
+                        // per event, to detect timestamp collisions when importing events.
+                        prefetch_create_accounts_limit,
                     ),
-                    // create_transfer() updates a single Transfer.
+                    // `create_transfer()` inserts a single `Transfer` per event.
                     .prefetch_entries_for_update_max = prefetch_create_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers,
                     .tree_options_object = .{
@@ -4707,11 +4715,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                     ),
                 },
                 .transfers_pending = .{
-                    .prefetch_entries_for_read_max = @max(
-                        prefetch_lookup_transfers_limit,
-                        prefetch_create_transfers_limit,
-                    ),
-                    // create_transfer() posts/voids at most one transfer.
+                    // `create_transfer()` looks up at most one `TransferPending` per event.
+                    .prefetch_entries_for_read_max = prefetch_create_transfers_limit,
+                    // `create_transfer()` inserts at most one `TransferPending` per event.
                     .prefetch_entries_for_update_max = prefetch_create_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers_pending,
                     .tree_options_object = .{
