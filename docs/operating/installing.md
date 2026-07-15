@@ -64,5 +64,5 @@ compilation instructions.
 
 ## Client Libraries
 
-Client libraries for .NET, Go, Java, Node.js, and Python are published to the respective package
-repositories, see [Clients](../coding/clients/).
+Client libraries for .NET, Go, Java, Node.js, Python, Ruby, and Rust are published to the respective
+package repositories, see [Clients](../coding/clients/).
