@@ -4209,6 +4209,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             });
 
             if (expires_at) |timestamp_expiry| {
+                assert(!p.flags.imported);
+                // Although imported transfers cannot have an expiry timeout,
+                // they may post or void regular pending transfers that do.
+                assert(t.flags.imported or timestamp_actual == timestamp_event);
                 assert(timestamp_expiry > timestamp_event);
                 // Removing the pending `expires_at` index.
                 // Invariant: Unique keys cannot be removed.
