@@ -416,7 +416,7 @@ try {
 ```
 
 For more details, please refer to the
-[Java client reference page](./clients/java).
+[Java client reference page](/src/clients/java/).
 
 </details><br><!--Java-->
 
@@ -500,7 +500,7 @@ for (const result of transferResults) {
 ```
 
 For more details, please refer to the
-[Node.js client reference page](./clients/node).
+[Node.js client reference page](/src/clients/node/).
 
 </details><br><!--Node.js-->
 
@@ -584,7 +584,7 @@ for result in transfer_results:
 ```
 
 For more details, please refer to the
-[Python client reference page](./clients/python).
+[Python client reference page](/src/clients/python/).
 
 </details><br><!--Python-->
 
@@ -597,7 +597,7 @@ However, the Rust client is not yet publicly available on Crates.io at the time 
 so they are not considered breaking changes.
 
 For more details, please refer to the
-[Rust client reference page](./clients/rust).
+[Rust client reference page](/src/clients/rust/).
 
 </details><!--Rust-->
 

@@ -242,8 +242,8 @@ In response to a `get_reply`:
 
 See also:
 
-- [Integration: Client Session Lifecycle](../../reference/sessions.md#lifecycle)
-- [Integration: Client Session Eviction](../../reference/sessions.md#eviction)
+- [Integration: Client Session Lifecycle](../reference/sessions.md#lifecycle)
+- [Integration: Client Session Eviction](../reference/sessions.md#eviction)
 
 ### Protocol: Repair Grid
 
