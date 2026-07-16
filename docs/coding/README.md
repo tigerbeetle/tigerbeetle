@@ -18,7 +18,7 @@ as a series of loosely connected guides which can be read in any order.
 - [Recipes](./recipes/) is a library of ready-made solutions for common business requirements such
   as a currency exchange.
 - [Clients](./clients/) shows how to use TigerBeetle from the comfort of .NET, Go, Java, Node.js,
-  or Python.
+  Python, Ruby, or Rust.
 - [API Changes](./api-changes.md) describes changes introduced in the TigerBeetle Client libraries.
   <br>
   Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
