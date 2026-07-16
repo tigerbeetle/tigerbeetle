@@ -30,6 +30,7 @@ const ci_java = @import("../clients/java/ci.zig");
 const ci_node = @import("../clients/node/ci.zig");
 const ci_python = @import("../clients/python/ci.zig");
 const ci_rust = @import("../clients/rust/ci.zig");
+const vsr_options = @import("vsr_options");
 
 const MiB = stdx.MiB;
 
@@ -128,7 +129,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     const version_info = VersionInfo{
         .release_triple = try shell.fmt("{[major]}.{[minor]}.{[patch]}", release.triple()),
-        .release_triple_client_min = @import("vsr_options").release_client_min,
+        .release_triple_client_min = vsr_options.release_client_min,
         .tag = try shell.fmt(
             "{[major]}.{[minor]}.{[patch]}",
             release.triple(),

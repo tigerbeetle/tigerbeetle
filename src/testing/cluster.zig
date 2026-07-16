@@ -24,6 +24,11 @@ const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
 const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestCheckerType;
 const JournalCheckerType = @import("cluster/journal_checker.zig").JournalCheckerType;
+const TestingNetwork = @import("cluster/network.zig").Network;
+const TestingNetworkOptions = @import("cluster/network.zig").NetworkOptions;
+const TestingStorage = @import("storage.zig").Storage;
+const ClusterFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
+const ClusterMessageBus = @import("cluster/message_bus.zig").ClusterMessageBus;
 
 const vsr = @import("../vsr.zig");
 const format_writes_max = @import("../vsr/replica_format.zig").writes_max;
@@ -59,13 +64,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
         const Cluster = @This();
 
-        pub const Network = @import("cluster/network.zig").Network;
-        pub const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
-        pub const Storage = @import("storage.zig").Storage;
-        pub const StorageFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
+        pub const Network = TestingNetwork;
+        pub const NetworkOptions = TestingNetworkOptions;
+        pub const Storage = TestingStorage;
+        pub const StorageFaultAtlas = ClusterFaultAtlas;
         pub const Tracer = Storage.Tracer;
         pub const SuperBlock = vsr.SuperBlockType(Storage);
-        pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
+        pub const MessageBus = ClusterMessageBus;
         pub const StateMachine = StateMachineType(Storage);
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
         pub const ReplicaReformat =

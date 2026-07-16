@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 
 const stdx = @import("stdx");
+const UniqueKeyType = @import("unique_key.zig").UniqueKeyType;
 
 /// Combines a field (the key prefix) with a timestamp (the primary key).
 /// - To keep alignment, it supports either `u64` or `u128` prefixes (which can be truncated
@@ -113,7 +114,6 @@ comptime {
     assert(is_composite_key(CompositeKeyType(u64)));
     assert(is_composite_key(CompositeKeyType(u128)));
 
-    const UniqueKeyType = @import("unique_key.zig").UniqueKeyType;
     assert(!is_composite_key(UniqueKeyType(u64)));
     assert(!is_composite_key(UniqueKeyType(u128)));
 

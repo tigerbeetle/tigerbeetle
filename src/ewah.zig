@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
@@ -45,7 +46,7 @@ pub fn ewah(comptime Word: type) type {
         };
 
         comptime {
-            assert(@import("builtin").target.cpu.arch.endian() == std.builtin.Endian.little);
+            assert(builtin.target.cpu.arch.endian() == std.builtin.Endian.little);
             assert(@typeInfo(Word).int.signedness == .unsigned);
             assert(word_bits % 8 == 0); // A multiple of a byte, so that words can be cast to bytes.
             assert(@bitSizeOf(Marker) == word_bits);

@@ -6,11 +6,12 @@ const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
 const ForestType = @import("../lsm/forest.zig").ForestType;
+const GridType = @import("../vsr/grid.zig").GridType;
 
 pub fn StateMachineType(comptime Storage: type) type {
     return struct {
         const StateMachine = @This();
-        const Grid = @import("../vsr/grid.zig").GridType(Storage);
+        const Grid = GridType(Storage);
 
         pub const Workload = WorkloadType(StateMachine);
 

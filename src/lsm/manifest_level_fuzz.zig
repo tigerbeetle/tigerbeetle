@@ -31,6 +31,10 @@ const log = std.log.scoped(.lsm_manifest_level_fuzz);
 const fuzz = @import("../testing/fuzz.zig");
 const binary_search = @import("binary_search.zig");
 const lsm = @import("tree.zig");
+const TableType = @import("table.zig").TableType;
+const NodePoolType = @import("node_pool.zig").NodePoolType;
+const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
+const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;
 
 const Key = u64;
 const Value = packed struct(u128) {
@@ -51,7 +55,7 @@ inline fn tombstone(value: *const Value) bool {
     return value.tombstone;
 }
 
-const Table = @import("table.zig").TableType(
+const Table = TableType(
     Key,
     Value,
     key_from_value,
@@ -222,14 +226,15 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         const Environment = @This();
 
         const TableBuffer = std.ArrayList(TableInfo);
-        const NodePool = @import("node_pool.zig").NodePoolType(node_size, @alignOf(TableInfo));
-        pub const ManifestLevel = @import("manifest_level.zig").ManifestLevelType(
+        const NodePool = NodePoolType(node_size, @alignOf(TableInfo));
+        pub const ManifestLevel = ManifestLevelType(
             NodePool,
             Key,
             TableInfo,
             table_count_max_tree,
         );
-        pub const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
+        pub const TableInfo = TreeTableInfoType(Table);
+
         pool: NodePool,
         level: ManifestLevel,
         buffer: TableBuffer,

@@ -35,6 +35,7 @@ const stdx = @import("stdx");
 const Shell = stdx.Shell;
 const changelog = @import("./changelog.zig");
 const Release = @import("../multiversion.zig").Release;
+const Header = @import("../vsr/message_header.zig").Header;
 
 const MiB = stdx.MiB;
 
@@ -265,8 +266,6 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         // use the benchmark or repl via CLI.
         //
         // Use Header directly with a blocking TCP connection here, to avoid pulling in half of TB.
-        const Header = @import("../vsr/message_header.zig").Header;
-
         var ping = Header.PingClient{
             .command = .ping_client,
             .cluster = 0,
