@@ -49,6 +49,7 @@ const maybe = stdx.maybe;
 const KiB = stdx.KiB;
 
 const spec = @import("spec.zig");
+const vsr = @import("../../vsr.zig");
 
 pub const frame_min_size = spec.FRAME_MIN_SIZE;
 pub const tcp_port_default = 5672;
@@ -796,7 +797,6 @@ pub fn fatal(comptime format: []const u8, args: anytype) noreturn {
     const log = std.log.scoped(.amqp);
     log.err(format, args);
 
-    const vsr = @import("../../vsr.zig");
     const status = vsr.FatalReason.cli.exit_status();
     assert(status != 0);
     std.process.exit(status);

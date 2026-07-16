@@ -790,7 +790,7 @@ pub fn AOFType(comptime IO: type) type {
 const testing = std.testing;
 
 test "aof write / read" {
-    const IO = @import("io.zig").IO;
+    const IO = vsr.io.IO;
     const AOF = AOFType(IO);
     const AOFIterator = AOF.Iterator;
 
@@ -944,7 +944,7 @@ pub fn main() !void {
     const target = try gpa.create(AOFEntry);
     defer gpa.destroy(target);
 
-    const IO = @import("io.zig").IO;
+    const IO = vsr.io.IO;
     var io = try IO.init(32, 0);
     defer io.deinit();
 

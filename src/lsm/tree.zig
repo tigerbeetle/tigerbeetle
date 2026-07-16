@@ -13,6 +13,10 @@ const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_no
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
+const TableMemoryType = @import("table_memory.zig").TableMemoryType;
+const ManifestType = @import("manifest.zig").ManifestType;
+const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
+const CompactionType = @import("compaction.zig").CompactionType;
 
 pub const ScopeCloseMode = enum { persist, discard };
 
@@ -46,14 +50,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub const Table = TreeTable;
         pub const Value = Table.Value;
 
-        pub const TableMemory = @import("table_memory.zig").TableMemoryType(Table);
-        pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
+        pub const TableMemory = TableMemoryType(Table);
+        pub const Manifest = ManifestType(Table, Storage);
 
         const Grid = GridType(Storage);
-        const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
+        const ManifestLog = ManifestLogType(Storage);
         const KeyRange = Manifest.KeyRange;
 
-        const CompactionType = @import("compaction.zig").CompactionType;
         pub const Compaction = CompactionType(Tree, Storage);
 
         pub const LookupMemoryResult = union(enum) {

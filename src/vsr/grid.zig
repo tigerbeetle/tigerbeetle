@@ -17,6 +17,7 @@ const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing
 const Tracer = vsr.trace.Tracer;
 
 const FreeSet = @import("./free_set.zig").FreeSet;
+const FreeSetReservation = @import("./free_set.zig").Reservation;
 
 const log = stdx.log.scoped(.grid);
 
@@ -40,7 +41,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub const RepairTable = GridBlocksMissing.RepairTable;
         pub const RepairTableResult = GridBlocksMissing.RepairTableResult;
-        pub const Reservation = @import("./free_set.zig").Reservation;
+        pub const Reservation = FreeSetReservation;
 
         // Grid just reuses the Storage's NextTick abstraction for simplicity.
         pub const NextTick = Storage.NextTick;

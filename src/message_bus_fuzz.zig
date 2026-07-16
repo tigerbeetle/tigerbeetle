@@ -416,7 +416,7 @@ const IO = struct {
     // We can't specify io/linux.zig since it won't compile on windows, which means that we are
     // potentially using different error sets for different OS's, which means that fuzzer seeds are
     // only reproducible on the same OS.
-    const RealIO = @import("io.zig").IO;
+    const RealIO = vsr.io.IO;
     pub const AcceptError = RealIO.AcceptError;
     pub const CloseError = RealIO.CloseError;
     pub const ConnectError = RealIO.ConnectError;

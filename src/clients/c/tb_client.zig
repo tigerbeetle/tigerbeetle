@@ -3,7 +3,8 @@ const std = @import("std");
 pub const vsr = @import("../../vsr.zig");
 pub const exports = @import("tb_client_exports.zig");
 
-const MessageBus = @import("../../message_bus.zig").MessageBusType(@import("../../io.zig").IO);
+const MessageBusType = @import("../../message_bus.zig").MessageBusType;
+const MessageBus = MessageBusType(vsr.io.IO);
 
 pub const InitError = @import("tb_client/context.zig").InitError;
 pub const InitParameters = @import("tb_client/context.zig").InitParameters;

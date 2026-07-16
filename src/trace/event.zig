@@ -10,6 +10,7 @@ const Peer = vsr.Peer;
 const Zone = vsr.Zone;
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
 const tigerbeetle = @import("../tigerbeetle.zig");
+const tree_ids = @import("../state_machine.zig").tree_ids;
 const Duration = stdx.Duration;
 
 const Operation = operation_enum: {
@@ -37,7 +38,6 @@ const Operation = operation_enum: {
 };
 
 const TreeEnum = tree_enum: {
-    const tree_ids = @import("../state_machine.zig").tree_ids;
     var tree_fields: []const std.builtin.Type.EnumField = &[_]std.builtin.Type.EnumField{};
 
     for (std.meta.declarations(tree_ids)) |groove_field| {
@@ -59,7 +59,6 @@ const TreeEnum = tree_enum: {
 };
 
 const GrooveEnum = groove_enum: {
-    const tree_ids = @import("../state_machine.zig").tree_ids;
     var groove_fields: []const std.builtin.Type.EnumField = &[_]std.builtin.Type.EnumField{};
 
     for (std.meta.declarations(tree_ids)) |groove_field| {

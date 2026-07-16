@@ -49,6 +49,9 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.supervisor);
 const Release = @import("../../multiversion.zig").Release;
+const Model = @import("./workload.zig").Model;
+const Generator = @import("./workload.zig").Generator;
+const Command = @import("./workload.zig").Command;
 
 const dependencies_path: []const u8 = @import("vortex_options").dependencies_path;
 const dependencies_count: u32 = @import("vortex_options").dependencies_count;
@@ -802,10 +805,6 @@ const Replica = struct {
 };
 
 const Workload = struct {
-    const Model = @import("./workload.zig").Model;
-    const Generator = @import("./workload.zig").Generator;
-    const Command = @import("./workload.zig").Command;
-
     const RequestInfo = struct {
         timestamp_start_micros: u64,
         timestamp_end_micros: u64,

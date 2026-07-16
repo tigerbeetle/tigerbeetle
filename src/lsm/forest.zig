@@ -21,6 +21,7 @@ const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
 const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
 const compaction_input_tables_max = @import("compaction.zig").compaction_tables_input_max;
+const ForestTableIteratorType = @import("./forest_table_iterator.zig").ForestTableIteratorType;
 
 /// The maximum number of tables for the forest as a whole. This is set a bit backwards due to how
 /// the code is structured: a single tree should be able to use all the tables in the forest, so the
@@ -961,8 +962,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         ///
         /// (Invoked immediately after open() or checkpoint()).
         fn verify_tables_recovered(forest: *const Forest) void {
-            const ForestTableIteratorType =
-                @import("./forest_table_iterator.zig").ForestTableIteratorType;
             const ForestTableIterator = ForestTableIteratorType(Forest);
 
             assert(forest.grid.superblock.opened);

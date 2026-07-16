@@ -14,6 +14,13 @@ const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
+const TimeSimType = @import("testing/time.zig").TimeSim;
+const TestStorage = @import("testing/storage.zig").Storage;
+const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+const SuperBlockType = @import("vsr/superblock.zig").SuperBlockType;
+const GridType = @import("vsr/grid.zig").GridType;
+const fixtures = @import("testing/fixtures.zig");
+const parse_table = @import("testing/table.zig").parse;
 
 const Account = tb.Account;
 const AccountBalance = tb.AccountBalance;
@@ -35,13 +42,11 @@ const StateMachineType = @import("state_machine.zig").StateMachineType;
 const testing = std.testing;
 
 pub const TestContext = struct {
-    const TimeSim = @import("testing/time.zig").TimeSim;
-    const Storage = @import("testing/storage.zig").Storage;
+    const TimeSim = TimeSimType;
+    const Storage = TestStorage;
     const Tracer = Storage.Tracer;
-    const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
-    const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
-    const Grid = @import("vsr/grid.zig").GridType(Storage);
-    const fixtures = @import("testing/fixtures.zig");
+    const SuperBlock = SuperBlockType(Storage);
+    const Grid = GridType(Storage);
 
     pub const StateMachine = StateMachineType(Storage);
 
@@ -605,7 +610,6 @@ const TestQueryAccounts = TestQueryFilter;
 const TestQueryTransfers = TestQueryFilter;
 
 fn check(test_table: []const u8) !void {
-    const parse_table = @import("testing/table.zig").parse;
     const test_actions = parse_table(TestAction, test_table);
 
     // Runs the same test for each variation of supported operations,

@@ -18,6 +18,10 @@ const GrooveType = @import("lsm/groove.zig").GrooveType;
 const ForestType = @import("lsm/forest.zig").ForestType;
 const ScanBufferType = @import("lsm/scan_buffer.zig").ScanBufferType;
 const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
+const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
+const ScanRangeType = @import("lsm/scan_range.zig").ScanRangeType;
+const EvaluateNext = @import("lsm/scan_range.zig").EvaluateNext;
+const ScanTreeType = @import("lsm/scan_tree.zig").ScanTreeType;
 
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
@@ -4878,10 +4882,6 @@ fn ExpirePendingTransfersType(
 ) type {
     return struct {
         const ExpirePendingTransfers = @This();
-        const ScanRangeType = @import("lsm/scan_range.zig").ScanRangeType;
-        const EvaluateNext = @import("lsm/scan_range.zig").EvaluateNext;
-        const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
-
         const Tree = @FieldType(TransfersGroove.IndexTrees, "expires_at");
         const Value = Tree.Table.Value;
         const ScanBuffer = ScanBufferType(GridType(Storage));
@@ -5035,7 +5035,6 @@ fn ChangeEventsScanLookupType(
     comptime AccountEventsGroove: type,
     comptime Storage: type,
 ) type {
-    const ScanTreeType = @import("lsm/scan_tree.zig").ScanTreeType;
     const ScanBuffer = ScanBufferType(GridType(Storage));
 
     return struct {
