@@ -11847,7 +11847,7 @@ const JVQuorum = struct {
 
                 const headers = message_body_as_view_headers(jv.base_const());
                 const header_index = jv.header.op - op;
-                assert(header_index <= headers.slice.len);
+                assert(header_index < headers.slice.len);
 
                 const header = &headers.slice[header_index];
                 assert(header.op == op);
