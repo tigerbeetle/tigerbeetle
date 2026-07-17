@@ -194,7 +194,7 @@ Beyond these rules:
   form is easy to get right (and understand):
 
   ```zig
-  if (index < length) {
+  if (index < count) {
     // The invariant holds.
   } else {
     // The invariant doesn't hold.
@@ -202,10 +202,10 @@ Beyond these rules:
   ```
 
   This form is harder, and also goes against the grain of how `index` would typically be compared to
-  `length`, for example, in a loop condition:
+  `count`, for example, in a loop condition:
 
   ```zig
-  if (index >= length) {
+  if (index >= count) {
     // It's not true that the invariant holds.
   }
   ```
