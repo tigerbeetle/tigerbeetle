@@ -6,10 +6,10 @@ Gem::Specification.new do |spec|
   spec.summary     = "The TigerBeetle client for Ruby."
   spec.authors     = ["TigerBeetle, Inc"]
   spec.license     = "Apache-2.0"
-  spec.homepage    = "https://github.com/tigerbeetle/tigerbeetle"
+  spec.homepage    = "https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/ruby"
 
   spec.metadata = {
-    "source_code_uri" => "https://github.com/tigerbeetle/tigerbeetle",
+    "source_code_uri" => "https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/ruby",
     "bug_tracker_uri" => "https://github.com/tigerbeetle/tigerbeetle/issues",
   }
 
