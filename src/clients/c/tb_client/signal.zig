@@ -10,7 +10,7 @@ const Atomic = std.atomic.Value;
 /// occurs from another thread.
 pub fn SignalType(comptime IOType: type) type {
     return struct {
-        const SignalSelf = @This();
+        const Signal = @This();
 
         io: *IOType,
         completion: IOType.Completion,
@@ -23,9 +23,9 @@ pub fn SignalType(comptime IOType: type) type {
         }),
 
         listening: Atomic(bool),
-        on_signal_fn: *const fn (*SignalSelf) void,
+        on_signal_fn: *const fn (*Signal) void,
 
-        pub fn init(self: *SignalSelf, io: *IOType, on_signal_fn: *const fn (*SignalSelf) void) !void {
+        pub fn init(self: *Signal, io: *IOType, on_signal_fn: *const fn (*Signal) void) !void {
             const event = try io.open_event();
             errdefer io.close_event(event);
 
@@ -41,7 +41,7 @@ pub fn SignalType(comptime IOType: type) type {
             self.wait();
         }
 
-        pub fn deinit(self: *SignalSelf) void {
+        pub fn deinit(self: *Signal) void {
             assert(self.event != IOType.INVALID_EVENT);
             assert(self.status() == .shutdown_completed);
 
@@ -52,7 +52,7 @@ pub fn SignalType(comptime IOType: type) type {
         /// Requests to stop listening for notifications.
         /// The caller must continue processing `IO.run()` until `state() == .stopped`.
         /// Safe to call from multiple threads.
-        pub fn stop(self: *SignalSelf) void {
+        pub fn stop(self: *Signal) void {
             const listening = self.listening.swap(false, .release);
             if (listening) {
                 self.notify();
@@ -61,7 +61,7 @@ pub fn SignalType(comptime IOType: type) type {
 
         /// Returns the current state.
         /// Safe to call from multiple threads.
-        pub fn status(self: *const SignalSelf) enum {
+        pub fn status(self: *const Signal) enum {
             /// Listening for event notifications.
             /// Call `notify()` to trigger the callback.
             running,
@@ -86,7 +86,7 @@ pub fn SignalType(comptime IOType: type) type {
         /// Schedules the `on_signal` callback to be invoked on the IO thread.
         /// Calling `notify()` when `state() != .running` has no effect.
         /// Safe to call from multiple threads.
-        pub fn notify(self: *SignalSelf) void {
+        pub fn notify(self: *Signal) void {
             // Try to transition from `waiting` to `notified`.
             // If it fails, analyze the current state to determine if a notification is needed.
             var state: @TypeOf(self.event_state.raw) = .waiting;
@@ -108,7 +108,7 @@ pub fn SignalType(comptime IOType: type) type {
             }
         }
 
-        fn wait(self: *SignalSelf) void {
+        fn wait(self: *Signal) void {
             // It is not guaranteed to be `running` here, as another caller might have requested
             // a stop during the callback.
             assert(self.status() != .shutdown_completed);
@@ -129,7 +129,7 @@ pub fn SignalType(comptime IOType: type) type {
         }
 
         fn on_event(completion: *IOType.Completion) void {
-            const self: *SignalSelf = @fieldParentPtr("completion", completion);
+            const self: *Signal = @fieldParentPtr("completion", completion);
             const listening: bool = self.listening.load(.acquire);
             const state = self.event_state.cmpxchgStrong(
                 .notified,
@@ -146,7 +146,8 @@ pub fn SignalType(comptime IOType: type) type {
 
             switch (state) {
                 .running => unreachable, // Multiple racing calls to on_signal().
-                .waiting => unreachable, // on_signal() called without transitioning to a waking state.
+                // on_signal() called without transitioning to a waking state.
+                .waiting => unreachable,
                 .notified => unreachable, // Not possible due to CAS semantics.
                 .shutdown => unreachable, // Shutdown is a final state.
             }
@@ -154,13 +155,12 @@ pub fn SignalType(comptime IOType: type) type {
     };
 }
 
-const DefaultIO = vsr.io.IO;
-const IO = DefaultIO;
-pub const Signal = SignalType(DefaultIO);
+const IO = vsr.io.IO;
 
 test "signal" {
     try struct {
         const Context = @This();
+        const Signal = SignalType(IO);
 
         io: IO,
         count: u32 = 0,

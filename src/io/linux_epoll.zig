@@ -14,7 +14,6 @@ const posix = std.posix;
 const linux = std.os.linux;
 const log = std.log.scoped(.io);
 
-const constants = @import("../constants.zig");
 const stdx = @import("stdx");
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
@@ -24,7 +23,6 @@ pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     pub const Stats = common.Stats;
-    const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
     const TimeoutList = DoublyLinkedListType(Completion, .timeout_back, .timeout_next);
 
     const timerfd_epoll_tag: usize = 1;
@@ -42,26 +40,13 @@ pub const IO = struct {
     /// Completions that are ready to have their callbacks run.
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
-    /// All operations that are in-flight in epoll or awaiting a timeout.
-    awaiting: CompletionList = .{},
-
-    cancel_completion: Completion = undefined,
-
-    cancel_all_status: union(enum) {
-        inactive,
-        next,
-        queued: struct { target: *Completion },
-        wait: struct { target: *Completion },
-        done,
-    } = .inactive,
-
     stats: common.Stats = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
         _ = flags;
 
-        log.info("Starting epoll I/O", .{});
+        log.debug("Starting epoll I/O", .{});
 
         const epoll_fd = try posix.epoll_create1(linux.EPOLL.CLOEXEC);
         errdefer posix.close(epoll_fd);
@@ -84,7 +69,7 @@ pub const IO = struct {
             &timer_event,
         ))) {
             .SUCCESS => {},
-            else => |err| return stdx.unexpected_errno("io:init:timerfd:epoll_ctl", err),
+            else => |err| return stdx.unexpected_errno("epoll_ctl", err),
         }
 
         return IO{
@@ -100,23 +85,20 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
-        assert(self.cancel_all_status != .done);
-
         try self.poll_epoll(0);
         self.fire_expired_timeouts();
 
         var timer = try std.time.Timer.start();
         self.run_callbacks();
-        self.stats.now.time_callbacks.ns += timer.read();
+        self.stats.window.time_callbacks.ns += timer.read();
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        assert(self.cancel_all_status != .done);
         defer self.stats.trace();
 
         var total_timer = try std.time.Timer.start();
-        defer self.stats.now.time_run_for_ns.ns += total_timer.read();
+        defer self.stats.window.time_run_for_ns.ns += total_timer.read();
 
         const deadline: i128 = monotonic_now_ns() + @as(i128, nanoseconds);
 
@@ -125,7 +107,7 @@ pub const IO = struct {
 
             var cb_timer = try std.time.Timer.start();
             self.run_callbacks();
-            self.stats.now.time_callbacks.ns += cb_timer.read();
+            self.stats.window.time_callbacks.ns += cb_timer.read();
 
             const now: i128 = monotonic_now_ns();
             if (now >= deadline) break;
@@ -139,104 +121,12 @@ pub const IO = struct {
         }
     }
 
-    /// Run all queued completion callbacks, respecting cancel_all_status.
+    /// Run all queued completion callbacks.
     fn run_callbacks(self: *IO) void {
         while (self.completed.pop()) |completion| {
-            if (completion.in_awaiting) {
-                assert(!self.awaiting.empty());
-                self.awaiting.remove(completion);
-                completion.in_awaiting = false;
-            }
-
-            switch (self.cancel_all_status) {
-                .inactive => completion.complete(),
-                .next => {},
-                .queued => if (completion.operation == .cancel) completion.complete(),
-                .wait => |wait| if (wait.target == completion) {
-                    self.cancel_all_status = .next;
-                },
-                .done => unreachable,
-            }
+            completion.in_awaiting = false;
+            completion.complete();
         }
-    }
-
-    pub fn cancel_all(self: *IO) void {
-        assert(self.cancel_all_status == .inactive);
-
-        defer self.cancel_all_status = .done;
-
-        self.cancel_all_status = .next;
-
-        while (self.awaiting.tail) |target| {
-            assert(!self.awaiting.empty());
-            assert(self.cancel_all_status == .next);
-            assert(target.operation != .cancel);
-
-            self.cancel_all_status = .{ .queued = .{ .target = target } };
-
-            self.cancel(
-                *IO,
-                self,
-                cancel_all_callback,
-                .{
-                    .completion = &self.cancel_completion,
-                    .target = target,
-                },
-            );
-
-            while (self.cancel_all_status == .queued or self.cancel_all_status == .wait) {
-                self.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
-                    std.debug.panic("IO.cancel_all: run_for_ns error: {}", .{err});
-                };
-            }
-            assert(self.cancel_all_status == .next);
-        }
-        assert(self.awaiting.empty());
-    }
-
-    fn cancel_all_callback(self: *IO, completion: *Completion, result: CancelError!void) void {
-        assert(self.cancel_all_status == .queued);
-        assert(completion == &self.cancel_completion);
-        assert(completion.operation == .cancel);
-        assert(completion.operation.cancel.target == self.cancel_all_status.queued.target);
-
-        self.cancel_all_status = status: {
-            result catch |err| switch (err) {
-                error.NotRunning => break :status .next,
-                error.NotInterruptable => {},
-                error.Unexpected => unreachable,
-            };
-            break :status .{ .wait = .{ .target = self.cancel_all_status.queued.target } };
-        };
-    }
-
-    pub const CancelError = error{
-        NotRunning,
-        NotInterruptable,
-    } || posix.UnexpectedError;
-
-    pub fn cancel(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: CancelError!void,
-        ) void,
-        options: struct {
-            completion: *Completion,
-            target: *Completion,
-        },
-    ) void {
-        options.completion.* = .{
-            .io = self,
-            .context = context,
-            .callback = erase_types(Context, CancelError!void, callback),
-            .operation = .{ .cancel = .{ .target = options.target } },
-        };
-
-        self.enqueue(options.completion);
     }
 
     pub const AcceptError = error{
@@ -343,7 +233,7 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
     ) void {
         completion.* = .{
             .io = self,
@@ -352,7 +242,7 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address,
+                    .address = address.to_std(),
                 },
             },
         };
@@ -650,7 +540,10 @@ pub const IO = struct {
     pub fn open_event(self: *IO) !Event {
         _ = self;
 
-        const event_fd = posix.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK) catch |err| switch (err) {
+        const event_fd = posix.eventfd(
+            0,
+            linux.EFD.CLOEXEC | linux.EFD.NONBLOCK,
+        ) catch |err| switch (err) {
             error.SystemResources,
             error.SystemFdQuotaExceeded,
             error.ProcessFdQuotaExceeded,
@@ -698,10 +591,10 @@ pub const IO = struct {
 
         const value: u64 = 1;
         while (true) {
-            const rc = linux.write(event, @ptrCast(&value), @sizeOf(u64));
-            switch (posix.errno(rc)) {
+            const return_code = linux.write(event, @ptrCast(&value), @sizeOf(u64));
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    assert(rc == @sizeOf(u64));
+                    assert(return_code == @sizeOf(u64));
                     return;
                 },
                 .INTR => continue,
@@ -725,9 +618,13 @@ pub const IO = struct {
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
     /// The socket is set to non-blocking mode for use with epoll.
-    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+    pub fn open_socket_tcp(
+        self: *IO,
+        family: stdx.IPAddress.Family,
+        options: TCPOptions,
+    ) !socket_t {
         const fd = try posix.socket(
-            family,
+            family.to_std(),
             posix.SOCK.STREAM | posix.SOCK.CLOEXEC | posix.SOCK.NONBLOCK,
             posix.IPPROTO.TCP,
         );
@@ -738,10 +635,10 @@ pub const IO = struct {
     }
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+    pub fn open_socket_udp(self: *IO, family: stdx.IPAddress.Family) !socket_t {
         _ = self;
         return try posix.socket(
-            family,
+            family.to_std(),
             posix.SOCK.DGRAM | posix.SOCK.CLOEXEC | posix.SOCK.NONBLOCK,
             posix.IPPROTO.UDP,
         );
@@ -757,9 +654,9 @@ pub const IO = struct {
     pub fn listen(
         _: *IO,
         fd: socket_t,
-        address: std.net.Address,
+        address: stdx.SocketAddress,
         options: ListenOptions,
-    ) !std.net.Address {
+    ) !stdx.SocketAddress {
         return common.listen(fd, address, options);
     }
 
@@ -770,19 +667,8 @@ pub const IO = struct {
     pub const fd_t = posix.fd_t;
     pub const INVALID_FILE: fd_t = -1;
 
-    // -------------------------------------------------------------------------
-    // Internal: Enqueue
-    // -------------------------------------------------------------------------
-
     fn enqueue(self: *IO, completion: *Completion) void {
-        switch (self.cancel_all_status) {
-            .inactive => {},
-            .queued => assert(completion.operation == .cancel),
-            else => unreachable,
-        }
-
         switch (completion.operation) {
-            .cancel => self.enqueue_cancel(completion),
             .accept => self.enqueue_accept(completion),
             .close => self.enqueue_close(completion),
             .connect => self.enqueue_connect(completion),
@@ -798,78 +684,24 @@ pub const IO = struct {
         }
     }
 
-    /// Cancel completes synchronously. For epoll ops, the fd is removed from epoll and the
-    /// target is pushed to completed with ECANCELED.
-    /// The cancel completion is pushed to completed before the target to preserve the expected
-    /// ordering: cancel callback fires, then .wait state, then target fires, then .next state.
-    fn enqueue_cancel(self: *IO, completion: *Completion) void {
-        const target = completion.operation.cancel.target;
-
-        switch (target.operation) {
-            .accept, .recv, .send, .connect, .eventfd_read => {
-                if (target.epoll_registered) {
-                    const fd = operation_fd(target);
-                    _ = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
-                    target.epoll_registered = false;
-                    target.result = -@as(i32, @intFromEnum(posix.E.CANCELED));
-                    // Push cancel first, then target; FIFO order ensures cancel fires before target.
-                    completion.result = 0;
-                    self.completed.push(completion);
-                    self.completed.push(target);
-                } else {
-                    // Target is not registered (already completed or completing).
-                    completion.result = -@as(i32, @intFromEnum(posix.E.NOENT));
-                    self.completed.push(completion);
-                }
-            },
-            .timeout => {
-                completion.result = 0;
-                target.result = -@as(i32, @intFromEnum(posix.E.CANCELED));
-
-                if (target.in_timeouts) {
-                    const was_head = self.timeouts.tail == target;
-                    self.timeouts.remove(target);
-                    target.in_timeouts = false;
-
-                    if (was_head) {
-                        if (self.timeouts.tail) |next| {
-                            self.arm_timerfd(next.expiry_ns, monotonic_now_ns());
-                        } else {
-                            self.disarm_timerfd();
-                        }
-                    }
-                }
-
-                self.completed.push(completion);
-                self.completed.push(target);
-            },
-            .cancel, .close => {
-                // These complete synchronously; they won't be in awaiting when cancel runs.
-                completion.result = -@as(i32, @intFromEnum(posix.E.NOENT));
-                self.completed.push(completion);
-            },
-            .fsync, .openat, .read, .statx, .write => unreachable,
-        }
-    }
-
     fn enqueue_accept(self: *IO, completion: *Completion) void {
-        const op = &completion.operation.accept;
+        const operation = &completion.operation.accept;
         while (true) {
-            const rc = linux.accept4(
-                op.socket,
-                @ptrCast(&op.address),
-                &op.address_size,
+            const return_code = linux.accept4(
+                operation.socket,
+                @ptrCast(&operation.address),
+                &operation.address_size,
                 linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             );
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_enqueue(completion, op.socket, linux.EPOLL.IN);
+                    self.epoll_enqueue(completion, operation.socket, linux.EPOLL.IN);
                     return;
                 },
                 else => |err| {
@@ -885,10 +717,10 @@ pub const IO = struct {
         assert(completion.io == self);
         assert(!completion.in_awaiting);
 
-        const op = completion.operation.close;
-        const rc = linux.close(op.fd);
+        const operation = completion.operation.close;
+        const return_code = linux.close(operation.fd);
         // EINTR on close on Linux means the fd was closed; treat as success.
-        switch (posix.errno(rc)) {
+        switch (posix.errno(return_code)) {
             .SUCCESS, .INTR => completion.result = 0,
             else => |err| completion.result = -@as(i32, @intFromEnum(err)),
         }
@@ -899,20 +731,20 @@ pub const IO = struct {
         assert(completion.io == self);
         assert(!completion.in_awaiting);
 
-        const op = completion.operation.connect;
-        const rc = linux.connect(
-            op.socket,
-            @ptrCast(&op.address.any),
-            op.address.getOsSockLen(),
+        const operation = completion.operation.connect;
+        const return_code = linux.connect(
+            operation.socket,
+            @ptrCast(&operation.address.any),
+            operation.address.getOsSockLen(),
         );
-        switch (posix.errno(rc)) {
+        switch (posix.errno(return_code)) {
             .SUCCESS => {
                 completion.result = 0;
                 self.completed.push(completion);
             },
             // Connection in progress: wait for EPOLLOUT.
             .INPROGRESS => {
-                self.epoll_enqueue(completion, op.socket, linux.EPOLL.OUT);
+                self.epoll_enqueue(completion, operation.socket, linux.EPOLL.OUT);
             },
             else => |err| {
                 completion.result = -@as(i32, @intFromEnum(err));
@@ -922,22 +754,22 @@ pub const IO = struct {
     }
 
     fn enqueue_eventfd_read(self: *IO, completion: *Completion) void {
-        const op = completion.operation.eventfd_read;
+        const operation = completion.operation.eventfd_read;
         while (true) {
-            const rc = linux.read(
-                op.fd,
+            const return_code = linux.read(
+                operation.fd,
                 @ptrCast(&completion.eventfd_read_buffer),
                 @sizeOf(u64),
             );
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_enqueue(completion, op.fd, linux.EPOLL.IN);
+                    self.epoll_enqueue(completion, operation.fd, linux.EPOLL.IN);
                     return;
                 },
                 else => |err| {
@@ -950,18 +782,25 @@ pub const IO = struct {
     }
 
     fn enqueue_recv(self: *IO, completion: *Completion) void {
-        const op = completion.operation.recv;
+        const operation = completion.operation.recv;
         while (true) {
-            const rc = linux.recvfrom(op.socket, op.buffer.ptr, op.buffer.len, 0, null, null);
-            switch (posix.errno(rc)) {
+            const return_code = linux.recvfrom(
+                operation.socket,
+                operation.buffer.ptr,
+                operation.buffer.len,
+                0,
+                null,
+                null,
+            );
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_enqueue(completion, op.socket, linux.EPOLL.IN);
+                    self.epoll_enqueue(completion, operation.socket, linux.EPOLL.IN);
                     return;
                 },
                 else => |err| {
@@ -974,25 +813,25 @@ pub const IO = struct {
     }
 
     fn enqueue_send(self: *IO, completion: *Completion) void {
-        const op = completion.operation.send;
+        const operation = completion.operation.send;
         while (true) {
-            const rc = linux.sendto(
-                op.socket,
-                op.buffer.ptr,
-                op.buffer.len,
+            const return_code = linux.sendto(
+                operation.socket,
+                operation.buffer.ptr,
+                operation.buffer.len,
                 linux.MSG.NOSIGNAL,
                 null,
                 0,
             );
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_enqueue(completion, op.socket, linux.EPOLL.OUT);
+                    self.epoll_enqueue(completion, operation.socket, linux.EPOLL.OUT);
                     return;
                 },
                 else => |err| {
@@ -1018,7 +857,6 @@ pub const IO = struct {
         completion.in_awaiting = true;
         completion.in_timeouts = true;
 
-        self.awaiting.push(completion);
         self.timeout_insert_sorted(completion);
 
         if (self.timeouts.tail == completion) {
@@ -1026,11 +864,7 @@ pub const IO = struct {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Internal: Epoll
-    // -------------------------------------------------------------------------
-
-    /// Register a completion with epoll and add it to awaiting.
+    /// Register a completion with epoll and mark it in-flight.
     fn epoll_enqueue(self: *IO, completion: *Completion, fd: posix.fd_t, events: u32) void {
         assert(!completion.in_awaiting);
         assert(!completion.epoll_registered);
@@ -1049,11 +883,10 @@ pub const IO = struct {
         }
         completion.epoll_registered = true;
         completion.in_awaiting = true;
-        self.awaiting.push(completion);
     }
 
     /// Re-register a completion with epoll (used after spurious EAGAIN on epoll wakeup).
-    /// The completion remains in awaiting; only the epoll registration is refreshed.
+    /// The completion remains in-flight; only the epoll registration is refreshed.
     fn epoll_reregister(self: *IO, completion: *Completion, fd: posix.fd_t, events: u32) void {
         assert(completion.in_awaiting);
         assert(!completion.epoll_registered);
@@ -1077,11 +910,10 @@ pub const IO = struct {
     fn poll_epoll(self: *IO, timeout_ms: i32) !void {
         var events: [256]linux.epoll_event = undefined;
         while (true) {
-            const rc = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
-            switch (posix.errno(rc)) {
+            const return_code = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    const n: usize = rc;
-                    for (events[0..n]) |event| {
+                    for (events[0..return_code]) |event| {
                         self.process_epoll_event(event);
                     }
                     return;
@@ -1105,6 +937,7 @@ pub const IO = struct {
         // Remove from epoll. The fd is embedded in the operation.
         const fd = operation_fd(completion);
         _ = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
+        assert(completion.epoll_registered);
         completion.epoll_registered = false;
 
         switch (completion.operation) {
@@ -1118,24 +951,24 @@ pub const IO = struct {
     }
 
     fn process_accept(self: *IO, completion: *Completion) void {
-        const op = &completion.operation.accept;
+        const operation = &completion.operation.accept;
         while (true) {
-            const rc = linux.accept4(
-                op.socket,
-                @ptrCast(&op.address),
-                &op.address_size,
+            const return_code = linux.accept4(
+                operation.socket,
+                @ptrCast(&operation.address),
+                &operation.address_size,
                 linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             );
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 // Spurious wakeup: re-register with epoll.
                 .AGAIN => {
-                    self.epoll_reregister(completion, op.socket, linux.EPOLL.IN);
+                    self.epoll_reregister(completion, operation.socket, linux.EPOLL.IN);
                     return;
                 },
                 else => |err| {
@@ -1148,22 +981,22 @@ pub const IO = struct {
     }
 
     fn process_eventfd_read(self: *IO, completion: *Completion) void {
-        const op = completion.operation.eventfd_read;
+        const operation = completion.operation.eventfd_read;
         while (true) {
-            const rc = linux.read(
-                op.fd,
+            const return_code = linux.read(
+                operation.fd,
                 @ptrCast(&completion.eventfd_read_buffer),
                 @sizeOf(u64),
             );
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_reregister(completion, op.fd, linux.EPOLL.IN);
+                    self.epoll_reregister(completion, operation.fd, linux.EPOLL.IN);
                     return;
                 },
                 else => |err| {
@@ -1176,18 +1009,25 @@ pub const IO = struct {
     }
 
     fn process_recv(self: *IO, completion: *Completion) void {
-        const op = completion.operation.recv;
+        const operation = completion.operation.recv;
         while (true) {
-            const rc = linux.recvfrom(op.socket, op.buffer.ptr, op.buffer.len, 0, null, null);
-            switch (posix.errno(rc)) {
+            const return_code = linux.recvfrom(
+                operation.socket,
+                operation.buffer.ptr,
+                operation.buffer.len,
+                0,
+                null,
+                null,
+            );
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_reregister(completion, op.socket, linux.EPOLL.IN);
+                    self.epoll_reregister(completion, operation.socket, linux.EPOLL.IN);
                     return;
                 },
                 else => |err| {
@@ -1200,25 +1040,25 @@ pub const IO = struct {
     }
 
     fn process_send(self: *IO, completion: *Completion) void {
-        const op = completion.operation.send;
+        const operation = completion.operation.send;
         while (true) {
-            const rc = linux.sendto(
-                op.socket,
-                op.buffer.ptr,
-                op.buffer.len,
+            const return_code = linux.sendto(
+                operation.socket,
+                operation.buffer.ptr,
+                operation.buffer.len,
                 linux.MSG.NOSIGNAL,
                 null,
                 0,
             );
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    completion.result = @intCast(rc);
+                    completion.result = @intCast(return_code);
                     self.completed.push(completion);
                     return;
                 },
                 .INTR => continue,
                 .AGAIN => {
-                    self.epoll_reregister(completion, op.socket, linux.EPOLL.OUT);
+                    self.epoll_reregister(completion, operation.socket, linux.EPOLL.OUT);
                     return;
                 },
                 else => |err| {
@@ -1233,14 +1073,14 @@ pub const IO = struct {
     fn process_connect(self: *IO, completion: *Completion) void {
         assert(!completion.epoll_registered);
 
-        const op = completion.operation.connect;
+        const operation = completion.operation.connect;
 
         var so_error: c_int = 0;
         var so_error_len: posix.socklen_t = @sizeOf(c_int);
 
         // Check the connection result via getsockopt(SO_ERROR).
-        const rc = std.os.linux.getsockopt(
-            op.socket,
+        const return_code = std.os.linux.getsockopt(
+            operation.socket,
             posix.SOL.SOCKET,
             posix.SO.ERROR,
             @ptrCast(&so_error),
@@ -1248,10 +1088,10 @@ pub const IO = struct {
         );
         assert(so_error_len == @sizeOf(c_int));
 
-        switch (posix.errno(rc)) {
+        switch (posix.errno(return_code)) {
             .SUCCESS => {},
             .INTR => {
-                self.epoll_reregister(completion, op.socket, linux.EPOLL.OUT);
+                self.epoll_reregister(completion, operation.socket, linux.EPOLL.OUT);
                 return;
             },
             else => |err| {
@@ -1265,14 +1105,10 @@ pub const IO = struct {
         self.completed.push(completion);
     }
 
-    // -------------------------------------------------------------------------
-    // Internal: Timeouts
-    // -------------------------------------------------------------------------
-
     fn monotonic_now_ns() i128 {
         var ts: linux.timespec = undefined;
-        const rc = linux.clock_gettime(.MONOTONIC, &ts);
-        assert(posix.errno(rc) == .SUCCESS);
+        const return_code = linux.clock_gettime(.MONOTONIC, &ts);
+        assert(posix.errno(return_code) == .SUCCESS);
 
         return @as(i128, ts.sec) * std.time.ns_per_s + @as(i128, ts.nsec);
     }
@@ -1288,7 +1124,6 @@ pub const IO = struct {
             completion.in_timeouts = false;
 
             assert(completion.in_awaiting);
-            self.awaiting.remove(completion);
             completion.in_awaiting = false;
 
             completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
@@ -1308,15 +1143,15 @@ pub const IO = struct {
 
         while (true) {
             var expirations: u64 = undefined;
-            const rc = linux.read(
+            const return_code = linux.read(
                 self.timer_fd,
                 @ptrCast(&expirations),
                 @sizeOf(u64),
             );
 
-            switch (posix.errno(rc)) {
+            switch (posix.errno(return_code)) {
                 .SUCCESS => {
-                    assert(rc == @sizeOf(u64));
+                    assert(return_code == @sizeOf(u64));
                     self.timer_armed = false;
                     self.timer_expiry_ns = 0;
                     continue;
@@ -1424,18 +1259,14 @@ pub const IO = struct {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Internal: Helpers
-    // -------------------------------------------------------------------------
-
     /// Returns the fd for operations registered with epoll.
     fn operation_fd(completion: *Completion) posix.fd_t {
         return switch (completion.operation) {
-            .accept => |op| op.socket,
-            .recv => |op| op.socket,
-            .send => |op| op.socket,
-            .connect => |op| op.socket,
-            .eventfd_read => |op| op.fd,
+            .accept => |operation| operation.socket,
+            .recv => |operation| operation.socket,
+            .send => |operation| operation.socket,
+            .connect => |operation| operation.socket,
+            .eventfd_read => |operation| operation.fd,
             else => unreachable,
         };
     }
@@ -1462,10 +1293,6 @@ pub const IO = struct {
         }.erased;
     }
 
-    // -------------------------------------------------------------------------
-    // Completion
-    // -------------------------------------------------------------------------
-
     pub const Completion = struct {
         io: *IO,
         result: i32 = undefined,
@@ -1478,11 +1305,7 @@ pub const IO = struct {
             result: *const anyopaque,
         ) void,
 
-        /// Used by the IO.awaiting doubly-linked list.
-        awaiting_back: ?*Completion = null,
-        awaiting_next: ?*Completion = null,
-
-        /// True when this completion is in the IO.awaiting doubly-linked list.
+        /// True when this completion is in-flight (registered in epoll or awaiting a timeout).
         in_awaiting: bool = false,
 
         /// True when this completion is registered in epoll.
@@ -1498,20 +1321,6 @@ pub const IO = struct {
 
         fn complete(completion: *Completion) void {
             switch (completion.operation) {
-                .cancel => {
-                    const result: CancelError!void = result: {
-                        if (completion.result < 0) {
-                            break :result switch (@as(posix.E, @enumFromInt(-completion.result))) {
-                                .NOENT => error.NotRunning,
-                                .ALREADY => error.NotInterruptable,
-                                .INVAL => unreachable,
-                                else => |errno| stdx.unexpected_errno("cancel", errno),
-                            };
-                        }
-                        break :result {};
-                    };
-                    completion.callback(completion.context, completion, &result);
-                },
                 .accept => {
                     const result: AcceptError!socket_t = blk: {
                         if (completion.result < 0) {
@@ -1710,14 +1519,7 @@ pub const IO = struct {
         }
     };
 
-    // -------------------------------------------------------------------------
-    // Operation
-    // -------------------------------------------------------------------------
-
     const Operation = union(enum) {
-        cancel: struct {
-            target: *Completion,
-        },
         accept: struct {
             socket: socket_t,
             address: posix.sockaddr = undefined,

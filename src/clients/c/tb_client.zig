@@ -4,10 +4,10 @@ const builtin = @import("builtin");
 pub const vsr = @import("../../vsr.zig");
 pub const exports = @import("tb_client_exports.zig");
 
-// On Linux, the build flag `-Dclient_io=epoll` selects the lightweight epoll-only IO
-// backend instead of io_uring, for compatibility with older kernels and restricted containers.
+// On Linux, clients use the lightweight epoll-only IO backend instead of io_uring, for
+// compatibility with older kernels and restricted containers (e.g. Docker with io_uring disabled).
 // All other platforms always use their native IO.
-pub const ClientIO = if (builtin.target.os.tag == .linux and @import("vsr_options").client_io == .epoll)
+pub const ClientIO = if (builtin.target.os.tag == .linux)
     @import("../../io/linux_epoll.zig").IO
 else
     @import("../../io.zig").IO;
