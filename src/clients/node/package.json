@@ -9,6 +9,10 @@
     "url": "git+https://github.com/tigerbeetle/tigerbeetle.git",
     "directory": "src/clients/node"
   },
+  "homepage": "https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/node",
+  "bugs": {
+    "url": "https://github.com/tigerbeetle/tigerbeetle/issues"
+  },
   "preferUnplugged": true,
   "files": [
     "LICENSE",
