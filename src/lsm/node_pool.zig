@@ -34,7 +34,7 @@ pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) typ
                 .buffer = undefined,
                 .free = undefined,
             };
-            const size = node_size * node_count;
+            const size: u64 = @as(u64, node_size) * @as(u64, node_count);
             pool.buffer = try allocator.alignedAlloc(u8, node_alignment, size);
             errdefer allocator.free(pool.buffer);
 
