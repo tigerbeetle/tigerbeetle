@@ -6,8 +6,9 @@
       <NeutralLanguage>en-US</NeutralLanguage>
       <PackageId>tigerbeetle</PackageId>
       <PackageTags>TigerBeetle</PackageTags>
-      <PackageProjectUrl>https://github.com/tigerbeetle/tigerbeetle</PackageProjectUrl>
+      <PackageProjectUrl>https://docs.tigerbeetle.com/coding/clients/dotnet</PackageProjectUrl>
       <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+      <RepositoryUrl>https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/dotnet</RepositoryUrl>
       <PublishRepositoryUrl>true</PublishRepositoryUrl>
     </PropertyGroup>
   </Project>

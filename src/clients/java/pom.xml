@@ -18,9 +18,9 @@
     <name>TigerBeetle, Inc.</name>
     <url>https://www.tigerbeetle.com</url>
   </organization>
-  <url>https://www.tigerbeetle.com</url>
+  <url>https://docs.tigerbeetle.com/coding/client/java</url>
   <scm>
-    <url>https://github.com/tigerbeetle/tigerbeetle</url>
+    <url>https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/java</url>
   </scm>
 
   <licenses>

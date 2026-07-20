@@ -15,7 +15,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tigerbeetle/tigerbeetle"
+Homepage = "https://docs.tigerbeetle.com/coding/clients/python"
+Source = "https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/python"
 Issues = "https://github.com/tigerbeetle/tigerbeetle/issues"
 
 
