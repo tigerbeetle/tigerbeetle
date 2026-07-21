@@ -12,11 +12,16 @@ func isEmpty(obj interface{}) bool {
 	}
 
 	value := reflect.ValueOf(obj)
-	if value.IsNil() {
-		return true
-	}
 	switch value.Kind() {
-	case reflect.Chan, reflect.Map, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		if value.IsNil() {
+			return true
+		}
+		if value.Kind() == reflect.Chan || value.Kind() == reflect.Map || value.Kind() == reflect.Slice {
+			return value.Len() == 0
+		}
+		return false
+	case reflect.Array, reflect.String:
 		return value.Len() == 0
 	default:
 		return false
@@ -99,9 +104,30 @@ func NotEqual(t *testing.T, a, b interface{}) {
 }
 
 func isGreater(a, b interface{}) bool {
-	a64, okA := a.(uint64)
-	b64, okB := b.(uint64)
-	return okA && okB && (a64 > b64)
+	av := reflect.ValueOf(a)
+	bv := reflect.ValueOf(b)
+	if !av.IsValid() || !bv.IsValid() {
+		return false
+	}
+
+	switch av.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		switch bv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return av.Int() > bv.Int()
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		switch bv.Kind() {
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			return av.Uint() > bv.Uint()
+		}
+	case reflect.Float32, reflect.Float64:
+		switch bv.Kind() {
+		case reflect.Float32, reflect.Float64:
+			return av.Float() > bv.Float()
+		}
+	}
+	return false
 }
 
 func Greater(t *testing.T, a, b interface{}) {
