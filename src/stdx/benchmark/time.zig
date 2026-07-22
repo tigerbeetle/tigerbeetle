@@ -1,10 +1,9 @@
-/// In microbenchmarks, we often measure both time and other performance counters
-/// such as how many cycles were used, how many branch misses were incurred, and more.
-/// These only count cycles in the current process, and not, for exampole, sleep time.
-/// The closest matching clock implementation semantics are provided by CLOCK_MONOTONIC,
-/// which is what we use here. To distinguish towards vsr.time.Time.monotonic(),
-/// we call this `benchmark_monotonic()`
-/// https://github.com/ziglang/zig/pull/933#discussion_r656021295.
+//! In microbenchmarks, we often measure both time and other performance counters
+//! such as how many cycles were used, how many branch misses were incurred, and more.
+//! These only count cycles in the current process, and not, for exampole, sleep time.
+//! The closest matching clock implementation semantics are provided by CLOCK_MONOTONIC,
+//! which is what we use here. To distinguish towards vsr.time.Time.monotonic(),
+//! we call this `benchmark_monotonic()`.
 const std = @import("std");
 const builtin = @import("builtin");
 
@@ -100,7 +99,7 @@ fn benchmark_monotonic_darwin() u64 {
 fn benchmark_monotonic_linux() u64 {
     assert(is_linux);
     const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch {
-        @panic("CLOCK_BOOTTIME required");
+        @panic("CLOCK_MONOTONIC required");
     };
     return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
 }
