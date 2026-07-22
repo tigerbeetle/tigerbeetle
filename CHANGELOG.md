@@ -85,7 +85,7 @@ Released: 2026-07-03
 
 - [#3817](https://github.com/tigerbeetle/tigerbeetle/pull/3817)
 
-  Workaround MacOS builds on Zig 0.14.1 (see [issue](ttps://codeberg.org/ziglang/zig/issues/31658)).
+  Workaround MacOS builds on Zig 0.14.1 (see [issue](https://codeberg.org/ziglang/zig/issues/31658)).
 
 ### TigerTracks 🎧
 
@@ -3174,7 +3174,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 ### Internals
 - [#2713](https://github.com/tigerbeetle/tigerbeetle/pull/2713)
 
-  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md) from
+  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/internals/talks.md) from
   SystemsDistributed '23, P99 CONF '23, Money2020 '24, and SYCL '24.
 
 - [#2710](https://github.com/tigerbeetle/tigerbeetle/pull/2710)
