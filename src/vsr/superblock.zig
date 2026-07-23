@@ -420,16 +420,6 @@ pub const SuperBlockHeader = extern struct {
             return null;
         }
 
-        pub fn prepare_checkpoint_id_valid(
-            checkpoint: *const CheckpointState,
-            prepare: *const vsr.Header.Prepare,
-        ) bool {
-            if (prepare.operation == .reserved or prepare.op <= checkpoint.header.op) return true;
-            const checkpoint_id_expected =
-                checkpoint.checkpoint_id_for_op(prepare.op) orelse return true;
-            return prepare.checkpoint_id == checkpoint_id_expected;
-        }
-
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(@sizeOf(CheckpointState) == 1024);
@@ -1645,22 +1635,6 @@ test "CheckpointState.checkpoint_id_for_op" {
     try std.testing.expectEqual(checkpoint_id, checkpoint.checkpoint_id_for_op(checkpoint_3 + 1));
     try std.testing.expectEqual(checkpoint_id, checkpoint.checkpoint_id_for_op(checkpoint_4));
     try std.testing.expectEqual(null, checkpoint.checkpoint_id_for_op(checkpoint_4 + 1));
-
-    var prepare = std.mem.zeroes(vsr.Header.Prepare);
-    prepare.operation = .pulse;
-    prepare.op = checkpoint_2 + 1;
-    prepare.checkpoint_id = checkpoint.parent_checkpoint_id;
-    try std.testing.expect(checkpoint.prepare_checkpoint_id_valid(&prepare));
-
-    prepare.checkpoint_id += 1;
-    try std.testing.expect(!checkpoint.prepare_checkpoint_id_valid(&prepare));
-
-    prepare.op = checkpoint_2;
-    try std.testing.expect(checkpoint.prepare_checkpoint_id_valid(&prepare));
-
-    prepare.operation = .reserved;
-    prepare.op = checkpoint_2 + 1;
-    try std.testing.expect(checkpoint.prepare_checkpoint_id_valid(&prepare));
 }
 
 test "SuperBlockHeader" {

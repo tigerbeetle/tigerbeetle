@@ -344,16 +344,14 @@ fn check_wal(integrity: *Integrity) !u64 {
         assert(wal_header.valid_checksum());
         assert(wal_prepare_body_valid);
         assert(wal_header.checksum == wal_prepare.checksum);
-        if (!integrity.superblock.working.vsr_state.checkpoint.prepare_checkpoint_id_valid(
-            wal_header,
-        )) {
-            log.err("invalid checkpoint id: slot={} op={} operation={}", .{
-                slot,
-                wal_header.op,
-                wal_header.operation,
-            });
-            assert(false);
+
+        if (wal_header.operation != .reserved) {
+            const checkpoint = &integrity.superblock.working.vsr_state.checkpoint;
+            if (checkpoint.checkpoint_id_for_op(wal_header.op)) |checkpoint_id_expected| {
+                assert(wal_header.checkpoint_id == checkpoint_id_expected);
+            }
         }
+
         checked_bytes += bytes_read;
     }
 
