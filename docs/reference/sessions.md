@@ -9,6 +9,14 @@ to statically guarantee capacity in its incoming message queue. Additional reque
 application are queued by the client, to be dequeued and sent when their preceding request receives
 a reply.
 
+That client-side queue is **bounded**. By default a session may hold only a small number of
+requests at once (the in-flight request plus a short backlog —
+`constants.client_request_queue_max`, 2 by default). Multithreaded or highly concurrent apps should
+still share **one** client and batch events, but they must not assume unlimited request buffering:
+when the queue is full, further submits fail rather than growing without bound (language bindings
+surface this as an error/exception such as Java's `ConcurrencyMaxExceeded` path). This limit is
+independent of cluster [session eviction](#eviction) (`clients_max`).
+
 Similar to other databases, TigerBeetle has a [hard limit](#eviction) on the number of concurrent
 client sessions. To maximize throughput, users are encouraged to minimize the number of concurrent
 clients and [batch](../coding/requests.md#batching-events) as many events as possible per request.

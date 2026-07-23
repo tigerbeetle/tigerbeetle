@@ -83,6 +83,11 @@ it automatically groups together batches of small sizes into one request. Since 
 can have [**at most one in-flight request**](../reference/sessions.md), the client
 accumulates smaller batches together while waiting for a reply to the last request.
 
+The client retains only a **bounded** number of outstanding requests (in flight plus backlog;
+see [Client Sessions](../reference/sessions.md)). Exceeding that bound does not block forever and
+does not expand memory indefinitely — submit fails with a client-side error. Prefer deeper
+[event batches](#batching-events) over a large fan-out of concurrent tiny requests on one session.
+
 †: For queries (e.g. `get_account_transfers`, etc) TigerBeetle clients use the query `limit` to
 automatically batch queries of the same type together into requests when it knows for sure that all
 of their results will fit in a single reply.
