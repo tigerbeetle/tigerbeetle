@@ -9,6 +9,11 @@
 curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip
 ./tigerbeetle version
 ```
+
+`https://linux.tigerbeetle.com` serves the **x86_64** Linux build. On **aarch64** Linux,
+download [`tigerbeetle-aarch64-linux.zip`] from the [Latest Release](#latest-release) table
+instead (or the matching asset on the GitHub releases page).
+
 </details>
 
 <details>

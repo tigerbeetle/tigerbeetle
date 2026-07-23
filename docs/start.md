@@ -19,6 +19,10 @@ You can download a pre-built binary from `tigerbeetle.com`:
 curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip
 ./tigerbeetle version
 ```
+
+On **aarch64** Linux, the `linux.tigerbeetle.com` URL is x86_64-only — use the aarch64 zip from
+[Installing](./operating/installing.md#latest-release) instead.
+
 </details>
 
 <details>

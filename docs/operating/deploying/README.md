@@ -8,7 +8,10 @@ deployment procedure is simple:
 - Format the data files, specifying cluster id, replica count, and replica index.
 - Start replicas, specifying path to the data file and addresses of all replicas in the cluster.
 
-Here's how to deploy a three replica cluster running on a single machine:
+Here's how to deploy a three replica cluster running on a single machine.
+
+The `linux.tigerbeetle.com` shortcut is **x86_64**; on **aarch64** Linux see
+[Installing](../installing.md#latest-release).
 
 ```console
 curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
