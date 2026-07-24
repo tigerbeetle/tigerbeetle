@@ -165,7 +165,6 @@
 
               <!-- Excluding enums -->
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
-              <exclude>com/tigerbeetle/PacketAcquireStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/ClientStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
