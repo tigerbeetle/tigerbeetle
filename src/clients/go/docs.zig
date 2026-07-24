@@ -21,6 +21,10 @@ pub const GoDocs = Docs{
 
     .prerequisites =
     \\* Go >= 1.21
+    \\* A C toolchain for [cgo](https://pkg.go.dev/cmd/cgo) (the module links
+    \\  native `libtb_client`). On macOS install Xcode Command Line Tools; on
+    \\  Linux ensure `gcc` or `clang` is on `PATH`. Minimal / NixOS images
+    \\  often fail import with missing `gcc` until a C compiler is installed.
     \\
     \\**Additionally on Windows**: you must install [Zig
     \\0.14.1](https://ziglang.org/download/#release-0.14.1) and set the
