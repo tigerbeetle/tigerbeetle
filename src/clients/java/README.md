@@ -188,7 +188,7 @@ To toggle behavior for an account, combine enum values stored in the
 
 * `AccountFlags.LINKED`
 * `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
-* `AccountFlags.CREDITS_MUST_NOT_EXCEED_CREDITS`
+* `AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS`
 * `AccountFlags.HISTORY`
 
 For example, to link two accounts where the first account

@@ -103,7 +103,7 @@ pub const JavaDocs = Docs{
     \\
     \\* `AccountFlags.LINKED`
     \\* `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
-    \\* `AccountFlags.CREDITS_MUST_NOT_EXCEED_CREDITS`
+    \\* `AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS`
     \\* `AccountFlags.HISTORY`
     ,
 
