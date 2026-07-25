@@ -15,4 +15,5 @@ var (
 	ErrClientClosed         = errors.New("client was closed")
 	ErrInvalidOperation     = errors.New("internal operation provided was invalid")
 	ErrTooMuchData          = errors.New("too much data was sent or requested in this batch")
+	ErrInvalidQueryFilter   = errors.New("invalid query filter")
 )

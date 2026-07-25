@@ -29,6 +29,7 @@ extern __declspec(dllexport) void onGoPacketCompletion(
 import "C"
 import (
 	e "errors"
+	"math"
 	"runtime"
 	"strings"
 	"unsafe"
@@ -430,7 +431,31 @@ func (c *c_client) GetAccountBalances(filter AccountFilter) ([]AccountBalance, e
 	return results, nil
 }
 
+// validateQueryFilter mirrors state_machine QueryFilter acceptance so Go callers
+// get an error instead of an empty result for zero-limit / impossible timestamps
+// (see https://github.com/tigerbeetle/tigerbeetle/issues/3092).
+func validateQueryFilter(filter QueryFilter) error {
+	// timestamp id 2^64-1 is never a valid event timestamp (TimestampRange.valid).
+	if filter.TimestampMin != 0 && filter.TimestampMin == math.MaxUint64 {
+		return ErrInvalidQueryFilter
+	}
+	if filter.TimestampMax != 0 && filter.TimestampMax == math.MaxUint64 {
+		return ErrInvalidQueryFilter
+	}
+	if filter.TimestampMax != 0 && filter.TimestampMin > filter.TimestampMax {
+		return ErrInvalidQueryFilter
+	}
+	if filter.Limit == 0 {
+		return ErrInvalidQueryFilter
+	}
+	return nil
+}
+
 func (c *c_client) QueryAccounts(filter QueryFilter) ([]Account, error) {
+	if err := validateQueryFilter(filter); err != nil {
+		return nil, err
+	}
+
 	reply, err := c.doRequest(
 		C.TB_OPERATION_QUERY_ACCOUNTS,
 		1,
@@ -451,6 +476,10 @@ func (c *c_client) QueryAccounts(filter QueryFilter) ([]Account, error) {
 }
 
 func (c *c_client) QueryTransfers(filter QueryFilter) ([]Transfer, error) {
+	if err := validateQueryFilter(filter); err != nil {
+		return nil, err
+	}
+
 	reply, err := c.doRequest(
 		C.TB_OPERATION_QUERY_TRANSFERS,
 		1,
