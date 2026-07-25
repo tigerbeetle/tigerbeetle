@@ -26,7 +26,7 @@ public final class QueryFilter {
     /**
      * @return an array of 16 bytes representing the 128-bit value.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_128">user_data_128</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_128">user_data_128</a>
      */
     public byte[] getUserData128() {
         return this.batch.getUserData128();
@@ -39,7 +39,7 @@ public final class QueryFilter {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_128">user_data_128</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_128">user_data_128</a>
      */
     public long getUserData128(final UInt128 part) {
         return this.batch.getUserData128(part);
@@ -49,7 +49,7 @@ public final class QueryFilter {
      * @param userData128 an array of 16 bytes representing the 128-bit value.
      * @throws IllegalArgumentException if {@code userData128} is not 16 bytes long.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_128">user_data_128</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_128">user_data_128</a>
      */
     public void setUserData128(final byte[] userData128) {
         this.batch.setUserData128(userData128);
@@ -59,7 +59,7 @@ public final class QueryFilter {
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_128">user_data_128</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_128">user_data_128</a>
      */
     public void setUserData128(final long leastSignificant, final long mostSignificant) {
         this.batch.setUserData128(leastSignificant, mostSignificant);
@@ -68,7 +68,7 @@ public final class QueryFilter {
     /**
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_128">user_data_128</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_128">user_data_128</a>
      */
     public void setUserData128(final long leastSignificant) {
         this.batch.setUserData128(leastSignificant);
@@ -76,7 +76,7 @@ public final class QueryFilter {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_64">user_data_64</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_64">user_data_64</a>
      */
     public long getUserData64() {
         return this.batch.getUserData64();
@@ -85,7 +85,7 @@ public final class QueryFilter {
     /**
      * @param userData64
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_64">user_data_64</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_64">user_data_64</a>
      */
     public void setUserData64(final long userData64) {
         this.batch.setUserData64(userData64);
@@ -93,7 +93,7 @@ public final class QueryFilter {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_32">user_data_32</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_32">user_data_32</a>
      */
     public int getUserData32() {
         return this.batch.getUserData32();
@@ -102,14 +102,14 @@ public final class QueryFilter {
     /**
      * @param userData32
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter#user_data_32">user_data_32</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#user_data_32">user_data_32</a>
      */
     public void setUserData32(final int userData32) {
         this.batch.setUserData32(userData32);
     }
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/query_filter#ledger">ledger</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/query-filter#ledger">ledger</a>
      */
     public int getLedger() {
         return this.batch.getLedger();
@@ -117,14 +117,14 @@ public final class QueryFilter {
 
     /**
      * @param ledger
-     * @see <a href="https://docs.tigerbeetle.com/reference/query_filter#ledger">ledger</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/query-filter#ledger">ledger</a>
      */
     public void setLedger(final int ledger) {
         this.batch.setLedger(ledger);
     }
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/query_filter#code">code</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/query-filter#code">code</a>
      */
     public int getCode() {
         return this.batch.getCode();
@@ -132,7 +132,7 @@ public final class QueryFilter {
 
     /**
      * @param code
-     * @see <a href="https://docs.tigerbeetle.com/reference/query_filter#code">code</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/query-filter#code">code</a>
      */
     public void setCode(final int code) {
         this.batch.setCode(code);
@@ -140,7 +140,7 @@ public final class QueryFilter {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter-filter#timestamp_min">timestamp_min</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#timestamp_min">timestamp_min</a>
      */
     public long getTimestampMin() {
         return batch.getTimestampMin();
@@ -149,7 +149,7 @@ public final class QueryFilter {
     /**
      * @param timestamp
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter-filter#timestamp_min">timestamp_min</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#timestamp_min">timestamp_min</a>
      */
     public void setTimestampMin(final long timestamp) {
         batch.setTimestampMin(timestamp);
@@ -157,7 +157,7 @@ public final class QueryFilter {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter-filter#timestamp_max">timestamp_max</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#timestamp_max">timestamp_max</a>
      */
     public long getTimestampMax() {
         return batch.getTimestampMax();
@@ -166,14 +166,14 @@ public final class QueryFilter {
     /**
      * @param timestamp
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter-filter#timestamp_max">timestamp_max</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#timestamp_max">timestamp_max</a>
      */
     public void setTimestampMax(final long timestamp) {
         batch.setTimestampMax(timestamp);
     }
 
     /**
-     * @see <a href= "https://docs.tigerbeetle.com/reference/query_filter-filter#limit">limit</a>
+     * @see <a href= "https://docs.tigerbeetle.com/reference/query-filter#limit">limit</a>
      */
     public int getLimit() {
         return batch.getLimit();
@@ -181,7 +181,7 @@ public final class QueryFilter {
 
     /**
      * @param limit
-     * @see <a href= "https://docs.tigerbeetle.com/reference/query_filter-filter#limit">limit</a>
+     * @see <a href= "https://docs.tigerbeetle.com/reference/query-filter#limit">limit</a>
      */
     public void setLimit(final int limit) {
         batch.setLimit(limit);
@@ -189,7 +189,7 @@ public final class QueryFilter {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter-filter#flagsreversed">reversed</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#flagsreversed">reversed</a>
      */
     public boolean getReversed() {
         return getFlags(QueryFilterFlags.REVERSED);
@@ -198,7 +198,7 @@ public final class QueryFilter {
     /**
      * @param value
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/query_filter-filter#flagsreversed">reversed</a>
+     *      "https://docs.tigerbeetle.com/reference/query-filter#flagsreversed">reversed</a>
      */
     public void setReversed(boolean value) {
         setFlags(QueryFilterFlags.REVERSED, value);
