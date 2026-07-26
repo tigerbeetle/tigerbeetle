@@ -1366,42 +1366,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
 
-            const op_max = @max(
-                op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant),
-                op_maximum_headers_untrusted(replica.cluster, journal.headers),
-            );
-
-            const op_checkpoint = replica.op_checkpoint();
-            const op_prepare_max = replica.op_prepare_max();
-
-            // Nothing to truncate - head op is not certain as it must be >= op_checkpoint.
-            if (op_max < op_checkpoint) return .{};
-
-            // Nothing to truncate - prepares beyond prepare_max are truncated via the cut decision.
-            if (op_max >= op_prepare_max) return .{};
-
-            const op_prepare_max_slot = journal.slot_for_op(op_prepare_max);
-            const op_checkpoint_slot = journal.slot_for_op(op_checkpoint);
-
-            assert(op_max < op_prepare_max);
-
-            // Range is constructed such that the op for all *valid* prepares or headers in it
-            // should be less than op_max. If a prepare/header within this range is corrupted, that
-            // makes our op_max uncertain.
-            const op_max_to_op_prepare_max = SlotRange{
-                .head = journal.slot_for_op(op_max + 1),
-                .tail = prepare_max: {
-                    if (op_checkpoint > 0 and op_max == op_checkpoint) {
-                        assert(op_prepare_max_slot.index == op_checkpoint_slot.index);
-                        assert(op_prepare_max > 0);
-
-                        break :prepare_max journal.slot_for_op(op_prepare_max - 1);
-                    } else {
-                        break :prepare_max op_prepare_max_slot;
-                    }
-                },
-            };
-
             // We only consider journal_iops_write_max torn slots, as that is the maximum number of
             // prepare writes that could be concurrently underway. If we find more (due to
             // corruptions), we err on the side of caution and don't truncate any prepares.
@@ -1426,56 +1390,51 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (case.decision(replica.solo()) == .vsr) {
                     const slot = Slot{ .index = index };
 
-                    // Checked separately as SlotRange.contains doesn't handle empty ranges.
-                    const range_empty = op_max_to_op_prepare_max.head.index ==
-                        op_max_to_op_prepare_max.tail.index;
+                    const header_prepare_untrusted = &journal.headers[index];
+                    const header_redundant_ok = header_ok(
+                        replica.cluster,
+                        slot,
+                        &journal.headers_redundant[index],
+                    );
 
-                    if ((range_empty and index == op_prepare_max_slot.index) or
-                        (!range_empty and op_max_to_op_prepare_max.contains(slot)))
-                    {
-                        const header_prepare_untrusted = &journal.headers[index];
-                        const header_redundant_ok = header_ok(
-                            replica.cluster,
-                            slot,
-                            &journal.headers_redundant[index],
-                        );
+                    // 1. Corrupt redundant header or a misdirected read to a redundant header.
+                    if (header_redundant_ok == null) continue;
 
-                        // We need our head op to be certain to reliably truncate torn prepares.
-                        // Head op is uncertain if we encounter one of the below faults:
+                    // 2. Redundant header is set to .reserved. Could happen if:
+                    //    i. Slot was found corrupt on a previous startup, which set the header
+                    //       to reserved in memory.
+                    //    ii. Replica crashes *before* the corrupt slot was repaired, but
+                    //       *after* the reserved header was written to disk with a write to
+                    //       a nearby header (there are multiple headers in a single sector)
+                    if (header_redundant_ok.?.operation == .reserved) continue;
 
-                        // 1. Corrupt redundant header or a misdirected read to a redundant header.
-                        if (header_redundant_ok == null) return .{};
+                    // 3. Prepare must be invalid for the slot to be eligible for truncation. A
+                    //    valid prepare could be faulty due to a misdirected read/write.
+                    if (header_prepare_untrusted.valid_checksum()) continue;
 
-                        // 2. Redundant header is set to .reserved. Could happen if:
-                        //    i. Slot was found corrupt on a previous startup, which set the header
-                        //       to reserved in memory.
-                        //    ii. Replica crashes *before* the corrupt slot was repaired, but
-                        //       *after* the reserved header was written to disk with a write to
-                        //       a nearby header (there are multiple headers in a single sector)
-                        if (header_redundant_ok.?.operation == .reserved) return .{};
+                    if (header_redundant_ok.?.op > replica.op_checkpoint()) continue;
 
-                        // 3. Prepare must be invalid for the slot to be eligible for truncation. A
-                        //    valid prepare could be faulty due to a misdirected read/write.
-                        if (header_prepare_untrusted.valid_checksum()) return .{};
+                    const op_max = @max(
+                        op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant),
+                        op_maximum_headers_untrusted(replica.cluster, journal.headers),
+                    );
 
-                        // Header is valid and from a previous wrap.
-                        assert(header_redundant_ok != null);
-                        assert(header_redundant_ok.?.op < op_max);
-                        assert(header_redundant_ok.?.op <= op_checkpoint);
+                    // Header is valid and from a previous wrap.
+                    assert(header_redundant_ok != null);
+                    assert(header_redundant_ok.?.op <= op_max);
 
-                        assert(!header_prepare_untrusted.valid_checksum());
-                        assert(!journal.prepare_inhabited[index]);
+                    assert(!header_prepare_untrusted.valid_checksum());
+                    assert(!journal.prepare_inhabited[index]);
 
-                        if (torn_slots.count() < constants.journal_iops_write_max) {
-                            torn_slots.push(slot);
-                        } else {
-                            log.warn("{}: torn_prepares: not truncating, found >{} " ++
-                                "torn prepares!", .{
-                                journal.replica,
-                                constants.journal_iops_write_max,
-                            });
-                            return .{};
-                        }
+                    if (torn_slots.count() < constants.journal_iops_write_max) {
+                        torn_slots.push(slot);
+                    } else {
+                        log.warn("{}: torn_prepares: not truncating, found >{} " ++
+                            "torn prepares!", .{
+                            journal.replica,
+                            constants.journal_iops_write_max,
+                        });
+                        return .{};
                     }
                 }
             }
