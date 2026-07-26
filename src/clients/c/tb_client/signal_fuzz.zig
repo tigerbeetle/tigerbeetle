@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Signal = @import("./signal.zig").Signal;
+const Signal = @import("./signal.zig").SignalType(IO);
 const IO = @import("../../../io.zig").IO;
 const stdx = @import("stdx");
 const fuzz = @import("../../../testing/fuzz.zig");
