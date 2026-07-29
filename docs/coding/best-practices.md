@@ -26,19 +26,26 @@ For analytical workloads, we recommend using TigerBeetle's Change Data Capture (
 CDC streams your data out of TigerBeetle into external systems which allows for reads that won't
 affect the hot path of your application.
 
-## Ordered Transfer Ids
+## Ordered IDs
 
-Transfer ids should be ordered for best performance, such as with a time-based id scheme. Internally
-this allows TigerBeetle to take advantage of LSM optimizations. Non-ordered ids such as UUID v4 make
-operations such as the idempotency check much less efficient, degrading performance as the number of
-transfers grows.
+We recommend using [our TigerBeetle ID](./data-modeling.md#tigerbeetle-time-based-identifiers-recommended)
+which is available in each of our client libraries to generate Account and Transfer IDs. IDs should
+be generated at the end client (e.g. your app running on your user's device) and passed end-to-end
+through your application.
 
-[We've implemented our own TigerBeetle ID](./data-modeling.md#tigerbeetle-time-based-identifiers-recommended)
-which is available in each of our clients.
+TigerBeetle ID is roughly a concatenation of client's local timestamp, and a random number. This
+ensures that on the server side, the incoming IDs are approximately monotonic, which allows for
+fast idempotency checks.
 
-> *It's better to start from sortable ids from day 1 of using TigerBeetle, since we use min-max
-pruning to optimize lookups in the LSM tree. If ids are truly random over 128 bits, the
-ids could end up 'poisoning' the lookup check for all future transfers.*
+Non-monotonic IDs, such as [UUID v4](https://en.wikipedia.org/wiki/Universally_unique_identifier#Version_4_(random))
+are allowed, but result in degraded performance. Schemes such as [ULID](https://github.com/ulid/spec)
+and [UUID v7](https://en.wikipedia.org/wiki/Universally_unique_identifier#Version_7_(timestamp_and_random)) 
+_are_ monotonic increasing, but ensure that when converting to a u128 binary representation,
+they maintain monotonicity.
+
+> *It's better to start from ordered IDs from day 1 of using TigerBeetle, since we use min-max
+pruning to optimize lookups in the LSM tree. If IDs are truly random over 128 bits, one
+IDs could end up 'poisoning' the lookup check for all future transfers and accounts.*
 
 ## Clients: Less is More
 
@@ -47,7 +54,14 @@ clients.
 
 With fewer clients, the TigerBeetle client is able to
 [automatically batch events](./requests.md#batching-events). As you increase the number of clients,
-the less effective this automatic batching becomes.
+this automatic batching becomes less effective.
+
+On the other hand, more clients are able to take advantage of request pipelining, which improves
+throughput by increasing the concurrency, and more than 1 client is necessary for redundancy in your
+application.
+
+To right-size the number of clients for your application, we recommend you benchmark and measure
+based on your workload.
 
 ## Write Last, Read First
 
