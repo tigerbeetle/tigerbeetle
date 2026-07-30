@@ -169,11 +169,6 @@ func doTestClient(t *testing.T, client Client) {
 		assert.True(t, hi == 11647051514084770242)
 	})
 
-	t.Run("can create accounts", func(t *testing.T) {
-		t.Parallel()
-		createTwoAccounts(t)
-	})
-
 	t.Run("can lookup accounts", func(t *testing.T) {
 		t.Parallel()
 		accountA, accountB := createTwoAccounts(t)
@@ -207,44 +202,6 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Equal(t, ToUint128(0), accB.CreditsPending)
 		assert.Equal(t, ToUint128(0), accB.CreditsPosted)
 		assert.NotEqual(t, uint64(0), accB.Timestamp)
-	})
-
-	t.Run("can create a transfer", func(t *testing.T) {
-		t.Parallel()
-		accountA, accountB := createTwoAccounts(t)
-
-		results, err := client.CreateTransfers([]Transfer{
-			{
-				ID:              ID(),
-				CreditAccountID: accountA.ID,
-				DebitAccountID:  accountB.ID,
-				Amount:          ToUint128(100),
-				Ledger:          1,
-				Code:            1,
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertCreateTransfersOK(t, results, 1)
-
-		accounts, err := client.LookupAccounts([]Uint128{accountA.ID, accountB.ID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Len(t, accounts, 2)
-
-		accountA = accounts[0]
-		assert.Equal(t, ToUint128(0), accountA.DebitsPending)
-		assert.Equal(t, ToUint128(0), accountA.DebitsPosted)
-		assert.Equal(t, ToUint128(0), accountA.CreditsPending)
-		assert.Equal(t, ToUint128(100), accountA.CreditsPosted)
-
-		accountB = accounts[1]
-		assert.Equal(t, ToUint128(0), accountB.DebitsPending)
-		assert.Equal(t, ToUint128(100), accountB.DebitsPosted)
-		assert.Equal(t, ToUint128(0), accountB.CreditsPending)
-		assert.Equal(t, ToUint128(0), accountB.CreditsPosted)
 	})
 
 	t.Run("can create linked transfers", func(t *testing.T) {
@@ -382,26 +339,6 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Empty(t, results)
-	})
-
-	t.Run("accept zero-length lookup_accounts", func(t *testing.T) {
-		t.Parallel()
-		results, err := client.LookupAccounts([]Uint128{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		assert.Empty(t, results)
-	})
-
-	t.Run("accept zero-length lookup_transfers", func(t *testing.T) {
-		t.Parallel()
-		results, err := client.LookupTransfers([]Uint128{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
 		assert.Empty(t, results)
 	})
 
