@@ -474,6 +474,7 @@ pub fn build_with_options(
     build_go_client(b, build_steps.clients_go, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .conformance_module = conformance_module,
         .tb_client_header = tb_client.header,
         .mode = options.mode,
     });
@@ -1887,6 +1888,7 @@ fn build_go_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        conformance_module: *std.Build.Module,
         tb_client_header: std.Build.LazyPath,
         mode: std.builtin.OptimizeMode,
     },
@@ -1896,6 +1898,19 @@ fn build_go_client(
         .from = options.tb_client_header,
         .path = "./src/clients/go/native/tb_client.h",
     });
+
+    const go_conformance_generator = b.addExecutable(.{
+        .name = "go_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/go/go_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    go_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    step_clients_go.dependOn(&Generated.file(b, .{
+        .generator = go_conformance_generator,
+        .path = "./src/clients/go/conformance_test.go",
+    }).step);
 
     const go_bindings_generator = b.addExecutable(.{
         .name = "go_bindings",
