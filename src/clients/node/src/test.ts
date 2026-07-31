@@ -17,6 +17,9 @@ import {
   RequestError,
 } from '.'
 
+import { Worker } from 'worker_threads';
+import path from 'path';
+
 async function sleep_ms(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -1667,6 +1670,17 @@ test("destroy client in-flight", async (): Promise<void> => {
   await Promise.all(actions.map((f) => f()));
   for (const client of clients) client.destroy();
 });
+
+test('supports worker threads', async (): Promise<void> => {
+  // Using worker threads exposes invalid sharing of napi_refs across napi_envs
+  const workers = [
+    new Worker(path.join(__dirname, './test_worker'), { workerData: { cluster_id: 0n, replica_addresses: REPLICA_ADDRESSES } }),
+    new Worker(path.join(__dirname, './test_worker'), { workerData: { cluster_id: 0n, replica_addresses: REPLICA_ADDRESSES } }),
+  ];
+  await Promise.all(workers.map((worker) => worker.on('message', (message) => {
+    assert.strictEqual(message, 'done');
+  })));
+})
 
 async function main () {
   const start = new Date().getTime()

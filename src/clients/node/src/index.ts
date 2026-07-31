@@ -11,56 +11,9 @@ import {
 } from './bindings'
 import { randomFillSync } from 'node:crypto'
 
-const binding: Binding = (() => {
-  const { arch, platform } = process
-
-  const archMap = {
-    "arm64": "aarch64",
-    "x64": "x86_64"
-  }
-
-  const platformMap = {
-    "linux": "linux",
-    "darwin": "macos",
-    "win32" : "windows",
-  }
-
-  if (! (arch in archMap)) {
-    throw new Error(`Unsupported arch: ${arch}`)
-  }
-
-  if (! (platform in platformMap)) {
-    throw new Error(`Unsupported platform: ${platform}`)
-  }
-
-  let linuxABI = ''
-
-  /**
-   * We need to detect during runtime which libc we're running on to load the correct NAPI.
-   * binary.
-   */
-  if (platform === 'linux') {
-    const glibcVersionRuntime = (process.report.getReport() as any).header.glibcVersionRuntime
-    if (glibcVersionRuntime) {
-      linuxABI = '-gnu'
-    } else {
-      linuxABI = '-musl'
-    }
-  }
-
-  const filename = `./bin/${archMap[arch as keyof typeof archMap]}-` +
-                    `${platformMap[platform as keyof typeof platformMap]}${linuxABI}/client.node`
-  return require(filename)
-})()
-
-export type Context = object // tb_client
-export type AccountID = bigint // u128
-export type TransferID = bigint // u128
-export type Event = Account | Transfer | AccountID | TransferID | AccountFilter | QueryFilter
-export type Result = CreateAccountResult | CreateTransferResult | Account | Transfer | AccountBalance
-export type ResultCallback = (error: Error | null, results: Result[] | null) => void
-
-export const amount_max: bigint = (2n ** 128n) - 1n
+interface BindingConfigureArgs {
+  request_error_class: typeof RequestError,
+}
 
 // Error codes returned by the client.
 export const ErrorCodes = {
@@ -101,13 +54,70 @@ export class RequestError extends Error {
 
 }
 
+const binding: Binding = (() => {
+  const { arch, platform } = process
+
+  const archMap = {
+    "arm64": "aarch64",
+    "x64": "x86_64"
+  }
+
+  const platformMap = {
+    "linux": "linux",
+    "darwin": "macos",
+    "win32" : "windows",
+  }
+
+  if (! (arch in archMap)) {
+    throw new Error(`Unsupported arch: ${arch}`)
+  }
+
+  if (! (platform in platformMap)) {
+    throw new Error(`Unsupported platform: ${platform}`)
+  }
+
+  let linuxABI = ''
+
+  /**
+   * We need to detect during runtime which libc we're running on to load the correct NAPI.
+   * binary.
+   */
+  if (platform === 'linux') {
+    const glibcVersionRuntime = (process.report.getReport() as any).header.glibcVersionRuntime
+    if (glibcVersionRuntime) {
+      linuxABI = '-gnu'
+    } else {
+      linuxABI = '-musl'
+    }
+  }
+
+  const filename = `./bin/${archMap[arch as keyof typeof archMap]}-` +
+                    `${platformMap[platform as keyof typeof platformMap]}${linuxABI}/client.node`
+  const binding = require(filename)
+  /**
+   * Configure should be called once per NAPI env to capture the error constructor
+   * ref for the env.
+   */
+  binding.configure(RequestError)
+  return binding;
+})()
+
+export type Context = object // tb_client
+export type AccountID = bigint // u128
+export type TransferID = bigint // u128
+export type Event = Account | Transfer | AccountID | TransferID | AccountFilter | QueryFilter
+export type Result = CreateAccountResult | CreateTransferResult | Account | Transfer | AccountBalance
+export type ResultCallback = (error: Error | null, results: Result[] | null) => void
+
+export const amount_max: bigint = (2n ** 128n) - 1n
+
 interface BindingInitArgs {
   cluster_id: bigint, // u128
   replica_addresses: Buffer,
-  request_error_class: typeof RequestError,
 }
 
 interface Binding {
+  configure: (requestErrorClass: typeof RequestError) => void
   init: (args: BindingInitArgs) => Context
   submit: (context: Context, operation: Operation, batch: Event[], callback: ResultCallback) => void
   deinit: (context: Context) => void,
@@ -136,7 +146,6 @@ export function createClient (args: ClientInitArgs): Client {
   let context: Context | null = binding.init({
     cluster_id: args.cluster_id,
     replica_addresses: Buffer.from(args.replica_addresses.join(',')),
-    request_error_class: RequestError,
   })
 
   const destroy = () => {
