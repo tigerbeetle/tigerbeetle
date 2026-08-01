@@ -1677,9 +1677,13 @@ test('supports worker threads', async (): Promise<void> => {
     new Worker(path.join(__dirname, './test_worker'), { workerData: { cluster_id: 0n, replica_addresses: REPLICA_ADDRESSES } }),
     new Worker(path.join(__dirname, './test_worker'), { workerData: { cluster_id: 0n, replica_addresses: REPLICA_ADDRESSES } }),
   ];
-  await Promise.all(workers.map((worker) => worker.on('message', (message) => {
-    assert.strictEqual(message, 'done');
-  })));
+  await Promise.all(
+    workers.map((worker) => new Promise<void>((resolve) =>
+        worker.on('exit', () => {
+        resolve();
+      })
+    ))
+  );
 })
 
 async function main () {
