@@ -773,6 +773,8 @@ const IO = struct {
             assert(!io.servers.contains(socket));
 
             connection.closed = true;
+        } else {
+            // We might be closing a socket which didn't ever connect().
         }
     }
 
@@ -819,12 +821,7 @@ const IO = struct {
             }
         }
 
-        io.fds_open -= 1;
-        if (io.connections.getPtr(fd)) |connection| {
-            connection.closed = true;
-        } else {
-            // We might be closing a socket which didn't ever connect().
-        }
+        io.close_socket(fd);
 
         completion.* = .{
             .context = context,
