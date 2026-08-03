@@ -9904,6 +9904,13 @@ pub fn ReplicaType(
                     assert(!prepare.ok_quorum_received);
                     assert(prepare.ok_from_all_replicas.empty());
 
+                    // The prepare was created by a previous primary, so we don't trace it yet.
+                    // Start a new timer for the prepare_ok quorum for this primary in the new view.
+                    self.trace.start(.{ .replica_prepare_ok_quorum = .{
+                        .index = prepare.message.header.op %
+                            constants.pipeline_prepare_queue_max,
+                    } });
+
                     log.debug("{}: view_as_the_new_primary: pipeline " ++
                         "(op={} checksum={x:0>32} parent={x:0>32})", .{
                         self.log_prefix(),
@@ -10250,6 +10257,10 @@ pub fn ReplicaType(
                 self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
                 queue.deinit(self.message_bus.pool);
             }
+
+            // Pending prepare quorum traces belong to the previous view.
+            // The new primary will start tracing prepares that transfer over.
+            self.trace.cancel(.replica_prepare_ok_quorum);
 
             self.ping_timeout.start();
             self.commit_message_timeout.stop();
