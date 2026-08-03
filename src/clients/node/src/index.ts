@@ -11,10 +11,6 @@ import {
 } from './bindings'
 import { randomFillSync } from 'node:crypto'
 
-interface BindingConfigureArgs {
-  request_error_class: typeof RequestError,
-}
-
 // Error codes returned by the client.
 export const ErrorCodes = {
   ERR_CLIENT_CLOSED: 'ERR_CLIENT_CLOSED',

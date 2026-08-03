@@ -19,6 +19,7 @@ import {
 
 import { Worker } from 'worker_threads';
 import path from 'path';
+import { once } from 'events';
 
 async function sleep_ms(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms))
@@ -1678,11 +1679,10 @@ test('supports worker threads', async (): Promise<void> => {
     new Worker(path.join(__dirname, './test_worker'), { workerData: { cluster_id: 0n, replica_addresses: REPLICA_ADDRESSES } }),
   ];
   await Promise.all(
-    workers.map((worker) => new Promise<void>((resolve) =>
-        worker.on('exit', () => {
-        resolve();
-      })
-    ))
+    workers.map(async (worker) => {
+      const [exitCode] = await once(worker, 'exit');
+      assert.strictEqual(exitCode, 0);
+    })
   );
 })
 

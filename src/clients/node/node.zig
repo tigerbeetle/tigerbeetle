@@ -25,7 +25,6 @@ pub const std_options: std.Options = .{
 };
 
 const InstanceData = struct {
-    napi_null: c.napi_value,
     request_error_ctor_ref: c.napi_ref,
 };
 
@@ -44,18 +43,47 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
 }
 
 fn register_module(env: c.napi_env, exports: c.napi_value) !c.napi_value {
-    const env_instance_data = try global_allocator.create(InstanceData);
-    errdefer global_allocator.destroy(env_instance_data);
-
-    env_instance_data.* = .{
-        .napi_null = try translate.capture_null(env),
-        .request_error_ctor_ref = null,
-    };
-
     try translate.register_function(env, exports, "configure", configure);
     try translate.register_function(env, exports, "init", init);
     try translate.register_function(env, exports, "deinit", deinit);
     try translate.register_function(env, exports, "submit", submit);
+
+    return exports;
+}
+
+// Add-on code
+
+export fn configure(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    return configure_internal(env, info) catch null;
+}
+
+fn configure_internal(env: c.napi_env, info: c.napi_callback_info) !c.napi_value {
+    const args = translate.extract_args(env, info, .{ .count = 1, .function = "configure" }) catch return null;
+
+    const existing_instance_data = try translate.get_instance_data(env);
+    // If set_instance_data has already been called, this will return non-null
+    if (existing_instance_data != null) {
+        return null;
+    }
+
+    const env_instance_data = try global_allocator.create(InstanceData);
+    errdefer global_allocator.destroy(env_instance_data);
+
+    try translate.create_reference(
+        env,
+        args[0],
+        // Strong since this error constructor fn may be GC'ed
+        // but we need it for the lifetime of our addon
+        .strong,
+        &env_instance_data.request_error_ctor_ref,
+        "Cannot reference the object constructor",
+    );
+    assert(env_instance_data.request_error_ctor_ref != null);
+    errdefer {
+        // Avoid the potential throw from the translate helper
+        const status = c.napi_delete_reference(env, env_instance_data.request_error_ctor_ref);
+        assert(status == c.napi_ok);
+    }
 
     try translate.set_instance_data(
         env,
@@ -63,27 +91,6 @@ fn register_module(env: c.napi_env, exports: c.napi_value) !c.napi_value {
         &finalize_instance_data,
     );
 
-    return exports;
-}
-
-// Add-on code
-
-fn configure(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    const args = translate.extract_args(env, info, .{ .count = 1, .function = "configure" }) catch return null;
-
-    const env_instance_data = instance_data(env) catch return null;
-    // Confirm that configure has not already been called
-    assert(env_instance_data.request_error_ctor_ref == null);
-    translate.create_reference(
-        env,
-        args[0],
-        // Weak reference: type and symbol references are never
-        // GCed and cannot be deleted during cleanup.
-        .weak,
-        &env_instance_data.request_error_ctor_ref,
-        "Cannot reference the object constructor",
-    ) catch return null;
-    assert(env_instance_data.request_error_ctor_ref != null);
     return null;
 }
 
@@ -117,7 +124,7 @@ fn finalize_instance_data(env: c.napi_env, finalize_data: ?*anyopaque, finalize_
     assert(finalize_data != null);
     assert(finalize_hint == null);
 
-    const env_instance_data: *InstanceData = @ptrCast(@alignCast(finalize_data orelse return));
+    const env_instance_data: *InstanceData = @ptrCast(@alignCast(finalize_data.?));
     if (env_instance_data.request_error_ctor_ref) |request_error_ctor_ref| {
         const status = c.napi_delete_reference(env, request_error_ctor_ref);
         assert(status == c.napi_ok);
@@ -498,17 +505,17 @@ fn on_completion_js(
         .pulse, .get_change_events => unreachable,
     };
 
-    const env_instance_data = instance_data(env) catch return;
+    const napi_null = translate.capture_null(env) catch return;
 
     // Parse Result array out of packet data, freeing it in the process.
     // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
-    var callback_error = env_instance_data.napi_null;
+    var callback_error = napi_null;
     const callback_result = array_or_error catch |err| switch (err) {
         error.ExceptionThrown => blk: {
             if (c.napi_get_and_clear_last_exception(env, &callback_error) != c.napi_ok) {
                 std.log.warn("Failed to capture callback error from thrown Exception.", .{});
             }
-            break :blk env_instance_data.napi_null;
+            break :blk napi_null;
         },
     };
 
@@ -524,7 +531,7 @@ fn on_completion_js(
     ) catch return;
 
     var args = [_]c.napi_value{ callback_error, callback_result };
-    _ = translate.call_function(env, env_instance_data.napi_null, callback, &args) catch return;
+    _ = translate.call_function(env, napi_null, callback, &args) catch return;
 }
 
 // (De)Serialization
