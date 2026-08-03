@@ -2318,6 +2318,10 @@ pub fn ReplicaType(
             assert(!prepare.ok_quorum_received);
             prepare.ok_quorum_received = true;
 
+            self.trace.stop(.{ .replica_prepare_ok_quorum = .{
+                .index = message.header.op % constants.pipeline_prepare_queue_max,
+            } });
+
             log.debug("{}: on_prepare_ok: quorum received, prepare_checksum={x:0>32}", .{
                 self.log_prefix(),
                 prepare.message.header.checksum,
@@ -3956,7 +3960,6 @@ pub fn ReplicaType(
             self.release_seen_client_max = null;
 
             self.message_bus.trace_gauge();
-
             self.trace.emit_metrics();
         }
 
@@ -7469,6 +7472,12 @@ pub fn ReplicaType(
 
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
+
+            // A prepare might get resent after prepare_timeout, but we don't want to cancel
+            // or reset the timer then; it should be included in the traced quorum time.
+            self.trace.start(.{ .replica_prepare_ok_quorum = .{
+                .index = message.header.op % constants.pipeline_prepare_queue_max,
+            } });
 
             // We expect `on_prepare()` to increment `self.op` to match the primary's latest
             // prepare: This is critical to ensure that pipelined prepares do not receive the same
