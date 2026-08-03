@@ -39,22 +39,17 @@ const ErrorCodes = enum {
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
-    return register_module(env, exports) catch null;
-}
-
-fn register_module(env: c.napi_env, exports: c.napi_value) !c.napi_value {
-    try translate.register_function(env, exports, "configure", configure);
-    try translate.register_function(env, exports, "init", init);
-    try translate.register_function(env, exports, "deinit", deinit);
-    try translate.register_function(env, exports, "submit", submit);
-
+    translate.register_function(env, exports, "configure", configure) catch return null;
+    translate.register_function(env, exports, "init", init) catch return null;
+    translate.register_function(env, exports, "deinit", deinit) catch return null;
+    translate.register_function(env, exports, "submit", submit) catch return null;
     return exports;
 }
 
 // Add-on code
 
 export fn configure(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    return configure_internal(env, info) catch null;
+    return configure_internal(env, info) catch return null;
 }
 
 fn configure_internal(env: c.napi_env, info: c.napi_callback_info) !c.napi_value {
