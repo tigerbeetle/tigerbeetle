@@ -191,12 +191,7 @@ impl Output {
                 let results_length = u32::try_from(results.len())?;
                 self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
-                    let result = tbc::tb_create_account_result_t {
-                        timestamp: result.timestamp,
-                        status: u32::from(result.status),
-                        reserved: 0,
-                    };
-                    let bytes: [u8; mem::size_of::<tbc::tb_create_account_result_t>()] =
+                    let bytes: [u8; mem::size_of::<tb::CreateAccountResult>()] =
                         unsafe { mem::transmute(result) };
                     self.writer.write_all(&bytes)?;
                 }
@@ -205,12 +200,7 @@ impl Output {
                 let results_length = u32::try_from(results.len())?;
                 self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
-                    let result = tbc::tb_create_transfer_result_t {
-                        timestamp: result.timestamp,
-                        status: u32::from(result.status),
-                        reserved: 0,
-                    };
-                    let bytes: [u8; mem::size_of::<tbc::tb_create_transfer_result_t>()] =
+                    let bytes: [u8; mem::size_of::<tb::CreateTransferResult>()] =
                         unsafe { mem::transmute(result) };
                     self.writer.write_all(&bytes)?;
                 }
