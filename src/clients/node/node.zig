@@ -24,11 +24,9 @@ pub const std_options: std.Options = .{
     .logFn = tb_client.exports.Logging.application_logger,
 };
 
-// Cached value for JS (null).
-var napi_null: c.napi_value = undefined;
-
-// Cached `RequestError` constructor.
-var request_error_ctor_ref: c.napi_ref = undefined;
+const InstanceData = struct {
+    request_error_ctor_ref: c.napi_ref,
+};
 
 // Must be kept in sync with `index.ts`.
 const ErrorCodes = enum {
@@ -41,8 +39,7 @@ const ErrorCodes = enum {
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
-    napi_null = translate.capture_null(env) catch return null;
-
+    translate.register_function(env, exports, "configure", configure) catch return null;
     translate.register_function(env, exports, "init", init) catch return null;
     translate.register_function(env, exports, "deinit", deinit) catch return null;
     translate.register_function(env, exports, "submit", submit) catch return null;
@@ -50,6 +47,47 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
 }
 
 // Add-on code
+
+export fn configure(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    return configure_internal(env, info) catch return null;
+}
+
+fn configure_internal(env: c.napi_env, info: c.napi_callback_info) !c.napi_value {
+    const args = translate.extract_args(env, info, .{ .count = 1, .function = "configure" }) catch return null;
+
+    const existing_instance_data = try translate.get_instance_data(env);
+    // If set_instance_data has already been called, this will return non-null
+    if (existing_instance_data != null) {
+        return null;
+    }
+
+    const env_instance_data = try global_allocator.create(InstanceData);
+    errdefer global_allocator.destroy(env_instance_data);
+
+    try translate.create_reference(
+        env,
+        args[0],
+        // Strong since this error constructor fn may be GC'ed
+        // but we need it for the lifetime of our addon
+        .strong,
+        &env_instance_data.request_error_ctor_ref,
+        "Cannot reference the object constructor",
+    );
+    assert(env_instance_data.request_error_ctor_ref != null);
+    errdefer {
+        // Avoid the potential throw from the translate helper
+        const status = c.napi_delete_reference(env, env_instance_data.request_error_ctor_ref);
+        assert(status == c.napi_ok);
+    }
+
+    try translate.set_instance_data(
+        env,
+        env_instance_data,
+        &finalize_instance_data,
+    );
+
+    return null;
+}
 
 fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     const args = translate.extract_args(env, info, .{
@@ -63,23 +101,6 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
         args[0],
         "replica_addresses",
     ) catch return null;
-    const request_error_ctor = translate.get_object_property(
-        env,
-        args[0],
-        "request_error_class",
-    ) catch return null;
-    assert(request_error_ctor != null);
-
-    translate.create_reference(
-        env,
-        request_error_ctor,
-        // Weak reference: type and symbol references are never
-        // GCed and cannot be deleted during cleanup.
-        .weak,
-        &request_error_ctor_ref,
-        "Cannot reference the object constructor",
-    ) catch return null;
-    assert(request_error_ctor_ref != null);
 
     return create(env, cluster, addresses) catch null;
 }
@@ -92,6 +113,18 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value
 
     destroy(env, args[0]) catch {};
     return null;
+}
+
+fn finalize_instance_data(env: c.napi_env, finalize_data: ?*anyopaque, finalize_hint: ?*anyopaque) callconv(.c) void {
+    assert(finalize_data != null);
+    assert(finalize_hint == null);
+
+    const env_instance_data: *InstanceData = @ptrCast(@alignCast(finalize_data.?));
+    if (env_instance_data.request_error_ctor_ref) |request_error_ctor_ref| {
+        const status = c.napi_delete_reference(env, request_error_ctor_ref);
+        assert(status == c.napi_ok);
+    }
+    global_allocator.destroy(env_instance_data);
 }
 
 fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
@@ -183,7 +216,7 @@ fn create(
 
     const client = global_allocator.create(tb_client.ClientInterface) catch {
         return translate.throw(env, .{
-            .message = "Failed to allocated the client interface.",
+            .message = "Failed to allocate the client interface.",
         });
     };
     errdefer global_allocator.destroy(client);
@@ -313,13 +346,22 @@ fn request(
         .user_tag = 0,
         .status = undefined,
     };
+
     client.submit(packet) catch |err| switch (err) {
         error.ClientInvalid => return request_error(env, .ERR_CLIENT_CLOSED),
     };
 }
 
 fn request_error(env: c.napi_env, code: ErrorCodes) translate.Error {
-    return translate.throw_typed_error(env, request_error_ctor_ref, @tagName(code));
+    const env_instance_data = try instance_data(env);
+    assert(env_instance_data.request_error_ctor_ref != null);
+    return translate.throw_typed_error(env, env_instance_data.request_error_ctor_ref, @tagName(code));
+}
+
+fn instance_data(env: c.napi_env) translate.Error!*InstanceData {
+    const opaque_instance_data = try translate.get_instance_data(env);
+    assert(opaque_instance_data != null);
+    return @ptrCast(@alignCast(opaque_instance_data.?));
 }
 
 fn on_completion(
@@ -341,7 +383,7 @@ fn on_completion(
 
                     const packet = packet_extern.cast();
                     const request_buffer: []align(@alignOf(Event)) u8 =
-                        @constCast(@alignCast(packet.slice()));
+                        @alignCast(@constCast(packet.slice()));
                     // Trying to reallocate the request buffer instead of allocating a new one.
                     // This is optimal for create_* operations.
                     const reply_buffer: []align(@alignOf(Result)) u8 = global_allocator.realloc(
@@ -457,6 +499,8 @@ fn on_completion_js(
         },
         .pulse, .get_change_events => unreachable,
     };
+
+    const napi_null = translate.capture_null(env) catch return;
 
     // Parse Result array out of packet data, freeing it in the process.
     // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
