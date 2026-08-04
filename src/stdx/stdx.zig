@@ -13,7 +13,9 @@ pub const IOPSType = @import("iops.zig").IOPSType;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
 pub const PRNG = @import("prng.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
-pub const Bench = @import("testing/bench.zig");
+pub const Bench = @import("benchmark/bench.zig");
+pub const PerfCounters = @import("benchmark/perf.zig").PerfCounters;
+pub const timeit = @import("benchmark/timeit.zig").timeit;
 pub const Snap = @import("testing/snaptest.zig").Snap;
 pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
@@ -21,11 +23,9 @@ pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 pub const huge_page_allocator = @import("huge_page_allocator.zig").huge_page_allocator;
 
 pub const aegis = @import("vendored/aegis.zig");
-pub const dbg = @import("debug.zig").dbg;
 pub const Flags = @import("flags.zig");
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const Shell = @import("shell.zig");
-pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
 pub const windows = @import("windows.zig");
 pub const radix_sort = @import("radix.zig").sort;
@@ -1242,7 +1242,23 @@ test "to_case" {
     );
 }
 
+/// Utility for print-if debugging, a-la Rust's dbg! macro.
+///
+/// dbg prints the value with the prefix, while also returning the value, which makes it convenient
+/// to drop it in the middle of a complex expression.
+pub fn dbg(prefix: []const u8, value: anytype) @TypeOf(value) {
+    std.debug.print("{s} = {any}\n", .{
+        prefix,
+        std.json.fmt(value, .{ .whitespace = .indent_2 }),
+    });
+    return value;
+}
+
 comptime {
+    _ = @import("benchmark/bench.zig");
+    _ = @import("benchmark/perf.zig");
+    _ = @import("benchmark/time.zig");
+    _ = @import("benchmark/timeit.zig");
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
     _ = @import("flags.zig");
@@ -1256,7 +1272,6 @@ comptime {
     _ = @import("shell.zig");
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
-    _ = @import("testing/bench.zig");
     _ = @import("testing/snaptest.zig");
     _ = @import("time_units.zig");
     _ = @import("unshare.zig");
