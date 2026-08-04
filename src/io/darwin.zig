@@ -1108,11 +1108,10 @@ pub const IO = struct {
     /// instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
     fn fs_sync(fd: fd_t) !void {
-        _ = fd; // autofix
         // TODO: This is of dubious safety - it's _not_ safe to fall back on posix.fsync unless it's
         // known at startup that the disk (eg, an external disk on a Mac) doesn't support
         // F_FULLFSYNC.
-        // _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
+        _ = posix.fcntl(fd, posix.F.FULLFSYNC, 1) catch return posix.fsync(fd);
     }
 
     /// Allocates a file contiguously using fallocate() if supported.

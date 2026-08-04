@@ -100,6 +100,7 @@ pub fn StorageType(comptime IO: type) type {
         dir_fd: IO.fd_t,
         fd: IO.fd_t,
         unflushed: u64 = 0,
+        purpose: IO.OpenDataFilePurpose,
 
         pub fn init(io: *IO, tracer: *Tracer, options: struct {
             path: []const u8,
@@ -129,12 +130,14 @@ pub fn StorageType(comptime IO: type) type {
                 .tracer = tracer,
                 .dir_fd = dir_fd,
                 .fd = fd,
+                .purpose = options.purpose,
             };
         }
 
         pub fn deinit(storage: *Storage) void {
             assert(storage.fd != IO.INVALID_FILE);
             assert(storage.dir_fd != IO.INVALID_FILE);
+            assert(storage.unflushed == 0);
 
             std.posix.close(storage.fd);
             storage.fd = IO.INVALID_FILE;
@@ -382,10 +385,12 @@ pub fn StorageType(comptime IO: type) type {
             assert(write.offset % constants.sector_size == 0);
             self.assert_bounds(write.buffer, write.offset);
 
-            const dsync = write.zone.dsync();
+            const dsync = write.zone.dsync() or self.purpose == .format;
 
             if (!dsync) {
-                assert(write.zone == .grid);
+                if (self.purpose != .format) {
+                    assert(write.zone == .grid);
+                }
                 self.unflushed += 1;
             }
 
