@@ -29,6 +29,7 @@ pub fn format(
 
     try replica_format.queue_format_wal(options.cluster, storage);
     replica_format.format_and_tick(storage, &superblock, options);
+    replica_format.flush_and_tick(storage);
     replica_format.verify_writes();
 }
 
@@ -59,6 +60,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
 
         sectors_written: std.DynamicBitSetUnmanaged,
         arena: std.heap.ArenaAllocator,
+
+        flush: Storage.Flush = undefined,
 
         fn init(gpa: std.mem.Allocator) !ReplicaFormat {
             var sectors_written = try std.DynamicBitSetUnmanaged.initEmpty(
@@ -209,6 +212,21 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 superblock_options,
             );
             while (self.formatting_superblock) storage.run();
+        }
+
+        fn flush_and_tick(self: *ReplicaFormat, storage: *Storage) void {
+            assert(!self.formatting and !self.formatting_superblock);
+            assert(self.writes_pending == 0);
+
+            storage.flush_sectors(flush_callback, &self.flush);
+
+            self.formatting = true;
+            while (self.formatting) storage.run();
+        }
+
+        fn flush_callback(flush: *Storage.Flush) void {
+            const self: *ReplicaFormat = @alignCast(@fieldParentPtr("flush", flush));
+            self.formatting = false;
         }
 
         fn write_sectors_callback(storage_write: *Storage.Write) void {
