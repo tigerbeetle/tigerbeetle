@@ -150,22 +150,22 @@ fn round_trip_create_transfer_result() {
 
 #[test]
 fn round_trip_init_status() {
-    round_trip_test::<tb::InitStatus, i32>(
+    round_trip_test::<tb::InitError, i32>(
         "TB_INIT_STATUS",
-        // Success not represented in tb::InitStatus
+        // Success not represented in tb::InitError
         &[0],
-        |c_value| tb::InitStatus::from(c_value),
+        |c_value| tb::InitError::from(c_value),
         |rust_value| i32::from(rust_value),
     );
 }
 
 #[test]
 fn round_trip_packet_status() {
-    round_trip_test::<tb::PacketStatus, u8>(
+    round_trip_test::<tb::PacketError, u8>(
         "TB_PACKET_STATUS",
-        // Success not represented in tb::PacketStatus
+        // Success not represented in tb::PacketError
         &[0],
-        |c_value| tb::PacketStatus::from(c_value),
+        |c_value| tb::PacketError::from(c_value),
         |rust_value| u8::from(rust_value),
     );
 }

@@ -39,7 +39,7 @@ pub struct tb_account_t {
     pub reserved: u32,
     pub ledger: u32,
     pub code: u16,
-    pub flags: u16,
+    pub flags: AccountFlags,
     pub timestamp: u64,
 }
 
@@ -82,138 +82,378 @@ pub struct tb_transfer_t {
     pub timeout: u32,
     pub ledger: u32,
     pub code: u16,
-    pub flags: u16,
+    pub flags: TransferFlags,
     pub timestamp: u64,
 }
 
-pub type TB_CREATE_ACCOUNT_STATUS = u32;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_CREATED: TB_CREATE_ACCOUNT_STATUS = 0xFFFFFFFF;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED: TB_CREATE_ACCOUNT_STATUS = 1;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN: TB_CREATE_ACCOUNT_STATUS = 2;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_IMPORTED_EVENT_EXPECTED: TB_CREATE_ACCOUNT_STATUS = 22;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_IMPORTED_EVENT_NOT_EXPECTED: TB_CREATE_ACCOUNT_STATUS = 23;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_TIMESTAMP_MUST_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 3;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE: TB_CREATE_ACCOUNT_STATUS = 24;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE: TB_CREATE_ACCOUNT_STATUS = 25;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_RESERVED_FIELD: TB_CREATE_ACCOUNT_STATUS = 4;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_RESERVED_FLAG: TB_CREATE_ACCOUNT_STATUS = 5;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_ID_MUST_NOT_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 6;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_ID_MUST_NOT_BE_INT_MAX: TB_CREATE_ACCOUNT_STATUS = 7;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS_WITH_DIFFERENT_FLAGS: TB_CREATE_ACCOUNT_STATUS = 15;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS_WITH_DIFFERENT_USER_DATA_128: TB_CREATE_ACCOUNT_STATUS = 16;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS_WITH_DIFFERENT_USER_DATA_64: TB_CREATE_ACCOUNT_STATUS = 17;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS_WITH_DIFFERENT_USER_DATA_32: TB_CREATE_ACCOUNT_STATUS = 18;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS_WITH_DIFFERENT_LEDGER: TB_CREATE_ACCOUNT_STATUS = 19;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS_WITH_DIFFERENT_CODE: TB_CREATE_ACCOUNT_STATUS = 20;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_EXISTS: TB_CREATE_ACCOUNT_STATUS = 21;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_FLAGS_ARE_MUTUALLY_EXCLUSIVE: TB_CREATE_ACCOUNT_STATUS = 8;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_DEBITS_PENDING_MUST_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 9;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_DEBITS_POSTED_MUST_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 10;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_CREDITS_PENDING_MUST_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 11;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_CREDITS_POSTED_MUST_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 12;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_LEDGER_MUST_NOT_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 13;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_CODE_MUST_NOT_BE_ZERO: TB_CREATE_ACCOUNT_STATUS = 14;
-pub const TB_CREATE_ACCOUNT_STATUS_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS: TB_CREATE_ACCOUNT_STATUS = 26;
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum CreateAccountStatus {
+    Created = 0xFFFFFFFF,
+    LinkedEventFailed = 1,
+    LinkedEventChainOpen = 2,
+    ImportedEventExpected = 22,
+    ImportedEventNotExpected = 23,
+    TimestampMustBeZero = 3,
+    ImportedEventTimestampOutOfRange = 24,
+    ImportedEventTimestampMustNotAdvance = 25,
+    ReservedField = 4,
+    ReservedFlag = 5,
+    IdMustNotBeZero = 6,
+    IdMustNotBeIntMax = 7,
+    ExistsWithDifferentFlags = 15,
+    ExistsWithDifferentUserData128 = 16,
+    ExistsWithDifferentUserData64 = 17,
+    ExistsWithDifferentUserData32 = 18,
+    ExistsWithDifferentLedger = 19,
+    ExistsWithDifferentCode = 20,
+    Exists = 21,
+    FlagsAreMutuallyExclusive = 8,
+    DebitsPendingMustBeZero = 9,
+    DebitsPostedMustBeZero = 10,
+    CreditsPendingMustBeZero = 11,
+    CreditsPostedMustBeZero = 12,
+    LedgerMustNotBeZero = 13,
+    CodeMustNotBeZero = 14,
+    ImportedEventTimestampMustNotRegress = 26,
+}
 
-pub type TB_CREATE_TRANSFER_STATUS = u32;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CREATED: TB_CREATE_TRANSFER_STATUS = 0xFFFFFFFF;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_LINKED_EVENT_FAILED: TB_CREATE_TRANSFER_STATUS = 1;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN: TB_CREATE_TRANSFER_STATUS = 2;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_EXPECTED: TB_CREATE_TRANSFER_STATUS = 56;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_NOT_EXPECTED: TB_CREATE_TRANSFER_STATUS = 57;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_TIMESTAMP_MUST_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 3;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE: TB_CREATE_TRANSFER_STATUS = 58;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE: TB_CREATE_TRANSFER_STATUS = 59;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_RESERVED_FLAG: TB_CREATE_TRANSFER_STATUS = 4;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_ID_MUST_NOT_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 5;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_ID_MUST_NOT_BE_INT_MAX: TB_CREATE_TRANSFER_STATUS = 6;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_FLAGS: TB_CREATE_TRANSFER_STATUS = 36;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_PENDING_ID: TB_CREATE_TRANSFER_STATUS = 40;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_TIMEOUT: TB_CREATE_TRANSFER_STATUS = 44;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_DEBIT_ACCOUNT_ID: TB_CREATE_TRANSFER_STATUS = 37;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_CREDIT_ACCOUNT_ID: TB_CREATE_TRANSFER_STATUS = 38;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_AMOUNT: TB_CREATE_TRANSFER_STATUS = 39;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_USER_DATA_128: TB_CREATE_TRANSFER_STATUS = 41;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_USER_DATA_64: TB_CREATE_TRANSFER_STATUS = 42;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_USER_DATA_32: TB_CREATE_TRANSFER_STATUS = 43;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_LEDGER: TB_CREATE_TRANSFER_STATUS = 67;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_CODE: TB_CREATE_TRANSFER_STATUS = 45;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXISTS: TB_CREATE_TRANSFER_STATUS = 46;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_ID_ALREADY_FAILED: TB_CREATE_TRANSFER_STATUS = 68;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_FLAGS_ARE_MUTUALLY_EXCLUSIVE: TB_CREATE_TRANSFER_STATUS = 7;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 8;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_DEBIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX: TB_CREATE_TRANSFER_STATUS = 9;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 10;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CREDIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX: TB_CREATE_TRANSFER_STATUS = 11;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_ACCOUNTS_MUST_BE_DIFFERENT: TB_CREATE_TRANSFER_STATUS = 12;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_ID_MUST_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 13;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_ID_MUST_NOT_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 14;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_ID_MUST_NOT_BE_INT_MAX: TB_CREATE_TRANSFER_STATUS = 15;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_ID_MUST_BE_DIFFERENT: TB_CREATE_TRANSFER_STATUS = 16;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_TIMEOUT_RESERVED_FOR_PENDING_TRANSFER: TB_CREATE_TRANSFER_STATUS = 17;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CLOSING_TRANSFER_MUST_BE_PENDING: TB_CREATE_TRANSFER_STATUS = 64;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_LEDGER_MUST_NOT_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 19;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CODE_MUST_NOT_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 20;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_DEBIT_ACCOUNT_NOT_FOUND: TB_CREATE_TRANSFER_STATUS = 21;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CREDIT_ACCOUNT_NOT_FOUND: TB_CREATE_TRANSFER_STATUS = 22;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER: TB_CREATE_TRANSFER_STATUS = 23;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS: TB_CREATE_TRANSFER_STATUS = 24;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_NOT_FOUND: TB_CREATE_TRANSFER_STATUS = 25;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_NOT_PENDING: TB_CREATE_TRANSFER_STATUS = 26;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_HAS_DIFFERENT_DEBIT_ACCOUNT_ID: TB_CREATE_TRANSFER_STATUS = 27;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_HAS_DIFFERENT_CREDIT_ACCOUNT_ID: TB_CREATE_TRANSFER_STATUS = 28;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_HAS_DIFFERENT_LEDGER: TB_CREATE_TRANSFER_STATUS = 29;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_HAS_DIFFERENT_CODE: TB_CREATE_TRANSFER_STATUS = 30;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXCEEDS_PENDING_TRANSFER_AMOUNT: TB_CREATE_TRANSFER_STATUS = 31;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_HAS_DIFFERENT_AMOUNT: TB_CREATE_TRANSFER_STATUS = 32;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_ALREADY_POSTED: TB_CREATE_TRANSFER_STATUS = 33;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_ALREADY_VOIDED: TB_CREATE_TRANSFER_STATUS = 34;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_PENDING_TRANSFER_EXPIRED: TB_CREATE_TRANSFER_STATUS = 35;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS: TB_CREATE_TRANSFER_STATUS = 60;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_MUST_POSTDATE_DEBIT_ACCOUNT: TB_CREATE_TRANSFER_STATUS = 61;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_MUST_POSTDATE_CREDIT_ACCOUNT: TB_CREATE_TRANSFER_STATUS = 62;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMEOUT_MUST_BE_ZERO: TB_CREATE_TRANSFER_STATUS = 63;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_DEBIT_ACCOUNT_ALREADY_CLOSED: TB_CREATE_TRANSFER_STATUS = 65;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_CREDIT_ACCOUNT_ALREADY_CLOSED: TB_CREATE_TRANSFER_STATUS = 66;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_DEBITS_PENDING: TB_CREATE_TRANSFER_STATUS = 47;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_CREDITS_PENDING: TB_CREATE_TRANSFER_STATUS = 48;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_DEBITS_POSTED: TB_CREATE_TRANSFER_STATUS = 49;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_CREDITS_POSTED: TB_CREATE_TRANSFER_STATUS = 50;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_DEBITS: TB_CREATE_TRANSFER_STATUS = 51;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_CREDITS: TB_CREATE_TRANSFER_STATUS = 52;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_OVERFLOWS_TIMEOUT: TB_CREATE_TRANSFER_STATUS = 53;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXCEEDS_CREDITS: TB_CREATE_TRANSFER_STATUS = 54;
-pub const TB_CREATE_TRANSFER_STATUS_TB_CREATE_TRANSFER_EXCEEDS_DEBITS: TB_CREATE_TRANSFER_STATUS = 55;
+impl From<u32> for CreateAccountStatus {
+    fn from(value: u32) -> CreateAccountStatus {
+        match value {
+            0xFFFFFFFF => CreateAccountStatus::Created,
+            1 => CreateAccountStatus::LinkedEventFailed,
+            2 => CreateAccountStatus::LinkedEventChainOpen,
+            22 => CreateAccountStatus::ImportedEventExpected,
+            23 => CreateAccountStatus::ImportedEventNotExpected,
+            3 => CreateAccountStatus::TimestampMustBeZero,
+            24 => CreateAccountStatus::ImportedEventTimestampOutOfRange,
+            25 => CreateAccountStatus::ImportedEventTimestampMustNotAdvance,
+            4 => CreateAccountStatus::ReservedField,
+            5 => CreateAccountStatus::ReservedFlag,
+            6 => CreateAccountStatus::IdMustNotBeZero,
+            7 => CreateAccountStatus::IdMustNotBeIntMax,
+            15 => CreateAccountStatus::ExistsWithDifferentFlags,
+            16 => CreateAccountStatus::ExistsWithDifferentUserData128,
+            17 => CreateAccountStatus::ExistsWithDifferentUserData64,
+            18 => CreateAccountStatus::ExistsWithDifferentUserData32,
+            19 => CreateAccountStatus::ExistsWithDifferentLedger,
+            20 => CreateAccountStatus::ExistsWithDifferentCode,
+            21 => CreateAccountStatus::Exists,
+            8 => CreateAccountStatus::FlagsAreMutuallyExclusive,
+            9 => CreateAccountStatus::DebitsPendingMustBeZero,
+            10 => CreateAccountStatus::DebitsPostedMustBeZero,
+            11 => CreateAccountStatus::CreditsPendingMustBeZero,
+            12 => CreateAccountStatus::CreditsPostedMustBeZero,
+            13 => CreateAccountStatus::LedgerMustNotBeZero,
+            14 => CreateAccountStatus::CodeMustNotBeZero,
+            26 => CreateAccountStatus::ImportedEventTimestampMustNotRegress,
+            other_value => panic!("cannot convert u32 {other_value} to CreateAccountStatus")
+        }
+    }
+}
+
+impl From<CreateAccountStatus> for u32 {
+    fn from(value: CreateAccountStatus) -> u32 {
+        value as u32
+    }
+}
+
+ impl core::fmt::Display for CreateAccountStatus {
+     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+         match self {
+             Self::Created => f.write_str("Created"),
+             Self::LinkedEventFailed => f.write_str("LinkedEventFailed"),
+             Self::LinkedEventChainOpen => f.write_str("LinkedEventChainOpen"),
+             Self::ImportedEventExpected => f.write_str("ImportedEventExpected"),
+             Self::ImportedEventNotExpected => f.write_str("ImportedEventNotExpected"),
+             Self::TimestampMustBeZero => f.write_str("TimestampMustBeZero"),
+             Self::ImportedEventTimestampOutOfRange => f.write_str("ImportedEventTimestampOutOfRange"),
+             Self::ImportedEventTimestampMustNotAdvance => f.write_str("ImportedEventTimestampMustNotAdvance"),
+             Self::ReservedField => f.write_str("ReservedField"),
+             Self::ReservedFlag => f.write_str("ReservedFlag"),
+             Self::IdMustNotBeZero => f.write_str("IdMustNotBeZero"),
+             Self::IdMustNotBeIntMax => f.write_str("IdMustNotBeIntMax"),
+             Self::ExistsWithDifferentFlags => f.write_str("ExistsWithDifferentFlags"),
+             Self::ExistsWithDifferentUserData128 => f.write_str("ExistsWithDifferentUserData128"),
+             Self::ExistsWithDifferentUserData64 => f.write_str("ExistsWithDifferentUserData64"),
+             Self::ExistsWithDifferentUserData32 => f.write_str("ExistsWithDifferentUserData32"),
+             Self::ExistsWithDifferentLedger => f.write_str("ExistsWithDifferentLedger"),
+             Self::ExistsWithDifferentCode => f.write_str("ExistsWithDifferentCode"),
+             Self::Exists => f.write_str("Exists"),
+             Self::FlagsAreMutuallyExclusive => f.write_str("FlagsAreMutuallyExclusive"),
+             Self::DebitsPendingMustBeZero => f.write_str("DebitsPendingMustBeZero"),
+             Self::DebitsPostedMustBeZero => f.write_str("DebitsPostedMustBeZero"),
+             Self::CreditsPendingMustBeZero => f.write_str("CreditsPendingMustBeZero"),
+             Self::CreditsPostedMustBeZero => f.write_str("CreditsPostedMustBeZero"),
+             Self::LedgerMustNotBeZero => f.write_str("LedgerMustNotBeZero"),
+             Self::CodeMustNotBeZero => f.write_str("CodeMustNotBeZero"),
+             Self::ImportedEventTimestampMustNotRegress => f.write_str("ImportedEventTimestampMustNotRegress"),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[non_exhaustive]
+pub enum CreateTransferStatus {
+    Created = 0xFFFFFFFF,
+    LinkedEventFailed = 1,
+    LinkedEventChainOpen = 2,
+    ImportedEventExpected = 56,
+    ImportedEventNotExpected = 57,
+    TimestampMustBeZero = 3,
+    ImportedEventTimestampOutOfRange = 58,
+    ImportedEventTimestampMustNotAdvance = 59,
+    ReservedFlag = 4,
+    IdMustNotBeZero = 5,
+    IdMustNotBeIntMax = 6,
+    ExistsWithDifferentFlags = 36,
+    ExistsWithDifferentPendingId = 40,
+    ExistsWithDifferentTimeout = 44,
+    ExistsWithDifferentDebitAccountId = 37,
+    ExistsWithDifferentCreditAccountId = 38,
+    ExistsWithDifferentAmount = 39,
+    ExistsWithDifferentUserData128 = 41,
+    ExistsWithDifferentUserData64 = 42,
+    ExistsWithDifferentUserData32 = 43,
+    ExistsWithDifferentLedger = 67,
+    ExistsWithDifferentCode = 45,
+    Exists = 46,
+    IdAlreadyFailed = 68,
+    FlagsAreMutuallyExclusive = 7,
+    DebitAccountIdMustNotBeZero = 8,
+    DebitAccountIdMustNotBeIntMax = 9,
+    CreditAccountIdMustNotBeZero = 10,
+    CreditAccountIdMustNotBeIntMax = 11,
+    AccountsMustBeDifferent = 12,
+    PendingIdMustBeZero = 13,
+    PendingIdMustNotBeZero = 14,
+    PendingIdMustNotBeIntMax = 15,
+    PendingIdMustBeDifferent = 16,
+    TimeoutReservedForPendingTransfer = 17,
+    ClosingTransferMustBePending = 64,
+    LedgerMustNotBeZero = 19,
+    CodeMustNotBeZero = 20,
+    DebitAccountNotFound = 21,
+    CreditAccountNotFound = 22,
+    AccountsMustHaveTheSameLedger = 23,
+    TransferMustHaveTheSameLedgerAsAccounts = 24,
+    PendingTransferNotFound = 25,
+    PendingTransferNotPending = 26,
+    PendingTransferHasDifferentDebitAccountId = 27,
+    PendingTransferHasDifferentCreditAccountId = 28,
+    PendingTransferHasDifferentLedger = 29,
+    PendingTransferHasDifferentCode = 30,
+    ExceedsPendingTransferAmount = 31,
+    PendingTransferHasDifferentAmount = 32,
+    PendingTransferAlreadyPosted = 33,
+    PendingTransferAlreadyVoided = 34,
+    PendingTransferExpired = 35,
+    ImportedEventTimestampMustNotRegress = 60,
+    ImportedEventTimestampMustPostdateDebitAccount = 61,
+    ImportedEventTimestampMustPostdateCreditAccount = 62,
+    ImportedEventTimeoutMustBeZero = 63,
+    DebitAccountAlreadyClosed = 65,
+    CreditAccountAlreadyClosed = 66,
+    OverflowsDebitsPending = 47,
+    OverflowsCreditsPending = 48,
+    OverflowsDebitsPosted = 49,
+    OverflowsCreditsPosted = 50,
+    OverflowsDebits = 51,
+    OverflowsCredits = 52,
+    OverflowsTimeout = 53,
+    ExceedsCredits = 54,
+    ExceedsDebits = 55,
+}
+
+impl From<u32> for CreateTransferStatus {
+    fn from(value: u32) -> CreateTransferStatus {
+        match value {
+            0xFFFFFFFF => CreateTransferStatus::Created,
+            1 => CreateTransferStatus::LinkedEventFailed,
+            2 => CreateTransferStatus::LinkedEventChainOpen,
+            56 => CreateTransferStatus::ImportedEventExpected,
+            57 => CreateTransferStatus::ImportedEventNotExpected,
+            3 => CreateTransferStatus::TimestampMustBeZero,
+            58 => CreateTransferStatus::ImportedEventTimestampOutOfRange,
+            59 => CreateTransferStatus::ImportedEventTimestampMustNotAdvance,
+            4 => CreateTransferStatus::ReservedFlag,
+            5 => CreateTransferStatus::IdMustNotBeZero,
+            6 => CreateTransferStatus::IdMustNotBeIntMax,
+            36 => CreateTransferStatus::ExistsWithDifferentFlags,
+            40 => CreateTransferStatus::ExistsWithDifferentPendingId,
+            44 => CreateTransferStatus::ExistsWithDifferentTimeout,
+            37 => CreateTransferStatus::ExistsWithDifferentDebitAccountId,
+            38 => CreateTransferStatus::ExistsWithDifferentCreditAccountId,
+            39 => CreateTransferStatus::ExistsWithDifferentAmount,
+            41 => CreateTransferStatus::ExistsWithDifferentUserData128,
+            42 => CreateTransferStatus::ExistsWithDifferentUserData64,
+            43 => CreateTransferStatus::ExistsWithDifferentUserData32,
+            67 => CreateTransferStatus::ExistsWithDifferentLedger,
+            45 => CreateTransferStatus::ExistsWithDifferentCode,
+            46 => CreateTransferStatus::Exists,
+            68 => CreateTransferStatus::IdAlreadyFailed,
+            7 => CreateTransferStatus::FlagsAreMutuallyExclusive,
+            8 => CreateTransferStatus::DebitAccountIdMustNotBeZero,
+            9 => CreateTransferStatus::DebitAccountIdMustNotBeIntMax,
+            10 => CreateTransferStatus::CreditAccountIdMustNotBeZero,
+            11 => CreateTransferStatus::CreditAccountIdMustNotBeIntMax,
+            12 => CreateTransferStatus::AccountsMustBeDifferent,
+            13 => CreateTransferStatus::PendingIdMustBeZero,
+            14 => CreateTransferStatus::PendingIdMustNotBeZero,
+            15 => CreateTransferStatus::PendingIdMustNotBeIntMax,
+            16 => CreateTransferStatus::PendingIdMustBeDifferent,
+            17 => CreateTransferStatus::TimeoutReservedForPendingTransfer,
+            64 => CreateTransferStatus::ClosingTransferMustBePending,
+            19 => CreateTransferStatus::LedgerMustNotBeZero,
+            20 => CreateTransferStatus::CodeMustNotBeZero,
+            21 => CreateTransferStatus::DebitAccountNotFound,
+            22 => CreateTransferStatus::CreditAccountNotFound,
+            23 => CreateTransferStatus::AccountsMustHaveTheSameLedger,
+            24 => CreateTransferStatus::TransferMustHaveTheSameLedgerAsAccounts,
+            25 => CreateTransferStatus::PendingTransferNotFound,
+            26 => CreateTransferStatus::PendingTransferNotPending,
+            27 => CreateTransferStatus::PendingTransferHasDifferentDebitAccountId,
+            28 => CreateTransferStatus::PendingTransferHasDifferentCreditAccountId,
+            29 => CreateTransferStatus::PendingTransferHasDifferentLedger,
+            30 => CreateTransferStatus::PendingTransferHasDifferentCode,
+            31 => CreateTransferStatus::ExceedsPendingTransferAmount,
+            32 => CreateTransferStatus::PendingTransferHasDifferentAmount,
+            33 => CreateTransferStatus::PendingTransferAlreadyPosted,
+            34 => CreateTransferStatus::PendingTransferAlreadyVoided,
+            35 => CreateTransferStatus::PendingTransferExpired,
+            60 => CreateTransferStatus::ImportedEventTimestampMustNotRegress,
+            61 => CreateTransferStatus::ImportedEventTimestampMustPostdateDebitAccount,
+            62 => CreateTransferStatus::ImportedEventTimestampMustPostdateCreditAccount,
+            63 => CreateTransferStatus::ImportedEventTimeoutMustBeZero,
+            65 => CreateTransferStatus::DebitAccountAlreadyClosed,
+            66 => CreateTransferStatus::CreditAccountAlreadyClosed,
+            47 => CreateTransferStatus::OverflowsDebitsPending,
+            48 => CreateTransferStatus::OverflowsCreditsPending,
+            49 => CreateTransferStatus::OverflowsDebitsPosted,
+            50 => CreateTransferStatus::OverflowsCreditsPosted,
+            51 => CreateTransferStatus::OverflowsDebits,
+            52 => CreateTransferStatus::OverflowsCredits,
+            53 => CreateTransferStatus::OverflowsTimeout,
+            54 => CreateTransferStatus::ExceedsCredits,
+            55 => CreateTransferStatus::ExceedsDebits,
+            other_value => panic!("cannot convert u32 {other_value} to CreateTransferStatus")
+        }
+    }
+}
+
+impl From<CreateTransferStatus> for u32 {
+    fn from(value: CreateTransferStatus) -> u32 {
+        value as u32
+    }
+}
+
+ impl core::fmt::Display for CreateTransferStatus {
+     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+         match self {
+             Self::Created => f.write_str("Created"),
+             Self::LinkedEventFailed => f.write_str("LinkedEventFailed"),
+             Self::LinkedEventChainOpen => f.write_str("LinkedEventChainOpen"),
+             Self::ImportedEventExpected => f.write_str("ImportedEventExpected"),
+             Self::ImportedEventNotExpected => f.write_str("ImportedEventNotExpected"),
+             Self::TimestampMustBeZero => f.write_str("TimestampMustBeZero"),
+             Self::ImportedEventTimestampOutOfRange => f.write_str("ImportedEventTimestampOutOfRange"),
+             Self::ImportedEventTimestampMustNotAdvance => f.write_str("ImportedEventTimestampMustNotAdvance"),
+             Self::ReservedFlag => f.write_str("ReservedFlag"),
+             Self::IdMustNotBeZero => f.write_str("IdMustNotBeZero"),
+             Self::IdMustNotBeIntMax => f.write_str("IdMustNotBeIntMax"),
+             Self::ExistsWithDifferentFlags => f.write_str("ExistsWithDifferentFlags"),
+             Self::ExistsWithDifferentPendingId => f.write_str("ExistsWithDifferentPendingId"),
+             Self::ExistsWithDifferentTimeout => f.write_str("ExistsWithDifferentTimeout"),
+             Self::ExistsWithDifferentDebitAccountId => f.write_str("ExistsWithDifferentDebitAccountId"),
+             Self::ExistsWithDifferentCreditAccountId => f.write_str("ExistsWithDifferentCreditAccountId"),
+             Self::ExistsWithDifferentAmount => f.write_str("ExistsWithDifferentAmount"),
+             Self::ExistsWithDifferentUserData128 => f.write_str("ExistsWithDifferentUserData128"),
+             Self::ExistsWithDifferentUserData64 => f.write_str("ExistsWithDifferentUserData64"),
+             Self::ExistsWithDifferentUserData32 => f.write_str("ExistsWithDifferentUserData32"),
+             Self::ExistsWithDifferentLedger => f.write_str("ExistsWithDifferentLedger"),
+             Self::ExistsWithDifferentCode => f.write_str("ExistsWithDifferentCode"),
+             Self::Exists => f.write_str("Exists"),
+             Self::IdAlreadyFailed => f.write_str("IdAlreadyFailed"),
+             Self::FlagsAreMutuallyExclusive => f.write_str("FlagsAreMutuallyExclusive"),
+             Self::DebitAccountIdMustNotBeZero => f.write_str("DebitAccountIdMustNotBeZero"),
+             Self::DebitAccountIdMustNotBeIntMax => f.write_str("DebitAccountIdMustNotBeIntMax"),
+             Self::CreditAccountIdMustNotBeZero => f.write_str("CreditAccountIdMustNotBeZero"),
+             Self::CreditAccountIdMustNotBeIntMax => f.write_str("CreditAccountIdMustNotBeIntMax"),
+             Self::AccountsMustBeDifferent => f.write_str("AccountsMustBeDifferent"),
+             Self::PendingIdMustBeZero => f.write_str("PendingIdMustBeZero"),
+             Self::PendingIdMustNotBeZero => f.write_str("PendingIdMustNotBeZero"),
+             Self::PendingIdMustNotBeIntMax => f.write_str("PendingIdMustNotBeIntMax"),
+             Self::PendingIdMustBeDifferent => f.write_str("PendingIdMustBeDifferent"),
+             Self::TimeoutReservedForPendingTransfer => f.write_str("TimeoutReservedForPendingTransfer"),
+             Self::ClosingTransferMustBePending => f.write_str("ClosingTransferMustBePending"),
+             Self::LedgerMustNotBeZero => f.write_str("LedgerMustNotBeZero"),
+             Self::CodeMustNotBeZero => f.write_str("CodeMustNotBeZero"),
+             Self::DebitAccountNotFound => f.write_str("DebitAccountNotFound"),
+             Self::CreditAccountNotFound => f.write_str("CreditAccountNotFound"),
+             Self::AccountsMustHaveTheSameLedger => f.write_str("AccountsMustHaveTheSameLedger"),
+             Self::TransferMustHaveTheSameLedgerAsAccounts => f.write_str("TransferMustHaveTheSameLedgerAsAccounts"),
+             Self::PendingTransferNotFound => f.write_str("PendingTransferNotFound"),
+             Self::PendingTransferNotPending => f.write_str("PendingTransferNotPending"),
+             Self::PendingTransferHasDifferentDebitAccountId => f.write_str("PendingTransferHasDifferentDebitAccountId"),
+             Self::PendingTransferHasDifferentCreditAccountId => f.write_str("PendingTransferHasDifferentCreditAccountId"),
+             Self::PendingTransferHasDifferentLedger => f.write_str("PendingTransferHasDifferentLedger"),
+             Self::PendingTransferHasDifferentCode => f.write_str("PendingTransferHasDifferentCode"),
+             Self::ExceedsPendingTransferAmount => f.write_str("ExceedsPendingTransferAmount"),
+             Self::PendingTransferHasDifferentAmount => f.write_str("PendingTransferHasDifferentAmount"),
+             Self::PendingTransferAlreadyPosted => f.write_str("PendingTransferAlreadyPosted"),
+             Self::PendingTransferAlreadyVoided => f.write_str("PendingTransferAlreadyVoided"),
+             Self::PendingTransferExpired => f.write_str("PendingTransferExpired"),
+             Self::ImportedEventTimestampMustNotRegress => f.write_str("ImportedEventTimestampMustNotRegress"),
+             Self::ImportedEventTimestampMustPostdateDebitAccount => f.write_str("ImportedEventTimestampMustPostdateDebitAccount"),
+             Self::ImportedEventTimestampMustPostdateCreditAccount => f.write_str("ImportedEventTimestampMustPostdateCreditAccount"),
+             Self::ImportedEventTimeoutMustBeZero => f.write_str("ImportedEventTimeoutMustBeZero"),
+             Self::DebitAccountAlreadyClosed => f.write_str("DebitAccountAlreadyClosed"),
+             Self::CreditAccountAlreadyClosed => f.write_str("CreditAccountAlreadyClosed"),
+             Self::OverflowsDebitsPending => f.write_str("OverflowsDebitsPending"),
+             Self::OverflowsCreditsPending => f.write_str("OverflowsCreditsPending"),
+             Self::OverflowsDebitsPosted => f.write_str("OverflowsDebitsPosted"),
+             Self::OverflowsCreditsPosted => f.write_str("OverflowsCreditsPosted"),
+             Self::OverflowsDebits => f.write_str("OverflowsDebits"),
+             Self::OverflowsCredits => f.write_str("OverflowsCredits"),
+             Self::OverflowsTimeout => f.write_str("OverflowsTimeout"),
+             Self::ExceedsCredits => f.write_str("ExceedsCredits"),
+             Self::ExceedsDebits => f.write_str("ExceedsDebits"),
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct tb_create_account_result_t {
+pub struct CreateAccountResult {
     pub timestamp: u64,
-    pub status: u32,
+    pub status: CreateAccountStatus,
     pub reserved: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct tb_create_transfer_result_t {
+pub struct CreateTransferResult {
     pub timestamp: u64,
-    pub status: u32,
+    pub status: CreateTransferStatus,
     pub reserved: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct tb_account_filter_t {
+#[derive(Debug, Copy, Clone, Default)]
+pub struct AccountFilter {
     pub account_id: u128,
     pub user_data_128: u128,
     pub user_data_64: u64,
     pub user_data_32: u32,
     pub code: u16,
-    pub reserved: [u8; 58],
+    pub reserved: Reserved<58>,
     pub timestamp_min: u64,
     pub timestamp_max: u64,
     pub limit: u32,
-    pub flags: u32,
+    pub flags: AccountFilterFlags,
 }
 
 #[derive(Copy, Clone, Debug, Default)] 
@@ -243,22 +483,22 @@ pub struct tb_account_balance_t {
     pub credits_pending: u128,
     pub credits_posted: u128,
     pub timestamp: u64,
-    pub reserved: [u8; 56],
+    pub reserved: Reserved<56>,
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct tb_query_filter_t {
+#[derive(Debug, Copy, Clone, Default)]
+pub struct QueryFilter {
     pub user_data_128: u128,
     pub user_data_64: u64,
     pub user_data_32: u32,
     pub ledger: u32,
     pub code: u16,
-    pub reserved: [u8; 6],
+    pub reserved: Reserved<6>,
     pub timestamp_min: u64,
     pub timestamp_max: u64,
     pub limit: u32,
-    pub flags: u32,
+    pub flags: QueryFilterFlags,
 }
 
 #[derive(Copy, Clone, Debug, Default)] 
@@ -279,8 +519,8 @@ impl std::ops::BitOr for QueryFilterFlags {
 }
 
 // Opaque struct serving as a handle for the client instance.
-// This struct must be "pinned" (not copyable or movable), as its address must remain stable
-// throughout the lifetime of the client instance.
+// This struct must be "pinned" (not copyable or movable), as its address 
+// must remain stable throughout the lifetime of the client instance.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct tb_client_t {
@@ -288,8 +528,8 @@ pub struct tb_client_t {
 }
 
 // Struct containing the state of a request submitted through the client.
-// This struct must be "pinned" (not copyable or movable), as its address must remain stable
-// throughout the lifetime of the request.
+// This struct must be "pinned" (not copyable or movable), as its address 
+// must remain stable throughout the lifetime of the request.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct tb_packet_t {
@@ -298,7 +538,7 @@ pub struct tb_packet_t {
     pub data_size: u32,
     pub user_tag: u16,
     pub operation: u8,
-    pub status: u8,
+    pub status: TB_PACKET_STATUS,
     pub opaque: [u8; 64],
 }
 
@@ -347,6 +587,16 @@ pub const TB_LOG_LEVEL_TB_LOG_ERR: TB_LOG_LEVEL = 0;
 pub const TB_LOG_LEVEL_TB_LOG_WARN: TB_LOG_LEVEL = 1;
 pub const TB_LOG_LEVEL_TB_LOG_INFO: TB_LOG_LEVEL = 2;
 pub const TB_LOG_LEVEL_TB_LOG_DEBUG: TB_LOG_LEVEL = 3;
+
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Reserved<const N: usize>([u8; N]);
+
+impl<const N: usize> Default for Reserved<N> {
+    fn default() -> Reserved<N> {
+        Reserved([0; N])
+    }
+}
 
 extern "C" {
     // Initialize a new TigerBeetle client which connects to the addresses provided and
