@@ -261,7 +261,7 @@ pub fn GridType(comptime Storage: type) type {
             const blocks_count = options.cache_blocks_count + stash_blocks_count;
             const blocks = try allocator.alignedAlloc(
                 [constants.block_size]u8,
-                constants.sector_size,
+                .fromByteUnits(constants.sector_size),
                 blocks_count,
             );
             errdefer allocator.free(blocks);

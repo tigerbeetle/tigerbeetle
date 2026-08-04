@@ -143,11 +143,16 @@ pub const Supervisor = struct {
         log_debug: bool,
     };
 
-    pub fn create(allocator: std.mem.Allocator, options: Options) !*Supervisor {
+    pub fn create(
+        allocator: std.mem.Allocator,
+        io_std: std.Io,
+        environ_map: *const std.process.Environ.Map,
+        options: Options,
+    ) !*Supervisor {
         // Vortex currently only supports Linux.
         assert(builtin.os.tag == .linux);
 
-        const shell = try Shell.create(allocator);
+        const shell = try Shell.create(allocator, io_std, environ_map);
         errdefer shell.destroy();
 
         const dependencies = try configuration(shell);
@@ -157,7 +162,7 @@ pub const Supervisor = struct {
 
         const output_directory = try shell.create_tmp_dir();
         errdefer {
-            shell.cwd.deleteTree(output_directory) catch |err| {
+            shell.cwd.deleteTree(shell.io, output_directory) catch |err| {
                 log.err("error deleting tree: {}", .{err});
             };
         }
@@ -167,7 +172,7 @@ pub const Supervisor = struct {
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
 
-        io.* = try IO.init(128, 0);
+        io.* = try IO.init(io_std, 128, 0);
         errdefer io.deinit();
 
         const replica_ports_actual =
@@ -251,7 +256,10 @@ pub const Supervisor = struct {
         supervisor.io.deinit();
         supervisor.allocator.destroy(supervisor.io);
 
-        supervisor.shell.cwd.deleteTree(supervisor.output_directory) catch |err| {
+        supervisor.shell.cwd.deleteTree(
+            supervisor.shell.io,
+            supervisor.output_directory,
+        ) catch |err| {
             log.err("error deleting tree: {}", .{err});
         };
         supervisor.shell.destroy();
@@ -270,17 +278,17 @@ pub const Supervisor = struct {
             if (replica.state != .terminated) {
                 if (replica.wait_nonblocking()) |term| {
                     // Replicas shouldn't exit on their own, even with code=0.
-                    maybe(std.meta.eql(term, .{ .Exited = 0 }));
+                    maybe(std.meta.eql(term, .{ .exited = 0 }));
 
                     log.err(
                         "{}: replica terminated unexpectedly with {}",
                         .{ replica_index, term },
                     );
-                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL })) {
+                    if (std.meta.eql(term, .{ .signal = std.posix.SIG.KILL })) {
                         // If one of the replica dies to SIGKILL, it is likely an OOM.
                         // Bubble that up to CFO so that this Vortex run is counted as neither a
                         // success or failure.
-                        std.posix.exit(@intCast(128 + term.Signal));
+                        std.process.exit(@intCast(128 + @intFromEnum(term.signal)));
                     } else {
                         fatal(.replica_exit_result, "replica exited with: {}", .{term});
                     }
@@ -290,7 +298,7 @@ pub const Supervisor = struct {
 
         if (supervisor.workload) |workload| {
             // Driver subprocess should never exit on its own.
-            const result = std.posix.waitpid(workload.driver.id, std.posix.W.NOHANG);
+            const result = waitpid(workload.driver.id.?, std.posix.W.NOHANG);
             if (result.pid != 0) {
                 assert(result.pid == workload.driver.id);
 
@@ -314,7 +322,7 @@ pub const Supervisor = struct {
             const too_slow_request = workload.find_slow_request_since(faults_start);
 
             if (no_finished_requests) {
-                fatal(.liveness, "liveness check: no finished requests after {} ", .{
+                fatal(.liveness, "liveness check: no finished requests after {f} ", .{
                     constants.vortex.liveness_requirement,
                 });
             }
@@ -498,14 +506,17 @@ pub const Supervisor = struct {
 
         log.info("{}: reformatting replica", .{replica_index});
 
-        supervisor.shell.cwd.deleteFile(supervisor.replica_datafiles[replica_index]) catch |err| {
+        supervisor.shell.cwd.deleteFile(
+            supervisor.shell.io,
+            supervisor.replica_datafiles[replica_index],
+        ) catch |err| {
             log.err("{}: failed deleting datafile: {}", .{ replica_index, err });
             return err;
         };
 
         const release_index = supervisor.replicas[replica_index].executable_index;
         const server_executable = supervisor.server_executables[release_index];
-        const child = supervisor.shell.spawn(.{ .stderr_behavior = .Inherit },
+        const child = supervisor.shell.spawn(.{ .stderr_behavior = .inherit },
             \\{tigerbeetle} recover
             \\    --cluster={cluster_id}
             \\    --replica={replica}
@@ -528,14 +539,14 @@ pub const Supervisor = struct {
         // (The tick limit is an arbitrary safety counter.)
         const ticks_max = 1500;
         for (0..ticks_max) |_| {
-            const result = std.posix.waitpid(child.id, std.posix.W.NOHANG);
+            const result = waitpid(child.id.?, std.posix.W.NOHANG);
             if (result.pid == 0) {
                 try supervisor.tick();
             } else {
-                assert(result.pid == child.id);
+                assert(result.pid == child.id.?);
 
                 const status = stdx.term_from_status(result.status);
-                if (std.meta.eql(status, .{ .Exited = 0 })) {
+                if (std.meta.eql(status, .{ .exited = 0 })) {
                     break;
                 } else {
                     log.err("{}: reformat failed: {}", .{ replica_index, status });
@@ -571,13 +582,12 @@ pub const Supervisor = struct {
 
         assert(replica.process == null);
         replica.state = .running;
-        replica.process = std.process.Child.init(argv.const_slice(), supervisor.allocator);
-        replica.process.?.stdin_behavior = .Ignore;
-        replica.process.?.stdout_behavior = .Ignore;
-        replica.process.?.stderr_behavior = .Inherit;
-
-        try replica.process.?.spawn();
-        errdefer _ = replica.process.?.kill() catch {};
+        replica.process = try std.process.spawn(supervisor.shell.io, .{
+            .argv = argv.const_slice(),
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .inherit,
+        });
     }
 
     pub fn replica_terminate(supervisor: *Supervisor, replica_index: u8) !void {
@@ -586,10 +596,10 @@ pub const Supervisor = struct {
         const replica = supervisor.replicas[replica_index];
         assert(replica.state == .running or replica.state == .paused);
 
-        try std.posix.kill(replica.process.?.id, std.posix.SIG.KILL);
+        try std.posix.kill(replica.process.?.id.?, std.posix.SIG.KILL);
 
-        const term = try replica.process.?.wait();
-        assert(std.meta.eql(term, .{ .Signal = std.posix.SIG.KILL }));
+        const term = try replica.process.?.wait(supervisor.shell.io);
+        assert(std.meta.eql(term, .{ .signal = std.posix.SIG.KILL }));
 
         replica.process = null;
         replica.state = .terminated;
@@ -602,7 +612,7 @@ pub const Supervisor = struct {
         const replica = supervisor.replicas[replica_index];
         assert(replica.state == .running);
 
-        try std.posix.kill(replica.process.?.id, std.posix.SIG.STOP);
+        try std.posix.kill(replica.process.?.id.?, std.posix.SIG.STOP);
         replica.state = .paused;
     }
 
@@ -613,7 +623,7 @@ pub const Supervisor = struct {
         const replica = supervisor.replicas[replica_index];
         assert(replica.state == .paused);
 
-        try std.posix.kill(replica.process.?.id, std.posix.SIG.CONT);
+        try std.posix.kill(replica.process.?.id.?, std.posix.SIG.CONT);
         replica.state = .running;
     }
 
@@ -621,7 +631,7 @@ pub const Supervisor = struct {
         assert(release_index < supervisor.release_count);
 
         log.info(
-            "{}: installing replica release: {} ... {}",
+            "{}: installing replica release: {f} ... {f}",
             .{
                 replica_index,
                 supervisor.releases[supervisor.replicas[replica_index].executable_index],
@@ -636,9 +646,10 @@ pub const Supervisor = struct {
             try supervisor.replica_terminate(replica_index);
         }
 
-        try std.fs.copyFileAbsolute(
+        try std.Io.Dir.copyFileAbsolute(
             supervisor.server_executables[release_index],
             supervisor.replicas[replica_index].executable_target,
+            supervisor.shell.io,
             .{},
         );
 
@@ -670,12 +681,12 @@ pub const Supervisor = struct {
         };
         const workload_driver_release = supervisor.releases[
             switch (driver) {
-                .command => |_| supervisor.driver_executables.len - 1,
+                .command => supervisor.driver_executables.len - 1,
                 .release => |release_index| release_index,
             }
         ];
         log.info(
-            "launching workload with driver: {s} (release={})",
+            "launching workload with driver: {s} (release={f})",
             .{ workload_driver, workload_driver_release },
         );
 
@@ -722,14 +733,13 @@ fn replicas_in_state(
 fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
     assert(ports.len > 0);
 
-    var out = std.ArrayList(u8).init(allocator);
-    errdefer out.deinit();
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
 
-    const writer = out.writer();
-    try writer.print("{d}", .{ports[0]});
-    for (ports[1..]) |port| try writer.print(",{d}", .{port});
+    try out.print(allocator, "{d}", .{ports[0]});
+    for (ports[1..]) |port| try out.print(allocator, ",{d}", .{port});
 
-    return out.toOwnedSlice();
+    return out.toOwnedSlice(allocator);
 }
 
 test comma_separate_ports {
@@ -737,6 +747,18 @@ test comma_separate_ports {
     defer std.testing.allocator.free(formatted);
 
     try std.testing.expectEqualStrings("3000,3001,3002", formatted);
+}
+
+fn waitpid(pid: std.posix.pid_t, flags: u32) struct { pid: std.posix.pid_t, status: u32 } {
+    var status: u32 = undefined;
+    while (true) {
+        const rc = std.os.linux.waitpid(pid, &status, flags);
+        switch (std.os.linux.errno(rc)) {
+            .SUCCESS => return .{ .pid = @intCast(rc), .status = status },
+            .INTR => continue,
+            else => unreachable,
+        }
+    }
 }
 
 const ReplicaState = enum { running, paused, terminated };
@@ -796,9 +818,9 @@ const Replica = struct {
     pub fn wait_nonblocking(self: *Replica) ?std.process.Child.Term {
         assert(self.state == .running or self.state == .paused);
 
-        const result = std.posix.waitpid(self.process.?.id, std.posix.W.NOHANG);
+        const result = waitpid(self.process.?.id.?, std.posix.W.NOHANG);
         if (result.pid == 0) return null;
-        assert(result.pid == self.process.?.id);
+        assert(result.pid == self.process.?.id.?);
 
         self.state = .terminated;
         return stdx.term_from_status(result.status);
@@ -856,20 +878,21 @@ const Workload = struct {
         const arg_addresses = try comma_separate_ports(allocator, proxy_ports);
         defer allocator.free(arg_addresses);
 
-        var driver_argv = std.ArrayList([]const u8).init(allocator);
-        defer driver_argv.deinit();
+        var driver_argv: std.ArrayList([]const u8) = .empty;
+        defer driver_argv.deinit(allocator);
 
         var driver_command_parts = std.mem.splitScalar(u8, driver_command, ' ');
-        while (driver_command_parts.next()) |part| try driver_argv.append(part);
-        try driver_argv.append(arg_cluster);
-        try driver_argv.append(arg_addresses);
+        while (driver_command_parts.next()) |part| try driver_argv.append(allocator, part);
+        try driver_argv.append(allocator, arg_cluster);
+        try driver_argv.append(allocator, arg_addresses);
 
-        var driver = std.process.Child.init(driver_argv.items, allocator);
-        driver.stdin_behavior = .Pipe;
-        driver.stdout_behavior = .Pipe;
-        driver.stderr_behavior = .Inherit;
-        try driver.spawn();
-        errdefer _ = driver.kill() catch {};
+        var driver = try std.process.spawn(io.io_std, .{
+            .argv = driver_argv.items,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .inherit,
+        });
+        errdefer driver.kill(io.io_std);
 
         var model = try Model.init(allocator);
         errdefer model.deinit(allocator);
@@ -901,11 +924,14 @@ const Workload = struct {
     }
 
     pub fn destroy(workload: *Workload, allocator: std.mem.Allocator) void {
-        const workload_result = workload.driver.kill() catch |err| {
+        std.posix.kill(workload.driver.id.?, std.posix.SIG.TERM) catch |err| {
             fatal(.workload_exit_result, "workload: error killing driver: {any}", .{err});
         };
-        if (!std.meta.eql(workload_result, .{ .Signal = std.posix.SIG.TERM }) and
-            !std.meta.eql(workload_result, .{ .Exited = 128 + std.posix.SIG.TERM }))
+        const workload_result = workload.driver.wait(workload.io.io_std) catch |err| {
+            fatal(.workload_exit_result, "workload: error waiting for driver: {any}", .{err});
+        };
+        if (!std.meta.eql(workload_result, .{ .signal = std.posix.SIG.TERM }) and
+            !std.meta.eql(workload_result, .{ .exited = 128 + @intFromEnum(std.posix.SIG.TERM) }))
         {
             fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
         }
@@ -937,17 +963,17 @@ const Workload = struct {
 
         const command = workload.generator.random_command(&workload.model);
         const operation = command.operation();
-        var stream = std.io.fixedBufferStream(workload.request_buffer);
-        stream.writer().writeInt(u8, @intFromEnum(operation), .little) catch unreachable;
+        var stream = std.Io.Writer.fixed(workload.request_buffer);
+        stream.writeInt(u8, @intFromEnum(operation), .little) catch unreachable;
 
         const request_body_size = workload.generator.random_request(
             &workload.model,
             command,
-            workload.request_buffer[stream.pos + @sizeOf(u32) ..],
+            workload.request_buffer[stream.end + @sizeOf(u32) ..],
         );
         const request_body_events_count: u32 =
             @intCast(@divExact(request_body_size, operation.event_size()));
-        stream.writer().writeInt(u32, request_body_events_count, .little) catch unreachable;
+        stream.writeInt(u32, request_body_events_count, .little) catch unreachable;
 
         log.debug(
             "workload: request start: command={s} body={}",
@@ -956,7 +982,7 @@ const Workload = struct {
 
         workload.command = command;
         workload.request_written = 0;
-        workload.request_size = @intCast(stream.pos + request_body_size);
+        workload.request_size = @intCast(stream.end + request_body_size);
         workload.request_start = workload.time.monotonic();
         workload.driver_request_write();
     }
@@ -1033,17 +1059,17 @@ const Workload = struct {
         workload.read_progress += read_size;
 
         const read_buffer = workload.reply_buffer[0..workload.read_progress];
-        var read_stream = std.io.fixedBufferStream(read_buffer);
-        const reader = read_stream.reader();
+        var read_stream = std.Io.Reader.fixed(read_buffer);
+        const reader = &read_stream;
 
         if (workload.read_progress < @sizeOf(u32)) return workload.driver_response_read();
-        const results_count = reader.readInt(u32, .little) catch unreachable;
+        const results_count = reader.takeInt(u32, .little) catch unreachable;
         const results_size = results_count * workload.command.?.operation().result_size();
-        if (workload.read_progress < read_stream.pos + results_size) {
+        if (workload.read_progress < read_stream.seek + results_size) {
             return workload.driver_response_read();
         }
 
-        const results_buffer = workload.reply_buffer[read_stream.pos..][0..results_size];
+        const results_buffer = workload.reply_buffer[read_stream.seek..][0..results_size];
         workload.model.reconcile(
             workload.command.?,
             workload.request_buffer[(@sizeOf(u8) + @sizeOf(u32))..workload.request_size.?],
@@ -1065,7 +1091,7 @@ const Workload = struct {
         );
 
         log.info(
-            "workload: request done: command={s} duration={} " ++
+            "workload: request done: command={s} duration={f} " ++
                 "(accounts_created={d} transfers_created={d})",
             .{
                 @tagName(workload.command.?),

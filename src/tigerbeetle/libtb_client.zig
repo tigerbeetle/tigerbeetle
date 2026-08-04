@@ -10,6 +10,7 @@ const exports = vsr.tb_client.exports;
 pub const std_options: std.Options = .{
     .log_level = .debug,
     .logFn = exports.Logging.application_logger,
+    .signal_stack_size = null,
 };
 
 comptime {

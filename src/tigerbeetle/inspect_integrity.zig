@@ -70,7 +70,7 @@ pub fn command_inspect_integrity(
         // If no seed was given, use a random seed for better coverage.
         const seed: u64 = seed_from_arg: {
             const seed_argument = args.seed orelse
-                break :seed_from_arg @truncate(stdx.crypto_u128());
+                break :seed_from_arg @truncate(stdx.crypto_u128(io.io_std));
             break :seed_from_arg vsr.testing.parse_seed(seed_argument);
         };
 
@@ -145,7 +145,11 @@ fn init(
     });
     errdefer integrity.storage.deinit();
 
-    const data_file_stat = try (std.fs.File{ .handle = integrity.storage.fd }).stat();
+    const data_file = std.Io.File{
+        .handle = integrity.storage.fd,
+        .flags = .{ .nonblocking = false },
+    };
+    const data_file_stat = try data_file.stat(io.io_std);
 
     integrity.superblock = try SuperBlock.init(
         gpa,
@@ -241,14 +245,14 @@ fn init(
 
     integrity.buffer_headers = try gpa.alignedAlloc(
         u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
         constants.journal_size_headers,
     );
     errdefer gpa.free(integrity.buffer_headers);
 
     integrity.buffer_prepare = try gpa.alignedAlloc(
         u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
         constants.message_size_max,
     );
     errdefer gpa.free(integrity.buffer_prepare);
@@ -404,7 +408,7 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
     var prng = stdx.PRNG.from_seed(seed);
     integrity.grid_scrubber.open(&prng);
 
-    const parent_progress_node = std.Progress.start(.{
+    const parent_progress_node = std.Progress.start(integrity.io.io_std, .{
         .root_name = "checking grid blocks",
         .estimated_total_items = blocks_expected_count,
     });

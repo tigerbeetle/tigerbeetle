@@ -20,7 +20,7 @@ pub fn init(gpa: std.mem.Allocator, size: usize) !ScratchMemory {
         .state = .free,
     };
 
-    scratch.buffer = try gpa.alignedAlloc(u8, std.heap.page_size_min, size);
+    scratch.buffer = try gpa.alignedAlloc(u8, .fromByteUnits(std.heap.page_size_min), size);
     errdefer gpa.free(scratch.buffer);
 
     return scratch;

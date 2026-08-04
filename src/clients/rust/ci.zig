@@ -24,7 +24,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
             .line_length_max = 100,
         }));
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
             .prebuilt = options.tigerbeetle,
         });
@@ -45,14 +45,14 @@ fn file_contains(
         line_length_max: u32 = 100,
     },
 ) !bool {
-    const file = try shell.cwd.openFile(path, .{});
-    defer file.close();
+    const file = try shell.cwd.openFile(shell.io, path, .{});
+    defer file.close(shell.io);
 
     const line_buffer = try gpa.alloc(u8, options.line_length_max + 1);
     defer gpa.free(line_buffer);
 
-    const reader = file.reader();
-    while (try reader.readUntilDelimiterOrEof(line_buffer, '\n')) |line| {
+    var file_reader = file.reader(shell.io, line_buffer);
+    while (try file_reader.interface.takeDelimiter('\n')) |line| {
         if (std.mem.indexOf(u8, line, options.needle) != null) return true;
     }
 
@@ -72,7 +72,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
 
     const base_dir = shell.cwd;
     try shell.pushd(tmp_dir);
@@ -89,7 +89,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
             log.warn("waiting for 5 minutes for the {s} version to appear on crates.io", .{
                 options.release,
             });
-            std.time.sleep(5 * std.time.ns_per_min);
+            try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
         }
     } else {
         shell.exec("cargo add tigerbeetle@{release}", .{
@@ -102,7 +102,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.exec("cargo add futures@0.3", .{});
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -111,7 +111,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    try Shell.copy_path(
+    try shell.copy_path(
         base_dir,
         "src/clients/rust/samples/basic/src/main.rs",
         shell.cwd,

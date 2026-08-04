@@ -1,7 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
-const fmt = std.fmt;
 const mem = std.mem;
 const os = std.os;
 const log = std.log.scoped(.main);
@@ -33,7 +32,7 @@ const ReplicaReformat =
     vsr.ReplicaReformatType(StateMachine, MessageBus, Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
-const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator(.{});
+const GeneralPurposeAllocator = std.heap.DebugAllocator(.{});
 
 const KiB = stdx.KiB;
 const MiB = stdx.MiB;
@@ -45,7 +44,7 @@ pub var log_level_runtime: std.log.Level = .info;
 
 pub fn log_runtime(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -62,7 +61,7 @@ pub const std_options: std.Options = .{
     .logFn = log_runtime,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     if (builtin.os.tag == .windows) try vsr.multiversion.wait_for_parent_to_exit();
 
     var allocator = GeneralPurposeAllocator.init;
@@ -76,13 +75,21 @@ pub fn main() !void {
         }
     }
 
+    var io_std_threaded: std.Io.Threaded = .init(gpa, .{
+        .argv0 = .init(init.args),
+        .environ = init.environ,
+    });
+    defer io_std_threaded.deinit();
+
+    const io_std = io_std_threaded.io();
+
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    var command = cli.parse_args(&flags);
+    var command = cli.parse_args(&flags, io_std, init.args);
 
     if (command == .version) {
-        try command_version(gpa, command.version.verbose);
+        try command_version(gpa, io_std, init.args, init.environ, command.version.verbose);
         return; // Exit early before initializing IO.
     }
 
@@ -100,14 +107,15 @@ pub fn main() !void {
         .format, .recover => 2048,
         else => 128,
     };
-    var io = try IO.init(io_entries, 0);
+    var io = try IO.init(io_std, io_entries, 0);
     defer io.deinit();
 
     var time_os: TimeOS = .{};
     const time = time_os.interface();
 
-    var trace_file: ?std.fs.File = null;
-    defer if (trace_file) |file| file.close();
+    var trace_file: ?std.Io.File = null;
+    var trace_file_writer: std.Io.File.Writer = undefined;
+    defer if (trace_file) |file| file.close(io_std);
 
     var statsd_address: ?stdx.SocketAddress = null;
     var log_trace = true;
@@ -115,10 +123,15 @@ pub fn main() !void {
     switch (command) {
         .start => |*args| {
             if (args.trace) |path| {
-                trace_file = std.fs.cwd().createFile(path, .{ .exclusive = true }) catch |err| {
+                trace_file = std.Io.Dir.cwd().createFile(
+                    io_std,
+                    path,
+                    .{ .exclusive = true },
+                ) catch |err| {
                     log.err("error creating trace file '{s}': {}", .{ path, err });
                     return err;
                 };
+                trace_file_writer = trace_file.?.writerStreaming(io_std, &.{});
             }
             if (args.statsd) |address| statsd_address = address;
             log_trace = args.log_trace;
@@ -131,7 +144,7 @@ pub fn main() !void {
     }
 
     var tracer = try Tracer.init(gpa, time, .unknown, .{
-        .writer = if (trace_file) |file| file.writer().any() else null,
+        .writer = if (trace_file != null) &trace_file_writer.interface else null,
         .statsd_options = if (statsd_address) |address| .{
             .udp = .{
                 .io = &io,
@@ -167,7 +180,16 @@ pub fn main() !void {
 
             switch (command_storage) {
                 .format => try command_format(gpa, &storage, args),
-                .start => try command_start(gpa, &io, time, &tracer, &storage, args),
+                .start => try command_start(
+                    gpa,
+                    init.args,
+                    init.environ,
+                    &io,
+                    time,
+                    &tracer,
+                    &storage,
+                    args,
+                ),
                 .recover => try command_reformat(gpa, &io, time, &storage, args),
                 else => comptime unreachable,
             }
@@ -176,23 +198,36 @@ pub fn main() !void {
         .benchmark => |*args| try benchmark_driver.command_benchmark(gpa, &io, time, args),
         .inspect => |*args| try inspect.command_inspect(gpa, &io, &tracer, args),
         .multiversion => |*args| {
-            var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-            var stdout_writer = stdout_buffer.writer();
-            const stdout = stdout_writer.any();
+            var stdout_buffer: [4096]u8 = undefined;
+            var stdout_writer = std.Io.File.stdout().writerStreaming(io_std, &stdout_buffer);
+            const stdout = &stdout_writer.interface;
 
-            try vsr.multiversion.print_information(gpa, args.path, stdout);
-            try stdout_buffer.flush();
+            try vsr.multiversion.print_information(
+                gpa,
+                io_std,
+                init.args,
+                init.environ,
+                args.path,
+                stdout,
+            );
+            try stdout.flush();
         },
-        .amqp => |*args| try command_amqp(gpa, time, args),
+        .amqp => |*args| try command_amqp(gpa, io_std, time, args),
     }
 }
 
-fn command_version(gpa: mem.Allocator, verbose: bool) !void {
-    var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
-    var stdout_writer = stdout_buffer.writer();
-    const stdout = stdout_writer.any();
+fn command_version(
+    gpa: mem.Allocator,
+    io_std: std.Io,
+    process_args: std.process.Args,
+    process_environ: std.process.Environ,
+    verbose: bool,
+) !void {
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writerStreaming(io_std, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
 
-    try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
+    try stdout.print("TigerBeetle version {f}\n", .{constants.semver});
 
     if (verbose) {
         try stdout.writeAll("\n");
@@ -220,12 +255,24 @@ fn command_version(gpa: mem.Allocator, verbose: bool) !void {
         }
 
         try stdout.writeAll("\n");
-        const self_exe_path = try vsr.multiversion.self_exe_path(gpa);
+        const self_exe_path = try vsr.multiversion.self_exe_path(
+            io_std,
+            process_args,
+            process_environ,
+            gpa,
+        );
         defer gpa.free(self_exe_path);
 
-        vsr.multiversion.print_information(gpa, self_exe_path, stdout) catch {};
+        vsr.multiversion.print_information(
+            gpa,
+            io_std,
+            process_args,
+            process_environ,
+            self_exe_path,
+            stdout,
+        ) catch {};
     }
-    try stdout_buffer.flush();
+    try stdout.flush();
 }
 
 fn command_format(
@@ -250,6 +297,8 @@ fn command_format(
 
 fn command_start(
     base_allocator: mem.Allocator,
+    process_args: std.process.Args,
+    process_environ: std.process.Environ,
     io: *IO,
     time: Time,
     tracer: *Tracer,
@@ -303,7 +352,7 @@ fn command_start(
         });
     }
 
-    const random_nonce = stdx.crypto_u128();
+    const random_nonce = stdx.crypto_u128(io.io_std);
 
     var self_exe_path: ?[:0]const u8 = null;
     defer if (self_exe_path) |path| gpa.free(path);
@@ -330,10 +379,17 @@ fn command_start(
             break :blk .single_release(constants.config.process.release);
         }
 
-        self_exe_path = try vsr.multiversion.self_exe_path(gpa);
+        self_exe_path = try vsr.multiversion.self_exe_path(
+            io.io_std,
+            process_args,
+            process_environ,
+            gpa,
+        );
         multiversion_os = try vsr.multiversion.MultiversionOS.init(
             gpa,
             io,
+            process_args,
+            process_environ,
             self_exe_path.?,
             .native,
         );
@@ -344,9 +400,11 @@ fn command_start(
         break :blk multiversion_os.?.multiversion();
     };
 
-    log.info("release={}", .{config.process.release});
-    log.info("release_client_min={}", .{config.process.release_client_min});
-    log.info("releases_bundled={any}", .{multiversion.releases_bundled().slice()});
+    log.info("release={f}", .{config.process.release});
+    log.info("release_client_min={f}", .{config.process.release_client_min});
+    log.info("releases_bundled={f}", .{
+        vsr.multiversion.fmt_releases(multiversion.releases_bundled().slice()),
+    });
     log.info("git_commit={?s}", .{config.process.git_commit});
 
     const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
@@ -436,10 +494,10 @@ fn command_start(
         @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, MiB),
     });
 
-    log.info("{}: cluster={}: listening on {}", .{
+    log.info("{}: cluster={}: listening on {f}", .{
         replica.replica,
         replica.cluster,
-        replica.message_bus.accept_address.?,
+        vsr.format_addresses(&.{replica.message_bus.accept_address.?}),
     });
 
     if (args.aof_recovery) {
@@ -470,21 +528,22 @@ fn command_start(
     // - tigerbeetle process exits when its stdin gets closed.
     if (args.addresses.zero) {
         const port_actual = replica.message_bus.accept_address.?.port;
-        const stdout = std.io.getStdOut();
-        try stdout.writer().print("{}\n", .{port_actual});
-        stdout.close();
+        const stdout = std.Io.File.stdout();
+        var stdout_writer = stdout.writerStreaming(io.io_std, &.{});
+        try stdout_writer.interface.print("{}\n", .{port_actual});
+        stdout.close(io.io_std);
 
         // While it is possible to integrate stdin with our io_uring loop, using a dedicated
         // thread is simpler, and gives us _un_graceful shutdown, which is exactly what we want
         // to keep behavior close to the normal case.
         const watchdog = try std.Thread.spawn(.{}, struct {
-            fn thread_main() void {
+            fn thread_main(watchdog_io: std.Io) void {
                 var buf: [1]u8 = .{0};
-                _ = std.io.getStdIn().read(&buf) catch {};
+                _ = std.Io.File.stdin().readStreaming(watchdog_io, &.{&buf}) catch {};
                 log.info("stdin closed, exiting", .{});
                 std.process.exit(0);
             }
-        }.thread_main, .{});
+        }.thread_main, .{io.io_std});
         watchdog.detach();
     }
 
@@ -543,7 +602,7 @@ fn command_reformat(
         time,
         &message_pool,
         .{
-            .id = stdx.crypto_u128(),
+            .id = stdx.crypto_u128(io.io_std),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
             .aof_recovery = false,
@@ -608,10 +667,16 @@ fn command_repl(
     try repl_instance.run(args.statements);
 }
 
-fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
+fn command_amqp(
+    gpa: mem.Allocator,
+    io_std: std.Io,
+    time: Time,
+    args: *const cli.Command.AMQP,
+) !void {
     var runner: vsr.cdc.Runner = undefined;
     try runner.init(
         gpa,
+        io_std,
         time,
         .{
             .cluster_id = args.cluster,
@@ -647,7 +712,7 @@ fn print_value(
 ) !void {
     if (@TypeOf(value) == ?[40]u8) {
         assert(std.mem.eql(u8, field, "process.git_commit"));
-        return std.fmt.format(writer, "{s}=\"{?s}\"\n", .{
+        return writer.print("{s}=\"{?s}\"\n", .{
             field,
             value,
         });
@@ -655,11 +720,20 @@ fn print_value(
 
     switch (@typeInfo(@TypeOf(value))) {
         .@"fn" => {}, // Ignore the log() function.
-        .pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+        .pointer => try writer.print("{s}=\"{f}\"\n", .{
             field,
-            std.fmt.fmtSliceEscapeLower(value),
+            std.ascii.hexEscape(value, .lower),
         }),
-        else => try std.fmt.format(writer, "{s}={any}\n", .{
+        .@"enum" => try writer.print("{s}={s}{any}\n", .{
+            field,
+            @typeName(@TypeOf(value)),
+            value,
+        }),
+        .@"struct" => try writer.print("{s}={f}\n", .{
+            field,
+            value,
+        }),
+        else => try writer.print("{s}={any}\n", .{
             field,
             value,
         }),

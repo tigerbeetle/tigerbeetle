@@ -905,7 +905,7 @@ pub fn MessageBusType(comptime IO: type) type {
             if (bus.replicas[replica]) |connection| {
                 bus.send_message(connection, message);
             } else {
-                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
+                log.debug("{}: send_message_to_replica: no connection to={} header={f}", .{
                     bus.id,
                     replica,
                     message.header,

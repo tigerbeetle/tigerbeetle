@@ -1,7 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const os = std.os;
-const posix = std.posix;
 const linux = os.linux;
 const IO_Uring = linux.IoUring;
 const io_uring_cqe = linux.io_uring_cqe;
@@ -10,6 +9,7 @@ const log = std.log.scoped(.io);
 
 const constants = @import("../constants.zig");
 const stdx = @import("stdx");
+const posix = stdx.posix;
 const TimeOS = stdx.TimeOS;
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
@@ -27,6 +27,9 @@ pub const IO = struct {
 
     ring: IO_Uring,
 
+    /// The `std.Io` used for blocking file system operations (e.g. `aof_blocking_*`).
+    io_std: std.Io,
+
     /// Completions and deferred callbacks that are ready to have their callbacks run.
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
@@ -40,7 +43,7 @@ pub const IO = struct {
 
     run_for_ns_active: bool = false,
 
-    pub fn init(entries: u12, flags: u32) !IO {
+    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
         errdefer |err| switch (err) {
             error.SystemOutdated => {
                 log.err("io_uring is not available", .{});
@@ -62,7 +65,7 @@ pub const IO = struct {
             @panic("Linux kernel 5.11 or greater is required for IORING_ENTER_EXT_ARG");
         }
 
-        return IO{ .ring = ring };
+        return IO{ .ring = ring, .io_std = io_std };
     }
 
     pub fn deinit(self: *IO) void {
@@ -294,7 +297,7 @@ pub const IO = struct {
             @sizeOf(linux.io_uring_getevents_arg),
         );
 
-        switch (linux.E.init(res)) {
+        switch (linux.errno(res)) {
             .SUCCESS => {},
             // The kernel was unable to allocate memory or ran out of resources for the request.
             // The application should wait for some completions and try again:
@@ -582,7 +585,7 @@ pub const IO = struct {
                                 .PERM => error.AccessDenied,
                                 .EXIST => error.PathAlreadyExists,
                                 .BUSY => error.DeviceBusy,
-                                .OPNOTSUPP => error.FileLocksNotSupported,
+                                .OPNOTSUPP => error.FileLocksUnsupported,
                                 .AGAIN => error.WouldBlock,
                                 .TXTBSY => error.FileBusy,
                                 else => |errno| stdx.unexpected_errno("openat", errno),
@@ -783,7 +786,7 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: std.net.Address,
+            address: stdx.RawAddress,
         },
         fsync: struct {
             fd: fd_t,
@@ -812,7 +815,7 @@ pub const IO = struct {
             dir_fd: fd_t,
             file_path: [*:0]const u8,
             flags: u32,
-            mask: u32,
+            mask: os.linux.STATX,
             statxbuf: *std.os.linux.Statx,
         },
         timeout: struct {
@@ -941,7 +944,7 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address.to_std(),
+                    .address = address.to_raw(),
                 },
             },
         };
@@ -1166,7 +1169,7 @@ pub const IO = struct {
         FileNotFound,
         NameTooLong,
         NotDir,
-    } || std.fs.File.StatError || posix.UnexpectedError;
+    } || std.Io.File.StatError || posix.UnexpectedError;
 
     pub fn statx(
         self: *IO,
@@ -1181,7 +1184,7 @@ pub const IO = struct {
         dir_fd: fd_t,
         file_path: [*:0]const u8,
         flags: u32,
-        mask: u32,
+        mask: os.linux.STATX,
         statxbuf: *std.os.linux.Statx,
     ) void {
         completion.* = .{
@@ -1295,7 +1298,7 @@ pub const IO = struct {
             error.Unexpected => return error.Unexpected,
         };
         assert(event_fd != INVALID_EVENT);
-        errdefer os.close(event_fd);
+        errdefer posix.close(event_fd);
 
         return event_fd;
     }
@@ -1402,7 +1405,7 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !fd_t {
+    pub fn open_dir(_: *IO, dir_path: []const u8) !fd_t {
         return posix.open(dir_path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY }, 0);
     }
 
@@ -1426,8 +1429,6 @@ pub const IO = struct {
         purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
-        _ = self;
-
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
@@ -1510,7 +1511,7 @@ pub const IO = struct {
                 // here (see below) but being able to benchmark production workloads
                 // on tmpfs is very useful for removing disk speed from the equation.
                 if (direct_io != .direct_io_disabled and !dir_on_tmpfs) {
-                    direct_io_supported = try fs_supports_direct_io(dir_fd);
+                    direct_io_supported = try fs_supports_direct_io(self.io_std, dir_fd);
                     if (direct_io_supported) {
                         flags.DIRECT = true;
                     } else if (direct_io == .direct_io_optional) {
@@ -1574,7 +1575,7 @@ pub const IO = struct {
             for (0..5) |_| {
                 posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
                     error.WouldBlock => {
-                        std.Thread.sleep(50 * std.time.ns_per_ms);
+                        std.Io.sleep(self.io_std, .fromMilliseconds(50), .awake) catch {};
                         continue;
                     },
                     else => return err,
@@ -1609,7 +1610,7 @@ pub const IO = struct {
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
         if (purpose == .format and kind == .file) {
-            log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+            log.info("allocating {Bi}...", .{size});
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {
                     log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
@@ -1652,7 +1653,7 @@ pub const IO = struct {
                 const BLKGETSIZE64 = os.linux.IOCTL.IOR(0x12, 114, usize);
                 var block_device_size: usize = 0;
 
-                switch (os.linux.E.init(os.linux.ioctl(
+                switch (os.linux.errno(os.linux.ioctl(
                     fd,
                     BLKGETSIZE64,
                     @intFromPtr(&block_device_size),
@@ -1668,10 +1669,10 @@ pub const IO = struct {
 
                 if (block_device_size < size) {
                     std.debug.panic(
-                        "The block device used is too small ({} available/{} needed).",
+                        "The block device used is too small ({Bi} available/{Bi} needed).",
                         .{
-                            std.fmt.fmtIntSizeBin(block_device_size),
-                            std.fmt.fmtIntSizeBin(size),
+                            block_device_size,
+                            size,
                         },
                     );
                 }
@@ -1697,8 +1698,8 @@ pub const IO = struct {
                         std.debug.panic(
                             "Superblock on block device not empty. " ++
                                 "If this is the correct block device to use, " ++
-                                "please zero the first {} using a tool like dd.",
-                            .{std.fmt.fmtIntSizeBin(superblock_zone_size)},
+                                "please zero the first {Bi} using a tool like dd.",
+                            .{superblock_zone_size},
                         );
                     }
 
@@ -1720,8 +1721,8 @@ pub const IO = struct {
                     // since the zero superblock check above is to prevent accidentally overwriting
                     // a real device. replica_format.zig checks that the format doesn't depend on
                     // preexisting data.
-                    log.info("discarding {}...", .{std.fmt.fmtIntSizeBin(block_device_size)});
-                    switch (os.linux.E.init(os.linux.ioctl(
+                    log.info("discarding {Bi}...", .{block_device_size});
+                    switch (os.linux.errno(os.linux.ioctl(
                         fd,
                         BLKDISCARD,
                         @intFromPtr(&range),
@@ -1750,7 +1751,7 @@ pub const IO = struct {
 
         while (true) {
             const res = stdx.fstatfs(dir_fd, &statfs);
-            switch (os.linux.E.init(res)) {
+            switch (os.linux.errno(res)) {
                 .SUCCESS => {
                     return statfs.f_type == stdx.TmpfsMagic;
                 },
@@ -1762,23 +1763,23 @@ pub const IO = struct {
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
-    fn fs_supports_direct_io(dir_fd: fd_t) !bool {
+    fn fs_supports_direct_io(io_std: std.Io, dir_fd: fd_t) !bool {
         if (!@hasField(posix.O, "DIRECT")) return false;
 
         var cookie: [16]u8 = @splat('0');
-        _ = stdx.array_print(16, &cookie, "{0x}", .{std.crypto.random.int(u64)});
+        _ = stdx.array_print(16, &cookie, "{0x}", .{stdx.crypto_random_int(io_std, u64)});
 
         const path: [:0]const u8 = "fs_supports_direct_io-" ++ cookie ++ "";
-        const dir = std.fs.Dir{ .fd = dir_fd };
+        const dir = std.Io.Dir{ .handle = dir_fd };
         const flags: posix.O = .{ .CLOEXEC = true, .CREAT = true, .TRUNC = true };
         const fd = try posix.openatZ(dir_fd, path, flags, 0o600);
         defer posix.close(fd);
-        defer dir.deleteFile(path) catch {};
+        defer dir.deleteFile(io_std, path) catch {};
 
         while (true) {
             const dir_flags: posix.O = .{ .CLOEXEC = true, .ACCMODE = .RDONLY, .DIRECT = true };
             const res = os.linux.openat(dir_fd, path, dir_flags, 0);
-            switch (os.linux.E.init(res)) {
+            switch (os.linux.errno(res)) {
                 .SUCCESS => {
                     posix.close(@intCast(res));
                     return true;
@@ -1799,7 +1800,7 @@ pub const IO = struct {
 
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
-            switch (os.linux.E.init(rc)) {
+            switch (os.linux.errno(rc)) {
                 .SUCCESS => return,
                 .BADF => return error.FileDescriptorInvalid,
                 .FBIG => return error.FileTooBig,
@@ -1818,38 +1819,42 @@ pub const IO = struct {
         }
     }
 
-    pub const PReadError = posix.PReadError;
+    pub const PReadError = std.Io.File.ReadPositionalError;
 
-    pub fn aof_blocking_write_all(_: *IO, fd: fd_t, buffer: []const u8) posix.WriteError!void {
-        return common.aof_blocking_write_all(fd, buffer);
+    pub fn aof_blocking_write_all(
+        io: *IO,
+        fd: fd_t,
+        buffer: []const u8,
+    ) std.Io.File.Writer.Error!void {
+        return common.aof_blocking_write_all(io.io_std, fd, buffer);
     }
 
-    pub fn aof_blocking_pread_all(_: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
-        return common.aof_blocking_pread_all(fd, buffer, offset);
+    pub fn aof_blocking_pread_all(io: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
+        return common.aof_blocking_pread_all(io.io_std, fd, buffer, offset);
     }
 
-    pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
-        return common.aof_blocking_close(fd);
+    pub fn aof_blocking_close(io: *IO, fd: fd_t) void {
+        return common.aof_blocking_close(io.io_std, fd);
     }
 
-    pub fn aof_blocking_stat(_: *IO, path: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
-        return common.aof_blocking_stat(path);
+    pub fn aof_blocking_stat(io: *IO, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
+        return common.aof_blocking_stat(io.io_std, path);
     }
 
-    pub fn aof_blocking_fstat(_: *IO, fd: fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
-        return common.aof_blocking_fstat(fd);
+    pub fn aof_blocking_fstat(io: *IO, fd: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
+        return common.aof_blocking_fstat(io.io_std, fd);
     }
 
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
         stdx.maybe(std.fs.path.isAbsolute(path));
 
         const dir_path = std.fs.path.dirname(path) orelse ".";
-        const dir_fd = try IO.open_dir(dir_path);
+        const dir_fd = try io.open_dir(dir_path);
         defer io.aof_blocking_close(dir_fd);
 
         const file_path = std.fs.path.basename(path);
 
-        return common.aof_blocking_open(dir_fd, file_path);
+        return common.aof_blocking_open(io.io_std, dir_fd, file_path);
     }
 
     fn erase_types(

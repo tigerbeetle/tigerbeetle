@@ -81,7 +81,6 @@
 //! [Detecting Clock Sync Failure in Highly Available Systems](https://youtu.be/7R-Iz6sJG6Q?si=9sD2TpfD29AxUjOY)
 const std = @import("std");
 const assert = std.debug.assert;
-const fmt = std.fmt;
 
 const stdx = @import("stdx");
 const log = stdx.log.scoped(.clock);
@@ -498,9 +497,9 @@ fn synchronize(self: *Clock) void {
     // operator, as the counterpoint to `no agreement on cluster time`.
     if (self.epoch.synchronized == null and self.window.synchronized != null) {
         const new_interval = self.window.synchronized.?;
-        log.info("{}: synchronized: accuracy={}", .{
+        log.info("{}: synchronized: accuracy={f}", .{
             self.replica,
-            fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+            std.Io.Duration.fromNanoseconds(new_interval.upper_bound - new_interval.lower_bound),
         });
     }
 
@@ -515,13 +514,13 @@ fn synchronize(self: *Clock) void {
 fn after_synchronization(self: *Clock) void {
     const new_interval = self.epoch.synchronized.?;
 
-    log.debug("{}: synchronized: truechimers={}/{} clock_offset={}..{} accuracy={}", .{
+    log.debug("{}: synchronized: truechimers={}/{} clock_offset={f}..{f} accuracy={f}", .{
         self.replica,
         new_interval.sources_true,
         self.epoch.sources.len,
-        fmt.fmtDurationSigned(new_interval.lower_bound),
-        fmt.fmtDurationSigned(new_interval.upper_bound),
-        fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
+        std.Io.Duration.fromNanoseconds(new_interval.lower_bound),
+        std.Io.Duration.fromNanoseconds(new_interval.upper_bound),
+        std.Io.Duration.fromNanoseconds(new_interval.upper_bound - new_interval.lower_bound),
     });
 
     const elapsed: i64 = @intCast(self.epoch.elapsed(self));
@@ -543,16 +542,16 @@ fn after_synchronization(self: *Clock) void {
         if (self.trace) |trace| trace.gauge(.clock_delta_ns, delta);
 
         if (delta < delta_warning) {
-            log.debug("{}: system time is {} behind", .{
+            log.debug("{}: system time is {f} behind", .{
                 self.replica,
-                fmt.fmtDurationSigned(delta),
+                std.Io.Duration.fromNanoseconds(delta),
             });
         } else {
             log.warn(
-                "{}: system time is {} behind, clamping system time to cluster time",
+                "{}: system time is {f} behind, clamping system time to cluster time",
                 .{
                     self.replica,
-                    fmt.fmtDurationSigned(delta),
+                    std.Io.Duration.fromNanoseconds(delta),
                 },
             );
         }
@@ -561,14 +560,14 @@ fn after_synchronization(self: *Clock) void {
         if (self.trace) |trace| trace.gauge(.clock_delta_ns, delta);
 
         if (delta < delta_warning) {
-            log.debug("{}: system time is {} ahead", .{
+            log.debug("{}: system time is {f} ahead", .{
                 self.replica,
-                fmt.fmtDurationSigned(delta),
+                std.Io.Duration.fromNanoseconds(delta),
             });
         } else {
-            log.warn("{}: system time is {} ahead, clamping system time to cluster time", .{
+            log.warn("{}: system time is {f} ahead, clamping system time to cluster time", .{
                 self.replica,
-                fmt.fmtDurationSigned(delta),
+                std.Io.Duration.fromNanoseconds(delta),
             });
         }
     }
@@ -1005,12 +1004,12 @@ test "clock: fuzz test" {
         clock_count,
     });
     log.info("absolute clock offsets with respect to test time:\n", .{});
-    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(max_clock_offset)))});
-    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(min_clock_offset)))});
+    log.info("maximum={f}\n", .{std.Io.Duration.fromNanoseconds(max_clock_offset)});
+    log.info("minimum={f}\n", .{std.Io.Duration.fromNanoseconds(min_clock_offset)});
     log.info("\nabsolute synchronization errors between clocks:\n", .{});
-    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(max_sync_error)))});
-    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(min_sync_error)))});
-    log.info("clock ticks without synchronization={d}\n", .{
+    log.info("maximum={f}\n", .{std.Io.Duration.fromNanoseconds(max_sync_error)});
+    log.info("minimum={f}\n", .{std.Io.Duration.fromNanoseconds(min_sync_error)});
+    log.info("clock ticks without synchronization={any}\n", .{
         clock_ticks_without_synchronization,
     });
 }

@@ -75,13 +75,8 @@ pub const Duration = struct {
 
     // Human readable format like `1.123s`.
     // NB: this is a lossy operation, durations are rounded to look nice.
-    pub fn format(
-        duration: Duration,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        try std.fmt.fmtDuration(duration.ns).format(fmt, options, writer);
+    pub fn format(duration: Duration, writer: *std.Io.Writer) !void {
+        try std.Io.Duration.fromNanoseconds(duration.ns).format(writer);
     }
 
     pub fn parse_flag_value(
@@ -219,14 +214,7 @@ pub const InstantUnix = struct {
         second: u8,
         millisecond: u16,
 
-        pub fn format(
-            datetime: DateTimeUTC,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
+        pub fn format(datetime: DateTimeUTC, writer: *std.Io.Writer) !void {
             try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
                 datetime.year,
                 datetime.month,
@@ -269,14 +257,7 @@ pub const InstantUnix = struct {
         return .{ .ns = instant.ns + duration.ns };
     }
 
-    pub fn format(
-        instant: InstantUnix,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(instant: InstantUnix, writer: *std.Io.Writer) !void {
         _ = instant;
         _ = writer;
         @compileError("convert to DateTime first");
@@ -288,11 +269,11 @@ test "DateTimeUTC format" {
     var buffer: [24]u8 = undefined;
     try std.testing.expectEqualStrings(
         "1970-01-01 00:00:00.000Z",
-        try std.fmt.bufPrint(&buffer, "{}", .{instant_min.date_time()}),
+        try std.fmt.bufPrint(&buffer, "{f}", .{instant_min.date_time()}),
     );
     const instant_max = InstantUnix{ .ns = std.math.maxInt(u64) };
     try std.testing.expectEqualStrings(
         "2554-07-21 23:34:33.709Z",
-        try std.fmt.bufPrint(&buffer, "{}", .{instant_max.date_time()}),
+        try std.fmt.bufPrint(&buffer, "{f}", .{instant_max.date_time()}),
     );
 }

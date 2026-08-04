@@ -240,7 +240,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         scan_lookup: ScanLookup = .null,
         scan_lookup_buffer: []align(constants.cache_line_size) u8,
         scan_lookup_buffer_index: u32 = 0,
-        scan_lookup_results: std.ArrayListUnmanaged(u32),
+        scan_lookup_results: std.ArrayList(u32),
         scan_lookup_next_tick: Grid.NextTick = undefined,
 
         expire_pending_transfers: ExpirePendingTransfers = .{},
@@ -921,12 +921,12 @@ pub fn StateMachineType(comptime Storage: type) type {
                 };
             self.scan_lookup_buffer = try allocator.alignedAlloc(
                 u8,
-                constants.cache_line_size,
+                .fromByteUnits(constants.cache_line_size),
                 scan_lookup_buffer_size,
             );
             errdefer allocator.free(self.scan_lookup_buffer);
 
-            self.scan_lookup_results = try std.ArrayListUnmanaged(u32).initCapacity(
+            self.scan_lookup_results = try std.ArrayList(u32).initCapacity(
                 allocator,
                 scan_lookup_result_max,
             );
@@ -2083,7 +2083,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             inline for (indexes) |index| {
                 if (@field(filter, @tagName(index)) != 0) {
                     scan_conditions.push(groove.scan_builder.scan_prefix(
-                        std.enums.nameCast(std.meta.FieldEnum(Groove.IndexTrees), index),
+                        @field(std.meta.FieldEnum(Groove.IndexTrees), @tagName(index)),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         self.prefetch_snapshot.?,
                         @field(filter, @tagName(index)),

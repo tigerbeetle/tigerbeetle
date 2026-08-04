@@ -485,7 +485,7 @@ const TestAction = union(enum) {
     }
 };
 
-const ArrayList = std.ArrayListAligned(u8, constants.cache_line_size);
+const ArrayList = std.array_list.Aligned(u8, .fromByteUnits(constants.cache_line_size));
 
 fn check(test_table: []const u8) !void {
     const test_actions = parse_table(TestAction, test_table);
@@ -532,8 +532,8 @@ fn RunnerType(comptime options: Options) type {
             var context: TestContext = undefined;
             try context.init(arena, &assert_results);
 
-            var input_buffer: ArrayList = .init(arena);
-            var output_buffer: ArrayList = .init(arena);
+            var input_buffer: ArrayList = .empty;
+            var output_buffer: ArrayList = .empty;
 
             var operation: ?TestOperation = null;
             for (test_actions) |test_action| {
@@ -634,7 +634,7 @@ fn RunnerType(comptime options: Options) type {
             output_buffer: *ArrayList,
         ) !void {
             var event = action.event();
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
 
             context.commit_timestamp_expected += 1;
 
@@ -662,7 +662,7 @@ fn RunnerType(comptime options: Options) type {
                         },
                         .status = action.status,
                     };
-                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+                    try output_buffer.appendSlice(context.arena, std.mem.asBytes(&result));
 
                     if (event.flags.linked) {
                         if (action.status == .linked_event_failed) {
@@ -682,7 +682,7 @@ fn RunnerType(comptime options: Options) type {
                         .index = @intCast(@divExact(input_buffer.items.len, @sizeOf(Account)) - 1),
                         .result = action.status,
                     };
-                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+                    try output_buffer.appendSlice(context.arena, std.mem.asBytes(&result));
                 },
                 else => unreachable,
             }
@@ -695,7 +695,7 @@ fn RunnerType(comptime options: Options) type {
             output_buffer: *ArrayList,
         ) !void {
             var event = action.event();
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
 
             context.commit_timestamp_expected += 1;
 
@@ -744,7 +744,7 @@ fn RunnerType(comptime options: Options) type {
                         },
                         .status = action.status,
                     };
-                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+                    try output_buffer.appendSlice(context.arena, std.mem.asBytes(&result));
 
                     if (event.flags.linked) {
                         if (action.status == .linked_event_failed) {
@@ -764,7 +764,7 @@ fn RunnerType(comptime options: Options) type {
                         .index = @intCast(@divExact(input_buffer.items.len, @sizeOf(Transfer)) - 1),
                         .result = action.status,
                     };
-                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+                    try output_buffer.appendSlice(context.arena, std.mem.asBytes(&result));
                 },
                 else => unreachable,
             }
@@ -776,7 +776,7 @@ fn RunnerType(comptime options: Options) type {
             input_buffer: *ArrayList,
             output_buffer: *ArrayList,
         ) !void {
-            try input_buffer.appendSlice(std.mem.asBytes(&action.id));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&action.id));
             if (action.data) |data| {
                 var a: Account = context.accounts.get(action.id).?;
                 a.debits_pending = data.debits_pending;
@@ -784,7 +784,7 @@ fn RunnerType(comptime options: Options) type {
                 a.credits_pending = data.credits_pending;
                 a.credits_posted = data.credits_posted;
                 a.flags.closed = data.flag_closed != null;
-                try output_buffer.appendSlice(std.mem.asBytes(&a));
+                try output_buffer.appendSlice(context.arena, std.mem.asBytes(&a));
             }
         }
 
@@ -794,23 +794,23 @@ fn RunnerType(comptime options: Options) type {
             input_buffer: *ArrayList,
             output_buffer: *ArrayList,
         ) !void {
-            try input_buffer.appendSlice(std.mem.asBytes(&action.id));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&action.id));
             switch (action.data) {
                 .exists => |exists| {
                     if (exists) {
                         var t: Transfer = context.transfers.get(action.id).?;
-                        try output_buffer.appendSlice(std.mem.asBytes(&t));
+                        try output_buffer.appendSlice(context.arena, std.mem.asBytes(&t));
                     }
                 },
                 .amount => |amount| {
                     var t: Transfer = context.transfers.get(action.id).?;
                     t.amount = amount;
-                    try output_buffer.appendSlice(std.mem.asBytes(&t));
+                    try output_buffer.appendSlice(context.arena, std.mem.asBytes(&t));
                 },
                 .timestamp => |timestamp| {
                     var t: Transfer = context.transfers.get(action.id).?;
                     t.timestamp = timestamp;
-                    try output_buffer.appendSlice(std.mem.asBytes(&t));
+                    try output_buffer.appendSlice(context.arena, std.mem.asBytes(&t));
                 },
             }
         }
@@ -855,7 +855,7 @@ fn RunnerType(comptime options: Options) type {
                     .reversed = action.flags_reversed != null,
                 },
             };
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
         }
 
         fn get_account_balances_result(
@@ -873,7 +873,7 @@ fn RunnerType(comptime options: Options) type {
                 .credits_posted = action.credits_posted,
                 .timestamp = context.transfers.get(action.transfer_id).?.timestamp,
             };
-            try output_buffer.appendSlice(std.mem.asBytes(&result));
+            try output_buffer.appendSlice(context.arena, std.mem.asBytes(&result));
         }
 
         fn get_account_transfers(
@@ -916,7 +916,7 @@ fn RunnerType(comptime options: Options) type {
                     .reversed = action.flags_reversed != null,
                 },
             };
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
         }
 
         fn get_account_transfers_result(
@@ -926,7 +926,10 @@ fn RunnerType(comptime options: Options) type {
             output_buffer: *ArrayList,
         ) !void {
             _ = input_buffer;
-            try output_buffer.appendSlice(std.mem.asBytes(&context.transfers.get(id).?));
+            try output_buffer.appendSlice(
+                context.arena,
+                std.mem.asBytes(&context.transfers.get(id).?),
+            );
         }
 
         fn query_accounts(
@@ -965,7 +968,7 @@ fn RunnerType(comptime options: Options) type {
                     .reversed = action.flags_reversed != null,
                 },
             };
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
         }
 
         fn query_accounts_result(
@@ -983,7 +986,7 @@ fn RunnerType(comptime options: Options) type {
                 a.credits_posted = data.credits_posted;
                 a.flags.closed = data.flag_closed != null;
             }
-            try output_buffer.appendSlice(std.mem.asBytes(&a));
+            try output_buffer.appendSlice(context.arena, std.mem.asBytes(&a));
         }
 
         fn query_transfers(
@@ -1021,7 +1024,7 @@ fn RunnerType(comptime options: Options) type {
                     .reversed = action.flags_reversed != null,
                 },
             };
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
         }
 
         fn query_transfers_result(
@@ -1032,7 +1035,10 @@ fn RunnerType(comptime options: Options) type {
         ) !void {
             _ = input_buffer;
 
-            try output_buffer.appendSlice(std.mem.asBytes(&context.transfers.get(id).?));
+            try output_buffer.appendSlice(
+                context.arena,
+                std.mem.asBytes(&context.transfers.get(id).?),
+            );
         }
 
         fn get_change_events(
@@ -1063,7 +1069,7 @@ fn RunnerType(comptime options: Options) type {
                 .timestamp_max = timestamp_max,
                 .limit = limit,
             };
-            try input_buffer.appendSlice(std.mem.asBytes(&event));
+            try input_buffer.appendSlice(context.arena, std.mem.asBytes(&event));
         }
 
         fn get_change_events_result(
@@ -1072,9 +1078,8 @@ fn RunnerType(comptime options: Options) type {
             input_buffer: *ArrayList,
             output_buffer: *ArrayList,
         ) !void {
-            _ = context;
             _ = input_buffer;
-            try output_buffer.appendSlice(std.mem.asBytes(&result));
+            try output_buffer.appendSlice(context.arena, std.mem.asBytes(&result));
         }
 
         fn commit(
@@ -1087,8 +1092,8 @@ fn RunnerType(comptime options: Options) type {
             // Multibatching can be achieved by calling `submit()` multiple times.
             assert(context.state == .idle);
 
-            const data: []const u8 = try input_buffer.toOwnedSlice();
-            const reply_expected: []const u8 = try output_buffer.toOwnedSlice();
+            const data: []const u8 = try input_buffer.toOwnedSlice(context.arena);
+            const reply_expected: []const u8 = try output_buffer.toOwnedSlice(context.arena);
             const request: *Request = try context.arena.create(Request);
 
             request.* = .{
@@ -3405,7 +3410,7 @@ test "StateMachine: input_valid" {
 
     const input = try arena.allocator().alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         2 * constants.message_body_size_max,
     );
 
@@ -3516,7 +3521,7 @@ test "StateMachine: query multi-batch input_valid" {
 
     const input = try arena.allocator().alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         2 * constants.message_body_size_max,
     );
 

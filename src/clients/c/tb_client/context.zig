@@ -224,7 +224,7 @@ pub fn ContextType(
         request_latency: ?stdx.Duration,
 
         const Context = @This();
-        const GPA = std.heap.GeneralPurposeAllocator(.{
+        const GPA = std.heap.DebugAllocator(.{
             .thread_safe = true,
         });
 
@@ -275,7 +275,7 @@ pub fn ContextType(
             context.* = .{
                 .gpa = context.gpa,
 
-                .client_id = stdx.crypto_u128(),
+                .client_id = stdx.crypto_u128(std.Io.Threaded.global_single_threaded.io()),
                 .cluster_id = cluster_id,
 
                 .completion_callback = completion_callback,
@@ -325,7 +325,7 @@ pub fn ContextType(
             context.addresses.resize(addresses_parsed.len) catch unreachable;
 
             log.debug("{}: init: initializing IO", .{context.client_id});
-            context.io = IO.init(32, 0) catch |err| {
+            context.io = IO.init(std.Io.Threaded.global_single_threaded.io(), 32, 0) catch |err| {
                 log.err("{}: failed to initialize IO: {s}", .{
                     context.client_id,
                     @errorName(err),
@@ -342,10 +342,10 @@ pub fn ContextType(
             context.message_pool = try MessagePool.init(allocator, .client);
             errdefer context.message_pool.deinit(allocator);
 
-            log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
+            log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={f})", .{
                 context.client_id,
                 cluster_id,
-                context.addresses.const_slice(),
+                vsr.format_addresses(context.addresses.const_slice()),
             });
             context.client = Client.init(
                 allocator,
@@ -939,10 +939,20 @@ pub fn ContextType(
     };
 }
 
-/// Implements the `Mutex` API as an `extern` struct, based on `std.Thread.Futex`.
-/// Vendored from `std.Thread.Mutex.FutexImpl`.
+/// Implements the `Mutex` API as an `extern` struct, based on the futex operations of `std.Io`.
+/// Adapted from Zig 0.14's `std.Thread.Mutex.FutexImpl`.
 const Locker = extern struct {
-    const Futex = std.Thread.Futex;
+    const Futex = struct {
+        const io = std.Io.Threaded.global_single_threaded.io();
+
+        fn wait(ptr: *const std.atomic.Value(u32), expect: u32) void {
+            io.futexWaitUncancelable(u32, &ptr.raw, expect);
+        }
+
+        fn wake(ptr: *const std.atomic.Value(u32), max_waiters: u32) void {
+            io.futexWake(u32, &ptr.raw, max_waiters);
+        }
+    };
     const unlocked: u32 = 0b00;
     const locked: u32 = 0b01;
     const contended: u32 = 0b11; // Must contain the `locked` bit for x86 optimization below.

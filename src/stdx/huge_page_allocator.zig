@@ -45,10 +45,14 @@ fn verify_address_is_huge_page(ptr: [*]const u8) !bool {
     assert(builtin.target.os.tag == .linux);
     const addr = @intFromPtr(ptr);
 
-    var file = try std.fs.openFileAbsolute("/proc/self/smaps", .{});
-    defer file.close();
+    const file = try std.Io.Dir.openFileAbsolute(testing.io, "/proc/self/smaps", .{});
+    defer file.close(testing.io);
 
-    const content = try file.readToEndAlloc(testing.allocator, 10 * 1024 * 1024);
+    var file_reader = file.readerStreaming(testing.io, &.{});
+    const content = try file_reader.interface.allocRemaining(
+        testing.allocator,
+        .limited(10 * 1024 * 1024),
+    );
     defer testing.allocator.free(content);
 
     var lines = std.mem.splitScalar(u8, content, '\n');

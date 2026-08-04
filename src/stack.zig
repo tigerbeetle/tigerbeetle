@@ -160,7 +160,7 @@ test "Stack: fuzz" {
 
     // Reference model: a dynamic array of node IDs in Stack order (last is the top).
     var model = try std.ArrayList(u32).initCapacity(allocator, item_count_max);
-    defer model.deinit();
+    defer model.deinit(allocator);
 
     // Run a sequence of randomized events.
     for (0..events_max) |_| {
@@ -175,7 +175,7 @@ test "Stack: fuzz" {
                 const free_index = items_free.findFirstSet() orelse continue;
                 const item = &items[free_index];
                 stack.push(item);
-                try model.append(item.id);
+                try model.append(allocator, item.id);
                 items_free.unset(item.id);
             },
             .pop => {
@@ -198,7 +198,7 @@ test "Stack: fuzz" {
             const top = stack.peek() orelse unreachable;
             const top_ref = model.pop().?;
             assert(top.id == top_ref);
-            try model.append(top_ref);
+            try model.append(allocator, top_ref);
         } else {
             assert(stack.empty());
             assert(stack.count() == 0);

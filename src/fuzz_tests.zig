@@ -65,56 +65,30 @@ const CLIArgs = struct {
     seed: ?u64 = null,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     comptime assert(constants.verify);
 
     fuzz.limit_ram();
 
-    var gpa_allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    // Disable "hint" argument for mmap call, which was observed to cause stack overflow.
-    // See https://ziggit.dev/t/stack-probe-puzzle/10291/3 for the full story.
-    gpa_allocator.backing_allocator = .{
-        .ptr = std.heap.page_allocator.ptr,
-        .vtable = &comptime .{
-            .alloc = struct {
-                fn alloc(
-                    ctx: *anyopaque,
-                    len: usize,
-                    ptr_align: std.mem.Alignment,
-                    ret_addr: usize,
-                ) ?[*]u8 {
-                    @atomicStore(
-                        @TypeOf(std.heap.next_mmap_addr_hint),
-                        &std.heap.next_mmap_addr_hint,
-                        null,
-                        .monotonic,
-                    );
-                    return std.heap.page_allocator.vtable.alloc(ctx, len, ptr_align, ret_addr);
-                }
-            }.alloc,
-            .remap = std.heap.page_allocator.vtable.remap,
-            .resize = std.heap.page_allocator.vtable.resize,
-            .free = std.heap.page_allocator.vtable.free,
-        },
-    };
+    var gpa_allocator: std.heap.DebugAllocator(.{}) = .{};
     const gpa = gpa_allocator.allocator();
 
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const cli_args = flags.parse(CLIArgs);
+    const cli_args = flags.parse(CLIArgs, init.minimal.args);
 
     switch (cli_args.fuzzer) {
         .smoke => {
             assert(cli_args.seed == null);
             assert(cli_args.events_max == null);
-            try main_smoke(gpa);
+            try main_smoke(gpa, init.io);
         },
-        else => try main_single(gpa, cli_args),
+        else => try main_single(gpa, init.io, cli_args),
     }
 }
 
-fn main_smoke(gpa: std.mem.Allocator) !void {
+fn main_smoke(gpa: std.mem.Allocator, io: std.Io) !void {
     var time: TimeOS = .{};
     const timer_all = time.monotonic();
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
@@ -144,25 +118,26 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
 
         const timer_single = time.monotonic();
         try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
+            .io = io,
             .seed = 123,
             .events_max = events_max,
         });
         const fuzz_duration = timer_single.elapsed(time.monotonic());
         if (fuzz_duration.ns > 10 * std.time.ns_per_s) {
-            log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {}", .{
-                std.fmt.fmtDuration(fuzz_duration.ns),
+            log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {f}", .{
+                fuzz_duration,
             });
         }
     }
 
     const elapsed = timer_all.elapsed(time.monotonic());
-    log.info("done in {}", .{std.fmt.fmtDuration(elapsed.ns)});
+    log.info("done in {f}", .{elapsed});
 }
 
-fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
+fn main_single(gpa: std.mem.Allocator, io: std.Io, cli_args: CLIArgs) !void {
     assert(cli_args.fuzzer != .smoke);
 
-    const seed = cli_args.seed orelse std.crypto.random.int(u64);
+    const seed = cli_args.seed orelse stdx.crypto_random_int(io, u64);
     log.info("Fuzz seed = {}", .{seed});
 
     var time: TimeOS = .{};
@@ -175,10 +150,11 @@ fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             }
         },
         inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
+            .io = io,
             .seed = seed,
             .events_max = cli_args.events_max,
         }),
     }
     const elapsed = timer.elapsed(time.monotonic());
-    log.info("done in {}", .{std.fmt.fmtDuration(elapsed.ns)});
+    log.info("done in {f}", .{elapsed});
 }

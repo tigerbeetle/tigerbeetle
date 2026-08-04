@@ -394,7 +394,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             ) |*aof, *aof_io, *aof_io_file, i| {
                 const buffer = try allocator.alignedAlloc(
                     u8,
-                    constants.sector_size,
+                    .fromByteUnits(constants.sector_size),
                     // Arbitrary value.
                     32 * MiB,
                 );
@@ -781,7 +781,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(replica.release.value != release.value);
             assert(cluster.replica_upgrades[replica.replica] == null);
 
-            log.debug("{}: release_execute_soon: release={}..{}", .{
+            log.debug("{}: release_execute_soon: release={f}..{f}", .{
                 replica.replica,
                 replica.release,
                 release,
@@ -811,7 +811,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const release = cluster.replica_upgrades[replica_index].?;
             defer cluster.replica_upgrades[replica_index] = null;
 
-            log.debug("{}: release_execute: release={}..{}", .{
+            log.debug("{}: release_execute: release={f}..{f}", .{
                 replica_index,
                 replica.release,
                 release,
@@ -983,8 +983,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.client_eviction_requests_cancelled +=
                 @intFromBool(client.request_inflight != null and
-                client.request_inflight.?.message.header.operation != .register and
-                client.request_inflight.?.message.header.operation != .noop);
+                    client.request_inflight.?.message.header.operation != .register and
+                    client.request_inflight.?.message.header.operation != .noop);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
@@ -1046,7 +1046,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Print an error message and then exit with an exit code.
         fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
             std.log.scoped(.state_checker).err(fmt_string, args);
-            std.posix.exit(@intFromEnum(failure));
+            std.process.exit(@intFromEnum(failure));
         }
 
         /// Print the current state of the cluster, intended for printf debugging.

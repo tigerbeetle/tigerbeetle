@@ -15,18 +15,18 @@ const flag_mappings = .{
 };
 
 const Buffer = struct {
-    inner: std.ArrayList(u8),
+    inner: std.Io.Writer.Allocating,
 
     pub fn init(allocator: std.mem.Allocator) Buffer {
-        return .{ .inner = std.ArrayList(u8).init(allocator) };
+        return .{ .inner = .init(allocator) };
     }
 
     pub fn print(self: *Buffer, comptime format: []const u8, args: anytype) void {
-        self.inner.writer().print(format, args) catch unreachable;
+        self.inner.writer.print(format, args) catch unreachable;
     }
 
     pub fn write(self: *Buffer, bytes: []const u8) void {
-        self.inner.writer().writeAll(bytes) catch unreachable;
+        self.inner.writer.writeAll(bytes) catch unreachable;
     }
 };
 
@@ -827,7 +827,7 @@ fn emit_c_header(buffer: *Buffer) void {
     buffer.print("#endif\n", .{});
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -844,5 +844,5 @@ pub fn main() !void {
         @compileError("unsupported ruby bindings output mode");
     }
 
-    try std.io.getStdOut().writeAll(buffer.inner.items);
+    try std.Io.File.stdout().writeStreamingAll(init.io, buffer.inner.written());
 }

@@ -358,7 +358,7 @@ test "zipfian-distribution" {
 
     try snap(@src(),
         \\{ 333, 170, 125, 90, 59, 61, 43, 47, 38, 34 }
-    ).diff_fmt("{d}", .{distribution});
+    ).diff_fmt("{any}", .{distribution});
 }
 
 test "shuffled-zipfian-distribution" {
@@ -376,7 +376,7 @@ test "shuffled-zipfian-distribution" {
 
     try snap(@src(),
         \\{ 333, 34, 38, 47, 43, 61, 60, 89, 125, 170 }
-    ).diff_fmt("{d}", .{distribution});
+    ).diff_fmt("{any}", .{distribution});
 }
 
 // Non-statistical smoke tests related to the shuffled hot items optimization.

@@ -5,20 +5,22 @@ const Allocator = std.mem.Allocator;
 
 const log = std.log;
 
-pub fn exec_ok(arena: Allocator, argv: []const []const u8) bool {
+pub fn exec_ok(arena: Allocator, io: std.Io, argv: []const []const u8) bool {
     assert(argv.len > 0);
-    const result = std.process.Child.run(.{ .allocator = arena, .argv = argv }) catch return false;
-    return result.term == .Exited and result.term.Exited == 0;
+    const result = std.process.run(arena, io, .{ .argv = argv }) catch return false;
+    return result.term == .exited and result.term.exited == 0;
 }
 
-pub fn exec(arena: Allocator, argv: []const []const u8) ![]const u8 {
+pub fn exec(arena: Allocator, io: std.Io, argv: []const []const u8) ![]const u8 {
     assert(argv.len > 0);
-    const result = std.process.Child.run(.{ .allocator = arena, .argv = argv }) catch |err| {
-        log.err("running {s}: {}", .{ argv, err });
+    const result = std.process.run(arena, io, .{ .argv = argv }) catch |err| {
+        const argv_flat = std.mem.join(arena, " ", argv) catch "<oom>";
+        log.err("running {s}: {}", .{ argv_flat, err });
         return err;
     };
-    if (!(result.term == .Exited and result.term.Exited == 0)) {
-        log.err("running {s}: {}\n{s}", .{ argv, result.term, result.stderr });
+    if (!(result.term == .exited and result.term.exited == 0)) {
+        const argv_flat = std.mem.join(arena, " ", argv) catch "<oom>";
+        log.err("running {s}: {}\n{s}", .{ argv_flat, result.term, result.stderr });
         return error.Exec;
     }
     if (std.mem.indexOfScalar(u8, result.stdout, '\n')) |first_newline| {

@@ -1,9 +1,9 @@
 //! Code shared across several IO implementations, because, e.g., it is expressible via POSIX layer.
 const builtin = @import("builtin");
 const std = @import("std");
-const posix = std.posix;
 
 const stdx = @import("stdx");
+const posix = stdx.posix;
 
 const Tracer = @import("../trace.zig").Tracer;
 
@@ -35,20 +35,20 @@ pub fn listen(
     address: stdx.SocketAddress,
     options: ListenOptions,
 ) !stdx.SocketAddress {
-    const address_std = address.to_std();
+    const address_std = address.to_raw();
     try setsockopt(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
     try posix.bind(fd, &address_std.any, address_std.getOsSockLen());
 
     // Resolve port 0 to an actual port picked by the OS.
-    var address_resolved_std: std.net.Address = .{ .any = undefined };
-    var addrlen: posix.socklen_t = @sizeOf(std.net.Address);
+    var address_resolved_std: stdx.RawAddress = .{ .any = undefined };
+    var addrlen: posix.socklen_t = @sizeOf(stdx.RawAddress);
     try posix.getsockname(fd, &address_resolved_std.any, &addrlen);
     assert(address_resolved_std.getOsSockLen() == addrlen);
     assert(address_resolved_std.any.family == address_std.any.family);
 
     try posix.listen(fd, options.backlog);
 
-    const address_resolved = stdx.SocketAddress.from_std(address_resolved_std) catch |err|
+    const address_resolved = stdx.SocketAddress.from_raw(address_resolved_std) catch |err|
         switch (err) {
             error.UnsupportedFamily => unreachable,
         };
@@ -171,15 +171,15 @@ fn getsockopt(
 
     if (builtin.target.os.tag == .windows) {
         var value_size: i32 = @sizeOf(c_int);
-        const rc = std.os.windows.ws2_32.getsockopt(
-            fd,
+        const rc = stdx.windows.ws2_32.getsockopt(
+            @ptrCast(fd),
             level,
             @intCast(option),
             std.mem.asBytes(&value),
             &value_size,
         );
         if (rc != 0) {
-            switch (std.os.windows.ws2_32.WSAGetLastError()) {
+            switch (stdx.windows.ws2_32.WSAGetLastError()) {
                 .WSAEACCES => return error.AccessDenied,
                 .WSAENOPROTOOPT => return error.InvalidProtocolOption,
                 .WSAENOBUFS => return error.SystemResources,
@@ -187,7 +187,7 @@ fn getsockopt(
                 .WSAEFAULT => unreachable,
                 .WSAEINVAL => unreachable,
                 .WSAENOTSOCK => unreachable,
-                else => |err| return std.os.windows.unexpectedWSAError(err),
+                else => |err| return stdx.windows.unexpectedWSAError(err),
             }
         }
         assert(value_size == @sizeOf(c_int));
@@ -215,52 +215,62 @@ fn getsockopt(
     return value;
 }
 
-pub fn aof_blocking_write_all(fd: posix.fd_t, buffer: []const u8) posix.WriteError!void {
-    const file = std.fs.File{ .handle = fd };
-    return file.writeAll(buffer);
+pub fn aof_blocking_write_all(
+    io: std.Io,
+    fd: posix.fd_t,
+    buffer: []const u8,
+) std.Io.File.Writer.Error!void {
+    const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
+    return file.writeStreamingAll(io, buffer);
 }
 
-pub fn aof_blocking_pread_all(fd: posix.fd_t, buffer: []u8, offset: u64) posix.PReadError!usize {
-    const file = std.fs.File{ .handle = fd };
-    return file.preadAll(buffer, offset);
+pub fn aof_blocking_pread_all(
+    io: std.Io,
+    fd: posix.fd_t,
+    buffer: []u8,
+    offset: u64,
+) std.Io.File.ReadPositionalError!usize {
+    const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
+    return file.readPositionalAll(io, buffer, offset);
 }
 
-pub fn aof_blocking_close(fd: posix.fd_t) void {
-    const file = std.fs.File{ .handle = fd };
-    file.close();
+pub fn aof_blocking_close(io: std.Io, fd: posix.fd_t) void {
+    const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
+    file.close(io);
 }
 
-pub fn aof_blocking_stat(path: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
-    return std.fs.cwd().statFile(path);
+pub fn aof_blocking_stat(io: std.Io, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
+    return std.Io.Dir.cwd().statFile(io, path, .{});
 }
 
-pub fn aof_blocking_fstat(fd: posix.fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
-    const file = std.fs.File{ .handle = fd };
-    return file.stat();
+pub fn aof_blocking_fstat(io: std.Io, fd: posix.fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
+    const file = std.Io.File{ .handle = fd, .flags = .{ .nonblocking = false } };
+    return file.stat(io);
 }
 
-pub fn aof_blocking_open(dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
+pub fn aof_blocking_open(io: std.Io, dir_fd: posix.fd_t, path: []const u8) !posix.fd_t {
     assert(!std.fs.path.isAbsolute(path));
 
-    const dir = std.fs.Dir{ .fd = dir_fd };
+    const dir = std.Io.Dir{ .handle = dir_fd };
 
-    const file = try dir.createFile(path, .{
+    const file = try dir.createFile(io, path, .{
         .read = true,
         .truncate = false,
         .exclusive = false,
         .lock = .exclusive,
     });
-    errdefer file.close();
+    errdefer file.close(io);
 
-    try file.sync();
+    try file.sync(io);
 
     // We cannot fsync the directory handle on Windows.
     // We have no way to open a directory with write access.
     if (builtin.os.tag != .windows) {
-        try std.posix.fsync(dir_fd);
+        try posix.fsync(dir_fd);
     }
 
-    try file.seekFromEnd(0);
+    var file_writer = file.writerStreaming(io, &.{});
+    try file_writer.seekTo(try file.length(io));
 
     return file.handle;
 }

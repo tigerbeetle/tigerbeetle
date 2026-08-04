@@ -6,23 +6,29 @@ const Entry = struct {
     html: []const u8,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
 
-    var args = std.process.args();
+    var args = init.minimal.args.iterate();
     _ = args.skip();
 
-    var entries = std.ArrayList(Entry).init(allocator);
+    var entries: std.ArrayList(Entry) = .empty;
     while (args.next()) |path| {
         const html = args.next().?;
         const entry = Entry{
             .path = path,
-            .html = try std.fs.cwd().readFileAlloc(allocator, html, Website.file_size_max),
+            .html = try std.Io.Dir.cwd().readFileAlloc(
+                init.io,
+                html,
+                allocator,
+                .limited(Website.file_size_max),
+            ),
         };
-        try entries.append(entry);
+        try entries.append(allocator, entry);
     }
 
-    const json_string = try std.json.stringifyAlloc(allocator, entries.items, .{});
-    try std.io.getStdOut().writer().print("{s}\n", .{json_string});
+    const json_string = try std.json.Stringify.valueAlloc(allocator, entries.items, .{});
+    var stdout = std.Io.File.stdout().writerStreaming(init.io, &.{});
+    try stdout.interface.print("{s}\n", .{json_string});
 }
