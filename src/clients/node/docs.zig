@@ -43,7 +43,7 @@ pub const NodeDocs = Docs{
     \\
     \\* `AccountFlags.linked`
     \\* `AccountFlags.debits_must_not_exceed_credits`
-    \\* `AccountFlags.credits_must_not_exceed_credits`
+    \\* `AccountFlags.credits_must_not_exceed_debits`
     \\* `AccountFlags.history`
     \\
     ,

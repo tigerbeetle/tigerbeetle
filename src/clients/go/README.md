@@ -135,7 +135,7 @@ account balances have a few helper functions to make it easier
 to convert 128-bit little-endian unsigned integers between
 `string`, `math/big.Int`, and `[]byte`.
 
-See the type [Uint128](https://pkg.go.dev/github.com/tigerbeetle/tigerbeetle-go/pkg/types#Uint128) for more details.
+See the type [Uint128](https://pkg.go.dev/github.com/tigerbeetle/tigerbeetle-go#Uint128) for more details.
 
 ### Account Flags
 
