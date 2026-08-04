@@ -145,6 +145,7 @@ pub const Event = union(enum) {
     replica_request: EventOperationData,
     replica_request_execute: EventOperationData,
     replica_request_local: EventOperationData,
+    replica_prepare_ok_quorum: struct { index: usize },
 
     compact_beat: struct { tree: TreeEnum, level_b: u8 },
     compact_beat_merge: struct { tree: TreeEnum, level_b: u8 },
@@ -225,6 +226,7 @@ pub const EventTiming = union(Event.Tag) {
     replica_request: EventOperationData,
     replica_request_execute: EventOperationData,
     replica_request_local: EventOperationData,
+    replica_prepare_ok_quorum,
 
     compact_beat: struct { tree: TreeEnum },
     compact_beat_merge: struct { tree: TreeEnum },
@@ -260,6 +262,7 @@ pub const EventTiming = union(Event.Tag) {
         .replica_request = enum_count(Operation),
         .replica_request_execute = enum_count(Operation),
         .replica_request_local = enum_count(Operation),
+        .replica_prepare_ok_quorum = 1,
         .compact_beat = enum_count(TreeEnum),
         .compact_beat_merge = enum_count(TreeEnum),
         .compact_manifest = 1,
@@ -391,6 +394,7 @@ pub const EventTracing = union(Event.Tag) {
     replica_request,
     replica_request_execute,
     replica_request_local,
+    replica_prepare_ok_quorum: struct { index: usize },
 
     compact_beat,
     compact_beat_merge,
@@ -426,6 +430,7 @@ pub const EventTracing = union(Event.Tag) {
         .replica_request = 1,
         .replica_request_execute = 1,
         .replica_request_local = 1,
+        .replica_prepare_ok_quorum = constants.pipeline_prepare_queue_max,
         .compact_beat = 1,
         .compact_beat_merge = 1,
         .compact_manifest = 1,
@@ -471,6 +476,11 @@ pub const EventTracing = union(Event.Tag) {
             inline .replica_sync_table,
             .lookup_worker,
             => |data| {
+                assert(data.index < stack_limits.get(event.*));
+                const stack_base = stack_bases.get(event.*);
+                return stack_base + @as(u32, @intCast(data.index));
+            },
+            .replica_prepare_ok_quorum => |data| {
                 assert(data.index < stack_limits.get(event.*));
                 const stack_base = stack_bases.get(event.*);
                 return stack_base + @as(u32, @intCast(data.index));
@@ -801,6 +811,7 @@ test "EventTiming slot doesn't have collisions" {
             .replica_request_local => .{ .replica_request_local = .{
                 .operation = g.enum_value(Operation),
             } },
+            .replica_prepare_ok_quorum => .replica_prepare_ok_quorum,
             .compact_beat => .{ .compact_beat = .{
                 .tree = g.enum_value(TreeEnum),
             } },
