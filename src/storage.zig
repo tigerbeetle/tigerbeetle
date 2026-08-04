@@ -385,7 +385,7 @@ pub fn StorageType(comptime IO: type) type {
             assert(write.offset % constants.sector_size == 0);
             self.assert_bounds(write.buffer, write.offset);
 
-            const dsync = write.zone.dsync() or self.purpose == .format;
+            const dsync = if (self.purpose == .format) false else write.zone.dsync();
 
             if (!dsync) {
                 if (self.purpose != .format) {
