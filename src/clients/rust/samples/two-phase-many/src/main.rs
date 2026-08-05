@@ -27,7 +27,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
                 code: 1,
                 ..Default::default()
             },
-        ])?
+        ])
         .await?;
 
     assert!(account_results.len() == 2);
@@ -88,7 +88,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    let transfer_results = client.create_transfers(&transfers)?.await?;
+    let transfer_results = client.create_transfers(&transfers).await?;
     assert!(transfer_results.len() == transfers.len());
     for result in &transfer_results {
         assert!(result.status == tb::CreateTransferStatus::Created);
@@ -131,7 +131,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
@@ -174,7 +174,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::VoidPendingTransfer,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
@@ -217,7 +217,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
@@ -260,7 +260,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::VoidPendingTransfer,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
@@ -303,7 +303,7 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             code: 1,
             flags: tb::TransferFlags::PostPendingTransfer,
             ..Default::default()
-        }])?
+        }])
         .await?;
 
     assert!(transfer_results.len() == 1);
@@ -343,7 +343,7 @@ async fn assert_account_balances(
     debug_msg: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ids: Vec<u128> = expected_accounts.iter().map(|a| a.id).collect();
-    let found_accounts = client.lookup_accounts(&ids)?.await?;
+    let found_accounts = client.lookup_accounts(&ids).await?;
     assert_eq!(expected_accounts.len(), found_accounts.len(), "accounts");
 
     for found_account in &found_accounts {

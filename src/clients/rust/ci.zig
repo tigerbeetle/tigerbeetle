@@ -13,7 +13,13 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.exec("cargo fmt --check", .{});
     try shell.exec("cargo clippy -- -D clippy::all", .{});
 
-    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+    inline for (.{
+        "basic",
+        "two-phase",
+        "two-phase-many",
+        "walkthrough",
+        "zero-allocation",
+    }) |sample| {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 

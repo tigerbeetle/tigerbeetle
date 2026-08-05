@@ -8,6 +8,7 @@ use futures::executor::block_on;
 use std::mem;
 use std::str::FromStr;
 use tb::tb_client as tbc;
+use tbc::Operation;
 use tigerbeetle as tb;
 
 struct CliArgs {
@@ -37,23 +38,19 @@ fn main() -> AnyResult<()> {
 fn execute(client: &mut tb::Client, op: Request) -> AnyResult<Reply> {
     match op {
         Request::CreateAccounts(accounts) => {
-            let response = client.create_accounts(&accounts)?;
-            let response = block_on(response)?;
+            let response = block_on(client.create_accounts(accounts.as_slice()))?;
             Ok(Reply::CreateAccounts(response))
         }
         Request::CreateTransfers(transfers) => {
-            let response = client.create_transfers(&transfers)?;
-            let response = block_on(response)?;
+            let response = block_on(client.create_transfers(transfers.as_slice()))?;
             Ok(Reply::CreateTransfers(response))
         }
         Request::LookupAccounts(account_ids) => {
-            let response = client.lookup_accounts(&account_ids)?;
-            let response = block_on(response)?;
+            let response = block_on(client.lookup_accounts(account_ids.as_slice()))?;
             Ok(Reply::LookupAccounts(response))
         }
         Request::LookupTransfers(transfer_ids) => {
-            let response = client.lookup_transfers(&transfer_ids)?;
-            let response = block_on(response)?;
+            let response = block_on(client.lookup_transfers(transfer_ids.as_slice()))?;
             Ok(Reply::LookupTransfers(response))
         }
     }
@@ -127,7 +124,7 @@ impl Input {
         };
 
         match op {
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS => {
+            tbc::CreateAccounts::OP_CODE => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<tb::Account>()];
@@ -137,7 +134,7 @@ impl Input {
                 }
                 Ok(Some(Request::CreateAccounts(events)))
             }
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS => {
+            tbc::CreateTransfers::OP_CODE => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<tb::Account>()];
@@ -147,7 +144,7 @@ impl Input {
                 }
                 Ok(Some(Request::CreateTransfers(events)))
             }
-            tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS => {
+            tbc::LookupAccounts::OP_CODE => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<u128>()];
@@ -157,7 +154,7 @@ impl Input {
                 }
                 Ok(Some(Request::LookupAccounts(events)))
             }
-            tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS => {
+            tbc::LookupTransfers::OP_CODE => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<u128>()];
