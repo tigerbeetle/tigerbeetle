@@ -482,6 +482,7 @@ pub fn build_with_options(
         .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .conformance_module = conformance_module,
         .mode = options.mode,
     });
     build_dotnet_client(b, build_steps.clients_dotnet, .{
@@ -1977,9 +1978,23 @@ fn build_java_client(
         stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        conformance_module: *std.Build.Module,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const java_conformance_generator = b.addExecutable(.{
+        .name = "java_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/java/java_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    java_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    step_clients_java.dependOn(&Generated.file(b, .{
+        .generator = java_conformance_generator,
+        .path = "./src/clients/java/src/test/java/com/tigerbeetle/ConformanceTest.java",
+    }).step);
+
     const java_bindings_generator = b.addExecutable(.{
         .name = "java_bindings",
         .root_module = b.createModule(.{

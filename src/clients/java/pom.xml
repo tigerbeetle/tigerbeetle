@@ -201,6 +201,7 @@
               <exclude>com/tigerbeetle/AccountBalanceBatch.java</exclude>
               <exclude>com/tigerbeetle/QueryFilterFlags.java</exclude>
               <exclude>com/tigerbeetle/QueryFilterBatch.java</exclude>
+              <exclude>com/tigerbeetle/ConformanceTest.java</exclude>
             </excludes>
           </configuration>
         </plugin>
