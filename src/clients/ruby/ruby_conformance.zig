@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const conformance = @import("conformance");
 
 const types = conformance.types;
+const utils = conformance.utils;
 
 const indent_width = 2;
 const def_indent_level = 1; // class > def
@@ -399,7 +400,7 @@ fn render_flags(
             try text.writer.splatByteAll(' ', continuation_indent_level * indent_width);
         }
         try text.writer.print("TigerBeetle::{s}::{s}", .{
-            @tagName(record.type), try upper_case(arena, field.name),
+            @tagName(record.type), try utils.to_case(arena, .UPPER_CASE, field.name),
         });
     }
     return text.written();
@@ -413,7 +414,8 @@ fn render_field_value(
     switch (field.value) {
         .enum_literal => |literal| {
             return std.fmt.allocPrint(arena, "TigerBeetle::{s}::{s}", .{
-                field.type.enum_name, try upper_case(arena, literal),
+                field.type.enum_name,
+                try utils.to_case(arena, .UPPER_CASE, literal),
             });
         },
         .record => |record| if (types.Record.is_flags(record.type)) {
@@ -423,9 +425,4 @@ fn render_field_value(
         },
         else => return render_expression(arena, field.value),
     }
-}
-
-fn upper_case(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
-    const result = try arena.alloc(u8, text.len);
-    return std.ascii.upperString(result, text);
 }

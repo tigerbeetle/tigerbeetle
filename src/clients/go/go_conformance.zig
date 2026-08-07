@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const conformance = @import("conformance");
 
 const types = conformance.types;
+const utils = conformance.utils;
 
 const indent_width = 1; // Tabs.
 const case_indent_level = 1; // func > test
@@ -117,7 +118,7 @@ fn emit_step(writer: *std.Io.Writer, scope: *Scope, step: types.Step) !void {
 }
 
 fn emit_binding(writer: *std.Io.Writer, scope: *Scope, binding: types.Binding) !void {
-    const name = try go_identifier(scope.arena, binding.name);
+    const name = try utils.to_case(scope.arena, .GOCamelCase, binding.name);
     switch (binding.value) {
         .generate_id => {
             try write_indent(writer, statement_indent_level);
@@ -134,7 +135,7 @@ fn emit_binding(writer: *std.Io.Writer, scope: *Scope, binding: types.Binding) !
             try writer.writeAll("}\n");
         },
         .index => |index| {
-            const reference = try go_identifier(scope.arena, index.reference);
+            const reference = try utils.to_case(scope.arena, .GOCamelCase, index.reference);
             try write_indent(writer, statement_indent_level);
             try writer.print("{s} := {s}[{d}]\n", .{ name, reference, index.index });
         },
@@ -265,7 +266,9 @@ fn emit_invocation(
                 }),
                 .reference => |reference| {
                     try write_indent(writer, options.indent_level + 1);
-                    try writer.print("{s},\n", .{try go_identifier(arena, reference)});
+                    try writer.print("{s},\n", .{
+                        try utils.to_case(arena, .GOCamelCase, reference),
+                    });
                 },
                 else => unreachable,
             };
@@ -352,11 +355,11 @@ fn emit_record_fields(
 ) !void {
     var name_width: usize = 0;
     for (record.fields) |field| {
-        const name = try go_field_name(arena, field.name);
+        const name = try utils.to_case(arena, .GOPascalCase, field.name);
         name_width = @max(name_width, name.len);
     }
     for (record.fields) |field| {
-        const name = try go_field_name(arena, field.name);
+        const name = try utils.to_case(arena, .GOPascalCase, field.name);
         const value = try render_field_value(arena, field);
         try write_indent(writer, indent_level);
         try writer.print("{s}:", .{name});
@@ -369,7 +372,7 @@ fn emit_assertion(writer: *std.Io.Writer, scope: *Scope, assertion: types.Assert
     const arena = scope.arena;
     switch (assertion) {
         .equal => |equal| {
-            const actual = try go_identifier(arena, equal.actual);
+            const actual = try utils.to_case(arena, .GOCamelCase, equal.actual);
             try write_indent(writer, statement_indent_level);
             try writer.print("assert.Len(t, {s}, {d})\n", .{ actual, equal.expected.len });
             for (equal.expected, 0..) |record, index| {
@@ -380,17 +383,18 @@ fn emit_assertion(writer: *std.Io.Writer, scope: *Scope, assertion: types.Assert
                         value,
                         actual,
                         index,
-                        try go_field_name(arena, field.name),
+                        try utils.to_case(arena, .GOPascalCase, field.name),
                     });
                 }
             }
         },
         .empty => |actual| {
+            const name = try utils.to_case(arena, .GOCamelCase, actual);
             try write_indent(writer, statement_indent_level);
-            try writer.print("assert.Len(t, {s}, 0)\n", .{try go_identifier(arena, actual)});
+            try writer.print("assert.Len(t, {s}, 0)\n", .{name});
         },
         .unique => |ids| {
-            const name = try go_identifier(arena, ids);
+            const name = try utils.to_case(arena, .GOCamelCase, ids);
             try write_indent(writer, statement_indent_level);
             try writer.print("seen := make(map[string]struct{{}}, len({s}))\n", .{name});
             try write_indent(writer, statement_indent_level);
@@ -407,7 +411,7 @@ fn emit_assertion(writer: *std.Io.Writer, scope: *Scope, assertion: types.Assert
             try writer.writeAll("}\n");
         },
         .ascending => |ids| {
-            const name = try go_identifier(arena, ids);
+            const name = try utils.to_case(arena, .GOCamelCase, ids);
             try write_indent(writer, statement_indent_level);
             try writer.print("for i := 1; i < len({s}); i++ {{\n", .{name});
             try write_indent(writer, statement_indent_level + 1);
@@ -452,8 +456,8 @@ fn render_field_reference(
     comparison: types.Assertion.FieldComparison,
 ) ![]const u8 {
     return std.fmt.allocPrint(arena, "{s}.{s}", .{
-        try go_identifier(arena, comparison.reference),
-        try go_field_name(arena, comparison.field.name),
+        try utils.to_case(arena, .GOCamelCase, comparison.reference),
+        try utils.to_case(arena, .GOPascalCase, comparison.field.name),
     });
 }
 
@@ -463,7 +467,7 @@ fn render_field_value(arena: std.mem.Allocator, field: types.Field) ![]const u8 
             const enum_name = field.type.enum_name;
             return std.fmt.allocPrint(arena, "{s}{s}", .{
                 go_enum_prefix(enum_name),
-                try go_pascal_case(arena, literal),
+                try utils.to_case(arena, .GOPascalCase, literal),
             });
         },
         .record => |flags| {
@@ -473,7 +477,8 @@ fn render_field_value(arena: std.mem.Allocator, field: types.Field) ![]const u8 
             for (flags.fields, 0..) |flag, index| {
                 assert(flag.value == .boolean and flag.value.boolean);
                 if (index > 0) try text.writer.writeAll(", ");
-                try text.writer.print("{s}: true", .{try go_field_name(arena, flag.name)});
+                const name = try utils.to_case(arena, .GOPascalCase, flag.name);
+                try text.writer.print("{s}: true", .{name});
             }
             try text.writer.print("}}.ToUint{d}()", .{flags_bits(flags.type)});
             return text.written();
@@ -484,10 +489,10 @@ fn render_field_value(arena: std.mem.Allocator, field: types.Field) ![]const u8 
             return text;
         },
         .generate_id => return "ID()",
-        .reference => |name| return go_identifier(arena, name),
+        .reference => |name| return utils.to_case(arena, .GOCamelCase, name),
         .index => |index| {
             return std.fmt.allocPrint(arena, "{s}[{d}]", .{
-                try go_identifier(arena, index.reference),
+                try utils.to_case(arena, .GOCamelCase, index.reference),
                 index.index,
             });
         },
@@ -500,7 +505,7 @@ fn render_field_value(arena: std.mem.Allocator, field: types.Field) ![]const u8 
 fn render_id(arena: std.mem.Allocator, expression: types.Expression) ![]const u8 {
     switch (expression) {
         .generate_id => return "ID()",
-        .reference => |name| return go_identifier(arena, name),
+        .reference => |name| return utils.to_case(arena, .GOCamelCase, name),
         .integer => |text| return render_uint128(arena, text),
         else => unreachable,
     }
@@ -543,45 +548,6 @@ fn go_enum_prefix(enum_name: []const u8) []const u8 {
     if (std.mem.eql(u8, enum_name, "CreateAccountStatus")) return "Account";
     if (std.mem.eql(u8, enum_name, "CreateTransferStatus")) return "Transfer";
     @panic("unmapped enum type");
-}
-
-fn go_field_name(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
-    return go_pascal_case(arena, name);
-}
-
-// Go exports fields in PascalCase, with initialisms upper-cased throughout, as `go_bindings.zig`
-// emits them.
-fn go_pascal_case(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
-    var text = std.Io.Writer.Allocating.init(arena);
-    var words = std.mem.tokenizeScalar(u8, name, '_');
-    while (words.next()) |word| {
-        if (is_initialism(word)) {
-            for (word) |char| try text.writer.writeByte(std.ascii.toUpper(char));
-            continue;
-        }
-        try text.writer.writeByte(std.ascii.toUpper(word[0]));
-        try text.writer.writeAll(word[1..]);
-    }
-    return text.written();
-}
-
-fn go_identifier(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
-    const pascal = try go_pascal_case(arena, name);
-    var text = std.Io.Writer.Allocating.init(arena);
-    // An identifier opening with an initialism stays lower-case throughout it: `idFoo`, not
-    // `iDFoo`.
-    var words = std.mem.tokenizeScalar(u8, name, '_');
-    const first = words.next().?;
-    const lead = if (is_initialism(first)) first.len else 1;
-    for (pascal[0..lead]) |char| try text.writer.writeByte(std.ascii.toLower(char));
-    try text.writer.writeAll(pascal[lead..]);
-    return text.written();
-}
-
-// https://github.com/golang/go/wiki/CodeReviewComments#initialisms, as `go_bindings.zig`
-// applies it.
-fn is_initialism(word: []const u8) bool {
-    return std.ascii.eqlIgnoreCase(word, "id") or std.ascii.eqlIgnoreCase(word, "ok");
 }
 
 fn flags_bits(flags_type: types.Record.Type) u16 {
