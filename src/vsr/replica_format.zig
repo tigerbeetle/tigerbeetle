@@ -89,7 +89,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
             cluster: u128,
             storage: *Storage,
         ) !void {
-            assert(!self.formatting and !self.formatting_superblock);
+            assert(!self.formatting);
+            assert(!self.formatting_superblock);
 
             const arena = self.arena.allocator();
 
@@ -215,17 +216,19 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn flush_and_tick(self: *ReplicaFormat, storage: *Storage) void {
-            assert(!self.formatting and !self.formatting_superblock);
+            assert(!self.formatting);
+            assert(!self.formatting_superblock);
             assert(self.writes_pending == 0);
 
-            storage.flush_sectors(flush_callback, &self.flush);
-
             self.formatting = true;
+            storage.flush_sectors(flush_callback, &self.flush);
             while (self.formatting) storage.run();
         }
 
         fn flush_callback(flush: *Storage.Flush) void {
             const self: *ReplicaFormat = @alignCast(@fieldParentPtr("flush", flush));
+            assert(self.formatting);
+
             self.formatting = false;
         }
 
@@ -262,7 +265,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn verify_writes(self: *ReplicaFormat) void {
-            assert(!self.formatting and !self.formatting_superblock);
+            assert(!self.formatting);
+            assert(!self.formatting_superblock);
             assert(self.writes_pending == 0);
 
             assert(self.sectors_written.count() > 0);

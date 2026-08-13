@@ -249,6 +249,10 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
+        // The VOPR doesn't always finish runs at a checkpoint, so there may be unflushed writes
+        // still present.
+        maybe(storage.unflushed > 0);
+
         storage.writes.deinit();
         storage.reads.deinit();
         allocator.destroy(storage.overlay_buffers);
@@ -590,6 +594,7 @@ pub const Storage = struct {
         };
 
         // We ensure the capacity is sufficient for constants.iops_write_max in init()
+        storage.unflushed += 1;
         storage.writes.add(write) catch unreachable;
     }
 

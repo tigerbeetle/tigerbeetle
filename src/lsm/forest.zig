@@ -774,12 +774,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
         }
 
-        pub fn flush_callback(flush: *Grid.Flush) void {
+        fn flush_callback(flush: *Grid.Flush) void {
             const forest: *Forest = @alignCast(@fieldParentPtr("flush", flush));
             forest.compact_finish_dispatch_callback();
         }
 
-        pub fn compact_finish_dispatch_callback(forest: *Forest) void {
+        fn compact_finish_dispatch_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
             assert(forest.progress.?.compact.trees_done);
             assert(forest.progress.?.compact.manifest_log_done);
