@@ -590,70 +590,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             ).?;
 
             // Attempt to coalesce with adjacent tables in level 0.
-            const range_coalesced = range: {
-                const value_count_target = stdx.div_ceil((Table.value_count_max *
-                    constants.lsm_table_coalescing_threshold_percent), 100);
-                assert(value_count_target > 1);
-                assert(value_count_target < Table.value_count_max);
-
-                var value_count_output: u32 = options.value_count;
-                for (range_overlap.tables.const_slice()) |*table| {
-                    value_count_output += table.table_info.value_count;
-                }
-
-                // Set to true when we encounter a coalesce-able table that is small enough to
-                // warrant coalescing.
-                var coalesced_small_table: bool = value_count_output < value_count_target;
-
-                var range = range_overlap;
-                outer: for ([_]Direction{ .descending, .ascending }) |direction| {
-                    inner: for (0..constants.lsm_growth_factor) |_| {
-                        if (range.tables.full()) break :outer;
-                        if (value_count_output >= value_count_target) break :outer;
-
-                        const table_next = manifest_level.next_table(.{
-                            .snapshot = snapshot_latest,
-                            .key_min = 0,
-                            .key_max = std.math.maxInt(Key),
-                            .key_exclusive = switch (direction) {
-                                .descending => range.key_min,
-                                .ascending => range.key_max,
-                            },
-                            .direction = direction,
-                        }) orelse break :inner;
-
-                        const table_next_value_count = table_next.table_info.value_count;
-                        assert(table_next_value_count > 0);
-
-                        if (value_count_output + table_next_value_count <= Table.value_count_max) {
-                            value_count_output += table_next_value_count;
-                            coalesced_small_table = coalesced_small_table or
-                                table_next.table_info.value_count < value_count_target;
-
-                            switch (direction) {
-                                .descending => range.key_min = table_next.table_info.key_min,
-                                .ascending => range.key_max = table_next.table_info.key_max,
-                            }
-
-                            switch (direction) {
-                                .descending => range.tables.insert_at(0, table_next),
-                                .ascending => range.tables.push(table_next),
-                            }
-                        } else {
-                            break :inner;
-                        }
-                    } else unreachable;
-                }
-
-                if (range.tables.count() != range_overlap.tables.count() and
-                    coalesced_small_table)
-                {
-                    break :range range;
-                } else {
-                    // None of the tables benefit much from coalescing, so just use the overlap.
-                    break :range null;
-                }
-            };
+            const range_coalesced = if (manifest_level.table_count_visible == growth_factor - 1)
+                manifest_level.tables_coalesceable(range_overlap, snapshot_latest, options.value_count, Table.value_count_max)
+            else
+                range_overlap;
 
             if (range_coalesced) |range| {
                 log.debug("{}: {s}: manifest: coalesced with {} adjacent tables", .{
