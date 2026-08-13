@@ -591,7 +591,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             // Attempt to coalesce with adjacent tables in level 0.
             const range_coalesced = if (manifest_level.table_count_visible == growth_factor - 1)
-                manifest_level.tables_coalesceable(range_overlap, snapshot_latest, options.value_count, Table.value_count_max)
+                manifest_level.tables_coalesceable(
+                    range_overlap,
+                    snapshot_latest,
+                    options.value_count,
+                    Table.value_count_max,
+                )
             else
                 range_overlap;
 
