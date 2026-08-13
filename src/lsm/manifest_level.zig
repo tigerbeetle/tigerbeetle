@@ -761,7 +761,7 @@ pub fn ManifestLevelType(
             return null;
         }
 
-        pub fn tables_coalesceable(
+        pub fn tables_adjacent(
             level: *const ManifestLevel,
             range_overlap: OverlapRange,
             snapshot: u64,
