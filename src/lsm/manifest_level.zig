@@ -761,7 +761,7 @@ pub fn ManifestLevelType(
             return null;
         }
 
-        pub fn tables_adjacent(
+        pub fn tables_to_coalesce(
             level: *const ManifestLevel,
             range_overlap: OverlapRange,
             snapshot: u64,
@@ -832,14 +832,6 @@ pub fn ManifestLevelType(
                 return null;
             }
 
-            std.debug.print(
-                "coalesced table {} from {} of {}\n",
-                .{
-                    range.tables.count(),
-                    range_overlap.tables.count(),
-                    level.table_count_visible,
-                },
-            );
             return range;
         }
 

@@ -590,25 +590,28 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             ).?;
 
             // Attempt to coalesce with adjacent tables in level 0.
-            const range_coalesced = if (manifest_level.table_count_visible == growth_factor - 1)
-                manifest_level.tables_coalesceable(
+            const range = blk: {
+                if (manifest_level.table_count_visible != growth_factor - 1)
+                    break :blk range_overlap;
+
+                const coalesced = manifest_level.tables_to_coalesce(
                     range_overlap,
                     snapshot_latest,
                     options.value_count,
                     Table.value_count_max,
-                )
-            else
-                range_overlap;
+                );
 
-            if (range_coalesced) |range| {
-                log.debug("{}: {s}: manifest: coalesced with {} adjacent tables", .{
-                    manifest.manifest_log.?.grid.superblock.replica_index.?,
-                    manifest.config.name,
-                    range.tables.count() - range_overlap.tables.count(),
-                });
-            }
+                if (coalesced) |coalesced_range| {
+                    log.debug("{}: {s}: manifest: coalesced with {} adjacent tables", .{
+                        manifest.manifest_log.?.grid.superblock.replica_index.?,
+                        manifest.config.name,
+                        coalesced_range.tables.count() - range_overlap.tables.count(),
+                    });
+                }
 
-            const range = range_coalesced orelse range_overlap;
+                break :blk coalesced orelse range_overlap;
+            };
+
             assert(range.tables.count() >= range_overlap.tables.count());
             assert(range.key_min <= range.key_max);
             assert(range.key_min <= key_min);
