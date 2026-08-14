@@ -966,6 +966,7 @@ pub const HttpOptions = struct {
 
     response_body_size_max: u32 = 512 * stdx.KiB,
     expected_response_code: std.http.Status = .ok,
+    log_errors: bool = true,
 };
 
 pub fn http_get(shell: *Shell, url: []const u8, options: HttpOptions) ![]const u8 {
@@ -1057,7 +1058,9 @@ fn http_request(
     }
 
     if (request.response.status != options.expected_response_code) {
-        log.err("response: {s}", .{response_body});
+        if (options.log_errors) {
+            log.err("response: {s}", .{response_body});
+        }
         return error.ResponseWrongStatus;
     }
 

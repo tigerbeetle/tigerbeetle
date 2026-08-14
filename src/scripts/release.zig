@@ -1057,6 +1057,7 @@ fn publish_ruby_trusted_publishing_token(shell: *Shell) ![]const u8 {
         .{
             .content_type = .json,
             .expected_response_code = .created,
+            .log_errors = false,
         },
     );
     const rubygems = try std.json.parseFromSliceLeaky(
