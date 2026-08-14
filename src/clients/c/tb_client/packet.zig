@@ -22,7 +22,7 @@ pub const Packet = extern struct {
     /// External packet type exposed to the user.
     pub const Extern = extern struct {
         user_data: ?*anyopaque,
-        data: ?*anyopaque,
+        data: ?*const anyopaque,
         data_size: u32,
         user_tag: u16,
         operation: u8,
@@ -45,7 +45,7 @@ pub const Packet = extern struct {
     pub const Queue = QueueType(Packet);
 
     user_data: ?*anyopaque,
-    data: ?*anyopaque,
+    data: ?*const anyopaque,
     data_size: u32,
     user_tag: u16,
     operation: u8,
