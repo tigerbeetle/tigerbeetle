@@ -851,53 +851,7 @@ pub const Operation = enum(u8) {
     /// The maximum number of events per batch.
     /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
     pub inline fn event_max(operation: Operation, batch_size_limit: u32) u32 {
-        assert(batch_size_limit > 0);
-        assert(batch_size_limit <= constants.message_body_size_max);
-
-        const event_size_bytes: u32 = operation.event_size();
-        maybe(event_size_bytes == 0); // Zeroed event size is allowed.
-        const result_size_bytes: u32 = operation.result_size();
-        assert(result_size_bytes > 0);
-
-        if (!operation.is_multi_batch()) {
-            return if (event_size_bytes == 0)
-                @divFloor(constants.message_body_size_max, result_size_bytes)
-            else
-                @min(
-                    @divFloor(batch_size_limit, event_size_bytes),
-                    @divFloor(constants.message_body_size_max, result_size_bytes),
-                );
-        }
-        assert(operation.is_multi_batch());
-
-        const reply_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
-            .element_size = result_size_bytes,
-            .batch_count = 1,
-        });
-        assert(reply_trailer_size_min > 0);
-        assert(reply_trailer_size_min < batch_size_limit);
-
-        if (event_size_bytes == 0) {
-            return @divFloor(
-                constants.message_body_size_max - reply_trailer_size_min,
-                result_size_bytes,
-            );
-        } else {
-            const request_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
-                .element_size = event_size_bytes,
-                .batch_count = 1,
-            });
-            assert(request_trailer_size_min > 0);
-            assert(request_trailer_size_min < constants.message_body_size_max);
-
-            return @min(
-                @divFloor(batch_size_limit - request_trailer_size_min, event_size_bytes),
-                @divFloor(
-                    constants.message_body_size_max - reply_trailer_size_min,
-                    result_size_bytes,
-                ),
-            );
-        }
+        return vsr.multi_batch.event_max(Operation, operation, batch_size_limit);
     }
 
     /// The maximum number of results per batch.
@@ -905,29 +859,7 @@ pub const Operation = enum(u8) {
     /// is true) then `result_max() == event_max()`.
     /// Inline function so that `operation` and `batch_size_limit` can be known at comptime.
     pub inline fn result_max(operation: Operation, batch_size_limit: u32) u32 {
-        assert(batch_size_limit > 0);
-        assert(batch_size_limit <= constants.message_body_size_max);
-        if (operation.is_batchable()) {
-            return operation.event_max(batch_size_limit);
-        }
-        assert(!operation.is_batchable());
-
-        const result_size_bytes = operation.result_size();
-        assert(result_size_bytes > 0);
-
-        if (!operation.is_multi_batch()) {
-            return @divFloor(constants.message_body_size_max, result_size_bytes);
-        }
-        assert(operation.is_multi_batch());
-
-        const reply_trailer_size_min: u32 = vsr.multi_batch.trailer_total_size(.{
-            .element_size = result_size_bytes,
-            .batch_count = 1,
-        });
-        return @divFloor(
-            constants.message_body_size_max - reply_trailer_size_min,
-            result_size_bytes,
-        );
+        return vsr.multi_batch.result_max(Operation, operation, batch_size_limit);
     }
 
     /// Returns the expected number of results for a given batch.
