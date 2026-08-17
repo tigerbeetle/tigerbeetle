@@ -494,6 +494,7 @@ pub fn build_with_options(
     build_node_client(b, build_steps.clients_node, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .conformance_module = conformance_module,
         .mode = options.mode,
     });
     build_python_client(b, build_steps.clients_python, .{
@@ -2088,9 +2089,23 @@ fn build_node_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        conformance_module: *std.Build.Module,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const node_conformance_generator = b.addExecutable(.{
+        .name = "node_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/node/node_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    node_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    step_clients_node.dependOn(&Generated.file(b, .{
+        .generator = node_conformance_generator,
+        .path = "./src/clients/node/src/conformance_test.ts",
+    }).step);
+
     const node_bindings_generator = b.addExecutable(.{
         .name = "node_bindings",
         .root_module = b.createModule(.{
