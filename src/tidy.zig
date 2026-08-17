@@ -1334,6 +1334,57 @@ test "tidy no large blobs" {
     if (has_large_blobs) return error.HasLargeBlobs;
 }
 
+test "tidy commits" {
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    var commits = try shell.exec_stdout(
+        "git log --max-count=32 --format={format} HEAD",
+        .{ .format = tidy_commit_metadata_format },
+    );
+
+    var agents_reported: TidyCommitAgentSet = .{};
+    while (commits.len > 0) {
+        const commit, commits = stdx.cut(commits, "\x00\n") orelse .{ commits, "" };
+        const hash, const metadata =
+            stdx.cut(commit, "\x00") orelse return error.InvalidGitLog;
+        for (tidy_commit_agents, 0..) |agent, agent_index| {
+            if (agents_reported.is_set(agent_index) or
+                std.ascii.indexOfIgnoreCase(metadata, agent) == null) continue;
+            std.debug.print(
+                "{s}: error: TigerBeetle does not allow llm contributions\n",
+                .{hash},
+            );
+            agents_reported.set(agent_index);
+        }
+    }
+    if (!agents_reported.empty()) return error.Untidy;
+}
+
+const tidy_commit_agents = [_][]const u8{
+    "aider",
+    "claude",
+    "codex",
+    "copilot",
+    "cursor",
+    "gemini",
+};
+
+const tidy_commit_metadata_format =
+    "%H%x00" ++ // Commit hash.
+    "%an%x00" ++ // Author name.
+    "%(trailers:key=Co-authored-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Co-author-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Made-with,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Generated-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Generated-with,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Powered-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=AI-Author,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Signed-off-by,valueonly,separator=%x00)%x00";
+
+const TidyCommitAgentSet = stdx.BitSetType(tidy_commit_agents.len);
+
 test "tidy unix permissions" {
     const executable_files = [_][]const u8{
         "zig/download.ps1",
