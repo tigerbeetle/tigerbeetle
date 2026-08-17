@@ -15,5 +15,10 @@
     "strictNullChecks": true,
     "outDir": "./dist"
   },
-  "files": ["src/index.ts", "src/test.ts", "src/benchmark.ts"]
+  "files": [
+    "src/index.ts",
+    "src/test.ts",
+    "src/conformance_test.ts",
+    "src/benchmark.ts"
+  ]
 }
