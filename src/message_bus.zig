@@ -1495,7 +1495,7 @@ test "MessageBus unit test" {
         parent2.bus.tick();
     }
 
-    const handshake_message = parent1.encryption.handshake_initiate();
+    const handshake_message = parent1.encryption.handshake_initiate(.{ .deterministic = &prng });
     const handshake_token = parent1.bus.send_message_to_replica(
         1,
         @sizeOf(encryption.HandshakeMessage),

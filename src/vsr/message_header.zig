@@ -71,6 +71,7 @@ pub const HeaderEncrypted = extern struct {
         try writer.writeAll("HeaderEncrypted { ");
         try writer.print(".header_tag={x:0>32}, ", .{self.header_tag});
         try writer.print(".header_key_id={x:0>32}, ", .{self.header_key_id});
+        try writer.print(".handshake_id={d}, ", .{self.header_key_id});
         try writer.print(".header_nonce={x:0>32}", .{self.header_nonce});
         try writer.writeAll(" }");
     }

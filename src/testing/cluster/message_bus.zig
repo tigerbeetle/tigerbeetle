@@ -15,6 +15,8 @@ pub const Process = union(ProcessType) {
     client: u128,
 };
 
+// TOOD: bound # of connections, which bounds # of handshakes.
+// Utilize Network for that.
 pub const MessageBus = struct {
     network: *Network,
     pool: *MessagePool,

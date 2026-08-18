@@ -252,7 +252,7 @@ pub const EncryptionNetwork = struct {
 
         encryption.* = undefined;
     }
-    
+
     pub fn insert_existing(
         encryption: *EncryptionNetwork,
         other: *EncryptionNetwork,
@@ -326,11 +326,28 @@ pub const EncryptionNetwork = struct {
 
     pub fn handshake_initiate(
         encryption: *EncryptionNetwork,
+        options: union(enum) { random, deterministic: *stdx.PRNG },
     ) HandshakeMessage {
-        const handshake = HandshakeInsecure.initiator(.{
-            .id = encryption.self_id,
-            .peer = encryption.self_peer,
-        });
+        const handshake = blk: switch (options) {
+            .random => HandshakeInsecure.initiator(
+                .{ .id = encryption.self_id, .peer = encryption.self_peer },
+            ),
+            .deterministic => |prng| {
+                assert(builtin.is_test);
+                var seed: [X25519.seed_length]u8 = undefined;
+                while (true) {
+                    prng.fill(&seed);
+                    const handshake = HandshakeInsecure.initiator_deterministic(
+                        .{ .id = encryption.self_id, .peer = encryption.self_peer },
+                        seed,
+                        prng.int(u128),
+                    ) catch {
+                        continue;
+                    };
+                    break :blk handshake;
+                }
+            },
+        };
 
         log.debug("initiator_handshake: creating handshake id  ({d})", .{handshake.handshake_id});
 
@@ -357,6 +374,10 @@ pub const EncryptionNetwork = struct {
     pub fn handshake_consume(
         encryption: *EncryptionNetwork,
         source: []const u8,
+        options: union(enum) {
+            random,
+            deterministic: *stdx.PRNG,
+        },
     ) union(enum) {
         operation: struct { message: ?HandshakeMessage, peer: ?vsr.Peer },
         err: anyerror,
@@ -398,10 +419,28 @@ pub const EncryptionNetwork = struct {
                     return .{ .err = error.HandshakeFailed };
                 },
                 .replica => {
-                    const handshake = HandshakeInsecure.responder(
-                        .{ .id = encryption.self_id, .peer = encryption.self_peer },
-                        handshake_message.header.header_key_id,
-                    );
+                    const handshake = blk: switch (options) {
+                        .random => HandshakeInsecure.responder(
+                            .{ .id = encryption.self_id, .peer = encryption.self_peer },
+                            handshake_message.header.header_key_id,
+                        ),
+                        .deterministic => |prng| {
+                            assert(builtin.is_test);
+                            var seed: [X25519.seed_length]u8 = undefined;
+                            while (true) {
+                                prng.fill(&seed);
+                                const handshake = HandshakeInsecure.responder_deterministic(
+                                    .{ .id = encryption.self_id, .peer = encryption.self_peer },
+                                    seed,
+                                    handshake_message.header.header_key_id,
+                                ) catch {
+                                    continue;
+                                };
+                                break :blk handshake;
+                            }
+                        },
+                    };
+
                     gop_handshake.value_ptr.* = .{ .insecure = handshake };
                 },
             }
@@ -412,6 +451,9 @@ pub const EncryptionNetwork = struct {
                 switch (handshake_impl.feed(handshake_message)) {
                     .operation => |operation| {
                         assert(operation.result != null or operation.message != null);
+                        if (operation.message) |message| {
+                            log.debug("handshake_consume: sending header {}", .{message.header});
+                        }
                         var peer: ?vsr.Peer = null;
                         if (operation.result) |result| {
                             const other_peer: Peer = .{
@@ -750,7 +792,7 @@ pub const HandshakeInsecure = struct {
                 switch (state) {
                     .send_dh => {
                         if (maybe_msg != null) return .terminate;
-                        log.info("feed: (initator) send dh", .{});
+                        log.info("feed: (initator) send dh id ({d})", .{handshake.handshake_id});
                         handshake.state.initiator = .send_identity;
                         return .{
                             .operation = .{ .message = .init(
@@ -770,7 +812,7 @@ pub const HandshakeInsecure = struct {
                         if (msg.message_type != .diffie_hellman) {
                             return .terminate;
                         }
-                        log.info("feed: (initator) received dh", .{});
+                        log.info("feed: (initator) received dh id ({d})", .{handshake.handshake_id});
 
                         const shared_secret = X25519.scalarmult(
                             handshake.key_pair.secret_key,
@@ -785,7 +827,7 @@ pub const HandshakeInsecure = struct {
                             .peer_id = msg.peer_id,
                         };
                         handshake.state.initiator = .send_identity;
-                        log.info("feed: (initator) send identity", .{});
+                        log.info("feed: (initator) send identity id ({d})", .{handshake.handshake_id});
 
                         return .{
                             .operation = .{ .message = .init(
@@ -809,7 +851,7 @@ pub const HandshakeInsecure = struct {
                         if (msg.message_type != .diffie_hellman) {
                             return .terminate;
                         }
-                        log.info("feed: (responder) received dh", .{});
+                        log.info("feed: (responder) received dh id ({d})", .{handshake.handshake_id});
 
                         const shared_secret = X25519.scalarmult(
                             handshake.key_pair.secret_key,
@@ -824,7 +866,7 @@ pub const HandshakeInsecure = struct {
                             .peer_id = msg.peer_id,
                         };
                         handshake.state.responder = .recv_identity;
-                        log.info("feed: (responder) send dh", .{});
+                        log.info("feed: (responder) send dh id ({d})", .{handshake.handshake_id});
 
                         return .{
                             .operation = .{ .message = .init(
@@ -845,7 +887,7 @@ pub const HandshakeInsecure = struct {
                             return .terminate;
                         }
 
-                        log.info("feed: (responder) received identity", .{});
+                        log.info("feed: (responder) received identity id ({d})", .{handshake.handshake_id});
 
                         return .{ .operation = .{
                             .message = null,

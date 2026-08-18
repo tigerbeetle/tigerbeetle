@@ -345,7 +345,7 @@ fn tidy_banned(file: SourceFile, errors: *Errors) void {
     // Reminders:
     // Do use FIXME comments proactively while iterating on the code when you want to make sure
     // something is revisited before getting into the main branch.
-    inline for (.{ "FIXME", "dbg(" }) |banned| {
+    inline for (.{ "FIXYOU", "dbg(" }) |banned| {
         if (std.mem.indexOf(u8, file.text, banned)) |offset| {
             if (std.mem.startsWith(u8, file.text[offset..], "dbg(prefix: []const u8")) {
                 // Allow fn dbg( function definition.
@@ -361,12 +361,12 @@ test tidy_banned {
     try check_tidy_file(
         \\banned.zig
     ,
-        \\//FIXME: use copy_disjoint:
+        \\//FIXYOU: use copy_disjoint:
         \\@memcpy(foo, bar)
     ,
         snap(@src(),
             \\banned.zig:2: error: @memcpy( is banned, use stdx.copy_disjoint
-            \\banned.zig:1: error: leftover FIXME, remove before merge
+            \\banned.zig:1: error: leftover FIXYOU, remove before merge
             \\
         ),
     );

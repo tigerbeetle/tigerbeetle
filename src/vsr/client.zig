@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const stdx = @import("stdx");
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -247,7 +248,12 @@ pub fn ClientType(
             );
 
             if (EncryptionNetwork.message_type(&header_encrypted) == .handshake) {
-                switch (self.encryption_network.handshake_consume(message_encrypted)) {
+                const consume_result = if (builtin.is_test)
+                    self.encryption_network.handshake_consume(message_encrypted, .{ .deterministic = &self.prng })
+                else
+                    self.encryption_network.handshake_consume(message_encrypted, .random);
+
+                switch (consume_result) {
                     .operation => |operation| {
                         assert(operation.message != null or operation.peer != null);
 
@@ -825,7 +831,11 @@ pub fn ClientType(
                 if (maybe_token) |token| {
                     defer token.send();
 
-                    const handshake_message = self.encryption_network.handshake_initiate();
+                    const handshake_message = if (builtin.is_test)
+                        self.encryption_network.handshake_initiate(.{ .deterministic = &self.prng })
+                    else
+                        self.encryption_network.handshake_initiate(.random);
+
                     stdx.copy_disjoint(
                         .exact,
                         u8,

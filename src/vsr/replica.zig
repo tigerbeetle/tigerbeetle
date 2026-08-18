@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -1577,8 +1578,14 @@ pub fn ReplicaType(
             );
 
             if (EncryptionNetwork.message_type(&header_encrypted) == .handshake) {
-                log.info("message_callback: received handshake message", .{});
-                switch (self.encryption_network.handshake_consume(message_encrypted)) {
+                log.info("message_callback: received handshake message. Header: {}", .{header_encrypted});
+
+                const consume_result = if (builtin.is_test)
+                    self.encryption_network.handshake_consume(message_encrypted, .{ .deterministic = &self.prng })
+                else
+                    self.encryption_network.handshake_consume(message_encrypted, .random);
+
+                switch (consume_result) {
                     .operation => |operation| {
                         assert(operation.message != null or operation.peer != null);
 
@@ -9438,7 +9445,11 @@ pub fn ReplicaType(
                     if (maybe_token) |token| {
                         defer token.send();
 
-                        const handshake_message = self.encryption_network.handshake_initiate();
+                        const handshake_message = if (builtin.is_test)
+                            self.encryption_network.handshake_initiate(.{ .deterministic = &self.prng })
+                        else
+                            self.encryption_network.handshake_initiate(.random);
+
                         stdx.copy_disjoint(
                             .exact,
                             u8,

@@ -39,7 +39,7 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const MiB = stdx.MiB;
 
-const log_level: std.log.Level = .err;
+const log_level: std.log.Level = .debug;
 
 const releases = [_]Release{
     .{
@@ -2178,12 +2178,16 @@ const TestContext = struct {
     log_level: std.log.Level,
     client_requests: []usize,
     client_replies: []usize,
+    prng: stdx.PRNG,
 
     pub fn init(
         options: struct {
             replica_count: u8,
             standby_count: u8 = 0,
             // reformats_max + client_count must not exceed constants.client_max.
+            // The reason is that EncryptionNetwork sizes the client array according
+            // to `constants.clients_max`. However, up to `client_count` + `reformats_max`
+            // clients start a handshake.
             client_count: u8 = constants.clients_max - 3,
             client_release: vsr.Release = releases[0].release,
             seed: u64 = 123,
@@ -2260,6 +2264,7 @@ const TestContext = struct {
             .log_level = log_level_original,
             .client_requests = client_requests,
             .client_replies = client_replies,
+            .prng = prng,
         };
         cluster.context = context;
 
@@ -3056,7 +3061,9 @@ const TestClientBus = struct {
         if (maybe_token) |token| {
             defer token.send();
 
-            const handshake_message = client_bus.encryption_network.handshake_initiate();
+            const handshake_message = client_bus.encryption_network.handshake_initiate(
+                .{ .deterministic = &client_bus.context.prng },
+            );
             stdx.copy_disjoint(.exact, u8, token.target, std.mem.asBytes(&handshake_message));
         } else {
             log.warn("request: dropping handshake with replica ({d})", .{
