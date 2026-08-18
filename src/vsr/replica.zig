@@ -324,7 +324,7 @@ pub fn ReplicaType(
 
         /// An abstraction to send messages from the replica to another replica or client.
         /// The message bus will also deliver messages to this replica by calling
-        /// `on_messages_from_bus()`.
+        /// `header_callback` and `message_callback()`.
         message_bus: MessageBus,
 
         /// For executing service up-calls after an operation has been committed:
@@ -9106,11 +9106,11 @@ pub fn ReplicaType(
                 return;
             }
 
-            const maybe_tooken = self.message_bus.send_message_to_client(
+            const maybe_token = self.message_bus.send_message_to_client(
                 client,
                 message.header.size,
             );
-            if (maybe_tooken) |token| {
+            if (maybe_token) |token| {
                 defer token.send();
 
                 self.encryption_network.encrypt_message(
@@ -9421,6 +9421,9 @@ pub fn ReplicaType(
 
                 const peer: vsr.Peer = .{ .replica = replica };
 
+                // TOOD: revisit this condition.
+                // What happens if two replicas continuously initiate a handshake?
+                // Last to complete wins?
                 if (!self.encryption_network.handshake_completed(peer)) {
                     log.info("{}: send_message_to_replica: dropping message and " ++
                         " initiating handshake with replica ({d})", .{

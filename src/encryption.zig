@@ -35,32 +35,6 @@ fn seed_init() void {
     seed_state = aegis_auth.Aegis256Mac.init(&key);
 }
 
-pub const ChecksumStream = struct {
-    state: aegis_auth.Aegis256Mac,
-
-    pub fn init() ChecksumStream {
-        seed_once.call();
-        return ChecksumStream{ .state = seed_state };
-    }
-
-    pub fn add(stream: *ChecksumStream, bytes: []const u8) void {
-        stream.state.update(bytes);
-    }
-
-    pub fn checksum(stream: *ChecksumStream) u256 {
-        var result: u256 = undefined;
-        stream.state.final(std.mem.asBytes(&result));
-        stream.* = undefined;
-        return result;
-    }
-};
-
-fn checksum(bytes: []const u8) u256 {
-    var stream: ChecksumStream = .init();
-    stream.add(bytes);
-    return stream.checksum();
-}
-
 const Payload = enum(u8) { header = 1, body = 2 };
 const PeerType = enum(u8) { replica = 1, client = 2 };
 
@@ -278,7 +252,7 @@ pub const EncryptionNetwork = struct {
 
         encryption.* = undefined;
     }
-
+    
     pub fn insert_existing(
         encryption: *EncryptionNetwork,
         other: *EncryptionNetwork,
@@ -688,13 +662,11 @@ pub const HandshakeInsecure = struct {
     const InitiatorState = enum {
         send_dh,
         send_identity,
-        done,
     };
 
     const ResponderState = enum {
         recv_dh,
         recv_identity,
-        done,
     };
 
     const Role = enum {
@@ -825,9 +797,6 @@ pub const HandshakeInsecure = struct {
                             ), .result = handshake.result.? },
                         };
                     },
-                    .done => {
-                        return .terminate;
-                    },
                 }
             },
             .responder => |state| {
@@ -882,9 +851,6 @@ pub const HandshakeInsecure = struct {
                             .message = null,
                             .result = handshake.result.?,
                         } };
-                    },
-                    .done => {
-                        return .terminate;
                     },
                 }
             },
@@ -969,6 +935,8 @@ test "HandshakeInsecure" {
     );
 }
 
+// TODO: implement NonceCounter, otherwise vulnerable to
+// replay attacks.
 pub const CipherAegis256Nonce128 = struct {
     const BodyTagNonce = struct { body_nonce: u128, body_tag: u128 };
     key_id: u128,
