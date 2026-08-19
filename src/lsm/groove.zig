@@ -734,7 +734,8 @@ pub fn GrooveType(
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched and not modified by a batch.
             prefetch_entries_for_read_max: u32,
-            /// The maximum number of objects that might be prefetched and then modified by a batch.
+            /// The maximum number of objects that might be prefetched and then modified by a batch,
+            /// including those used for idempotency checks.
             prefetch_entries_for_update_max: u32,
             cache_entries_max: u32,
 
