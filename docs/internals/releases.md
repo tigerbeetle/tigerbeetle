@@ -10,7 +10,7 @@ The motivation for specific steps follows after.
 
 ### Friday
 
-1. Open [devhub](https://devhub.tigerbeetle.com/) to check that:
+1. Open devhub to check that:
    - you are the release manager for the week
    - the VOPR results look reasonable (no failures and a bunch of successful runs for recent
      commits)
@@ -197,7 +197,7 @@ As such:
 ## Release Logistics
 
 Releases are triggered manually, on Monday. Default release rotation is on the
-devhub: <https://devhub.tigerbeetle.com/>.
+devhub.
 
 The middle name is the default release manager for the _current_ week. They should execute [Release
 Manager Algorithm](#release-manager-algorithm) on Monday. If the release manager isn't available on

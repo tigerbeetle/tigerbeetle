@@ -1,4 +1,4 @@
-//! Runs a set of macro-benchmarks whose result is displayed at <https://devhub.tigerbeetle.com/>.
+//! Runs a set of macro-benchmarks whose result is displayed on the devhub.
 //!
 //! Specifically:
 //!
