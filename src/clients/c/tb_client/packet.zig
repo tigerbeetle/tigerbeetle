@@ -2,15 +2,16 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const tb_client = @import("../tb_client.zig");
-const constants = tb_client.vsr.constants;
-const multi_batch = tb_client.vsr.multi_batch;
+const vsr = tb_client.vsr;
+const constants = vsr.constants;
+const multi_batch = vsr.multi_batch;
 const MultiBatchEncoder = multi_batch.MultiBatchEncoder;
 const MultiBatchDecoder = multi_batch.MultiBatchDecoder;
 
-const stdx = tb_client.vsr.stdx;
+const stdx = vsr.stdx;
 const maybe = stdx.maybe;
 
-const QueueType = tb_client.vsr.queue.QueueType;
+const QueueType = vsr.queue.QueueType;
 
 pub const Packet = extern struct {
     user_data: ?*anyopaque,
@@ -123,11 +124,29 @@ pub const Packet = extern struct {
         event_count: u32,
         result_count_expected: u32,
     } {
+        comptime {
+            assert(operations_allowed.len > 0);
+            assert(@typeInfo(Operation) == .@"enum");
+            assert(std.meta.Tag(Operation) == std.meta.Tag(vsr.Operation));
+            for (operations_allowed, 0..) |operation, index| {
+                const operation_vsr = vsr.Operation.from(Operation, operation);
+                assert(!operation_vsr.vsr_reserved());
+
+                assert(std.mem.indexOfScalar(
+                    Operation,
+                    operations_allowed[index + 1 ..],
+                    operation,
+                ) == null);
+            }
+        }
+
+        assert(options.batch_size_limit > 0);
         assert(options.batch_size_limit <= constants.message_body_size_max);
 
         const operation: Operation = operation: {
-            if (packet.operation < constants.vsr_operations_reserved)
+            if (packet.operation < constants.vsr_operations_reserved) {
                 return error.InvalidOperation;
+            }
 
             inline for (operations_allowed) |operation| {
                 if (packet.operation == @intFromEnum(operation)) {
@@ -189,11 +208,12 @@ pub const Packet = extern struct {
         options: struct {
             target: *Packet.Queue,
             batch_size_limit: u32,
-            time: tb_client.vsr.time.Time,
+            time: vsr.time.Time,
         },
     ) Error!void {
         packet.assert_phase(.submitted);
 
+        assert(options.batch_size_limit > 0);
         assert(options.batch_size_limit <= constants.message_body_size_max);
         maybe(options.target.empty());
         defer assert(!options.target.empty());
@@ -276,6 +296,9 @@ pub const Packet = extern struct {
         request_size: u32,
     } {
         packet_list.assert_phase(.pending);
+
+        assert(options.batch_size_limit > 0);
+        assert(options.batch_size_limit <= constants.message_body_size_max);
 
         const batch = packet_list.batch_validate(
             Operation,
