@@ -530,6 +530,16 @@ const TestOperation = enum(u8) {
             },
         };
     }
+
+    pub fn from_vsr(operation: vsr.Operation) ?TestOperation {
+        if (operation.vsr_reserved()) return null;
+
+        return vsr.Operation.to(TestOperation, operation);
+    }
+
+    pub fn to_vsr(operation: TestOperation) vsr.Operation {
+        return vsr.Operation.from(TestOperation, operation);
+    }
 };
 
 test "batch_validate" {
