@@ -96,7 +96,7 @@ fn zig_to_ctype(comptime Type: type) []const u8 {
             assert(info.size == .one);
             assert(!info.is_allowzero);
 
-            if (Type == *anyopaque) {
+            if (info.child == anyopaque) {
                 return "ctypes.c_void_p";
             }
 

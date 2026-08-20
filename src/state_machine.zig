@@ -1247,13 +1247,22 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
-            const accounts = stdx.bytes_as_slice(
+            const accounts: []const Account = stdx.bytes_as_slice(
                 .exact,
                 Account,
                 self.prefetch_input.?,
             );
             for (accounts) |*a| {
                 self.forest.grooves.accounts.prefetch_enqueue(.{ .id = a.id });
+
+                if (a.flags.imported) {
+                    // Looking for transfers with the same timestamp to avoid collisions.
+                    // The `transfers` prefetch isn't run yet, but enqueue it here as well
+                    // to save an extra iteration over accounts.
+                    self.forest.grooves.transfers.prefetch_enqueue(.{
+                        .timestamp = a.timestamp,
+                    });
+                }
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -1272,28 +1281,10 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             self.prefetch_context = .null;
-            const accounts = stdx.bytes_as_slice(
-                .exact,
-                Account,
-                self.prefetch_input.?,
+            self.forest.grooves.transfers.prefetch(
+                prefetch_create_accounts_transfers_callback,
+                self.prefetch_context.get(.transfers),
             );
-            if (accounts.len > 0 and
-                accounts[0].flags.imported)
-            {
-                // Looking for transfers with the same timestamp.
-                for (accounts) |*a| {
-                    self.forest.grooves.transfers.prefetch_enqueue(.{
-                        .timestamp = a.timestamp,
-                    });
-                }
-
-                self.forest.grooves.transfers.prefetch(
-                    prefetch_create_accounts_transfers_callback,
-                    self.prefetch_context.get(.transfers),
-                );
-            } else {
-                self.prefetch_finish();
-            }
         }
 
         fn prefetch_create_accounts_transfers_callback(
@@ -1315,7 +1306,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
-            const transfers = stdx.bytes_as_slice(
+            const transfers: []const Transfer = stdx.bytes_as_slice(
                 .exact,
                 Transfer,
                 self.prefetch_input.?,
@@ -1325,6 +1316,15 @@ pub fn StateMachineType(comptime Storage: type) type {
 
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     self.forest.grooves.transfers.prefetch_enqueue(.{ .id = t.pending_id });
+                }
+
+                if (t.flags.imported) {
+                    // Looking for accounts with the same timestamp to avoid collisions.
+                    // The `accounts` prefetch isn't run yet, but enqueue it here as well
+                    // to save an extra iteration over transfers.
+                    self.forest.grooves.accounts.prefetch_enqueue(.{
+                        .timestamp = t.timestamp,
+                    });
                 }
             }
 
@@ -1344,7 +1344,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
-            const transfers = stdx.bytes_as_slice(
+            const transfers: []const Transfer = stdx.bytes_as_slice(
                 .exact,
                 Transfer,
                 self.prefetch_input.?,
@@ -1368,19 +1368,6 @@ pub fn StateMachineType(comptime Storage: type) type {
                 } else {
                     self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.debit_account_id });
                     self.forest.grooves.accounts.prefetch_enqueue(.{ .id = t.credit_account_id });
-                }
-            }
-
-            if (transfers.len > 0 and
-                transfers[0].flags.imported)
-            {
-                // Looking for accounts with the same timestamp.
-                // This logic could be in the loop above, but we choose to iterate again,
-                // avoiding an extra comparison in the more common case of non-imported batches.
-                for (transfers) |*t| {
-                    self.forest.grooves.accounts.prefetch_enqueue(.{
-                        .timestamp = t.timestamp,
-                    });
                 }
             }
 
@@ -4672,14 +4659,18 @@ pub fn StateMachineType(comptime Storage: type) type {
             const tree_values_count_limit = tree_values_count(options.batch_size_limit);
             return .{
                 .accounts = .{
-                    // lookup_account() looks up 1 Account per item.
                     .prefetch_entries_for_read_max = @max(
+                        // `lookup_account()` looks up one `Account` per event.
                         prefetch_lookup_accounts_limit,
-                        prefetch_create_accounts_limit,
+                        // `create_transfers()` looks up at most one `Account` by timestamp
+                        // per event, to detect timestamp collisions when importing events.
+                        prefetch_create_transfers_limit,
                     ),
                     .prefetch_entries_for_update_max = @max(
-                        prefetch_create_accounts_limit, // create_account
-                        2 * prefetch_create_transfers_limit, // create_transfer dr and cr accounts.
+                        // `create_accounts()` inserts a single `Account` per event.
+                        prefetch_create_accounts_limit,
+                        // `create_transfers()` updates the dr and cr accounts per event.
+                        2 * prefetch_create_transfers_limit,
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
                     .tree_options_object = .{
@@ -4691,13 +4682,17 @@ pub fn StateMachineType(comptime Storage: type) type {
                     ),
                 },
                 .transfers = .{
-                    // lookup_transfer() looks up 1 Transfer.
-                    // create_transfer() looks up at most 1 Transfer for posting/voiding.
                     .prefetch_entries_for_read_max = @max(
+                        // `lookup_transfer()` looks up one `Transfer` per event.
                         prefetch_lookup_transfers_limit,
+                        // `create_transfer()` looks up at most one pending `Transfer`
+                        // for posting or voiding.
                         prefetch_create_transfers_limit,
+                        // `create_accounts()` looks up at most one `Transfer` by timestamp
+                        // per event, to detect timestamp collisions when importing events.
+                        prefetch_create_accounts_limit,
                     ),
-                    // create_transfer() updates a single Transfer.
+                    // `create_transfer()` inserts a single `Transfer` per event.
                     .prefetch_entries_for_update_max = prefetch_create_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers,
                     .tree_options_object = .{
@@ -4709,11 +4704,9 @@ pub fn StateMachineType(comptime Storage: type) type {
                     ),
                 },
                 .transfers_pending = .{
-                    .prefetch_entries_for_read_max = @max(
-                        prefetch_lookup_transfers_limit,
-                        prefetch_create_transfers_limit,
-                    ),
-                    // create_transfer() posts/voids at most one transfer.
+                    // `create_transfer()` looks up at most one `TransferPending` per event.
+                    .prefetch_entries_for_read_max = prefetch_create_transfers_limit,
+                    // `create_transfer()` inserts at most one `TransferPending` per event.
                     .prefetch_entries_for_update_max = prefetch_create_transfers_limit,
                     .cache_entries_max = options.cache_entries_transfers_pending,
                     .tree_options_object = .{

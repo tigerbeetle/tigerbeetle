@@ -75,7 +75,8 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                 }
             }
 
-            return comptime resolve_c_type(info.child) ++ "*";
+            return comptime (if (info.is_const) "const " else "") ++
+                resolve_c_type(info.child) ++ "*";
         },
         .void, .@"opaque" => return "void",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
