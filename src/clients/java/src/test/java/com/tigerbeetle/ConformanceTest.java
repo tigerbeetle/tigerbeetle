@@ -1597,7 +1597,7 @@ public class ConformanceTest {
         assertEquals(0, accounts.getLength());
     }
 
-    // Omitted: uint128_range_rejects_a_u128_above_the_maximum
+    // Omitted: "rejects a u128 above the maximum"
     // Reason: requires unbounded integers
 
     // Suite: create_transfers_concurrent
