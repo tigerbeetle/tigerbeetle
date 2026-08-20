@@ -546,7 +546,7 @@ pub inline fn hash_inline(value: anytype) u64 {
 }
 
 /// Inline version of Google Abseil "LowLevelHash" (inspired by wyhash).
-/// https://github.com/abseil/abseil-cpp/blob/master/absl/hash/internal/low_level_hash.cc
+/// https://github.com/abseil/abseil-cpp/blob/20211102.0/absl/hash/internal/low_level_hash.cc#L42
 inline fn low_level_hash(seed: u64, input: anytype) u64 {
     const salt = [_]u64{
         0xa0761d6478bd642f,

@@ -300,7 +300,7 @@ fn command_start(
         });
     }
 
-    const nonce = stdx.unique_u128();
+    const random_nonce = stdx.unique_u128();
 
     var self_exe_path: ?[:0]const u8 = null;
     defer if (self_exe_path) |path| gpa.free(path);
@@ -363,7 +363,7 @@ fn command_start(
             .storage_size_limit = args.storage_size_limit,
             .aof = if (aof != null) &aof.? else null,
             .aof_recovery = args.aof_recovery,
-            .nonce = nonce,
+            .random_nonce = random_nonce,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
             .commit_stall_probability = args.commit_stall_probability,
