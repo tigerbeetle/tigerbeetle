@@ -5,7 +5,7 @@ const Ast = std.zig.Ast;
 
 const api = @import("conformance_test_api.zig");
 pub const types = @import("conformance_test_types.zig");
-pub const utils = @import("conformance_utils.zig");
+pub const Formatter = @import("conformance_formatter.zig").Formatter;
 const debug = @import("conformance_test_debug.zig");
 
 // In the generated test files, suites appear in the order defined here. We are

@@ -1690,7 +1690,7 @@ func TestConformance(t *testing.T) {
 		assert.Len(t, accounts, 0)
 	})
 
-	// Omitted: uint128_range_rejects_a_u128_above_the_maximum
+	// Omitted: "rejects a u128 above the maximum"
 	// Reason: requires unbounded integers
 
 	// Suite: create_transfers_concurrent
