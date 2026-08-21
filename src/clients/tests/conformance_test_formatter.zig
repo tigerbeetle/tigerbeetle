@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("conformance_test_types.zig");
+const ast = @import("conformance_test_ast.zig");
 
 pub const Formatter = struct {
     // For GO* see: https://github.com/golang/go/wiki/CodeReviewComments#initialisms
@@ -55,7 +55,7 @@ pub const Formatter = struct {
         return text;
     }
 
-    pub fn generate_omission(formatter: Formatter, case: types.Case) ![]const u8 {
+    pub fn generate_omission(formatter: Formatter, case: ast.Case) ![]const u8 {
         const comment_start = try std.fmt.allocPrint(formatter.arena, "{s}{s} ", .{
             try formatter.indent(),
             formatter.comment_marker,
