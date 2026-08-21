@@ -16,7 +16,6 @@ pub const Case = struct {
     steps: []const Step,
     requirement: ?Requirement = null,
 
-    // The case only runs on clients that satisfy this requirement.
     pub const Requirement = stdx.EnumType(api_decl_names(is_requirement));
 };
 

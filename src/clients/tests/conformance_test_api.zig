@@ -20,111 +20,111 @@ pub const TransferFlags = tb.TransferFlags;
 /// Transpiles to language-specific u128 implementations where applicable.
 pub const U128 = struct { value: u128 };
 
-const ct_run_error = "attempted to run conformance test as Zig code";
+const ct_compile_error = "conformance test suites are parsed, not compiled";
 
 /// A runtime-generated TigerBeetle id.
 pub fn generate_id() u128 {
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 /// `count` runtime-generated ids.
 pub fn generate_ids(count: u32) []const u128 {
     _ = count;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn create_accounts(accounts: anytype) []const CreateAccountResult {
     _ = accounts;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn create_transfers(transfers: anytype) []const CreateTransferResult {
     _ = transfers;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn lookup_accounts(ids: anytype) []const Account {
     _ = ids;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn lookup_transfers(ids: anytype) []const Transfer {
     _ = ids;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn get_account_transfers(filter: AccountFilter) []const Transfer {
     _ = filter;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn get_account_balances(filter: AccountFilter) []const AccountBalance {
     _ = filter;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn query_accounts(filter: QueryFilter) []const Account {
     _ = filter;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn query_transfers(filter: QueryFilter) []const Transfer {
     _ = filter;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn close_client() void {
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 /// Runs `call` `n` times, one thread each, on the shared client.
 pub fn concurrently(n: u32, call: anytype) void {
     _ = n;
     _ = call;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn sleep_ms(ms: u32) void {
     _ = ms;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 /// Restricts the case to clients whose integers are unbounded so we can test for things like u128
 /// overflow.
 pub fn requires_unbounded_integers() void {
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 /// Compares only the fields listed in `expected`.
 pub fn assert_equal(actual: anytype, expected: anytype) void {
     _ = actual;
     _ = expected;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn assert_empty(actual: anytype) void {
     _ = actual;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn assert_unique(ids: []const u128) void {
     _ = ids;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn assert_ascending(ids: []const u128) void {
     _ = ids;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 pub fn assert_greater_than(actual: anytype, value: anytype) void {
     _ = actual;
     _ = value;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
 
 /// The wrapped call must fail with any client error.
 pub fn assert_fail(call: anytype) void {
     _ = call;
-    @panic(ct_run_error);
+    @panic(ct_compile_error);
 }
