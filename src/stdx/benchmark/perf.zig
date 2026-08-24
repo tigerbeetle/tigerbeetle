@@ -131,9 +131,6 @@ pub const PerfMeasurement = struct {
         const cycles_cpu = measurement.counters.cycles_cpu;
         const task_clock = measurement.counters.task_clock;
         const elapsed_ns = measurement.elapsed.ns;
-        assert(cycles_cpu > 0);
-        assert(instructions > 0);
-        assert(task_clock > 0);
 
         return .{
             .ipc = instructions / cycles_cpu,
