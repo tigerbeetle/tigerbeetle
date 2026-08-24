@@ -8,6 +8,7 @@ const stdx = @import("stdx");
 const Tracer = @import("../trace.zig").Tracer;
 
 const assert = std.debug.assert;
+const log = std.log.scoped(.io);
 
 const is_linux = builtin.target.os.tag == .linux;
 
@@ -66,30 +67,12 @@ pub fn tcp_options(
     fd: posix.socket_t,
     options: TCPOptions,
 ) !void {
-    if (options.rcvbuf > 0) rcvbuf: {
-        if (is_linux) {
-            // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-            if (setsockopt(fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, options.rcvbuf)) |_| {
-                break :rcvbuf;
-            } else |err| switch (err) {
-                error.PermissionDenied => {},
-                else => |e| return e,
-            }
-        }
-        try setsockopt(fd, posix.SOL.SOCKET, posix.SO.RCVBUF, options.rcvbuf);
+    if (options.rcvbuf > 0) {
+        try set_socket_buffer(fd, .receive, options.rcvbuf);
     }
 
-    if (options.sndbuf > 0) sndbuf: {
-        if (is_linux) {
-            // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-            if (setsockopt(fd, posix.SOL.SOCKET, posix.SO.SNDBUFFORCE, options.sndbuf)) |_| {
-                break :sndbuf;
-            } else |err| switch (err) {
-                error.PermissionDenied => {},
-                else => |e| return e,
-            }
-        }
-        try setsockopt(fd, posix.SOL.SOCKET, posix.SO.SNDBUF, options.sndbuf);
+    if (options.sndbuf > 0) {
+        try set_socket_buffer(fd, .send, options.sndbuf);
     }
 
     if (options.keepalive) |keepalive| {
@@ -118,6 +101,118 @@ pub fn tcp_options(
 
 pub fn setsockopt(fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
     try posix.setsockopt(fd, level, option, &std.mem.toBytes(value));
+}
+
+const SocketBuffer = enum {
+    receive,
+    send,
+
+    fn option(buffer: SocketBuffer) u32 {
+        return switch (buffer) {
+            .receive => posix.SO.RCVBUF,
+            .send => posix.SO.SNDBUF,
+        };
+    }
+
+    fn option_force(buffer: SocketBuffer) u32 {
+        assert(is_linux);
+        return switch (buffer) {
+            .receive => posix.SO.RCVBUFFORCE,
+            .send => posix.SO.SNDBUFFORCE,
+        };
+    }
+};
+
+fn set_socket_buffer(fd: posix.socket_t, buffer: SocketBuffer, requested: c_int) !void {
+    assert(requested > 0);
+
+    set: {
+        if (is_linux) {
+            // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF/SO_SNDBUF on EPERM):
+            if (setsockopt(fd, posix.SOL.SOCKET, buffer.option_force(), requested)) |_| {
+                break :set;
+            } else |err| switch (err) {
+                error.PermissionDenied => {},
+                else => |e| return e,
+            }
+        }
+        try setsockopt(fd, posix.SOL.SOCKET, buffer.option(), requested);
+    }
+
+    try verify_socket_buffer(fd, buffer, requested);
+}
+
+fn verify_socket_buffer(
+    fd: posix.socket_t,
+    buffer: SocketBuffer,
+    requested: c_int,
+) !void {
+    const effective_raw = try getsockopt(fd, posix.SOL.SOCKET, buffer.option());
+
+    // Linux reports twice the configured buffer size to account for kernel bookkeeping overhead
+    // (see https://man7.org/linux/man-pages/man7/socket.7.html).
+    const effective = if (is_linux) @divExact(effective_raw, 2) else effective_raw;
+
+    if (effective < requested) {
+        log.warn(
+            "TCP {s} buffer is smaller than requested: requested={} effective={}",
+            .{ @tagName(buffer), requested, effective },
+        );
+    }
+}
+
+// TODO: Use std.posix.getsockopt when it initializes optlen before calling the system API.
+fn getsockopt(
+    fd: posix.socket_t,
+    level: i32,
+    option: u32,
+) posix.GetSockOptError!c_int {
+    var value: c_int = undefined;
+
+    if (builtin.target.os.tag == .windows) {
+        var value_size: i32 = @sizeOf(c_int);
+        const rc = std.os.windows.ws2_32.getsockopt(
+            fd,
+            level,
+            @intCast(option),
+            std.mem.asBytes(&value),
+            &value_size,
+        );
+        if (rc != 0) {
+            switch (std.os.windows.ws2_32.WSAGetLastError()) {
+                .WSAEACCES => return error.AccessDenied,
+                .WSAENOPROTOOPT => return error.InvalidProtocolOption,
+                .WSAENOBUFS => return error.SystemResources,
+                .WSANOTINITIALISED => unreachable,
+                .WSAEFAULT => unreachable,
+                .WSAEINVAL => unreachable,
+                .WSAENOTSOCK => unreachable,
+                else => |err| return std.os.windows.unexpectedWSAError(err),
+            }
+        }
+        assert(value_size == @sizeOf(c_int));
+        return value;
+    }
+
+    var value_size: posix.socklen_t = @sizeOf(c_int);
+    switch (posix.errno(posix.system.getsockopt(
+        fd,
+        level,
+        option,
+        std.mem.asBytes(&value).ptr,
+        &value_size,
+    ))) {
+        .SUCCESS => assert(value_size == @sizeOf(c_int)),
+        .BADF => unreachable,
+        .NOTSOCK => unreachable,
+        .INVAL => unreachable,
+        .FAULT => unreachable,
+        .NOPROTOOPT => return error.InvalidProtocolOption,
+        .NOMEM, .NOBUFS => return error.SystemResources,
+        .ACCES => return error.AccessDenied,
+        else => |errno| return stdx.unexpected_errno("getsockopt", errno),
+    }
+    return value;
 }
 
 pub fn aof_blocking_write_all(fd: posix.fd_t, buffer: []const u8) posix.WriteError!void {
