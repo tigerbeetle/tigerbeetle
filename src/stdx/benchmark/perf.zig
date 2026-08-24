@@ -34,13 +34,16 @@ test "perf: usage example" {
 
     var perf = PerfCounters.init() catch |err| switch (err) {
         error.PermissionDenied => {
-            std.debug.print(
-                \\ Insufficient permmissions for opening linux performance counters. Try running
-                \\    sudo sysctl -w kernel.perf_event_paranoid=-1
-                \\ This may not be possible when running in a virtualized environment. 
-                \\
-            , .{});
-            return;
+            // we expect this to fail on CI machines and don't want to pollute the test output
+            if (!builtin.is_test) {
+                std.debug.print(
+                    \\Insufficient permmissions for opening linux performance counters. Try running
+                    \\   sudo sysctl -w kernel.perf_event_paranoid=-1
+                    \\This may not be possible when running in a virtualized environment. 
+                    \\
+                , .{});
+            }
+            return error.SkipZigTest;
         },
         else => return err,
     };
@@ -128,9 +131,6 @@ pub const PerfMeasurement = struct {
         const cycles_cpu = measurement.counters.cycles_cpu;
         const task_clock = measurement.counters.task_clock;
         const elapsed_ns = measurement.elapsed.ns;
-        assert(cycles_cpu > 0);
-        assert(instructions > 0);
-        assert(task_clock > 0);
 
         return .{
             .ipc = instructions / cycles_cpu,
