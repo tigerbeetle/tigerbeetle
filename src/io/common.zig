@@ -151,7 +151,7 @@ fn verify_socket_buffer(
 
     // Linux reports twice the configured buffer size to account for kernel bookkeeping overhead
     // (see https://man7.org/linux/man-pages/man7/socket.7.html).
-    const effective = if (is_linux) @divExact(effective_raw, 2) else effective_raw;
+    const effective = if (is_linux) @divFloor(effective_raw, 2) else effective_raw;
 
     if (effective < requested) {
         log.warn(
