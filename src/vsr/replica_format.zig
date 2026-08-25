@@ -29,6 +29,7 @@ pub fn format(
 
     try replica_format.queue_format_wal(options.cluster, storage);
     replica_format.format_and_tick(storage, &superblock, options);
+    replica_format.flush_and_tick(storage);
     replica_format.verify_writes();
 }
 
@@ -60,6 +61,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
         sectors_written: std.DynamicBitSetUnmanaged,
         arena: std.heap.ArenaAllocator,
 
+        flush: Storage.Flush = undefined,
+
         fn init(gpa: std.mem.Allocator) !ReplicaFormat {
             var sectors_written = try std.DynamicBitSetUnmanaged.initEmpty(
                 gpa,
@@ -86,7 +89,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
             cluster: u128,
             storage: *Storage,
         ) !void {
-            assert(!self.formatting and !self.formatting_superblock);
+            assert(!self.formatting);
+            assert(!self.formatting_superblock);
 
             const arena = self.arena.allocator();
 
@@ -211,6 +215,23 @@ fn ReplicaFormatType(comptime Storage: type) type {
             while (self.formatting_superblock) storage.run();
         }
 
+        fn flush_and_tick(self: *ReplicaFormat, storage: *Storage) void {
+            assert(!self.formatting);
+            assert(!self.formatting_superblock);
+            assert(self.writes_pending == 0);
+
+            self.formatting = true;
+            storage.flush_sectors(flush_callback, &self.flush);
+            while (self.formatting) storage.run();
+        }
+
+        fn flush_callback(flush: *Storage.Flush) void {
+            const self: *ReplicaFormat = @alignCast(@fieldParentPtr("flush", flush));
+            assert(self.formatting);
+
+            self.formatting = false;
+        }
+
         fn write_sectors_callback(storage_write: *Storage.Write) void {
             const write: *Write = @fieldParentPtr("write", storage_write);
             const self = write.replica_format;
@@ -244,7 +265,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
         }
 
         fn verify_writes(self: *ReplicaFormat) void {
-            assert(!self.formatting and !self.formatting_superblock);
+            assert(!self.formatting);
+            assert(!self.formatting_superblock);
             assert(self.writes_pending == 0);
 
             assert(self.sectors_written.count() > 0);

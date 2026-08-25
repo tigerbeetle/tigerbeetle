@@ -23,6 +23,8 @@ pub const IO = struct {
     pub const Stats = common.Stats;
     pub const NextTickSource = common.NextTickSource;
 
+    pub const dsync_all = true;
+
     ring: IO_Uring,
 
     /// Completions and deferred callbacks that are ready to have their callbacks run.
@@ -1257,7 +1259,12 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
+        // Linux dsync is efficient - it's used on every write.
+        assert(dsync_all);
+        _ = options;
+
         completion.* = .{
             .io = self,
             .context = context,
@@ -1537,7 +1544,7 @@ pub const IO = struct {
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert(flags.DSYNC);
+        assert(flags.DSYNC and dsync_all);
 
         const fd = try posix.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
