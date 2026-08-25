@@ -145,31 +145,6 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 	}
 }
 
-func getResultSize(op C.TB_OPERATION) uintptr {
-	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS:
-		return unsafe.Sizeof(CreateAccountResult{})
-	case C.TB_OPERATION_CREATE_TRANSFERS:
-		return unsafe.Sizeof(CreateTransferResult{})
-	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
-		return unsafe.Sizeof(Account{})
-	case C.TB_OPERATION_LOOKUP_TRANSFERS:
-		return unsafe.Sizeof(Transfer{})
-	case C.TB_OPERATION_GET_ACCOUNT_TRANSFERS:
-		return unsafe.Sizeof(Transfer{})
-	case C.TB_OPERATION_GET_ACCOUNT_BALANCES:
-		return unsafe.Sizeof(AccountBalance{})
-	case C.TB_OPERATION_QUERY_ACCOUNTS:
-		return unsafe.Sizeof(Account{})
-	case C.TB_OPERATION_QUERY_TRANSFERS:
-		return unsafe.Sizeof(Transfer{})
-	case C.TB_OPERATION_GET_CHANGE_EVENTS:
-		return unsafe.Sizeof(ChangeEvent{})
-	default:
-		return 0
-	}
-}
-
 func (c *c_client) doRequest(
 	op C.TB_OPERATION,
 	count int,
@@ -248,28 +223,8 @@ func onGoPacketCompletion(
 	req := (*request)(unsafe.Pointer(packet.user_data))
 	var reply []uint8 = nil
 	if result_size > 0 && result != nil {
-		op := C.TB_OPERATION(packet.operation)
-
-		// Make sure the completion handler is giving us valid data.
-		resultSize := C.uint32_t(getResultSize(op))
-		if result_size%resultSize != 0 {
-			panic("invalid result_size:  misaligned for the event")
-		}
-
-		//TODO(batiati): Refine the way we handle events with asymmetric results.
-		if op != C.TB_OPERATION_GET_ACCOUNT_TRANSFERS &&
-			op != C.TB_OPERATION_GET_ACCOUNT_BALANCES &&
-			op != C.TB_OPERATION_QUERY_ACCOUNTS &&
-			op != C.TB_OPERATION_QUERY_TRANSFERS &&
-			op != C.TB_OPERATION_GET_CHANGE_EVENTS {
-			// Make sure the amount of results at least matches the amount of requests.
-			count := packet.data_size / C.uint32_t(getEventSize(op))
-			if count*resultSize < result_size {
-				panic("invalid result_size: implied multiple results per event")
-			}
-		}
-
-		// Copy the result data into a new buffer.
+		// Copy the result data into a new buffer. The reply's size, alignment, and
+		// result count are validated by the C client; see `tb_client/context.zig`.
 		reply = make([]uint8, result_size)
 		C.memcpy(unsafe.Pointer(&reply[0]), unsafe.Pointer(result), C.size_t(result_size))
 	}
