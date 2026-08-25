@@ -321,7 +321,10 @@ test "benchmark/inspect smoke" {
 
     const offset = try stdx.parse_int(
         u64,
-        stdx.cut(tables_output, "O=").?[1],
+        stdx.cut(
+            stdx.cut(tables_output, "O=").?[1],
+            "\n",
+        ).?[0],
         .{},
     );
 
