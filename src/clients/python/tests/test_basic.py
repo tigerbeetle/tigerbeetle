@@ -67,6 +67,14 @@ def test_range_check_u128_cannot_be_negative(client):
     except tb.IntegerOverflowError:
         pass
 
+def test_range_check_u128_lookup_id_cannot_exceed(client):
+    with pytest.raises(tb.IntegerOverflowError):
+        client.lookup_accounts([2**128])
+
+def test_range_check_u128_lookup_id_cannot_be_negative(client):
+    with pytest.raises(tb.IntegerOverflowError):
+        client.lookup_transfers([-1])
+
 def test_range_check_code_on_account_to_be_u16(client):
     account = tb.Account(**{ **asdict(account_a), "id": 0, "code": 65535 + 1 })
 

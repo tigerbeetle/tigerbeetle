@@ -74,6 +74,7 @@ class c_uint128(ctypes.Structure):  # noqa: N801
 
     @classmethod
     def from_param(cls, obj: int) -> Self:
+        validate_uint(bits=128, name="u128", number=obj)
         return cls(_high=obj >> 64, _low=obj & 0xFFFFFFFFFFFFFFFF)
 
     def to_python(self) -> int:
