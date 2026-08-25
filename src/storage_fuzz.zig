@@ -86,6 +86,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             .tracer = &tracer,
             .dir_fd = 0,
             .fd = 0,
+            .purpose = .open,
         };
         // NB: Intentionally skipping deinit to avoid closing stdin.
 
