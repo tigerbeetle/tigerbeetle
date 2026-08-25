@@ -3198,7 +3198,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 ### Internals
 - [#2713](https://github.com/tigerbeetle/tigerbeetle/pull/2713)
 
-  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md) from
+  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/internals/talks.md) from
   SystemsDistributed '23, P99 CONF '23, Money2020 '24, and SYCL '24.
 
 - [#2710](https://github.com/tigerbeetle/tigerbeetle/pull/2710)
