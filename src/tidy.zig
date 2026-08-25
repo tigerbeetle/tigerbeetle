@@ -1333,6 +1333,84 @@ test "tidy no large blobs" {
     }
     if (has_large_blobs) return error.HasLargeBlobs;
 }
+test "tidy commits" {
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const commits = try shell.exec_stdout(
+        "git log --max-count=32 --format={format} HEAD",
+        .{ .format = tidy_commit_metadata_format },
+    );
+
+    const agent_hashes = try tidy_commit_agent_hashes(commits);
+    var untidy = false;
+    for (agent_hashes, tidy_commit_agents) |hash_optional, agent| {
+        const hash = hash_optional orelse continue;
+        std.debug.print(
+            "{s} {s}: TigerBeetle does not allow LLM contributions.\n",
+            .{ hash, agent },
+        );
+        untidy = true;
+    }
+    if (untidy) return error.Untidy;
+}
+
+fn tidy_commit_agent_hashes(history: []const u8) !TidyCommitAgentHashes {
+    var agent_hashes: TidyCommitAgentHashes = @splat(null);
+    var remaining = history;
+    while (remaining.len > 0) {
+        const commit, remaining =
+            stdx.cut(remaining, "\x00\n") orelse return error.InvalidGitLog;
+        const hash, const metadata =
+            stdx.cut(commit, "\x00") orelse return error.InvalidGitLog;
+        for (tidy_commit_agents, &agent_hashes) |agent, *agent_hash| {
+            if (agent_hash.* == null and
+                std.ascii.indexOfIgnoreCase(metadata, agent) != null)
+            {
+                agent_hash.* = hash;
+            }
+        }
+    }
+    return agent_hashes;
+}
+
+const tidy_commit_agents = [_][]const u8{
+    "aider",
+    "claude",
+    "codex",
+    "copilot",
+    "cursor",
+    "gemini",
+};
+
+const tidy_commit_metadata_format =
+    "%H%x00" ++ // Commit hash.
+    "%an%x00" ++ // Author name.
+    "%(trailers:key=Co-authored-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Co-author-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Made-with,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Generated-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Generated-with,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Powered-by,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=AI-Author,valueonly,separator=%x00)%x00" ++
+    "%(trailers:key=Signed-off-by,valueonly,separator=%x00)%x00";
+
+const TidyCommitAgentHashes = [tidy_commit_agents.len]?[]const u8;
+
+test tidy_commit_agent_hashes {
+    // Copied from `git log` after committing `Signed-off-by: Codex <noreply@openai.com>`.
+    const commits =
+        "ef30ac10ae0b8c7f5fcb22470139f981444b4e85\x00Tobias Ziegler" ++
+        "\x00\x00\x00\x00\x00\x00\x00\x00Codex <noreply@openai.com>\x00\n" ++
+        "4009f66035c720ff217953116ff73b9e7a4f5050\x00Tobias Ziegler" ++
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\n";
+
+    const expected: TidyCommitAgentHashes = .{
+        null, null, "ef30ac10ae0b8c7f5fcb22470139f981444b4e85", null, null, null,
+    };
+    try std.testing.expectEqualDeep(expected, try tidy_commit_agent_hashes(commits));
+}
 
 test "tidy unix permissions" {
     const executable_files = [_][]const u8{
