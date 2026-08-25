@@ -109,7 +109,7 @@ Released: 2026-07-03
 
 - [#3817](https://github.com/tigerbeetle/tigerbeetle/pull/3817)
 
-  Workaround MacOS builds on Zig 0.14.1 (see [issue](ttps://codeberg.org/ziglang/zig/issues/31658)).
+  Workaround MacOS builds on Zig 0.14.1 (see [issue](https://codeberg.org/ziglang/zig/issues/31658)).
 
 ### TigerTracks 🎧
 
