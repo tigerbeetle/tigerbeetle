@@ -34,7 +34,8 @@ test "perf: usage example" {
 
     var perf = PerfCounters.init() catch |err| switch (err) {
         error.PermissionDenied => {
-            // we expect this to fail on CI machines and don't want to pollute the test output
+            // Example error message. Disabled since performance counters are expected to be
+            // unavailable in CI environments, and the test should be skipped with no output.
             if (!builtin.is_test) {
                 std.debug.print(
                     \\Insufficient permmissions for opening linux performance counters. Try running
@@ -49,23 +50,30 @@ test "perf: usage example" {
     };
     defer perf.deinit();
 
-    var output: PerfTableType(struct { op: []const u8, context: []const u8 }) = try .init(
-        std.io.getStdErr().writer().any(),
-    );
+    var output_memory = std.ArrayList(u8).init(std.testing.allocator);
+    defer output_memory.deinit();
 
-    const scale = 1_000_000_000;
+    const scale = 1_000;
     try perf.start();
 
     var checksum: u128 = 0;
     for (1..scale) |i| {
         checksum += i * i;
     }
-
     const measurement = try perf.lap();
+
+    const Parameters = struct { op: []const u8, context: []const u8 };
+    var output: PerfTableType(Parameters) = try .init(output_memory.writer().any());
     try output.row(&measurement, .{ .checksum = @truncate(checksum), .scale = scale }, .{
         .op = "*",
         .context = "test",
     });
+
+    const header, const values = stdx.cut(output_memory.items, "\n").?;
+    assert(header.len > 0);
+    assert(values.len > 0);
+    assert(std.mem.startsWith(u8, header, "  op, context, elapsed_ms"));
+    assert(std.mem.startsWith(u8, values, "   *,    test, "));
 }
 
 const PerfCountersLinux = @import("./perf_linux.zig").PerfCounters;
