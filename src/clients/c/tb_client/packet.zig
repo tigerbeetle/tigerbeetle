@@ -216,11 +216,12 @@ pub const Packet = extern struct {
         assert(options.batch_size_limit > 0);
         assert(options.batch_size_limit <= constants.message_body_size_max);
         maybe(options.target.empty());
-        defer assert(!options.target.empty());
 
         const batch = try packet.batch_validate(Operation, operations_allowed, .{
             .batch_size_limit = options.batch_size_limit,
         });
+        errdefer comptime unreachable;
+        defer assert(!options.target.empty());
 
         if (batch.operation.is_multi_batch()) {
             var it = options.target.iterate();
@@ -1159,6 +1160,237 @@ test "batch_enqueue: no multibatch" {
     try testing.expect(packet_2.multi_batch_next == null);
     try testing.expect(packet_2.multi_batch_tail == null);
     try testing.expect(packet_2.multi_batch_time_monotonic != 0);
+}
+
+test "batch_enqueue: batch_validate" {
+    const operations_allowed: []const TestOperation = &.{ .create, .query };
+
+    var time_sim = fixtures.init_time(.{});
+    time_sim.ticks = 1;
+
+    // Event count == Result count.
+    // `data_size` larger than `batch_size_limit`.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = TestOperation.create.event_size() * 10,
+            .user_tag = 0,
+            .operation = @intFromEnum(TestOperation.create),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.TooMuchData, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = TestOperation.create.event_size() * 9,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Event count != Result count.
+    // `result_count_expected` larger than the `batch_size_limit`.
+    {
+        const QueryFilter = TestOperation.query.EventType();
+        const filter: QueryFilter = .{
+            .limit = 100_000,
+        };
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = &filter,
+            .data_size = @sizeOf(QueryFilter),
+            .user_tag = 1,
+            .operation = @intFromEnum(TestOperation.query),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.TooMuchData, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Invalid data size.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = TestOperation.create.event_size() - 1,
+            .user_tag = 0,
+            .operation = @intFromEnum(TestOperation.create),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidDataSize, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Invalid data size.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = TestOperation.query.event_size() - 1,
+            .user_tag = 0,
+            .operation = @intFromEnum(TestOperation.query),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidDataSize, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Invalid data size.
+    // More than one event per batch when `is_batchable == false`.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = TestOperation.query.event_size() * 2,
+            .user_tag = 0,
+            .operation = @intFromEnum(TestOperation.query),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidDataSize, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Invalid data size.
+    // Zero events when `is_batchable == false`.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = 0,
+            .user_tag = 0,
+            .operation = @intFromEnum(TestOperation.query),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidDataSize, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Reserved operation.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = 0,
+            .user_tag = 0,
+            .operation = 0,
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidOperation, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Invalid operation.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = 0,
+            .user_tag = 0,
+            .operation = 199,
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidOperation, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
+
+    // Operation not allowed.
+    {
+        var packet: Packet = .init(&.{
+            .user_data = null,
+            .data = undefined,
+            .data_size = 0,
+            .user_tag = 0,
+            .operation = @intFromEnum(TestOperation.deprecated),
+            .status = .ok,
+        });
+
+        var queue: Packet.Queue = .init(.{ .name = "testing", .verify_push = true });
+        try testing.expectError(error.InvalidOperation, packet.batch_enqueue(
+            TestOperation,
+            operations_allowed,
+            .{
+                .target = &queue,
+                .batch_size_limit = constants.message_body_size_max,
+                .time = time_sim.time(),
+            },
+        ));
+        try testing.expect(queue.empty());
+    }
 }
 
 test "batch_write: multibatch" {
