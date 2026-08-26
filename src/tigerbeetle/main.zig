@@ -274,8 +274,11 @@ fn command_start(
     } else null;
     defer if (aof != null) aof.?.close();
 
-    const grid_cache_size = @as(u64, args.cache_grid_blocks) * constants.block_size;
     const grid_cache_size_min = constants.block_size * Grid.Cache.value_count_max_multiple;
+    const grid_cache_size = if (args.development)
+        grid_cache_size_min
+    else
+        @as(u64, args.cache_grid_blocks) * constants.block_size;
 
     // The amount of bytes in `--cache-grid` must be a multiple of
     // `constants.block_size` and `SetAssociativeCache.value_count_max_multiple`,
