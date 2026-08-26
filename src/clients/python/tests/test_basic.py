@@ -53,19 +53,13 @@ account_b = tb.Account(
 
 def test_range_check_u128_cannot_exceed(client):
     account = tb.Account(**{ **asdict(account_a), "id": 9999999999999999999999999999999999999999 })
-
-    try:
-        error = client.create_accounts([account])
-    except tb.IntegerOverflowError:
-        pass
+    with pytest.raises(tb.IntegerOverflowError):
+        client.create_accounts([account])
 
 def test_range_check_u128_cannot_be_negative(client):
     account = tb.Account(**{ **asdict(account_a), "id": -1 })
-
-    try:
-        error = client.create_accounts([account])
-    except tb.IntegerOverflowError:
-        pass
+    with pytest.raises(tb.IntegerOverflowError):
+        client.create_accounts([account])
 
 def test_range_check_u128_lookup_id_cannot_exceed(client):
     with pytest.raises(tb.IntegerOverflowError):

@@ -73,8 +73,8 @@ class c_uint128(ctypes.Structure):  # noqa: N801
     _fields_ = [("_low", ctypes.c_uint64), ("_high", ctypes.c_uint64)]  # noqa: RUF012
 
     @classmethod
-    def from_param(cls, obj: int) -> Self:
-        validate_uint(bits=128, name="u128", number=obj)
+    def from_param(cls, obj: int, name: str = "u128") -> Self:
+        validate_uint(bits=128, name=name, number=obj)
         return cls(_high=obj >> 64, _low=obj & 0xFFFFFFFFFFFFFFFF)
 
     def to_python(self) -> int:
