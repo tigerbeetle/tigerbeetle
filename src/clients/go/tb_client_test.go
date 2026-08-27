@@ -55,7 +55,6 @@ func WithClient(t testing.TB, withClient func(Client)) {
 		"start",
 		"--development",
 		"--addresses=0",
-		"--cache-grid=256MiB",
 		fileName)
 
 	if testing.Verbose() {
