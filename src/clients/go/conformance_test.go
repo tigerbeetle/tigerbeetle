@@ -1693,6 +1693,9 @@ func TestConformance(t *testing.T) {
 	// Omitted: "rejects a u128 above the maximum"
 	// Reason: requires unbounded integers
 
+	// Omitted: "rejects a negative u128"
+	// Reason: requires unbounded integers
+
 	// Suite: create_transfers_concurrent
 
 	test("create_transfers_concurrent_applies_transfers_submitted_concurrently", func(t *testing.T, client Client) {

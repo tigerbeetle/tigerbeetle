@@ -13,3 +13,9 @@ test "rejects a u128 above the maximum" {
 
     ct.assert_fail(ct.lookup_accounts(.{340282366920938463463374607431768211456}));
 }
+
+test "rejects a negative u128" {
+    ct.requires_unbounded_integers();
+
+    ct.assert_fail(ct.lookup_accounts(.{-1}));
+}

@@ -1559,6 +1559,12 @@ test('uint128_range_rejects_a_u128_above_the_maximum', async (client) => {
   })
 })
 
+test('uint128_range_rejects_a_negative_u128', async (client) => {
+  await assert.rejects(async (): Promise<void> => {
+    await client.lookupAccounts([-1n])
+  })
+})
+
 // Suite: create_transfers_concurrent
 
 test('create_transfers_concurrent_applies_transfers_submitted_concurrently', async (client) => {

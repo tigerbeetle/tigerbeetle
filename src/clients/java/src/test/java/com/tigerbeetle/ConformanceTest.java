@@ -1600,6 +1600,9 @@ public class ConformanceTest {
     // Omitted: "rejects a u128 above the maximum"
     // Reason: requires unbounded integers
 
+    // Omitted: "rejects a negative u128"
+    // Reason: requires unbounded integers
+
     // Suite: create_transfers_concurrent
 
     @Test

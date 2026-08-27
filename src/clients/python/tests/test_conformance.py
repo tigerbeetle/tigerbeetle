@@ -1583,6 +1583,10 @@ def test_uint128_range_rejects_a_u128_above_the_maximum(client):
     with pytest.raises(Exception):
         client.lookup_accounts([340282366920938463463374607431768211456])
 
+def test_uint128_range_rejects_a_negative_u128(client):
+    with pytest.raises(Exception):
+        client.lookup_accounts([-1])
+
 # Suite: create_transfers_concurrent
 
 def test_create_transfers_concurrent_applies_transfers_submitted_concurrently(client):

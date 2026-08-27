@@ -22,12 +22,6 @@ class TestUInt128Range < TigerBeetleIntegrationTest
     end
   end
 
-  def test_range_check_u128_cannot_be_negative
-    assert_u128_range_error do
-      @client.lookup_accounts([-1])
-    end
-  end
-
   def test_range_check_u128_struct_field_cannot_exceed
     account = TigerBeetle::Account.new(id: UINT128_OVERFLOW, ledger: 1, code: 1)
 
