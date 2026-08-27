@@ -22,6 +22,18 @@ pub const tcp_options: IO.TCPOptions = .{
     .nodelay = false,
 };
 
+test "TCP socket buffer options" {
+    var io = try IO.init(32, 0);
+    defer io.deinit();
+
+    var options = tcp_options;
+    options.rcvbuf = 1;
+    options.sndbuf = 1;
+
+    const socket = try io.open_socket_tcp(.IPv4, options);
+    defer io.close_socket(socket);
+}
+
 test "open/write/read/close/statx" {
     try struct {
         const Context = @This();
