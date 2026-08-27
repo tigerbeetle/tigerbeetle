@@ -212,6 +212,14 @@ fn parse_expression(parser: *Parser, node: std.zig.Ast.Node.Index) anyerror!ast.
     const main_token = tree.nodeMainToken(node);
     switch (tree.nodeTag(node)) {
         .number_literal => return .{ .integer = tree.tokenSlice(main_token) },
+        .negation => {
+            const operand = tree.nodeData(node).node;
+            if (tree.nodeTag(operand) != .number_literal) {
+                return parser.fail_node(operand, "expected an integer");
+            }
+            const text = tree.tokenSlice(tree.nodeMainToken(operand));
+            return .{ .integer = try std.fmt.allocPrint(parser.arena, "-{s}", .{text}) };
+        },
         .enum_literal => return .{ .enum_literal = tree.tokenSlice(main_token) },
         .identifier => {
             const name = tree.tokenSlice(main_token);

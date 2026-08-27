@@ -1516,6 +1516,12 @@ class TestConformance < Minitest::Test
     end
   end
 
+  def test_uint128_range_rejects_a_negative_u128
+    assert_raises(StandardError) do
+      @client.lookup_accounts([-1])
+    end
+  end
+
   # Suite: create_transfers_concurrent
 
   def test_create_transfers_concurrent_applies_transfers_submitted_concurrently
