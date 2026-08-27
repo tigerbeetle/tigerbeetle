@@ -239,7 +239,7 @@ typedef struct tb_client_t {
 // throughout the lifetime of the request.
 typedef struct tb_packet_t {
     void* user_data;
-    void* data;
+    const void* data;
     uint32_t data_size;
     uint16_t user_tag;
     uint8_t operation;
@@ -302,7 +302,7 @@ typedef enum TB_LOG_LEVEL {
 typedef struct tb_init_parameters_t {
     tb_uint128_t cluster_id;
     tb_uint128_t client_id;
-    uint8_t* addresses_ptr;
+    const uint8_t* addresses_ptr;
     uint64_t addresses_len;
 } tb_init_parameters_t;
 

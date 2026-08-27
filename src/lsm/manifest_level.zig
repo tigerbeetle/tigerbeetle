@@ -761,6 +761,80 @@ pub fn ManifestLevelType(
             return null;
         }
 
+        pub fn tables_to_coalesce(
+            level: *const ManifestLevel,
+            range_overlap: OverlapRange,
+            snapshot: u64,
+            value_count: u32,
+            value_count_max: u32,
+        ) ?OverlapRange {
+            const value_count_target = stdx.div_ceil(
+                value_count_max * constants.lsm_table_coalescing_threshold_percent,
+                100,
+            );
+            assert(value_count_target > 1);
+            assert(value_count_target < value_count_max);
+
+            var value_count_output = value_count;
+            for (range_overlap.tables.const_slice()) |table| {
+                value_count_output += table.table_info.value_count;
+            }
+
+            var has_small_table = value_count_output < value_count_target;
+            var range = range_overlap;
+
+            outer: for ([_]Direction{ .descending, .ascending }) |direction| {
+                for (0..constants.lsm_growth_factor) |_| {
+                    if (range.tables.full() or
+                        value_count_output >= value_count_target)
+                    {
+                        break :outer;
+                    }
+
+                    const table_next = level.next_table(.{
+                        .snapshot = snapshot,
+                        .key_min = 0,
+                        .key_max = std.math.maxInt(Key),
+                        .key_exclusive = switch (direction) {
+                            .descending => range.key_min,
+                            .ascending => range.key_max,
+                        },
+                        .direction = direction,
+                    }) orelse break;
+
+                    const table_next_value_count = table_next.table_info.value_count;
+                    assert(table_next_value_count > 0);
+
+                    if (value_count_output + table_next_value_count > value_count_max) {
+                        break;
+                    }
+
+                    value_count_output += table_next_value_count;
+                    has_small_table =
+                        has_small_table or table_next_value_count < value_count_target;
+
+                    switch (direction) {
+                        .descending => {
+                            range.key_min = table_next.table_info.key_min;
+                            range.tables.insert_at(0, table_next);
+                        },
+                        .ascending => {
+                            range.key_max = table_next.table_info.key_max;
+                            range.tables.push(table_next);
+                        },
+                    }
+                } else unreachable;
+            }
+
+            if (range.tables.count() == range_overlap.tables.count() or
+                !has_small_table)
+            { // None of the tables benefit much from coalescing.
+                return null;
+            }
+
+            return range;
+        }
+
         /// Returns the smallest visible range of tables in the given level
         /// that overlap with the given range: [key_min, key_max]
         ///

@@ -212,7 +212,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             message_header.replica = node_source;
             message_header.command = prng.enum_weighted(vsr.Command, command_weights);
             if (message_header.into(.request)) |request_header| {
-                request_header.client = @max(1, fuzz.random_int_exponential(&prng, u128, 3));
+                request_header.client = fuzz.random_int_exponential(&prng, u128, 3);
             }
         } else {
             message_header.replica = @intCast(prng.index(nodes[0..replica_count]));
@@ -773,6 +773,8 @@ const IO = struct {
             assert(!io.servers.contains(socket));
 
             connection.closed = true;
+        } else {
+            // We might be closing a socket which didn't ever connect().
         }
     }
 
@@ -819,12 +821,7 @@ const IO = struct {
             }
         }
 
-        io.fds_open -= 1;
-        if (io.connections.getPtr(fd)) |connection| {
-            connection.closed = true;
-        } else {
-            // We might be closing a socket which didn't ever connect().
-        }
+        io.close_socket(fd);
 
         completion.* = .{
             .context = context,

@@ -10,11 +10,6 @@ const tb = @import("tigerbeetle.zig");
 const vsr = @import("vsr.zig");
 const constants = vsr.constants;
 
-const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
-const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
-
-const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
-
 const Account = tb.Account;
 const AccountBalance = tb.AccountBalance;
 const Transfer = tb.Transfer;
@@ -31,109 +26,1240 @@ const ChangeEvent = tb.ChangeEvent;
 const ChangeEventType = tb.ChangeEventType;
 
 const StateMachineType = @import("state_machine.zig").StateMachineType;
+const MessagePool = @import("message_pool.zig").MessagePool;
+const MultiBatchDecoder = @import("./vsr/multi_batch.zig").MultiBatchDecoder;
+const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
+const Packet = @import("./clients/c/tb_client/packet.zig").Packet;
+const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
+const TimeSim = @import("testing/time.zig").TimeSim;
+const Storage = @import("testing/storage.zig").Storage;
+const Tracer = Storage.Tracer;
+const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
+const Grid = @import("vsr/grid.zig").GridType(Storage);
+const fixtures = @import("testing/fixtures.zig");
+const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+
+const parse_table = @import("testing/table.zig").parse;
 const testing = std.testing;
 
-pub const TestContext = struct {
-    const TimeSim = @import("testing/time.zig").TimeSim;
-    const Storage = @import("testing/storage.zig").Storage;
-    const Tracer = Storage.Tracer;
-    const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
-    const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
-    const Grid = @import("vsr/grid.zig").GridType(Storage);
-    const fixtures = @import("testing/fixtures.zig");
+const StateMachine = StateMachineType(Storage);
 
-    pub const StateMachine = StateMachineType(Storage);
+/// Variations of operations supported by the state machine,
+/// including deprecated ones used by old clients.
+const TestOperation = enum {
+    create_accounts,
+    create_transfers,
+    lookup_accounts,
+    lookup_transfers,
+    get_account_transfers,
+    get_account_balances,
+    query_accounts,
+    query_transfers,
+    get_change_events,
 
-    pub const Operation = enum {
-        create_accounts,
-        create_transfers,
-        lookup_accounts,
-        lookup_transfers,
-        get_account_transfers,
-        get_account_balances,
-        query_accounts,
-        query_transfers,
-        get_change_events,
+    const VersionMap = std.EnumArray(TestOperation, StateMachine.Operation);
+    const versions: []const VersionMap = &.{
+        .init(.{
+            .create_accounts = .create_accounts,
+            .create_transfers = .create_transfers,
+            .lookup_accounts = .lookup_accounts,
+            .lookup_transfers = .lookup_transfers,
+            .get_account_transfers = .get_account_transfers,
+            .get_account_balances = .get_account_balances,
+            .query_accounts = .query_accounts,
+            .query_transfers = .query_transfers,
+            .get_change_events = .get_change_events,
+        }),
+        .init(.{
+            .create_accounts = .deprecated_create_accounts_sparse,
+            .create_transfers = .deprecated_create_transfers_sparse,
+            .lookup_accounts = .lookup_accounts,
+            .lookup_transfers = .lookup_transfers,
+            .get_account_transfers = .get_account_transfers,
+            .get_account_balances = .get_account_balances,
+            .query_accounts = .query_accounts,
+            .query_transfers = .query_transfers,
+            .get_change_events = .get_change_events,
+        }),
+        .init(.{
+            .create_accounts = .deprecated_create_accounts_unbatched,
+            .create_transfers = .deprecated_create_transfers_unbatched,
+            .lookup_accounts = .deprecated_lookup_accounts_unbatched,
+            .lookup_transfers = .deprecated_lookup_transfers_unbatched,
+            .get_account_transfers = .deprecated_get_account_transfers_unbatched,
+            .get_account_balances = .deprecated_get_account_balances_unbatched,
+            .query_accounts = .deprecated_query_accounts_unbatched,
+            .query_transfers = .deprecated_query_transfers_unbatched,
+            .get_change_events = .get_change_events,
+        }),
+    };
+};
 
-        const VersionMap = std.EnumArray(Operation, StateMachine.Operation);
-        /// Variations of operations supported by the state machine,
-        /// including deprecated ones used by old clients.
-        const versions: []const VersionMap = &.{
-            .init(.{
-                .create_accounts = .create_accounts,
-                .create_transfers = .create_transfers,
-                .lookup_accounts = .lookup_accounts,
-                .lookup_transfers = .lookup_transfers,
-                .get_account_transfers = .get_account_transfers,
-                .get_account_balances = .get_account_balances,
-                .query_accounts = .query_accounts,
-                .query_transfers = .query_transfers,
-                .get_change_events = .get_change_events,
-            }),
-            .init(.{
-                .create_accounts = .deprecated_create_accounts_sparse,
-                .create_transfers = .deprecated_create_transfers_sparse,
-                .lookup_accounts = .lookup_accounts,
-                .lookup_transfers = .lookup_transfers,
-                .get_account_transfers = .get_account_transfers,
-                .get_account_balances = .get_account_balances,
-                .query_accounts = .query_accounts,
-                .query_transfers = .query_transfers,
-                .get_change_events = .get_change_events,
-            }),
-            .init(.{
-                .create_accounts = .deprecated_create_accounts_unbatched,
-                .create_transfers = .deprecated_create_transfers_unbatched,
-                .lookup_accounts = .deprecated_lookup_accounts_unbatched,
-                .lookup_transfers = .deprecated_lookup_transfers_unbatched,
-                .get_account_transfers = .deprecated_get_account_transfers_unbatched,
-                .get_account_balances = .deprecated_get_account_balances_unbatched,
-                .query_accounts = .deprecated_query_accounts_unbatched,
-                .query_transfers = .deprecated_query_transfers_unbatched,
-                .get_change_events = .get_change_events,
-            }),
-        };
+const TestAction = union(enum) {
+    /// Set the account's balance.
+    setup: Setup,
+
+    tick: Tick,
+
+    commit: TestOperation,
+    account: CreateAccount,
+    transfer: CreateTransfer,
+
+    lookup_account: LookupAccount,
+    lookup_transfer: LookupTransfer,
+
+    get_account_balances: GetAccountBalances,
+    get_account_balances_result: GetAccountBalancesResult,
+
+    get_account_transfers: GetAccountTransfers,
+    get_account_transfers_result: u128,
+
+    query_accounts: QueryAccounts,
+    query_accounts_result: QueryAccountsResult,
+
+    query_transfers: QueryTransfers,
+    query_transfers_result: u128,
+
+    get_change_events: GetChangeEvents,
+    get_change_events_result: GetChangeEventsResult,
+
+    const Setup = struct {
+        account: u128,
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
     };
 
+    const Tick = struct {
+        value: i64,
+        unit: enum { nanoseconds, seconds },
+    };
+
+    const CreateAccount = struct {
+        id: u128,
+        debits_pending: u128 = 0,
+        debits_posted: u128 = 0,
+        credits_pending: u128 = 0,
+        credits_posted: u128 = 0,
+        user_data_128: u128 = 0,
+        user_data_64: u64 = 0,
+        user_data_32: u32 = 0,
+        reserved: u1 = 0,
+        ledger: u32,
+        code: u16,
+        flags_linked: ?enum { LNK } = null,
+        flags_debits_must_not_exceed_credits: ?enum { @"D<C" } = null,
+        flags_credits_must_not_exceed_debits: ?enum { @"C<D" } = null,
+        flags_history: ?enum { HIST } = null,
+        flags_imported: ?enum { IMP } = null,
+        flags_closed: ?enum { CLSD } = null,
+        flags_padding: u10 = 0,
+        timestamp: u64 = 0,
+        status: CreateAccountStatus,
+
+        fn event(a: CreateAccount) Account {
+            return .{
+                .id = a.id,
+                .debits_pending = a.debits_pending,
+                .debits_posted = a.debits_posted,
+                .credits_pending = a.credits_pending,
+                .credits_posted = a.credits_posted,
+                .user_data_128 = a.user_data_128,
+                .user_data_64 = a.user_data_64,
+                .user_data_32 = a.user_data_32,
+                .reserved = a.reserved,
+                .ledger = a.ledger,
+                .code = a.code,
+                .flags = .{
+                    .linked = a.flags_linked != null,
+                    .debits_must_not_exceed_credits = a
+                        .flags_debits_must_not_exceed_credits != null,
+                    .credits_must_not_exceed_debits = a
+                        .flags_credits_must_not_exceed_debits != null,
+                    .history = a.flags_history != null,
+                    .imported = a.flags_imported != null,
+                    .closed = a.flags_closed != null,
+                    .padding = a.flags_padding,
+                },
+                .timestamp = a.timestamp,
+            };
+        }
+    };
+
+    const CreateTransfer = struct {
+        id: u128,
+        debit_account_id: u128,
+        credit_account_id: u128,
+        amount: u128 = 0,
+        pending_id: u128 = 0,
+        user_data_128: u128 = 0,
+        user_data_64: u64 = 0,
+        user_data_32: u32 = 0,
+        timeout: u32 = 0,
+        ledger: u32,
+        code: u16,
+        flags_linked: ?enum { LNK } = null,
+        flags_pending: ?enum { PEN } = null,
+        flags_post_pending_transfer: ?enum { POS } = null,
+        flags_void_pending_transfer: ?enum { VOI } = null,
+        flags_balancing_debit: ?enum { BDR } = null,
+        flags_balancing_credit: ?enum { BCR } = null,
+        flags_imported: ?enum { IMP } = null,
+        flags_closing_debit: ?enum { CDR } = null,
+        flags_closing_credit: ?enum { CCR } = null,
+        flags_padding: u5 = 0,
+        timestamp: u64 = 0,
+        status: CreateTransferStatus,
+
+        fn event(t: CreateTransfer) Transfer {
+            return .{
+                .id = t.id,
+                .debit_account_id = t.debit_account_id,
+                .credit_account_id = t.credit_account_id,
+                .amount = t.amount,
+                .pending_id = t.pending_id,
+                .user_data_128 = t.user_data_128,
+                .user_data_64 = t.user_data_64,
+                .user_data_32 = t.user_data_32,
+                .timeout = t.timeout,
+                .ledger = t.ledger,
+                .code = t.code,
+                .flags = .{
+                    .linked = t.flags_linked != null,
+                    .pending = t.flags_pending != null,
+                    .post_pending_transfer = t.flags_post_pending_transfer != null,
+                    .void_pending_transfer = t.flags_void_pending_transfer != null,
+                    .balancing_debit = t.flags_balancing_debit != null,
+                    .balancing_credit = t.flags_balancing_credit != null,
+                    .imported = t.flags_imported != null,
+                    .closing_debit = t.flags_closing_debit != null,
+                    .closing_credit = t.flags_closing_credit != null,
+                    .padding = t.flags_padding,
+                },
+                .timestamp = t.timestamp,
+            };
+        }
+    };
+
+    const LookupAccount = struct {
+        id: u128,
+        data: ?struct {
+            debits_pending: u128,
+            debits_posted: u128,
+            credits_pending: u128,
+            credits_posted: u128,
+            flag_closed: ?enum { CLSD } = null,
+        } = null,
+    };
+
+    const LookupTransfer = struct {
+        id: u128,
+        data: union(enum) {
+            exists: bool,
+            amount: u128,
+            timestamp: u64,
+        },
+    };
+
+    const GetAccountBalances = struct {
+        account_id: u128,
+        user_data_128: ?u128 = null,
+        user_data_64: ?u64 = null,
+        user_data_32: ?u32 = null,
+        code: ?u16 = null,
+        // When non-null, the filter is set to the timestamp
+        //at which the specified transfer (by id) was created.
+        timestamp_min_transfer_id: ?u128 = null,
+        timestamp_max_transfer_id: ?u128 = null,
+        limit: u32,
+        flags_debits: ?enum { DR } = null,
+        flags_credits: ?enum { CR } = null,
+        flags_reversed: ?enum { REV } = null,
+    };
+
+    const GetAccountBalancesResult = struct {
+        transfer_id: u128,
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
+    };
+
+    const GetAccountTransfers = struct {
+        account_id: u128,
+        user_data_128: ?u128 = null,
+        user_data_64: ?u64 = null,
+        user_data_32: ?u32 = null,
+        code: ?u16 = null,
+        // When non-null, the filter is set to the timestamp at which
+        // the specified transfer (by id) was created.
+        timestamp_min_transfer_id: ?u128 = null,
+        timestamp_max_transfer_id: ?u128 = null,
+        limit: u32,
+        flags_debits: ?enum { DR } = null,
+        flags_credits: ?enum { CR } = null,
+        flags_reversed: ?enum { REV } = null,
+    };
+
+    const QueryAccounts = struct {
+        user_data_128: u128,
+        user_data_64: u64,
+        user_data_32: u32,
+        ledger: u32,
+        code: u16,
+        timestamp_min_transfer_id: ?u128 = null,
+        timestamp_max_transfer_id: ?u128 = null,
+        limit: u32,
+        flags_reversed: ?enum { REV } = null,
+    };
+
+    const QueryAccountsResult = struct {
+        id: u128,
+        data: ?struct {
+            debits_pending: u128,
+            debits_posted: u128,
+            credits_pending: u128,
+            credits_posted: u128,
+            flag_closed: ?enum { CLSD } = null,
+        } = null,
+    };
+
+    const QueryTransfers = struct {
+        user_data_128: u128,
+        user_data_64: u64,
+        user_data_32: u32,
+        ledger: u32,
+        code: u16,
+        timestamp_min_transfer_id: ?u128 = null,
+        timestamp_max_transfer_id: ?u128 = null,
+        limit: u32,
+        flags_reversed: ?enum { REV } = null,
+    };
+
+    const GetChangeEvents = struct {
+        timestamp_min_transfer_id: ?u128 = null,
+        timestamp_max_transfer_id: ?u128 = null,
+        limit: u32,
+    };
+
+    const GetChangeEventsResult = struct {
+        const Balance = struct {
+            account_id: u128,
+            debits_pending: u128,
+            debits_posted: u128,
+            credits_pending: u128,
+            credits_posted: u128,
+            closed: ?enum { CLSD } = null,
+        };
+
+        event_type: ?enum { PEN, POS, VOI, EXP } = null,
+        timestamp_transfer: ?u128 = null,
+        amount: u128,
+        transfer_pending_id: ?u128 = null,
+        dr_account: Balance,
+        cr_account: Balance,
+
+        fn match(
+            self: *const GetChangeEventsResult,
+            accounts: *std.AutoHashMap(u128, Account),
+            transfers: *std.AutoHashMap(u128, Transfer),
+            event: *const ChangeEvent,
+        ) bool {
+            if (self.timestamp_transfer) |id| {
+                const transfer = transfers.get(id).?;
+                if (event.type == .two_phase_expired) return false;
+                if (event.timestamp != transfer.timestamp) return false;
+                if (!match_transfer(event, &transfer)) return false;
+            }
+            if (self.event_type) |event_type| {
+                const expected: ChangeEventType = switch (event_type) {
+                    .PEN => .two_phase_pending,
+                    .POS => .two_phase_posted,
+                    .VOI => .two_phase_voided,
+                    .EXP => .two_phase_expired,
+                };
+                if (event.type != expected) return false;
+            } else {
+                if (event.type != .single_phase) return false;
+            }
+            if (event.transfer_amount != self.amount) return false;
+            if (self.transfer_pending_id) |transfer_pending_id| {
+                switch (event.type) {
+                    .two_phase_pending, .single_phase => return false,
+                    .two_phase_posted, .two_phase_voided => {
+                        if (event.transfer_pending_id != transfer_pending_id) return false;
+                    },
+                    .two_phase_expired => {
+                        const transfer = transfers.get(transfer_pending_id).?;
+                        if (transfer.timeout == 0) return false;
+                        if (event.timestamp <
+                            transfer.timestamp + transfer.timeout_ns()) return false;
+                        if (!match_transfer(event, &transfer)) return false;
+                    },
+                }
+            }
+
+            const dr_account = accounts.get(self.dr_account.account_id).?;
+            if (dr_account.ledger != event.ledger) return false;
+            if (self.dr_account.account_id != event.debit_account_id) return false;
+            if (dr_account.timestamp != event.debit_account_timestamp) return false;
+            if (self.dr_account.debits_pending != event.debit_account_debits_pending) return false;
+            if (self.dr_account.debits_posted != event.debit_account_debits_posted) return false;
+            if (self.dr_account.credits_pending != event.debit_account_credits_pending)
+                return false;
+            if (self.dr_account.credits_posted != event.debit_account_credits_posted) return false;
+            if ((self.dr_account.closed == .CLSD) != event.debit_account_flags.closed)
+                return false;
+
+            const cr_account = accounts.get(self.cr_account.account_id).?;
+            if (cr_account.ledger != event.ledger) return false;
+            if (self.cr_account.account_id != event.credit_account_id) return false;
+            if (cr_account.timestamp != event.credit_account_timestamp) return false;
+            if (self.cr_account.debits_pending != event.credit_account_debits_pending)
+                return false;
+            if (self.cr_account.debits_posted != event.credit_account_debits_posted)
+                return false;
+            if (self.cr_account.credits_pending != event.credit_account_credits_pending)
+                return false;
+            if (self.cr_account.credits_posted != event.credit_account_credits_posted)
+                return false;
+            if ((self.cr_account.closed == .CLSD) != event.credit_account_flags.closed)
+                return false;
+
+            return true;
+        }
+
+        fn match_transfer(event: *const ChangeEvent, transfer: *const tb.Transfer) bool {
+            if (event.transfer_timestamp != transfer.timestamp) return false;
+            if (event.transfer_id != transfer.id) return false;
+            if (event.transfer_amount != transfer.amount and
+                // The in-memory model keeps the `AMOUNT_MAX`.
+                transfer.amount != std.math.maxInt(u128)) return false;
+            if (event.transfer_pending_id != transfer.pending_id) return false;
+            if (event.transfer_user_data_128 != transfer.user_data_128) return false;
+            if (event.transfer_user_data_64 != transfer.user_data_64) return false;
+            if (event.transfer_user_data_32 != transfer.user_data_32) return false;
+            if (event.transfer_code != transfer.code) return false;
+            if (event.ledger != transfer.ledger) return false;
+            if (event.ledger != transfer.ledger) return false;
+            if (@as(u16, @bitCast(transfer.flags)) !=
+                @as(u16, @bitCast(event.transfer_flags))) return false;
+            return true;
+        }
+    };
+
+    fn operation(action: TestAction) ?TestOperation {
+        return switch (action) {
+            .setup => null,
+            .tick => null,
+
+            .commit => |tag| tag,
+
+            .account => .create_accounts,
+            .transfer => .create_transfers,
+            .lookup_account => .lookup_accounts,
+            .lookup_transfer => .lookup_transfers,
+
+            .get_account_balances,
+            .get_account_balances_result,
+            => .get_account_balances,
+
+            .get_account_transfers,
+            .get_account_transfers_result,
+            => .get_account_transfers,
+
+            .query_accounts,
+            .query_accounts_result,
+            => .query_accounts,
+
+            .query_transfers,
+            .query_transfers_result,
+            => .query_transfers,
+
+            .get_change_events,
+            .get_change_events_result,
+            => .get_change_events,
+        };
+    }
+};
+
+const ArrayList = std.ArrayListAligned(u8, constants.cache_line_size);
+
+fn check(test_table: []const u8) !void {
+    const test_actions = parse_table(TestAction, test_table);
+
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Runs the same test for each variation of supported operations,
+    // simulating different client versions.
+    inline for (TestOperation.versions) |*version_map| {
+        // When multibatching is enabled, operations of the same type
+        // can be submitted together to the state machine.
+        inline for (.{ true, false }) |multibatching_enabled| {
+            defer _ = arena.reset(.free_all);
+
+            const Runner = RunnerType(.{
+                .multibatching_enabled = multibatching_enabled,
+                .version_map = version_map,
+            });
+
+            try Runner.run(arena.allocator(), test_actions.const_slice());
+        }
+    }
+}
+
+const Options = struct {
+    version_map: *const TestOperation.VersionMap,
+    multibatching_enabled: bool,
+};
+
+const Request = struct {
+    packet: Packet,
+    reply_expected: []const u8,
+};
+
+fn RunnerType(comptime options: Options) type {
+    return struct {
+        const Runner = @This();
+
+        pub fn run(
+            arena: mem.Allocator,
+            test_actions: []const TestAction,
+        ) !void {
+            var context: TestContext = undefined;
+            try context.init(arena, &assert_results);
+
+            var input_buffer: ArrayList = .init(arena);
+            var output_buffer: ArrayList = .init(arena);
+
+            var operation: ?TestOperation = null;
+            for (test_actions) |test_action| {
+                switch (test_action) {
+                    inline else => |action, tag| {
+                        if (operation != null and operation != test_action.operation()) {
+                            try context.flush();
+                        }
+
+                        operation = test_action.operation();
+
+                        const function = @field(Runner, @tagName(tag));
+                        try function(&context, action, &input_buffer, &output_buffer);
+
+                        if (test_action == .commit and !options.multibatching_enabled) {
+                            try context.flush();
+                            operation = null;
+                        }
+                    },
+                }
+            }
+
+            if (options.multibatching_enabled) {
+                try context.flush();
+                operation = null;
+            }
+            assert(operation == null);
+            assert(input_buffer.items.len == 0);
+            assert(output_buffer.items.len == 0);
+        }
+
+        fn setup(
+            context: *TestContext,
+            action: TestAction.Setup,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            assert(input_buffer.items.len == 0);
+            assert(output_buffer.items.len == 0);
+
+            assert(context.state == .idle);
+            assert(context.pending.empty());
+
+            const account_old = context.get_account_from_cache(action.account).?;
+            var account_new: Account = account_old;
+
+            account_new.debits_pending = action.debits_pending;
+            account_new.debits_posted = action.debits_posted;
+            account_new.credits_pending = action.credits_pending;
+            account_new.credits_posted = action.credits_posted;
+            assert(!account_new.debits_exceed_credits(0));
+            assert(!account_new.credits_exceed_debits(0));
+
+            if (!stdx.equal_bytes(Account, &account_new, &account_old)) {
+                context.state_machine.forest.grooves.accounts.update(.{
+                    .old = &account_old,
+                    .new = &account_new,
+                });
+            }
+        }
+
+        fn tick(
+            context: *TestContext,
+            ticks: TestAction.Tick,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            assert(input_buffer.items.len == 0);
+            assert(output_buffer.items.len == 0);
+
+            assert(context.state == .idle);
+            assert(context.pending.empty());
+            assert(ticks.value != 0);
+
+            // The `parse` logic already computes `maxInt - value` when a unsigned int is
+            // represented as a negative number. However, we need to use a signed int and
+            // perform our own calculation to account for the unit.
+            const interval_ns: u64 = @abs(ticks.value) *
+                @as(u64, switch (ticks.unit) {
+                    .nanoseconds => 1,
+                    .seconds => std.time.ns_per_s,
+                });
+
+            context.state_machine.prepare_timestamp += if (ticks.value > 0)
+                interval_ns
+            else
+                TimestampRange.timestamp_max - interval_ns;
+            context.commit_timestamp_expected = context.state_machine.prepare_timestamp;
+
+            // Pulse is executed when the cluster is idle.
+            context.pulse();
+        }
+
+        fn account(
+            context: *TestContext,
+            action: TestAction.CreateAccount,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            var event = action.event();
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+
+            context.commit_timestamp_expected += 1;
+
+            if (event.timestamp == 0) event.timestamp = context.commit_timestamp_expected;
+            if (action.status == .created) {
+                try context.accounts.put(action.id, event);
+            }
+
+            switch (options.version_map.get(.create_accounts)) {
+                .create_accounts => {
+                    const result: CreateAccountResult = .{
+                        .timestamp = timestamp: {
+                            if (action.status == .created or
+                                action.status == .linked_event_failed)
+                            {
+                                break :timestamp event.timestamp;
+                            }
+                            if (action.status == .exists) {
+                                break :timestamp if (context.accounts.get(action.id)) |exists|
+                                    exists.timestamp
+                                else
+                                    context.linked_events_failed.get(action.id).?;
+                            }
+                            break :timestamp context.commit_timestamp_expected;
+                        },
+                        .status = action.status,
+                    };
+                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+
+                    if (event.flags.linked) {
+                        if (action.status == .linked_event_failed) {
+                            try context.linked_events_failed.putNoClobber(
+                                event.id,
+                                event.timestamp,
+                            );
+                        }
+                    } else {
+                        context.linked_events_failed.clearRetainingCapacity();
+                    }
+                },
+                .deprecated_create_accounts_sparse,
+                .deprecated_create_accounts_unbatched,
+                => if (action.status != .created) {
+                    const result: tb.CreateAccountErrorResult = .{
+                        .index = @intCast(@divExact(input_buffer.items.len, @sizeOf(Account)) - 1),
+                        .result = action.status,
+                    };
+                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+                },
+                else => unreachable,
+            }
+        }
+
+        fn transfer(
+            context: *TestContext,
+            action: TestAction.CreateTransfer,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            var event = action.event();
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+
+            context.commit_timestamp_expected += 1;
+
+            if (action.timestamp == 0) event.timestamp = context.commit_timestamp_expected;
+            if (action.status == .created) {
+                if (event.pending_id != 0) {
+                    // Fill in default values.
+                    const t_pending = context.transfers.get(event.pending_id).?;
+                    inline for (.{
+                        "debit_account_id",
+                        "credit_account_id",
+                        "ledger",
+                        "code",
+                        "user_data_128",
+                        "user_data_64",
+                        "user_data_32",
+                    }) |field| {
+                        if (@field(event, field) == 0) {
+                            @field(event, field) = @field(t_pending, field);
+                        }
+                    }
+
+                    if (event.flags.void_pending_transfer) {
+                        if (event.amount == 0) event.amount = t_pending.amount;
+                    }
+                }
+                try context.transfers.put(action.id, event);
+            }
+
+            switch (options.version_map.get(.create_transfers)) {
+                .create_transfers => {
+                    const result: CreateTransferResult = .{
+                        .timestamp = timestamp: {
+                            if (action.status == .created or
+                                action.status == .linked_event_failed)
+                            {
+                                break :timestamp event.timestamp;
+                            }
+                            if (action.status == .exists) {
+                                break :timestamp if (context.transfers.get(action.id)) |exists|
+                                    exists.timestamp
+                                else
+                                    context.linked_events_failed.get(action.id).?;
+                            }
+                            break :timestamp context.commit_timestamp_expected;
+                        },
+                        .status = action.status,
+                    };
+                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+
+                    if (event.flags.linked) {
+                        if (action.status == .linked_event_failed) {
+                            try context.linked_events_failed.putNoClobber(
+                                event.id,
+                                event.timestamp,
+                            );
+                        }
+                    } else {
+                        context.linked_events_failed.clearRetainingCapacity();
+                    }
+                },
+                .deprecated_create_transfers_sparse,
+                .deprecated_create_transfers_unbatched,
+                => if (action.status != .created) {
+                    const result: tb.CreateTransferErrorResult = .{
+                        .index = @intCast(@divExact(input_buffer.items.len, @sizeOf(Transfer)) - 1),
+                        .result = action.status,
+                    };
+                    try output_buffer.appendSlice(std.mem.asBytes(&result));
+                },
+                else => unreachable,
+            }
+        }
+
+        fn lookup_account(
+            context: *TestContext,
+            action: TestAction.LookupAccount,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            try input_buffer.appendSlice(std.mem.asBytes(&action.id));
+            if (action.data) |data| {
+                var a: Account = context.accounts.get(action.id).?;
+                a.debits_pending = data.debits_pending;
+                a.debits_posted = data.debits_posted;
+                a.credits_pending = data.credits_pending;
+                a.credits_posted = data.credits_posted;
+                a.flags.closed = data.flag_closed != null;
+                try output_buffer.appendSlice(std.mem.asBytes(&a));
+            }
+        }
+
+        fn lookup_transfer(
+            context: *TestContext,
+            action: TestAction.LookupTransfer,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            try input_buffer.appendSlice(std.mem.asBytes(&action.id));
+            switch (action.data) {
+                .exists => |exists| {
+                    if (exists) {
+                        var t: Transfer = context.transfers.get(action.id).?;
+                        try output_buffer.appendSlice(std.mem.asBytes(&t));
+                    }
+                },
+                .amount => |amount| {
+                    var t: Transfer = context.transfers.get(action.id).?;
+                    t.amount = amount;
+                    try output_buffer.appendSlice(std.mem.asBytes(&t));
+                },
+                .timestamp => |timestamp| {
+                    var t: Transfer = context.transfers.get(action.id).?;
+                    t.timestamp = timestamp;
+                    try output_buffer.appendSlice(std.mem.asBytes(&t));
+                },
+            }
+        }
+
+        fn get_account_balances(
+            context: *TestContext,
+            action: TestAction.GetAccountBalances,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = output_buffer;
+
+            const timestamp_min =
+                if (action.timestamp_min_transfer_id) |id|
+                    context.transfers.get(id).?.timestamp
+                else
+                    0;
+            const timestamp_max =
+                if (action.timestamp_max_transfer_id) |id|
+                    context.transfers.get(id).?.timestamp
+                else
+                    0;
+
+            const limit: u32 = if (action.limit == std.math.maxInt(u32))
+                options.version_map.get(.get_account_balances)
+                    .result_max(context.state_machine.batch_size_limit)
+            else
+                action.limit;
+
+            const event: AccountFilter = .{
+                .account_id = action.account_id,
+                .user_data_128 = action.user_data_128 orelse 0,
+                .user_data_64 = action.user_data_64 orelse 0,
+                .user_data_32 = action.user_data_32 orelse 0,
+                .code = action.code orelse 0,
+                .timestamp_min = timestamp_min,
+                .timestamp_max = timestamp_max,
+                .limit = limit,
+                .flags = .{
+                    .debits = action.flags_debits != null,
+                    .credits = action.flags_credits != null,
+                    .reversed = action.flags_reversed != null,
+                },
+            };
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+        }
+
+        fn get_account_balances_result(
+            context: *TestContext,
+            action: TestAction.GetAccountBalancesResult,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = input_buffer;
+
+            const result: AccountBalance = .{
+                .debits_pending = action.debits_pending,
+                .debits_posted = action.debits_posted,
+                .credits_pending = action.credits_pending,
+                .credits_posted = action.credits_posted,
+                .timestamp = context.transfers.get(action.transfer_id).?.timestamp,
+            };
+            try output_buffer.appendSlice(std.mem.asBytes(&result));
+        }
+
+        fn get_account_transfers(
+            context: *TestContext,
+            action: TestAction.GetAccountTransfers,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = output_buffer;
+
+            const timestamp_min =
+                if (action.timestamp_min_transfer_id) |id|
+                    context.transfers.get(id).?.timestamp
+                else
+                    0;
+            const timestamp_max =
+                if (action.timestamp_max_transfer_id) |id|
+                    context.transfers.get(id).?.timestamp
+                else
+                    0;
+
+            const limit: u32 = if (action.limit == std.math.maxInt(u32))
+                options.version_map.get(.get_account_transfers)
+                    .result_max(context.state_machine.batch_size_limit)
+            else
+                action.limit;
+
+            const event: AccountFilter = .{
+                .account_id = action.account_id,
+                .user_data_128 = action.user_data_128 orelse 0,
+                .user_data_64 = action.user_data_64 orelse 0,
+                .user_data_32 = action.user_data_32 orelse 0,
+                .code = action.code orelse 0,
+                .timestamp_min = timestamp_min,
+                .timestamp_max = timestamp_max,
+                .limit = limit,
+                .flags = .{
+                    .debits = action.flags_debits != null,
+                    .credits = action.flags_credits != null,
+                    .reversed = action.flags_reversed != null,
+                },
+            };
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+        }
+
+        fn get_account_transfers_result(
+            context: *TestContext,
+            id: u128,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = input_buffer;
+            try output_buffer.appendSlice(std.mem.asBytes(&context.transfers.get(id).?));
+        }
+
+        fn query_accounts(
+            context: *TestContext,
+            action: TestAction.QueryAccounts,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = output_buffer;
+
+            const timestamp_min = if (action.timestamp_min_transfer_id) |id|
+                context.accounts.get(id).?.timestamp
+            else
+                0;
+            const timestamp_max = if (action.timestamp_max_transfer_id) |id|
+                context.accounts.get(id).?.timestamp
+            else
+                0;
+
+            const limit: u32 = if (action.limit == std.math.maxInt(u32))
+                options.version_map.get(.query_accounts)
+                    .result_max(context.state_machine.batch_size_limit)
+            else
+                action.limit;
+
+            const event: QueryFilter = .{
+                .user_data_128 = action.user_data_128,
+                .user_data_64 = action.user_data_64,
+                .user_data_32 = action.user_data_32,
+                .ledger = action.ledger,
+                .code = action.code,
+                .timestamp_min = timestamp_min,
+                .timestamp_max = timestamp_max,
+                .limit = limit,
+                .flags = .{
+                    .reversed = action.flags_reversed != null,
+                },
+            };
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+        }
+
+        fn query_accounts_result(
+            context: *TestContext,
+            result: TestAction.QueryAccountsResult,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = input_buffer;
+            var a: Account = context.accounts.get(result.id).?;
+            if (result.data) |data| {
+                a.debits_pending = data.debits_pending;
+                a.debits_posted = data.debits_posted;
+                a.credits_pending = data.credits_pending;
+                a.credits_posted = data.credits_posted;
+                a.flags.closed = data.flag_closed != null;
+            }
+            try output_buffer.appendSlice(std.mem.asBytes(&a));
+        }
+
+        fn query_transfers(
+            context: *TestContext,
+            action: TestAction.QueryTransfers,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = output_buffer;
+            const timestamp_min = if (action.timestamp_min_transfer_id) |id|
+                context.transfers.get(id).?.timestamp
+            else
+                0;
+            const timestamp_max = if (action.timestamp_max_transfer_id) |id|
+                context.transfers.get(id).?.timestamp
+            else
+                0;
+
+            const limit: u32 = if (action.limit == std.math.maxInt(u32))
+                options.version_map.get(.query_accounts)
+                    .result_max(context.state_machine.batch_size_limit)
+            else
+                action.limit;
+
+            const event: QueryFilter = .{
+                .user_data_128 = action.user_data_128,
+                .user_data_64 = action.user_data_64,
+                .user_data_32 = action.user_data_32,
+                .ledger = action.ledger,
+                .code = action.code,
+                .timestamp_min = timestamp_min,
+                .timestamp_max = timestamp_max,
+                .limit = limit,
+                .flags = .{
+                    .reversed = action.flags_reversed != null,
+                },
+            };
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+        }
+
+        fn query_transfers_result(
+            context: *TestContext,
+            id: u128,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = input_buffer;
+
+            try output_buffer.appendSlice(std.mem.asBytes(&context.transfers.get(id).?));
+        }
+
+        fn get_change_events(
+            context: *TestContext,
+            action: TestAction.GetChangeEvents,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = output_buffer;
+
+            const timestamp_min = if (action.timestamp_min_transfer_id) |id|
+                context.transfers.get(id).?.timestamp
+            else
+                0;
+            const timestamp_max = if (action.timestamp_max_transfer_id) |id|
+                context.transfers.get(id).?.timestamp
+            else
+                0;
+
+            const limit: u32 = if (action.limit == std.math.maxInt(u32))
+                options.version_map.get(.get_change_events)
+                    .result_max(context.state_machine.batch_size_limit)
+            else
+                action.limit;
+
+            const event = ChangeEventsFilter{
+                .timestamp_min = timestamp_min,
+                .timestamp_max = timestamp_max,
+                .limit = limit,
+            };
+            try input_buffer.appendSlice(std.mem.asBytes(&event));
+        }
+
+        fn get_change_events_result(
+            context: *TestContext,
+            result: TestAction.GetChangeEventsResult,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            _ = context;
+            _ = input_buffer;
+            try output_buffer.appendSlice(std.mem.asBytes(&result));
+        }
+
+        fn commit(
+            context: *TestContext,
+            operation: TestOperation,
+            input_buffer: *ArrayList,
+            output_buffer: *ArrayList,
+        ) !void {
+            // Enqueues a `packet` to be submitted to the state machine when `flush()` is called.
+            // Multibatching can be achieved by calling `submit()` multiple times.
+            assert(context.state == .idle);
+
+            const data: []const u8 = try input_buffer.toOwnedSlice();
+            const reply_expected: []const u8 = try output_buffer.toOwnedSlice();
+            const request: *Request = try context.arena.create(Request);
+
+            request.* = .{
+                .reply_expected = reply_expected,
+                .packet = .init(&.{
+                    .data = data.ptr,
+                    .data_size = @intCast(data.len),
+                    .user_data = request,
+                    .operation = @intFromEnum(options.version_map.get(operation)),
+                    .user_tag = 0,
+                    .status = .ok,
+                }),
+            };
+
+            try request.packet.batch_enqueue(
+                StateMachine.Operation,
+                &options.version_map.values,
+                .{
+                    .target = &context.pending,
+                    .batch_size_limit = context.state_machine.batch_size_limit,
+                    .time = context.time_sim.time(),
+                },
+            );
+        }
+
+        fn assert_results(
+            client: *TestContext,
+            operation: StateMachine.Operation,
+            packet: *Packet,
+            timestamp: u64,
+            reply_actual: []const u8,
+        ) !void {
+            assert(packet.operation == @intFromEnum(operation));
+            assert(packet.status == .ok);
+            assert(packet.data_size == 0 or packet.data != null);
+            assert(TimestampRange.valid(timestamp));
+
+            const request: *Request = @alignCast(@fieldParentPtr("packet", packet));
+
+            switch (operation) {
+                inline else => |operation_actual_comptime| {
+                    const Result = operation_actual_comptime.ResultType();
+                    try testing.expectEqualSlices(
+                        Result,
+                        stdx.bytes_as_slice(.exact, Result, request.reply_expected),
+                        stdx.bytes_as_slice(.exact, Result, reply_actual),
+                    );
+                },
+                .get_change_events => {
+                    const results_actual = stdx.bytes_as_slice(
+                        .exact,
+                        ChangeEvent,
+                        reply_actual,
+                    );
+                    const results_expected = stdx.bytes_as_slice(
+                        .exact,
+                        TestAction.GetChangeEventsResult,
+                        request.reply_expected,
+                    );
+                    try testing.expectEqual(results_expected.len, results_actual.len);
+                    for (results_actual, results_expected) |*actual, *expected| {
+                        try testing.expect(expected.match(
+                            &client.accounts,
+                            &client.transfers,
+                            actual,
+                        ));
+                    }
+                },
+                .pulse => unreachable,
+            }
+        }
+    };
+}
+
+/// Implements a tb_client-like interface that calls the state machine directly.
+/// Batching and error-handling logic are shared with the real client implementation.
+const TestContext = struct {
+    arena: mem.Allocator,
+
+    accounts: std.AutoHashMap(u128, Account),
+    transfers: std.AutoHashMap(u128, Transfer),
+    // The result code `.exists` always returns the timestamp of the original event.
+    // Even if the existing event was created within a linked chain and rolled back.
+    // For example, the linked chain:
+    //  events:  { id=1, flags=linked; id=1 }
+    //  results: { result=linked_event_failed, timestamp=100; result=exists, timestamp=100 }
+    //                                                   ^^^                           ^^^
+    linked_events_failed: std.AutoHashMap(u128, u64),
+
+    message_pool: MessagePool,
     storage: Storage,
     time_sim: TimeSim,
     trace: Tracer,
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
+
+    pending: Packet.Queue,
     op: u64,
-    busy: bool,
+    commit_timestamp_expected: u64,
+    state: enum {
+        idle,
+        prefetch,
+    },
 
-    pub fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
-        ctx.storage = try fixtures.init_storage(allocator, .{ .size = 4096 });
-        errdefer ctx.storage.deinit(allocator);
+    callback: Callback,
 
-        ctx.time_sim = fixtures.init_time(.{});
+    const Callback = *const fn (
+        context: *TestContext,
+        operation: StateMachine.Operation,
+        packet: *Packet,
+        timestamp: u64,
+        reply_actual: []const u8,
+    ) anyerror!void;
 
-        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.time(), .{});
-        errdefer ctx.trace.deinit(allocator);
+    fn init(
+        context: *TestContext,
+        arena: std.mem.Allocator,
+        callback: Callback,
+    ) !void {
+        context.* = .{
+            .arena = arena,
 
-        ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{
+            .accounts = .init(arena),
+            .transfers = .init(arena),
+            .linked_events_failed = .init(arena),
+
+            .message_pool = undefined,
+            .time_sim = undefined,
+            .trace = undefined,
+            .superblock = undefined,
+            .grid = undefined,
+            .state_machine = undefined,
+            .storage = undefined,
+
+            .pending = Packet.Queue.init(.{
+                .name = null,
+                .verify_push = true,
+            }),
+
+            .op = 1,
+            .commit_timestamp_expected = 0,
+            .state = .idle,
+
+            .callback = callback,
+        };
+
+        context.message_pool = try MessagePool.init(arena, .client);
+        context.storage = try fixtures.init_storage(arena, .{ .size = 4096 });
+
+        context.time_sim = fixtures.init_time(.{});
+        context.time_sim.ticks = 1;
+
+        context.trace = try fixtures.init_tracer(arena, context.time_sim.time(), .{});
+
+        context.superblock = try fixtures.init_superblock(arena, &context.storage, .{
             .storage_size_limit = data_file_size_min,
         });
-        errdefer ctx.superblock.deinit(allocator);
 
         // Pretend that the superblock is open so that the Forest can initialize.
-        ctx.superblock.opened = true;
-        ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
+        context.superblock.opened = true;
+        context.superblock.working.vsr_state.checkpoint.header.op = 0;
 
-        ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
-        errdefer ctx.grid.deinit(allocator);
+        context.grid = try fixtures.init_grid(arena, &context.trace, &context.superblock, .{});
 
-        const batch_size_limit = 30 * @max(@sizeOf(Account), @sizeOf(Transfer));
-        assert(batch_size_limit <= constants.message_body_size_max);
-        try ctx.state_machine.init(
-            allocator,
-            ctx.time_sim.time(),
-            &ctx.grid,
+        try context.state_machine.init(
+            arena,
+            context.time_sim.time(),
+            &context.grid,
             .{
-                .batch_size_limit = batch_size_limit,
+                .batch_size_limit = constants.message_body_size_max,
                 .lsm_forest_compaction_block_count = StateMachine.Forest.Options
                     .compaction_block_count_min,
                 .lsm_forest_node_count = 1,
@@ -144,144 +1270,206 @@ pub const TestContext = struct {
                 .aof_recovery = false,
             },
         );
-        errdefer ctx.state_machine.deinit(allocator);
-        // Usually, `pulse_next_timestamp` starts in an unknown state, signaling that the state
-        // machine needs a `pulse` to scan for pending transfers and correctly determine when to
-        // process the next expiry. However, this initial `pulse` unnecessarily bumps time, making
-        // unit tests that depend on the `timestamp` harder to reason about.
+
+        // Usually, `pulse_next_timestamp` starts in an unknown state,
+        // signaling that the state machine needs a `pulse` to scan for
+        // pending transfers and correctly determine when to process the
+        // next expiry. However, this initial `pulse` unnecessarily bumps
+        // time, making unit tests that depend on the `timestamp` harder
+        // to reason about.
         //
-        // Since this is a newly created state machine, we can bypass the initial check, ensuring
-        // that there will be no `timestamp` bumps between operations unless actual pending
-        // transfers get expired.
-        ctx.state_machine.expire_pending_transfers
+        // Since this is a newly created state machine, we can bypass the
+        // initial check, ensuring that there will be no `timestamp` bumps
+        // between operations unless actual pending transfers get expired.
+        context.state_machine.expire_pending_transfers
             .pulse_next_timestamp = TimestampRange.timestamp_max;
-
-        ctx.op = 1;
-        ctx.busy = false;
     }
 
-    pub fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
-        ctx.state_machine.deinit(allocator);
-        ctx.grid.deinit(allocator);
-        ctx.superblock.deinit(allocator);
-        ctx.trace.deinit(allocator);
-        ctx.storage.deinit(allocator);
-        ctx.* = undefined;
+    fn submit(context: *TestContext, packet_list: *Packet) !void {
+        packet_list.assert_phase(.pending);
+
+        const request = context.message_pool.get_message(.request);
+        defer context.message_pool.unref(request);
+
+        const batch = packet_list.batch_write(
+            StateMachine.Operation,
+            std.enums.values(StateMachine.Operation),
+            .{
+                .output_buffer = request.buffer[@sizeOf(vsr.Header)..],
+                .batch_size_limit = context.state_machine.batch_size_limit,
+            },
+        );
+
+        const reply = context.message_pool.get_message(.request);
+        defer context.message_pool.unref(reply);
+
+        const reply_body = context.raw_request(
+            batch.operation,
+            request.buffer[@sizeOf(vsr.Header)..][0..batch.request_size],
+            reply.buffer[@sizeOf(vsr.Header)..],
+        );
+
+        try context.raw_reply(packet_list, reply_body);
     }
 
-    fn callback(state_machine: *StateMachine) void {
-        const ctx: *TestContext = @fieldParentPtr("state_machine", state_machine);
-        assert(ctx.busy);
-        ctx.busy = false;
-    }
-
-    fn submit(
-        context: *TestContext,
-        operation: TestContext.StateMachine.Operation,
-        input_buffer: []align(constants.cache_line_size) u8,
-        input_size: u32,
-        output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
-    ) []const u8 {
-        const message_body: []align(constants.cache_line_size) const u8 = message_body: {
-            if (!operation.is_multi_batch()) {
-                break :message_body input_buffer[0..input_size];
-            }
-            assert(operation.is_multi_batch());
-            const event_size = operation.event_size();
-            var body_encoder = MultiBatchEncoder.init(input_buffer, .{
-                .element_size = event_size,
-            });
-            body_encoder.add(input_size);
-            const bytes_written = body_encoder.finish();
-            assert(bytes_written > 0);
-            break :message_body input_buffer[0..bytes_written];
-        };
-        context.prepare(operation, message_body);
+    fn flush(context: *TestContext) !void {
+        assert(context.state == .idle);
+        maybe(context.pending.empty());
+        defer assert(context.pending.empty());
 
         const pulse_needed = context.state_machine.pulse_needed(
             context.state_machine.prepare_timestamp,
         );
         maybe(pulse_needed);
+
         // Pulse is executed in a best-effort manner
         // after committing the current pipelined operation.
         defer if (pulse_needed) context.pulse();
 
-        const reply_actual_size = context.execute(
+        var operation: ?u8 = null;
+        while (context.pending.pop()) |packet_list| {
+            // The real client can enqueue batches of different operations,
+            // although they are never sent together in the same request.
+            // For testing, we always flush between operations, so
+            // the pending queue must contain only batches of the same kind.
+            if (operation) |current| assert(packet_list.operation == current);
+            operation = packet_list.operation;
+
+            try context.submit(packet_list);
+        }
+
+        context.commit_timestamp_expected = context.state_machine.prefetch_timestamp;
+    }
+
+    fn pulse(context: *TestContext) void {
+        assert(context.state == .idle);
+
+        if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
+            const operation = vsr.Operation.pulse.cast(StateMachine.Operation);
+            const reply = context.raw_request(
+                operation,
+                &.{},
+                undefined, // Not used by pulses.
+            );
+            assert(reply.len == 0);
+            context.commit_timestamp_expected = context.state_machine.prepare_timestamp;
+        }
+    }
+
+    fn raw_request(
+        context: *TestContext,
+        operation: StateMachine.Operation,
+        message_body: []align(constants.cache_line_size) const u8,
+        output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
+    ) []align(constants.cache_line_size) const u8 {
+        assert(context.op > 0);
+        defer context.op += 1;
+
+        assert(context.state == .idle);
+        defer assert(context.state == .idle);
+
+        context.state_machine.prepare(
+            operation,
+            message_body,
+        );
+        if (context.state_machine.prepare_timestamp == context.state_machine.commit_timestamp) {
+            context.state_machine.prepare_timestamp += 1;
+        }
+        const timestamp = context.state_machine.prepare_timestamp;
+        assert(timestamp > context.state_machine.commit_timestamp);
+
+        context.state = .prefetch;
+        context.state_machine.prefetch_timestamp = timestamp;
+        context.state_machine.prefetch(
+            struct {
+                fn callback(state_machine: *StateMachine) void {
+                    const ctx: *TestContext = @fieldParentPtr(
+                        "state_machine",
+                        state_machine,
+                    );
+                    assert(ctx.state == .prefetch);
+                    ctx.state = .idle;
+                }
+            }.callback,
             context.op,
+            context.op,
+            operation,
+            message_body,
+        );
+        while (context.state == .prefetch) context.storage.run();
+
+        const client_id: u128 = 1;
+        const size = context.state_machine.commit(
+            client_id,
+            context.op,
+            timestamp,
             operation,
             message_body,
             output_buffer,
         );
-
-        if (!operation.is_multi_batch()) {
-            return output_buffer[0..reply_actual_size];
-        }
-        assert(operation.is_multi_batch());
-
-        const result_size = operation.result_size();
-        var reply_decoder = MultiBatchDecoder.init(
-            output_buffer[0..reply_actual_size],
-            .{ .element_size = result_size },
-        ) catch unreachable;
-        assert(reply_decoder.batch_count() == 1);
-        return reply_decoder.peek();
+        return output_buffer[0..size];
     }
 
-    pub fn prepare(
+    fn raw_reply(
         context: *TestContext,
-        operation: TestContext.StateMachine.Operation,
-        message_body_used: []align(constants.cache_line_size) const u8,
-    ) void {
-        context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
-        context.state_machine.prepare_timestamp += 1;
-        context.state_machine.prepare(
-            operation,
-            message_body_used,
+        packet_list: *Packet,
+        reply: []align(constants.cache_line_size) const u8,
+    ) !void {
+        const batch = try packet_list.batch_validate(
+            StateMachine.Operation,
+            std.enums.values(StateMachine.Operation),
+            .{
+                .batch_size_limit = context.state_machine.batch_size_limit,
+            },
         );
-    }
+        assert(batch.result_size > 0);
 
-    fn pulse(context: *TestContext) void {
-        if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
-            const operation = vsr.Operation.pulse.cast(TestContext.StateMachine.Operation);
-            context.prepare(operation, &.{});
-            const pulse_size = context.execute(
-                context.op,
-                operation,
-                &.{},
-                undefined, // Output is never used for pulse.
+        if (!batch.operation.is_multi_batch()) {
+            assert(packet_list.multi_batch_next == null);
+            assert(reply.len % batch.result_size == 0);
+            try context.callback(
+                context,
+                batch.operation,
+                packet_list,
+                context.state_machine.prepare_timestamp,
+                reply,
             );
-            assert(pulse_size == 0);
-            context.op += 1;
+            return;
         }
-    }
+        assert(batch.operation.is_multi_batch());
 
-    pub fn execute(
-        context: *TestContext,
-        op: u64,
-        operation: TestContext.StateMachine.Operation,
-        message_body_used: []align(constants.cache_line_size) const u8,
-        output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
-    ) usize {
-        const timestamp = context.state_machine.prepare_timestamp;
-        context.busy = true;
-        context.state_machine.prefetch_timestamp = timestamp;
-        context.state_machine.prefetch(
-            TestContext.callback,
-            op,
-            op,
-            operation,
-            message_body_used,
-        );
-        while (context.busy) context.storage.run();
+        var reply_decoder = try MultiBatchDecoder.init(reply, .{
+            .element_size = batch.result_size,
+        });
+        assert(packet_list.multi_batch_count == reply_decoder.batch_count());
 
-        return context.state_machine.commit(
-            1,
-            op,
-            timestamp,
-            operation,
-            message_body_used,
-            output_buffer,
-        );
+        // Copying it because `packet` is no longer valid after the callback.
+        const multi_batch_result_count_expected: u32 =
+            packet_list.multi_batch_result_count_expected;
+
+        var multi_batch_results_actual: u16 = 0;
+        var it: ?*Packet = packet_list;
+        while (it) |packet_next| {
+            if (packet_next != packet_list) packet_next.assert_phase(.batched);
+            assert(packet_next.operation == @intFromEnum(batch.operation));
+
+            it = packet_next.multi_batch_next;
+
+            const batched_reply: []const u8 = reply_decoder.pop().?;
+            multi_batch_results_actual += @intCast(@divExact(
+                batched_reply.len,
+                batch.result_size,
+            ));
+            try context.callback(
+                context,
+                batch.operation,
+                packet_next,
+                context.state_machine.prepare_timestamp,
+                batched_reply,
+            );
+        }
+        assert(reply_decoder.pop() == null);
+        assert(multi_batch_results_actual <= multi_batch_result_count_expected);
     }
 
     fn get_account_from_cache(context: *TestContext, id: u128) ?Account {
@@ -291,799 +1479,6 @@ pub const TestContext = struct {
         };
     }
 };
-
-const TestAction = union(enum) {
-    // Set the account's balance.
-    setup: struct {
-        account: u128,
-        debits_pending: u128,
-        debits_posted: u128,
-        credits_pending: u128,
-        credits_posted: u128,
-    },
-
-    tick: struct {
-        value: i64,
-        unit: enum { nanoseconds, seconds },
-    },
-
-    commit: TestContext.Operation,
-    account: TestCreateAccount,
-    transfer: TestCreateTransfer,
-
-    lookup_account: struct {
-        id: u128,
-        data: ?struct {
-            debits_pending: u128,
-            debits_posted: u128,
-            credits_pending: u128,
-            credits_posted: u128,
-            flag_closed: ?enum { CLSD } = null,
-        } = null,
-    },
-    lookup_transfer: struct {
-        id: u128,
-        data: union(enum) {
-            exists: bool,
-            amount: u128,
-            timestamp: u64,
-        },
-    },
-
-    get_account_balances: TestGetAccountBalances,
-    get_account_balances_result: struct {
-        transfer_id: u128,
-        debits_pending: u128,
-        debits_posted: u128,
-        credits_pending: u128,
-        credits_posted: u128,
-    },
-
-    get_account_transfers: TestGetAccountTransfers,
-    get_account_transfers_result: u128,
-
-    query_accounts: TestQueryAccounts,
-    query_accounts_result: struct {
-        id: u128,
-        data: ?struct {
-            debits_pending: u128,
-            debits_posted: u128,
-            credits_pending: u128,
-            credits_posted: u128,
-            flag_closed: ?enum { CLSD } = null,
-        } = null,
-    },
-
-    query_transfers: TestQueryTransfers,
-    query_transfers_result: u128,
-
-    get_change_events: TestGetChangeEventsFilter,
-    get_change_events_result: TestGetChangeEventsResult,
-};
-
-const TestCreateAccount = struct {
-    id: u128,
-    debits_pending: u128 = 0,
-    debits_posted: u128 = 0,
-    credits_pending: u128 = 0,
-    credits_posted: u128 = 0,
-    user_data_128: u128 = 0,
-    user_data_64: u64 = 0,
-    user_data_32: u32 = 0,
-    reserved: u1 = 0,
-    ledger: u32,
-    code: u16,
-    flags_linked: ?enum { LNK } = null,
-    flags_debits_must_not_exceed_credits: ?enum { @"D<C" } = null,
-    flags_credits_must_not_exceed_debits: ?enum { @"C<D" } = null,
-    flags_history: ?enum { HIST } = null,
-    flags_imported: ?enum { IMP } = null,
-    flags_closed: ?enum { CLSD } = null,
-    flags_padding: u10 = 0,
-    timestamp: u64 = 0,
-    status: CreateAccountStatus,
-
-    fn event(a: TestCreateAccount) Account {
-        return .{
-            .id = a.id,
-            .debits_pending = a.debits_pending,
-            .debits_posted = a.debits_posted,
-            .credits_pending = a.credits_pending,
-            .credits_posted = a.credits_posted,
-            .user_data_128 = a.user_data_128,
-            .user_data_64 = a.user_data_64,
-            .user_data_32 = a.user_data_32,
-            .reserved = a.reserved,
-            .ledger = a.ledger,
-            .code = a.code,
-            .flags = .{
-                .linked = a.flags_linked != null,
-                .debits_must_not_exceed_credits = a.flags_debits_must_not_exceed_credits != null,
-                .credits_must_not_exceed_debits = a.flags_credits_must_not_exceed_debits != null,
-                .history = a.flags_history != null,
-                .imported = a.flags_imported != null,
-                .closed = a.flags_closed != null,
-                .padding = a.flags_padding,
-            },
-            .timestamp = a.timestamp,
-        };
-    }
-};
-
-const TestCreateTransfer = struct {
-    id: u128,
-    debit_account_id: u128,
-    credit_account_id: u128,
-    amount: u128 = 0,
-    pending_id: u128 = 0,
-    user_data_128: u128 = 0,
-    user_data_64: u64 = 0,
-    user_data_32: u32 = 0,
-    timeout: u32 = 0,
-    ledger: u32,
-    code: u16,
-    flags_linked: ?enum { LNK } = null,
-    flags_pending: ?enum { PEN } = null,
-    flags_post_pending_transfer: ?enum { POS } = null,
-    flags_void_pending_transfer: ?enum { VOI } = null,
-    flags_balancing_debit: ?enum { BDR } = null,
-    flags_balancing_credit: ?enum { BCR } = null,
-    flags_imported: ?enum { IMP } = null,
-    flags_closing_debit: ?enum { CDR } = null,
-    flags_closing_credit: ?enum { CCR } = null,
-    flags_padding: u5 = 0,
-    timestamp: u64 = 0,
-    status: CreateTransferStatus,
-
-    fn event(t: TestCreateTransfer) Transfer {
-        return .{
-            .id = t.id,
-            .debit_account_id = t.debit_account_id,
-            .credit_account_id = t.credit_account_id,
-            .amount = t.amount,
-            .pending_id = t.pending_id,
-            .user_data_128 = t.user_data_128,
-            .user_data_64 = t.user_data_64,
-            .user_data_32 = t.user_data_32,
-            .timeout = t.timeout,
-            .ledger = t.ledger,
-            .code = t.code,
-            .flags = .{
-                .linked = t.flags_linked != null,
-                .pending = t.flags_pending != null,
-                .post_pending_transfer = t.flags_post_pending_transfer != null,
-                .void_pending_transfer = t.flags_void_pending_transfer != null,
-                .balancing_debit = t.flags_balancing_debit != null,
-                .balancing_credit = t.flags_balancing_credit != null,
-                .imported = t.flags_imported != null,
-                .closing_debit = t.flags_closing_debit != null,
-                .closing_credit = t.flags_closing_credit != null,
-                .padding = t.flags_padding,
-            },
-            .timestamp = t.timestamp,
-        };
-    }
-};
-
-const TestAccountFilter = struct {
-    account_id: u128,
-    user_data_128: ?u128 = null,
-    user_data_64: ?u64 = null,
-    user_data_32: ?u32 = null,
-    code: ?u16 = null,
-    // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
-    // created.
-    timestamp_min_transfer_id: ?u128 = null,
-    timestamp_max_transfer_id: ?u128 = null,
-    limit: u32,
-    flags_debits: ?enum { DR } = null,
-    flags_credits: ?enum { CR } = null,
-    flags_reversed: ?enum { REV } = null,
-};
-
-const TestQueryFilter = struct {
-    user_data_128: u128,
-    user_data_64: u64,
-    user_data_32: u32,
-    ledger: u32,
-    code: u16,
-    timestamp_min_transfer_id: ?u128 = null,
-    timestamp_max_transfer_id: ?u128 = null,
-    limit: u32,
-    flags_reversed: ?enum { REV } = null,
-};
-
-const TestGetChangeEventsFilter = struct {
-    timestamp_min_transfer_id: ?u128 = null,
-    timestamp_max_transfer_id: ?u128 = null,
-    limit: u32,
-};
-
-const TestGetChangeEventsResult = struct {
-    const Balance = struct {
-        account_id: u128,
-        debits_pending: u128,
-        debits_posted: u128,
-        credits_pending: u128,
-        credits_posted: u128,
-        closed: ?enum { CLSD } = null,
-    };
-
-    event_type: ?enum { PEN, POS, VOI, EXP } = null,
-    timestamp_transfer: ?u128 = null,
-    amount: u128,
-    transfer_pending_id: ?u128 = null,
-    dr_account: Balance,
-    cr_account: Balance,
-
-    fn match(
-        self: *const TestGetChangeEventsResult,
-        accounts: *std.AutoHashMap(u128, Account),
-        transfers: *std.AutoHashMap(u128, Transfer),
-        event: *const ChangeEvent,
-    ) bool {
-        if (self.timestamp_transfer) |id| {
-            const transfer = transfers.get(id).?;
-            if (event.type == .two_phase_expired) return false;
-            if (event.timestamp != transfer.timestamp) return false;
-            if (!match_transfer(event, &transfer)) return false;
-        }
-        if (self.event_type) |event_type| {
-            const expected: ChangeEventType = switch (event_type) {
-                .PEN => .two_phase_pending,
-                .POS => .two_phase_posted,
-                .VOI => .two_phase_voided,
-                .EXP => .two_phase_expired,
-            };
-            if (event.type != expected) return false;
-        } else {
-            if (event.type != .single_phase) return false;
-        }
-        if (event.transfer_amount != self.amount) return false;
-        if (self.transfer_pending_id) |transfer_pending_id| {
-            switch (event.type) {
-                .two_phase_pending, .single_phase => return false,
-                .two_phase_posted, .two_phase_voided => {
-                    if (event.transfer_pending_id != transfer_pending_id) return false;
-                },
-                .two_phase_expired => {
-                    const transfer = transfers.get(transfer_pending_id).?;
-                    if (transfer.timeout == 0) return false;
-                    if (event.timestamp <
-                        transfer.timestamp + transfer.timeout_ns()) return false;
-                    if (!match_transfer(event, &transfer)) return false;
-                },
-            }
-        }
-
-        const dr_account = accounts.get(self.dr_account.account_id).?;
-        if (dr_account.ledger != event.ledger) return false;
-        if (self.dr_account.account_id != event.debit_account_id) return false;
-        if (dr_account.timestamp != event.debit_account_timestamp) return false;
-        if (self.dr_account.debits_pending != event.debit_account_debits_pending) return false;
-        if (self.dr_account.debits_posted != event.debit_account_debits_posted) return false;
-        if (self.dr_account.credits_pending != event.debit_account_credits_pending) return false;
-        if (self.dr_account.credits_posted != event.debit_account_credits_posted) return false;
-        if ((self.dr_account.closed == .CLSD) != event.debit_account_flags.closed) return false;
-
-        const cr_account = accounts.get(self.cr_account.account_id).?;
-        if (cr_account.ledger != event.ledger) return false;
-        if (self.cr_account.account_id != event.credit_account_id) return false;
-        if (cr_account.timestamp != event.credit_account_timestamp) return false;
-        if (self.cr_account.debits_pending != event.credit_account_debits_pending) return false;
-        if (self.cr_account.debits_posted != event.credit_account_debits_posted) return false;
-        if (self.cr_account.credits_pending != event.credit_account_credits_pending) return false;
-        if (self.cr_account.credits_posted != event.credit_account_credits_posted) return false;
-        if ((self.cr_account.closed == .CLSD) != event.credit_account_flags.closed) return false;
-
-        return true;
-    }
-
-    fn match_transfer(event: *const ChangeEvent, transfer: *const tb.Transfer) bool {
-        if (event.transfer_timestamp != transfer.timestamp) return false;
-        if (event.transfer_id != transfer.id) return false;
-        if (event.transfer_amount != transfer.amount and
-            // The in-memory model keeps the `AMOUNT_MAX`.
-            transfer.amount != std.math.maxInt(u128)) return false;
-        if (event.transfer_pending_id != transfer.pending_id) return false;
-        if (event.transfer_user_data_128 != transfer.user_data_128) return false;
-        if (event.transfer_user_data_64 != transfer.user_data_64) return false;
-        if (event.transfer_user_data_32 != transfer.user_data_32) return false;
-        if (event.transfer_code != transfer.code) return false;
-        if (event.ledger != transfer.ledger) return false;
-        if (event.ledger != transfer.ledger) return false;
-        if (@as(u16, @bitCast(transfer.flags)) !=
-            @as(u16, @bitCast(event.transfer_flags))) return false;
-        return true;
-    }
-};
-
-// Operations that share the same input.
-const TestGetAccountBalances = TestAccountFilter;
-const TestGetAccountTransfers = TestAccountFilter;
-const TestQueryAccounts = TestQueryFilter;
-const TestQueryTransfers = TestQueryFilter;
-
-fn check(test_table: []const u8) !void {
-    const parse_table = @import("testing/table.zig").parse;
-    const test_actions = parse_table(TestAction, test_table);
-
-    // Runs the same test for each variation of supported operations,
-    // simulating different client versions.
-    for (TestContext.Operation.versions) |*version_map| {
-        try check_version(
-            test_actions.const_slice(),
-            version_map,
-        );
-    }
-}
-
-fn check_version(
-    test_actions: []const TestAction,
-    version_map: *const TestContext.Operation.VersionMap,
-) !void {
-    const allocator = std.testing.allocator;
-
-    var context: TestContext = undefined;
-    try context.init(allocator);
-    defer context.deinit(allocator);
-
-    var accounts = std.AutoHashMap(u128, Account).init(allocator);
-    defer accounts.deinit();
-
-    var transfers = std.AutoHashMap(u128, Transfer).init(allocator);
-    defer transfers.deinit();
-
-    // The result code `.exists` always returns the timestamp of the original event.
-    // Even if the existing event was created within a linked chain and rolled back.
-    // For example, the linked chain:
-    //  events:  { id=1, flags=linked; id=1 }
-    //  results: { result=linked_event_failed, timestamp=100; result=exists, timestamp=100 }
-    //                                                   ^^^                           ^^^
-    var linked_events_failed: std.AutoHashMap(u128, u64) = .init(allocator);
-    defer linked_events_failed.deinit();
-
-    var request: std.ArrayListAligned(u8, constants.cache_line_size) = .init(allocator);
-    defer request.deinit();
-
-    try request.ensureTotalCapacity(constants.message_body_size_max);
-
-    var reply: std.ArrayListAligned(u8, constants.cache_line_size) = .init(allocator);
-    defer reply.deinit();
-
-    var operation: ?TestContext.Operation = null;
-    for (test_actions) |test_action| {
-        switch (test_action) {
-            .setup => |b| {
-                assert(operation == null);
-
-                const account = context.get_account_from_cache(b.account).?;
-                var account_new = account;
-
-                account_new.debits_pending = b.debits_pending;
-                account_new.debits_posted = b.debits_posted;
-                account_new.credits_pending = b.credits_pending;
-                account_new.credits_posted = b.credits_posted;
-                assert(!account_new.debits_exceed_credits(0));
-                assert(!account_new.credits_exceed_debits(0));
-
-                if (!stdx.equal_bytes(Account, &account_new, &account)) {
-                    context.state_machine.forest.grooves.accounts.update(.{
-                        .old = &account,
-                        .new = &account_new,
-                    });
-                }
-            },
-            .tick => |ticks| {
-                assert(ticks.value != 0);
-
-                const interval_ns: u64 = @abs(ticks.value) *
-                    @as(u64, switch (ticks.unit) {
-                        .nanoseconds => 1,
-                        .seconds => std.time.ns_per_s,
-                    });
-
-                // The `parse` logic already computes `maxInt - value` when a unsigned int is
-                // represented as a negative number. However, we need to use a signed int and
-                // perform our own calculation to account for the unit.
-                context.state_machine.prepare_timestamp += if (ticks.value > 0)
-                    interval_ns
-                else
-                    TimestampRange.timestamp_max - interval_ns;
-
-                // Pulse is executed when the cluster is idle.
-                context.pulse();
-            },
-            .account => |a| {
-                assert(operation == null or operation.? == .create_accounts);
-                operation = .create_accounts;
-
-                var event = a.event();
-                try request.appendSlice(std.mem.asBytes(&event));
-
-                const timestamp_commit = context.state_machine.prepare_timestamp + 1 +
-                    @divExact(request.items.len, @sizeOf(Account));
-                if (event.timestamp == 0) event.timestamp = timestamp_commit;
-                if (a.status == .created) {
-                    try accounts.put(a.id, event);
-                }
-
-                switch (version_map.get(.create_accounts)) {
-                    .create_accounts => {
-                        const result = CreateAccountResult{
-                            .timestamp = timestamp_expected: {
-                                if (a.status == .created or a.status == .linked_event_failed) {
-                                    break :timestamp_expected event.timestamp;
-                                }
-                                if (a.status == .exists) {
-                                    break :timestamp_expected if (accounts.get(a.id)) |exists|
-                                        exists.timestamp
-                                    else
-                                        linked_events_failed.get(a.id).?;
-                                }
-                                break :timestamp_expected timestamp_commit;
-                            },
-                            .status = a.status,
-                        };
-                        try reply.appendSlice(std.mem.asBytes(&result));
-
-                        if (event.flags.linked) {
-                            if (a.status == .linked_event_failed) {
-                                try linked_events_failed.putNoClobber(event.id, event.timestamp);
-                            }
-                        } else {
-                            linked_events_failed.clearRetainingCapacity();
-                        }
-                    },
-                    .deprecated_create_accounts_sparse,
-                    .deprecated_create_accounts_unbatched,
-                    => if (a.status != .created) {
-                        const result = tb.CreateAccountErrorResult{
-                            .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
-                            .result = a.status,
-                        };
-                        try reply.appendSlice(std.mem.asBytes(&result));
-                    },
-                    else => unreachable,
-                }
-            },
-            .transfer => |t| {
-                assert(operation == null or operation.? == .create_transfers);
-                operation = .create_transfers;
-
-                var event = t.event();
-                try request.appendSlice(std.mem.asBytes(&event));
-
-                const timestamp_commit = context.state_machine.prepare_timestamp + 1 +
-                    @divExact(request.items.len, @sizeOf(Transfer));
-                if (t.timestamp == 0) event.timestamp = timestamp_commit;
-                if (t.status == .created) {
-                    if (event.pending_id != 0) {
-                        // Fill in default values.
-                        const t_pending = transfers.get(event.pending_id).?;
-                        inline for (.{
-                            "debit_account_id",
-                            "credit_account_id",
-                            "ledger",
-                            "code",
-                            "user_data_128",
-                            "user_data_64",
-                            "user_data_32",
-                        }) |field| {
-                            if (@field(event, field) == 0) {
-                                @field(event, field) = @field(t_pending, field);
-                            }
-                        }
-
-                        if (event.flags.void_pending_transfer) {
-                            if (event.amount == 0) event.amount = t_pending.amount;
-                        }
-                    }
-                    try transfers.put(t.id, event);
-                }
-
-                switch (version_map.get(.create_transfers)) {
-                    .create_transfers => {
-                        const result: CreateTransferResult = .{
-                            .timestamp = timestamp_expected: {
-                                if (t.status == .created or t.status == .linked_event_failed) {
-                                    break :timestamp_expected event.timestamp;
-                                }
-                                if (t.status == .exists) {
-                                    break :timestamp_expected if (transfers.get(t.id)) |exists|
-                                        exists.timestamp
-                                    else
-                                        linked_events_failed.get(t.id).?;
-                                }
-                                break :timestamp_expected timestamp_commit;
-                            },
-                            .status = t.status,
-                        };
-                        try reply.appendSlice(std.mem.asBytes(&result));
-
-                        if (event.flags.linked) {
-                            if (t.status == .linked_event_failed) {
-                                try linked_events_failed.putNoClobber(event.id, event.timestamp);
-                            }
-                        } else {
-                            linked_events_failed.clearRetainingCapacity();
-                        }
-                    },
-                    .deprecated_create_transfers_sparse,
-                    .deprecated_create_transfers_unbatched,
-                    => if (t.status != .created) {
-                        const result: tb.CreateTransferErrorResult = .{
-                            .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
-                            .result = t.status,
-                        };
-                        try reply.appendSlice(std.mem.asBytes(&result));
-                    },
-                    else => unreachable,
-                }
-            },
-            .lookup_account => |a| {
-                assert(operation == null or operation.? == .lookup_accounts);
-                operation = .lookup_accounts;
-
-                try request.appendSlice(std.mem.asBytes(&a.id));
-                if (a.data) |data| {
-                    var account = accounts.get(a.id).?;
-                    account.debits_pending = data.debits_pending;
-                    account.debits_posted = data.debits_posted;
-                    account.credits_pending = data.credits_pending;
-                    account.credits_posted = data.credits_posted;
-                    account.flags.closed = data.flag_closed != null;
-                    try reply.appendSlice(std.mem.asBytes(&account));
-                }
-            },
-            .lookup_transfer => |t| {
-                assert(operation == null or operation.? == .lookup_transfers);
-                operation = .lookup_transfers;
-
-                try request.appendSlice(std.mem.asBytes(&t.id));
-                switch (t.data) {
-                    .exists => |exists| {
-                        if (exists) {
-                            var transfer = transfers.get(t.id).?;
-                            try reply.appendSlice(std.mem.asBytes(&transfer));
-                        }
-                    },
-                    .amount => |amount| {
-                        var transfer = transfers.get(t.id).?;
-                        transfer.amount = amount;
-                        try reply.appendSlice(std.mem.asBytes(&transfer));
-                    },
-                    .timestamp => |timestamp| {
-                        var transfer = transfers.get(t.id).?;
-                        transfer.timestamp = timestamp;
-                        try reply.appendSlice(std.mem.asBytes(&transfer));
-                    },
-                }
-            },
-            .get_account_balances => |f| {
-                assert(operation == null or operation.? == .get_account_balances);
-                operation = .get_account_balances;
-
-                const timestamp_min =
-                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max =
-                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-
-                const event = AccountFilter{
-                    .account_id = f.account_id,
-                    .user_data_128 = f.user_data_128 orelse 0,
-                    .user_data_64 = f.user_data_64 orelse 0,
-                    .user_data_32 = f.user_data_32 orelse 0,
-                    .code = f.code orelse 0,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .debits = f.flags_debits != null,
-                        .credits = f.flags_credits != null,
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .get_account_balances_result => |r| {
-                assert(operation.? == .get_account_balances);
-
-                const balance = AccountBalance{
-                    .debits_pending = r.debits_pending,
-                    .debits_posted = r.debits_posted,
-                    .credits_pending = r.credits_pending,
-                    .credits_posted = r.credits_posted,
-                    .timestamp = transfers.get(r.transfer_id).?.timestamp,
-                };
-                try reply.appendSlice(std.mem.asBytes(&balance));
-            },
-            .get_account_transfers => |f| {
-                assert(operation == null or operation.? == .get_account_transfers);
-                operation = .get_account_transfers;
-
-                const timestamp_min =
-                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max =
-                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-
-                const event = AccountFilter{
-                    .account_id = f.account_id,
-                    .user_data_128 = f.user_data_128 orelse 0,
-                    .user_data_64 = f.user_data_64 orelse 0,
-                    .user_data_32 = f.user_data_32 orelse 0,
-                    .code = f.code orelse 0,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .debits = f.flags_debits != null,
-                        .credits = f.flags_credits != null,
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .get_account_transfers_result => |id| {
-                assert(operation.? == .get_account_transfers);
-                try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
-            },
-            .query_accounts => |f| {
-                assert(operation == null or operation.? == .query_accounts);
-                operation = .query_accounts;
-
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
-                    accounts.get(id).?.timestamp
-                else
-                    0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
-                    accounts.get(id).?.timestamp
-                else
-                    0;
-
-                const event = QueryFilter{
-                    .user_data_128 = f.user_data_128,
-                    .user_data_64 = f.user_data_64,
-                    .user_data_32 = f.user_data_32,
-                    .ledger = f.ledger,
-                    .code = f.code,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .query_accounts_result => |a| {
-                assert(operation.? == .query_accounts);
-                var account = accounts.get(a.id).?;
-                if (a.data) |data| {
-                    account.debits_pending = data.debits_pending;
-                    account.debits_posted = data.debits_posted;
-                    account.credits_pending = data.credits_pending;
-                    account.credits_posted = data.credits_posted;
-                    account.flags.closed = data.flag_closed != null;
-                }
-                try reply.appendSlice(std.mem.asBytes(&account));
-            },
-            .query_transfers => |f| {
-                assert(operation == null or operation.? == .query_transfers);
-                operation = .query_transfers;
-
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
-                    transfers.get(id).?.timestamp
-                else
-                    0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
-                    transfers.get(id).?.timestamp
-                else
-                    0;
-
-                const event = QueryFilter{
-                    .user_data_128 = f.user_data_128,
-                    .user_data_64 = f.user_data_64,
-                    .user_data_32 = f.user_data_32,
-                    .ledger = f.ledger,
-                    .code = f.code,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .query_transfers_result => |id| {
-                assert(operation.? == .query_transfers);
-                try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
-            },
-            .get_change_events => |f| {
-                assert(operation == null or operation.? == .get_change_events);
-                operation = .get_change_events;
-                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
-                    transfers.get(id).?.timestamp
-                else
-                    0;
-                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
-                    transfers.get(id).?.timestamp
-                else
-                    0;
-
-                const event = ChangeEventsFilter{
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .get_change_events_result => |*t| {
-                assert(operation.? == .get_change_events);
-                try reply.appendSlice(std.mem.asBytes(t));
-            },
-            .commit => |commit_operation| {
-                assert(operation == null or operation.? == commit_operation);
-                assert(!context.busy);
-
-                const reply_actual_buffer = try allocator.alignedAlloc(
-                    u8,
-                    constants.cache_line_size,
-                    constants.message_body_size_max,
-                );
-                defer allocator.free(reply_actual_buffer);
-
-                const payload_size: u32 = @intCast(request.items.len);
-                request.expandToCapacity();
-
-                const operation_actual = version_map.get(commit_operation);
-                const reply_actual = context.submit(
-                    operation_actual,
-                    request.items,
-                    payload_size,
-                    reply_actual_buffer[0..constants.message_body_size_max],
-                );
-
-                switch (operation_actual) {
-                    inline else => |operation_actual_comptime| {
-                        const Result = operation_actual_comptime.ResultType();
-                        try testing.expectEqualSlices(
-                            Result,
-                            stdx.bytes_as_slice(.exact, Result, reply.items),
-                            stdx.bytes_as_slice(.exact, Result, reply_actual),
-                        );
-                    },
-                    .get_change_events => {
-                        const results_actual = stdx.bytes_as_slice(
-                            .exact,
-                            ChangeEvent,
-                            reply_actual,
-                        );
-                        const results_expected = stdx.bytes_as_slice(
-                            .exact,
-                            TestGetChangeEventsResult,
-                            reply.items,
-                        );
-                        try testing.expectEqual(results_expected.len, results_actual.len);
-                        for (results_actual, results_expected) |*actual, *expected| {
-                            try testing.expect(expected.match(&accounts, &transfers, actual));
-                        }
-                    },
-                    .pulse => unreachable,
-                }
-
-                request.clearRetainingCapacity();
-                reply.clearRetainingCapacity();
-                operation = null;
-            },
-        }
-    }
-
-    assert(operation == null);
-    assert(request.items.len == 0);
-    assert(reply.items.len == 0);
-}
 
 test "create_accounts" {
     try check(
@@ -2045,6 +2440,41 @@ test "imported events: timestamp" {
     );
 }
 
+test "imported events: resolve timed pending transfers" {
+    try check(
+        \\ tick 10 nanoseconds
+        \\
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ IMP _ _ 1 created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ IMP _ _ 2 created
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2 10  _ _ _ _ 60 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ transfer T2 A1 A2 20  _ _ _ _ 60 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ commit create_transfers
+        \\
+        \\ tick 10 nanoseconds
+        \\ transfer T3 A1 A2 10 T1 _ _ _  0 L1 C1 _   _ POS _   _ _ IMP _ _ _ 17 created
+        \\ transfer T4 A1 A2  0 T2 _ _ _  0 L1 C1 _   _ _   VOI _ _ IMP _ _ _ 18 created
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 0 10 0  0 _
+        \\ lookup_account A2 0  0 0 10 _
+        \\ commit lookup_accounts
+        \\
+        // Crossing the original timeout must not find a stale expiry index entry.
+        \\ tick 60 seconds
+        \\ lookup_account A1 0 10 0  0 _
+        \\ lookup_account A2 0  0 0 10 _
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T1 timestamp 13
+        \\ lookup_transfer T2 timestamp 14
+        \\ lookup_transfer T3 timestamp 17
+        \\ lookup_transfer T4 timestamp 18
+        \\ commit lookup_transfers
+    );
+}
+
 test "imported events: pending transfers" {
     try check(
         \\ tick 10 nanoseconds
@@ -2109,6 +2539,26 @@ test "imported events: linked chain" {
         \\ lookup_transfer T2 timestamp 5
         \\ lookup_transfer T3 timestamp 6
         \\ commit lookup_transfers
+    );
+}
+
+test "imported events: mixed multibatching" {
+    try check(
+        // The first event determines whether the batch is imported,
+        // even when batches of imported and regular events are multibatched together.
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
+        \\ commit create_accounts
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _  3 created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ IMP _ _  4 imported_event_timestamp_must_not_advance
+        \\ commit create_accounts
+        \\
+        \\ transfer   T3 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _    _ _ _ _   0 created
+        \\ transfer   T4 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _    _ _ _ _   0 created
+        \\ commit create_transfers
+        \\ transfer   T1 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   7 created
+        \\ transfer   T2 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   8 imported_event_timestamp_must_not_advance
+        \\ commit create_transfers
     );
 }
 
@@ -2950,23 +3400,24 @@ test "StateMachine: batch_elements_max" {
 // Tests the input validation logic for both multi-batch encoded messages and
 // the former single-batch format.
 test "StateMachine: input_valid" {
-    const allocator = std.testing.allocator;
-    const input = try allocator.alignedAlloc(
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const input = try arena.allocator().alignedAlloc(
         u8,
         constants.cache_line_size,
         2 * constants.message_body_size_max,
     );
-    defer allocator.free(input);
 
     const build_input = struct {
         fn build_input(buffer: []align(constants.cache_line_size) u8, options: struct {
-            operation: TestContext.StateMachine.Operation,
+            operation: StateMachine.Operation,
             event_count: u32,
         }) []align(constants.cache_line_size) const u8 {
             const event_size = options.operation.event_size();
             const payload_size: u32 = options.event_count * event_size;
             if (options.operation.is_multi_batch()) {
-                var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
+                var body_encoder: MultiBatchEncoder = .init(buffer, .{
                     .element_size = event_size,
                 });
                 assert(payload_size <= body_encoder.writable().?.len);
@@ -2981,10 +3432,19 @@ test "StateMachine: input_valid" {
     }.build_input;
 
     var context: TestContext = undefined;
-    try context.init(std.testing.allocator);
-    defer context.deinit(std.testing.allocator);
+    try context.init(arena.allocator(), struct {
+        fn callback(
+            _: *TestContext,
+            _: StateMachine.Operation,
+            _: *Packet,
+            _: u64,
+            _: []const u8,
+        ) !void {
+            unreachable;
+        }
+    }.callback);
 
-    const operations = std.enums.values(TestContext.StateMachine.Operation);
+    const operations = std.enums.values(StateMachine.Operation);
     for (operations) |operation| {
         if (operation == .pulse) continue;
         const event_size = operation.event_size();
@@ -3051,21 +3511,31 @@ test "StateMachine: input_valid" {
 // Multi-batch filters are valid as long as the sum of `filter.limit` stays within the maximum
 // number of results that can fit in the reply message.
 test "StateMachine: query multi-batch input_valid" {
-    const allocator = std.testing.allocator;
-    const input = try allocator.alignedAlloc(
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+
+    const input = try arena.allocator().alignedAlloc(
         u8,
         constants.cache_line_size,
         2 * constants.message_body_size_max,
     );
-    defer allocator.free(input);
 
     var context: TestContext = undefined;
-    try context.init(std.testing.allocator);
-    defer context.deinit(std.testing.allocator);
+    try context.init(arena.allocator(), struct {
+        fn callback(
+            _: *TestContext,
+            _: StateMachine.Operation,
+            _: *Packet,
+            _: u64,
+            _: []const u8,
+        ) !void {
+            unreachable;
+        }
+    }.callback);
 
     const build_input = struct {
         fn build_input(
-            operation: TestContext.StateMachine.Operation,
+            operation: StateMachine.Operation,
             limits: []const u32,
             buffer: []align(constants.cache_line_size) u8,
         ) []align(constants.cache_line_size) const u8 {
@@ -3073,7 +3543,7 @@ test "StateMachine: query multi-batch input_valid" {
                 .get_account_transfers,
                 .get_account_balances,
                 => {
-                    var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
+                    var body_encoder: MultiBatchEncoder = .init(buffer, .{
                         .element_size = @sizeOf(AccountFilter),
                     });
                     if (limits.len == 0) body_encoder.add(0) else for (limits) |limit| {
@@ -3104,7 +3574,7 @@ test "StateMachine: query multi-batch input_valid" {
                 .query_accounts,
                 .query_transfers,
                 => {
-                    var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
+                    var body_encoder: MultiBatchEncoder = .init(buffer, .{
                         .element_size = @sizeOf(QueryFilter),
                     });
                     if (limits.len == 0) body_encoder.add(0) else for (limits) |limit| {
@@ -3135,7 +3605,7 @@ test "StateMachine: query multi-batch input_valid" {
         }
     }.build_input;
 
-    const operations = &[_]TestContext.StateMachine.Operation{
+    const operations = &[_]StateMachine.Operation{
         .get_account_transfers,
         .get_account_balances,
         .query_accounts,

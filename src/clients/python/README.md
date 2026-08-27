@@ -127,7 +127,7 @@ To toggle behavior for an account, combine enum values stored in the
 
 * `AccountFlags.linked`
 * `AccountFlags.debits_must_not_exceed_credits`
-* `AccountFlags.credits_must_not_exceed_credits`
+* `AccountFlags.credits_must_not_exceed_debits`
 * `AccountFlags.history`
 
 

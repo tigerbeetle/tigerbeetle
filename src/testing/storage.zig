@@ -125,6 +125,10 @@ pub const Storage = struct {
         }
     };
 
+    pub const Flush = struct {
+        callback: *const fn (write: *Storage.Flush) void,
+    };
+
     pub const NextTick = struct {
         link: QueueType(NextTick).Link = .{},
         source: NextTickSource,
@@ -189,6 +193,7 @@ pub const Storage = struct {
 
     reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
     writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
+    unflushed: u64 = 0,
 
     ticks: u64 = 0,
     next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
@@ -244,6 +249,10 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
+        // The VOPR doesn't always finish runs at a checkpoint, so there may be unflushed writes
+        // still present.
+        maybe(storage.unflushed > 0);
+
         storage.writes.deinit();
         storage.reads.deinit();
         allocator.destroy(storage.overlay_buffers);
@@ -565,6 +574,7 @@ pub const Storage = struct {
         offset_in_zone: u64,
     ) void {
         zone.verify_iop(buffer, offset_in_zone);
+        assert(zone.offset(offset_in_zone) + buffer.len <= storage.memory.len);
         maybe(zone == .grid_padding); // Padding is zeroed during format.
 
         // Verify that there are no concurrent overlapping writes.
@@ -584,6 +594,7 @@ pub const Storage = struct {
         };
 
         // We ensure the capacity is sufficient for constants.iops_write_max in init()
+        storage.unflushed += 1;
         storage.writes.add(write) catch unreachable;
     }
 
@@ -661,6 +672,16 @@ pub const Storage = struct {
             stdx.copy_disjoint(.inexact, u8, overlay_mistaken_buffer, write.buffer);
             stdx.copy_disjoint(.inexact, u8, overlay_intended_buffer, target_intended_buffer);
         }
+    }
+
+    pub fn flush_sectors(
+        storage: *Storage,
+        callback: *const fn (flush: *Storage.Flush) void,
+        flush: *Storage.Flush,
+    ) void {
+        storage.unflushed = 0;
+        flush.callback = callback;
+        flush.callback(flush);
     }
 
     fn read_latency(storage: *Storage) Duration {

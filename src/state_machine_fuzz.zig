@@ -8,8 +8,134 @@ const constants = vsr.constants;
 const stdx = @import("stdx");
 
 const tb = @import("tigerbeetle.zig");
-const TestContext = @import("state_machine_tests.zig").TestContext;
 const fuzz = @import("./testing/fuzz.zig");
+
+const StateMachineType = @import("./state_machine.zig").StateMachineType;
+const MultiBatchDecoder = @import("./vsr/multi_batch.zig").MultiBatchDecoder;
+const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
+
+const TimeSim = @import("testing/time.zig").TimeSim;
+const Storage = @import("testing/storage.zig").Storage;
+const Tracer = Storage.Tracer;
+const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
+const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
+const Grid = @import("vsr/grid.zig").GridType(Storage);
+const fixtures = @import("testing/fixtures.zig");
+
+const TestContext = struct {
+    storage: Storage,
+    time_sim: TimeSim,
+    trace: Tracer,
+    superblock: SuperBlock,
+    grid: Grid,
+    state_machine: StateMachine,
+    op: u64,
+    busy: bool,
+
+    const StateMachine = vsr.state_machine.StateMachineType(Storage);
+
+    fn init(ctx: *TestContext, allocator: std.mem.Allocator) !void {
+        ctx.storage = try fixtures.init_storage(allocator, .{ .size = 4096 });
+        errdefer ctx.storage.deinit(allocator);
+
+        ctx.time_sim = fixtures.init_time(.{});
+
+        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.time(), .{});
+        errdefer ctx.trace.deinit(allocator);
+
+        ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{
+            .storage_size_limit = data_file_size_min,
+        });
+        errdefer ctx.superblock.deinit(allocator);
+
+        // Pretend that the superblock is open so that the Forest can initialize.
+        ctx.superblock.opened = true;
+        ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
+
+        ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
+        errdefer ctx.grid.deinit(allocator);
+
+        const batch_size_limit = 30 * @max(@sizeOf(tb.Account), @sizeOf(tb.Transfer));
+        assert(batch_size_limit <= constants.message_body_size_max);
+        try ctx.state_machine.init(
+            allocator,
+            ctx.time_sim.time(),
+            &ctx.grid,
+            .{
+                .batch_size_limit = batch_size_limit,
+                .lsm_forest_compaction_block_count = StateMachine.Forest.Options
+                    .compaction_block_count_min,
+                .lsm_forest_node_count = 1,
+                .cache_entries_accounts = 0,
+                .cache_entries_transfers = 0,
+                .cache_entries_transfers_pending = 0,
+                .log_trace = true,
+                .aof_recovery = false,
+            },
+        );
+        errdefer ctx.state_machine.deinit(allocator);
+
+        ctx.op = 1;
+        ctx.busy = false;
+    }
+
+    pub fn deinit(ctx: *TestContext, allocator: std.mem.Allocator) void {
+        ctx.state_machine.deinit(allocator);
+        ctx.grid.deinit(allocator);
+        ctx.superblock.deinit(allocator);
+        ctx.trace.deinit(allocator);
+        ctx.storage.deinit(allocator);
+        ctx.* = undefined;
+    }
+
+    fn prepare(
+        context: *TestContext,
+        operation: StateMachine.Operation,
+        message_body_used: []align(constants.cache_line_size) const u8,
+    ) void {
+        context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
+        context.state_machine.prepare_timestamp += 1;
+        context.state_machine.prepare(
+            operation,
+            message_body_used,
+        );
+    }
+
+    fn execute(
+        context: *TestContext,
+        op: u64,
+        operation: StateMachine.Operation,
+        message_body_used: []align(constants.cache_line_size) const u8,
+        output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
+    ) usize {
+        const timestamp = context.state_machine.prepare_timestamp;
+        context.busy = true;
+        context.state_machine.prefetch_timestamp = timestamp;
+        context.state_machine.prefetch(
+            struct {
+                fn callback(state_machine: *StateMachine) void {
+                    const ctx: *TestContext = @fieldParentPtr("state_machine", state_machine);
+                    assert(ctx.busy);
+                    ctx.busy = false;
+                }
+            }.callback,
+            op,
+            op,
+            operation,
+            message_body_used,
+        );
+        while (context.busy) context.storage.run();
+
+        return context.state_machine.commit(
+            1,
+            op,
+            timestamp,
+            operation,
+            message_body_used,
+            output_buffer,
+        );
+    }
+};
 
 /// Generate a random number, biased towards all bit 'edges' of T. That is, given a u64, it's very
 /// likely to not only get 0 or maxInt(u64), but also values around maxInt(u63), maxInt(u62), ...,
@@ -67,7 +193,7 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             }
             assert(operation.is_multi_batch());
 
-            var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(request_buffer, .{
+            var body_encoder: MultiBatchEncoder = .init(request_buffer, .{
                 .element_size = operation.event_size(),
             });
 
@@ -100,7 +226,7 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             stdx.maybe(reply_size == 0);
             if (operation.is_multi_batch()) {
                 assert(reply_size > 0);
-                _ = vsr.multi_batch.MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
+                _ = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
                     .element_size = operation.result_size(),
                 }) catch |err| switch (err) {
                     error.MultiBatchInvalid => unreachable,

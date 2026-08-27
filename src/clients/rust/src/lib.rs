@@ -95,7 +95,7 @@
 //!
 //! In TigerBeetle's standard build-time configuration **the maximum number of
 //! events per batch is 8189**. If the events in a request exceed this number
-//! its future will return [`PacketStatus::TooMuchData`].
+//! its future will return [`PacketError::TooMuchData`].
 //!
 //!
 //! # Range query limits
@@ -127,7 +127,7 @@
 //! fn get_account_transfers_paged(
 //!     client: &tb::Client,
 //!     event: tb::AccountFilter,
-//! ) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + '_ {
+//! ) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketError>> + '_ {
 //!     assert!(
 //!         event.limit > 1,
 //!         "paged queries should use an explicit limit"
@@ -207,7 +207,7 @@
 //!
 //! It is possible to drop a `Client` while request futures are still
 //! outstanding. In this case any pending requests will be completed with
-//! [`PacketStatus::ClientShutdown`]. Request futures may resolve to successful
+//! [`PacketError::ClientShutdown`]. Request futures may resolve to successful
 //! results even after the client is closed.
 //!
 //! When `Client` is dropped without calling [`close`],
@@ -367,7 +367,7 @@ impl Client {
     /// # References
     ///
     /// [Client Sessions](https://docs.tigerbeetle.com/reference/sessions/).
-    pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, InitStatus> {
+    pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, InitError> {
         assert_abi_compatibility();
 
         unsafe {
@@ -403,7 +403,7 @@ impl Client {
     /// # Interpreting the return value
     ///
     /// This function has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller should assume
+    /// the future returns [`Err`] of [`PacketError`] and the caller should assume
     /// that none of the submitted events were processed.
     ///
     /// The results of events are represented individually. There are two
@@ -463,7 +463,7 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the length of the `events` argument exceeds the maximum batch size
-    /// the future will return [`Err`] of [`PacketStatus::TooMuchData`]. In
+    /// the future will return [`Err`] of [`PacketError::TooMuchData`]. In
     /// TigerBeetle's standard build-time configuration the maximum batch size
     /// is 8189.
     ///
@@ -473,7 +473,7 @@ impl Client {
     pub fn create_accounts(
         &self,
         events: &[Account],
-    ) -> Result<impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>>, ClientClosed>
+    ) -> Result<impl Future<Output = Result<Vec<CreateAccountResult>, PacketError>>, ClientClosed>
     {
         let (packet, rx) =
             create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
@@ -493,16 +493,8 @@ impl Client {
 
         Ok(async {
             let msg = rx.await;
-
-            let responses: &[tbc::tb_create_account_result_t] = handle_message(&msg)?;
-
-            Ok(responses
-                .iter()
-                .map(|result| CreateAccountResult {
-                    timestamp: result.timestamp,
-                    status: CreateAccountStatus::from(result.status),
-                })
-                .collect())
+            let responses: &[tbc::CreateAccountResult] = handle_message(&msg)?;
+            Ok(responses.to_vec())
         })
     }
 
@@ -518,7 +510,7 @@ impl Client {
     /// # Interpreting the return value
     ///
     /// This function has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller should assume
+    /// the future returns [`Err`] of [`PacketError`] and the caller should assume
     /// that none of the submitted events were processed.
     ///
     /// The results of events are represented individually. There are two
@@ -576,7 +568,7 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the length of the `events` argument exceeds the maximum batch size
-    /// the future will return [`Err`] of [`PacketStatus::TooMuchData`]. In
+    /// the future will return [`Err`] of [`PacketError::TooMuchData`]. In
     /// TigerBeetle's standard build-time configuration the maximum batch size
     /// is 8189.
     ///
@@ -586,7 +578,7 @@ impl Client {
     pub fn create_transfers(
         &self,
         events: &[Transfer],
-    ) -> Result<impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>>, ClientClosed>
+    ) -> Result<impl Future<Output = Result<Vec<CreateTransferResult>, PacketError>>, ClientClosed>
     {
         let (packet, rx) =
             create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
@@ -606,16 +598,8 @@ impl Client {
 
         Ok(async {
             let msg = rx.await;
-
-            let responses: &[tbc::tb_create_transfer_result_t] = handle_message(&msg)?;
-
-            Ok(responses
-                .iter()
-                .map(|result| CreateTransferResult {
-                    timestamp: result.timestamp,
-                    status: CreateTransferStatus::from(result.status),
-                })
-                .collect())
+            let responses: &[tbc::CreateTransferResult] = handle_message(&msg)?;
+            Ok(responses.to_vec())
         })
     }
 
@@ -627,7 +611,7 @@ impl Client {
     /// # Interpreting the return value
     ///
     /// This function has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller should assume
+    /// the future returns [`Err`] of [`PacketError`] and the caller should assume
     /// that none of the submitted events were processed.
     ///
     /// This request returns the found accounts, in the order requested. The
@@ -686,14 +670,14 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the length of the `events` argument exceeds the maximum batch size
-    /// the future will return [`Err`] of [`PacketStatus::TooMuchData`]. In
+    /// the future will return [`Err`] of [`PacketError::TooMuchData`]. In
     /// TigerBeetle's standard build-time configuration the maximum batch size
     /// is 8189.
     ///
     /// # Errors
     ///
     /// This request has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller can assume
+    /// the future returns [`Err`] of [`PacketError`] and the caller can assume
     /// that none of the submitted events were processed; if the request was
     /// processed, then each event may possibly be [`NotFound`].
     ///
@@ -703,7 +687,7 @@ impl Client {
     pub fn lookup_accounts(
         &self,
         events: &[u128],
-    ) -> Result<impl Future<Output = Result<Vec<Account>, PacketStatus>>, ClientClosed> {
+    ) -> Result<impl Future<Output = Result<Vec<Account>, PacketError>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
 
@@ -735,14 +719,14 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the length of the `events` argument exceeds the maximum batch size
-    /// the future will return [`Err`] of [`PacketStatus::TooMuchData`]. In
+    /// the future will return [`Err`] of [`PacketError::TooMuchData`]. In
     /// TigerBeetle's standard build-time configuration the maximum batch size
     /// is 8189.
     ///
     /// # Errors
     ///
     /// This request has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller can assume
+    /// the future returns [`Err`] of [`PacketError`] and the caller can assume
     /// that none of the submitted events were processed; if the request was
     /// processed, then each event may possibly be [`NotFound`].
     ///
@@ -800,7 +784,7 @@ impl Client {
     pub fn lookup_transfers(
         &self,
         events: &[u128],
-    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketStatus>>, ClientClosed> {
+    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketError>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
 
@@ -831,7 +815,7 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// If the entire request fails then the future returns [`Err`] of [`PacketStatus`].
+    /// If the entire request fails then the future returns [`Err`] of [`PacketError`].
     ///
     /// # Protocol reference
     ///
@@ -839,7 +823,7 @@ impl Client {
     pub fn get_account_transfers(
         &self,
         event: AccountFilter,
-    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketStatus>>, ClientClosed> {
+    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketError>>, ClientClosed> {
         let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS,
             &[event],
@@ -861,7 +845,6 @@ impl Client {
         Ok(async {
             let msg = rx.await;
             let result: &[Transfer] = handle_message(&msg)?;
-
             Ok(result.to_vec())
         })
     }
@@ -873,7 +856,7 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// If the entire request fails then the future returns [`Err`] of [`PacketStatus`].
+    /// If the entire request fails then the future returns [`Err`] of [`PacketError`].
     ///
     /// # Protocol reference
     ///
@@ -881,7 +864,7 @@ impl Client {
     pub fn get_account_balances(
         &self,
         event: AccountFilter,
-    ) -> Result<impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>>, ClientClosed> {
+    ) -> Result<impl Future<Output = Result<Vec<AccountBalance>, PacketError>>, ClientClosed> {
         let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES,
             &[event],
@@ -903,7 +886,6 @@ impl Client {
         Ok(async {
             let msg = rx.await;
             let result: &[AccountBalance] = handle_message(&msg)?;
-
             Ok(result.to_vec())
         })
     }
@@ -915,7 +897,7 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// If the entire request fails then the future returns [`Err`] of [`PacketStatus`].
+    /// If the entire request fails then the future returns [`Err`] of [`PacketError`].
     ///
     /// # Protocol reference
     ///
@@ -923,7 +905,7 @@ impl Client {
     pub fn query_accounts(
         &self,
         event: QueryFilter,
-    ) -> Result<impl Future<Output = Result<Vec<Account>, PacketStatus>>, ClientClosed> {
+    ) -> Result<impl Future<Output = Result<Vec<Account>, PacketError>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS, &[event]);
 
@@ -943,7 +925,6 @@ impl Client {
         Ok(async {
             let msg = rx.await;
             let result: &[Account] = handle_message(&msg)?;
-
             Ok(result.to_vec())
         })
     }
@@ -955,7 +936,7 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// If the entire request fails then the future returns [`Err`] of [`PacketStatus`].
+    /// If the entire request fails then the future returns [`Err`] of [`PacketError`].
     ///
     /// # Protocol reference
     ///
@@ -963,7 +944,7 @@ impl Client {
     pub fn query_transfers(
         &self,
         event: QueryFilter,
-    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketStatus>>, ClientClosed> {
+    ) -> Result<impl Future<Output = Result<Vec<Transfer>, PacketError>>, ClientClosed> {
         let (packet, rx) =
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS, &[event]);
 
@@ -983,7 +964,6 @@ impl Client {
         Ok(async {
             let msg = rx.await;
             let result: &[Transfer] = handle_message(&msg)?;
-
             Ok(result.to_vec())
         })
     }
@@ -1068,28 +1048,12 @@ fn assert_abi_compatibility() {
         std::mem::align_of::<tbc::tb_transfer_t>()
     );
     assert_eq!(
-        std::mem::size_of::<AccountFilter>(),
-        std::mem::size_of::<tbc::tb_account_filter_t>()
-    );
-    assert_eq!(
-        std::mem::align_of::<AccountFilter>(),
-        std::mem::align_of::<tbc::tb_account_filter_t>()
-    );
-    assert_eq!(
         std::mem::size_of::<AccountBalance>(),
         std::mem::size_of::<tbc::tb_account_balance_t>()
     );
     assert_eq!(
         std::mem::align_of::<AccountBalance>(),
         std::mem::align_of::<tbc::tb_account_balance_t>()
-    );
-    assert_eq!(
-        std::mem::size_of::<QueryFilter>(),
-        std::mem::size_of::<tbc::tb_query_filter_t>()
-    );
-    assert_eq!(
-        std::mem::align_of::<QueryFilter>(),
-        std::mem::align_of::<tbc::tb_query_filter_t>()
     );
 }
 
@@ -1158,20 +1122,7 @@ pub use tbc::TransferFlags;
 /// # Protocol reference
 ///
 /// [`AccountFilter`](https://docs.tigerbeetle.com/reference/account-filter).
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct AccountFilter {
-    pub account_id: u128,
-    pub user_data_128: u128,
-    pub user_data_64: u64,
-    pub user_data_32: u32,
-    pub code: u16,
-    pub reserved: Reserved<58>,
-    pub timestamp_min: u64,
-    pub timestamp_max: u64,
-    pub limit: u32,
-    pub flags: AccountFilterFlags,
-}
+pub use tbc::AccountFilter;
 
 /// Bitflags for the `flags` field of [`AccountFilter`].
 ///
@@ -1201,20 +1152,7 @@ pub struct AccountBalance {
 /// # Protocol reference
 ///
 /// [`QueryFilter`](https://docs.tigerbeetle.com/reference/query-filter/).
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct QueryFilter {
-    pub user_data_128: u128,
-    pub user_data_64: u64,
-    pub user_data_32: u32,
-    pub ledger: u32,
-    pub code: u16,
-    pub reserved: Reserved<6>,
-    pub timestamp_min: u64,
-    pub timestamp_max: u64,
-    pub limit: u32,
-    pub flags: QueryFilterFlags,
-}
+pub use tbc::QueryFilter;
 
 /// Bitflags for the `flags` field of [`QueryFilter`].
 ///
@@ -1236,37 +1174,7 @@ pub use tbc::QueryFilterFlags;
 /// # Protocol reference
 ///
 /// [`CreateAccountStatus`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum CreateAccountStatus {
-    Created,
-    LinkedEventFailed,
-    LinkedEventChainOpen,
-    ImportedEventExpected,
-    ImportedEventNotExpected,
-    TimestampMustBeZero,
-    ImportedEventTimestampOutOfRange,
-    ImportedEventTimestampMustNotAdvance,
-    ReservedField,
-    ReservedFlag,
-    IdMustNotBeZero,
-    IdMustNotBeIntMax,
-    ExistsWithDifferentFlags,
-    ExistsWithDifferentUserData128,
-    ExistsWithDifferentUserData64,
-    ExistsWithDifferentUserData32,
-    ExistsWithDifferentLedger,
-    ExistsWithDifferentCode,
-    Exists,
-    FlagsAreMutuallyExclusive,
-    DebitsPendingMustBeZero,
-    DebitsPostedMustBeZero,
-    CreditsPendingMustBeZero,
-    CreditsPostedMustBeZero,
-    LedgerMustNotBeZero,
-    CodeMustNotBeZero,
-    ImportedEventTimestampMustNotRegress,
-}
+pub use tbc::CreateAccountStatus;
 
 /// The result of a single [`create_accounts`] event, with index.
 ///
@@ -1275,57 +1183,7 @@ pub enum CreateAccountStatus {
 /// # Protocol reference
 ///
 /// [`CreateAccountStatus`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CreateAccountResult {
-    pub timestamp: u64,
-    pub status: CreateAccountStatus,
-}
-
-impl core::fmt::Display for CreateAccountStatus {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        match self {
-            Self::Created => f.write_str("created"),
-            Self::LinkedEventFailed => f.write_str("linked event failed"),
-            Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
-            Self::ImportedEventExpected => f.write_str("imported event expected"),
-            Self::ImportedEventNotExpected => f.write_str("imported event not expected"),
-            Self::TimestampMustBeZero => f.write_str("timestamp must be zero"),
-            Self::ImportedEventTimestampOutOfRange => {
-                f.write_str("imported event timestamp out of range")
-            }
-            Self::ImportedEventTimestampMustNotAdvance => {
-                f.write_str("imported event timestamp must not advance")
-            }
-            Self::ReservedField => f.write_str("reserved field"),
-            Self::ReservedFlag => f.write_str("reserved flag"),
-            Self::IdMustNotBeZero => f.write_str("id must not be zero"),
-            Self::IdMustNotBeIntMax => f.write_str("id must not be int max"),
-            Self::ExistsWithDifferentFlags => f.write_str("exists with different flags"),
-            Self::ExistsWithDifferentUserData128 => {
-                f.write_str("exists with different user_data_128")
-            }
-            Self::ExistsWithDifferentUserData64 => {
-                f.write_str("exists with different user_data_64")
-            }
-            Self::ExistsWithDifferentUserData32 => {
-                f.write_str("exists with different user_data_32")
-            }
-            Self::ExistsWithDifferentLedger => f.write_str("exists with different ledger"),
-            Self::ExistsWithDifferentCode => f.write_str("exists with different code"),
-            Self::Exists => f.write_str("exists"),
-            Self::FlagsAreMutuallyExclusive => f.write_str("flags are mutually exclusive"),
-            Self::DebitsPendingMustBeZero => f.write_str("debits_pending must be zero"),
-            Self::DebitsPostedMustBeZero => f.write_str("debits_posted must be zero"),
-            Self::CreditsPendingMustBeZero => f.write_str("credits_pending must be zero"),
-            Self::CreditsPostedMustBeZero => f.write_str("credits_posted must be zero"),
-            Self::LedgerMustNotBeZero => f.write_str("ledger must not be zero"),
-            Self::CodeMustNotBeZero => f.write_str("code must not be zero"),
-            Self::ImportedEventTimestampMustNotRegress => {
-                f.write_str("imported event timestamp must not regress")
-            }
-        }
-    }
-}
+pub use tbc::CreateAccountResult;
 
 /// The result of a single [`create_transfers`] event.
 ///
@@ -1340,78 +1198,7 @@ impl core::fmt::Display for CreateAccountStatus {
 /// # Protocol reference
 ///
 /// [`CreateTransferStatus`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
-pub enum CreateTransferStatus {
-    Created,
-    LinkedEventFailed,
-    LinkedEventChainOpen,
-    ImportedEventExpected,
-    ImportedEventNotExpected,
-    TimestampMustBeZero,
-    ImportedEventTimestampOutOfRange,
-    ImportedEventTimestampMustNotAdvance,
-    ReservedFlag,
-    IdMustNotBeZero,
-    IdMustNotBeIntMax,
-    ExistsWithDifferentFlags,
-    ExistsWithDifferentPendingId,
-    ExistsWithDifferentTimeout,
-    ExistsWithDifferentDebitAccountId,
-    ExistsWithDifferentCreditAccountId,
-    ExistsWithDifferentAmount,
-    ExistsWithDifferentUserData128,
-    ExistsWithDifferentUserData64,
-    ExistsWithDifferentUserData32,
-    ExistsWithDifferentLedger,
-    ExistsWithDifferentCode,
-    Exists,
-    IdAlreadyFailed,
-    FlagsAreMutuallyExclusive,
-    DebitAccountIdMustNotBeZero,
-    DebitAccountIdMustNotBeIntMax,
-    CreditAccountIdMustNotBeZero,
-    CreditAccountIdMustNotBeIntMax,
-    AccountsMustBeDifferent,
-    PendingIdMustBeZero,
-    PendingIdMustNotBeZero,
-    PendingIdMustNotBeIntMax,
-    PendingIdMustBeDifferent,
-    TimeoutReservedForPendingTransfer,
-    ClosingTransferMustBePending,
-    LedgerMustNotBeZero,
-    CodeMustNotBeZero,
-    DebitAccountNotFound,
-    CreditAccountNotFound,
-    AccountsMustHaveTheSameLedger,
-    TransferMustHaveTheSameLedgerAsAccounts,
-    PendingTransferNotFound,
-    PendingTransferNotPending,
-    PendingTransferHasDifferentDebitAccountId,
-    PendingTransferHasDifferentCreditAccountId,
-    PendingTransferHasDifferentLedger,
-    PendingTransferHasDifferentCode,
-    ExceedsPendingTransferAmount,
-    PendingTransferHasDifferentAmount,
-    PendingTransferAlreadyPosted,
-    PendingTransferAlreadyVoided,
-    PendingTransferExpired,
-    ImportedEventTimestampMustNotRegress,
-    ImportedEventTimestampMustPostdateDebitAccount,
-    ImportedEventTimestampMustPostdateCreditAccount,
-    ImportedEventTimeoutMustBeZero,
-    DebitAccountAlreadyClosed,
-    CreditAccountAlreadyClosed,
-    OverflowsDebitsPending,
-    OverflowsCreditsPending,
-    OverflowsDebitsPosted,
-    OverflowsCreditsPosted,
-    OverflowsDebits,
-    OverflowsCredits,
-    OverflowsTimeout,
-    ExceedsCredits,
-    ExceedsDebits,
-}
+pub use tbc::CreateTransferStatus;
 
 /// The result of a single [`create_transfers`] event, with index.
 ///
@@ -1420,133 +1207,12 @@ pub enum CreateTransferStatus {
 /// # Protocol reference
 ///
 /// [`CreateTransferStatus`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct CreateTransferResult {
-    pub timestamp: u64,
-    pub status: CreateTransferStatus,
-}
-
-impl core::fmt::Display for CreateTransferStatus {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        match self {
-            Self::Created => f.write_str("created"),
-            Self::LinkedEventFailed => f.write_str("linked event failed"),
-            Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
-            Self::ImportedEventExpected => f.write_str("imported event expected"),
-            Self::ImportedEventNotExpected => f.write_str("imported event not expected"),
-            Self::TimestampMustBeZero => f.write_str("timestamp must be zero"),
-            Self::ImportedEventTimestampOutOfRange => {
-                f.write_str("imported event timestamp out of range")
-            }
-            Self::ImportedEventTimestampMustNotAdvance => {
-                f.write_str("imported event timestamp must not advance")
-            }
-            Self::ReservedFlag => f.write_str("reserved flag"),
-            Self::IdMustNotBeZero => f.write_str("id must not be zero"),
-            Self::IdMustNotBeIntMax => f.write_str("id must not be int max"),
-            Self::ExistsWithDifferentFlags => f.write_str("exists with different flags"),
-            Self::ExistsWithDifferentPendingId => f.write_str("exists with different pending_id"),
-            Self::ExistsWithDifferentTimeout => f.write_str("exists with different timeout"),
-            Self::ExistsWithDifferentDebitAccountId => {
-                f.write_str("exists with different debit_account_id")
-            }
-            Self::ExistsWithDifferentCreditAccountId => {
-                f.write_str("exists with different credit_account_id")
-            }
-            Self::ExistsWithDifferentAmount => f.write_str("exists with different amount"),
-            Self::ExistsWithDifferentUserData128 => {
-                f.write_str("exists with different user_data_128")
-            }
-            Self::ExistsWithDifferentUserData64 => {
-                f.write_str("exists with different user_data_64")
-            }
-            Self::ExistsWithDifferentUserData32 => {
-                f.write_str("exists with different user_data_32")
-            }
-            Self::ExistsWithDifferentLedger => f.write_str("exists with different ledger"),
-            Self::ExistsWithDifferentCode => f.write_str("exists with different code"),
-            Self::Exists => f.write_str("exists"),
-            Self::IdAlreadyFailed => f.write_str("id already failed"),
-            Self::FlagsAreMutuallyExclusive => f.write_str("flags are mutually exclusive"),
-            Self::DebitAccountIdMustNotBeZero => f.write_str("debit_account_id must not be zero"),
-            Self::DebitAccountIdMustNotBeIntMax => {
-                f.write_str("debit_account_id must not be int max")
-            }
-            Self::CreditAccountIdMustNotBeZero => f.write_str("credit_account_id must not be zero"),
-            Self::CreditAccountIdMustNotBeIntMax => {
-                f.write_str("credit_account_id must not be int max")
-            }
-            Self::AccountsMustBeDifferent => f.write_str("accounts must be different"),
-            Self::PendingIdMustBeZero => f.write_str("pending_id must be zero"),
-            Self::PendingIdMustNotBeZero => f.write_str("pending_id must not be zero"),
-            Self::PendingIdMustNotBeIntMax => f.write_str("pending_id must not be int max"),
-            Self::PendingIdMustBeDifferent => f.write_str("pending_id must be different"),
-            Self::TimeoutReservedForPendingTransfer => {
-                f.write_str("timeout reserved for pending transfer")
-            }
-            Self::ClosingTransferMustBePending => f.write_str("closing transfer must be pending"),
-            Self::LedgerMustNotBeZero => f.write_str("ledger must not be zero"),
-            Self::CodeMustNotBeZero => f.write_str("code must not be zero"),
-            Self::DebitAccountNotFound => f.write_str("debit account not found"),
-            Self::CreditAccountNotFound => f.write_str("credit account not found"),
-            Self::AccountsMustHaveTheSameLedger => {
-                f.write_str("accounts must have the same ledger")
-            }
-            Self::TransferMustHaveTheSameLedgerAsAccounts => {
-                f.write_str("transfer must have the same ledger as accounts")
-            }
-            Self::PendingTransferNotFound => f.write_str("pending transfer not found"),
-            Self::PendingTransferNotPending => f.write_str("pending transfer not pending"),
-            Self::PendingTransferHasDifferentDebitAccountId => {
-                f.write_str("pending transfer has different debit_account_id")
-            }
-            Self::PendingTransferHasDifferentCreditAccountId => {
-                f.write_str("pending transfer has different credit_account_id")
-            }
-            Self::PendingTransferHasDifferentLedger => {
-                f.write_str("pending transfer has different ledger")
-            }
-            Self::PendingTransferHasDifferentCode => {
-                f.write_str("pending transfer has different code")
-            }
-            Self::ExceedsPendingTransferAmount => f.write_str("exceeds pending transfer amount"),
-            Self::PendingTransferHasDifferentAmount => {
-                f.write_str("pending transfer has different amount")
-            }
-            Self::PendingTransferAlreadyPosted => f.write_str("pending transfer already posted"),
-            Self::PendingTransferAlreadyVoided => f.write_str("pending transfer already voided"),
-            Self::PendingTransferExpired => f.write_str("pending transfer expired"),
-            Self::ImportedEventTimestampMustNotRegress => {
-                f.write_str("imported event timestamp must not regress")
-            }
-            Self::ImportedEventTimestampMustPostdateDebitAccount => {
-                f.write_str("imported event timestamp must postdate debit account")
-            }
-            Self::ImportedEventTimestampMustPostdateCreditAccount => {
-                f.write_str("imported event timestamp must postdate credit account")
-            }
-            Self::ImportedEventTimeoutMustBeZero => {
-                f.write_str("imported event timeout must be zero")
-            }
-            Self::DebitAccountAlreadyClosed => f.write_str("debit account already closed"),
-            Self::CreditAccountAlreadyClosed => f.write_str("credit account already closed"),
-            Self::OverflowsDebitsPending => f.write_str("overflows debits_pending"),
-            Self::OverflowsCreditsPending => f.write_str("overflows credits_pending"),
-            Self::OverflowsDebitsPosted => f.write_str("overflows debits_posted"),
-            Self::OverflowsCreditsPosted => f.write_str("overflows credits_posted"),
-            Self::OverflowsDebits => f.write_str("overflows debits"),
-            Self::OverflowsCredits => f.write_str("overflows credits"),
-            Self::OverflowsTimeout => f.write_str("overflows timeout"),
-            Self::ExceedsCredits => f.write_str("exceeds credits"),
-            Self::ExceedsDebits => f.write_str("exceeds debits"),
-        }
-    }
-}
+pub use tbc::CreateTransferResult;
 
 /// Errors resulting from constructing a [`Client`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum InitStatus {
+pub enum InitError {
     /// Some other unexpected error occurrred.
     Unexpected,
     /// Out of memory.
@@ -1563,8 +1229,8 @@ pub enum InitStatus {
     NetworkSubsystem,
 }
 
-impl std::error::Error for InitStatus {}
-impl core::fmt::Display for InitStatus {
+impl std::error::Error for InitError {}
+impl core::fmt::Display for InitError {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::Unexpected => f.write_str("unexpected"),
@@ -1583,7 +1249,7 @@ impl core::fmt::Display for InitStatus {
 /// then all operations in the request can be assumed to have not been processed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum PacketStatus {
+pub enum PacketError {
     /// Too many events were submitted to a multi-event request.
     TooMuchData,
     /// The client was evicted by the server.
@@ -1604,8 +1270,8 @@ pub enum PacketStatus {
     InvalidDataSize,
 }
 
-impl std::error::Error for PacketStatus {}
-impl core::fmt::Display for PacketStatus {
+impl std::error::Error for PacketError {}
+impl core::fmt::Display for PacketError {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::TooMuchData => f.write_str("too much data"),
@@ -1651,15 +1317,7 @@ impl core::fmt::Display for NotFound {
 ///
 /// This type is instantiated with [`Default::default`] and typically
 /// does not need to be used directly.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Reserved<const N: usize>([u8; N]);
-
-impl<const N: usize> Default for Reserved<N> {
-    fn default() -> Reserved<N> {
-        Reserved([0; N])
-    }
-}
+pub use tbc::Reserved;
 
 fn create_packet<Event>(
     op: u8, // TB_OPERATION
@@ -1702,7 +1360,7 @@ where
 
 fn handle_message<CEvent, CResult>(
     msg: &CompletionMessage<CEvent>,
-) -> Result<&[CResult], PacketStatus> {
+) -> Result<&[CResult], PacketError> {
     let packet = &msg.packet.0;
     let result = &msg.result;
 

@@ -967,6 +967,7 @@ const Workload = struct {
             workload.driver.stdin.?.handle,
             workload.request_buffer[workload.request_written.?..workload.request_size.?],
             0,
+            .{ .dsync = true }, // Meaningless when not writing to a real file.
         );
     }
 

@@ -5,6 +5,7 @@ comptime {
     _ = @import("cdc/runner.zig");
     _ = @import("clients/c/tb_client.zig");
     _ = @import("clients/c/tb_client/context.zig");
+    _ = @import("clients/c/tb_client/packet.zig");
     _ = @import("clients/c/tb_client/signal.zig");
     _ = @import("clients/c/test.zig");
     _ = @import("copyhound.zig");

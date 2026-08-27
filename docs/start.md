@@ -72,7 +72,7 @@ the storage misbehaves.
 ## Connecting to a Cluster
 
 Now that the cluster is running, we can connect to it using a client. TigerBeetle has
-clients for several popular programming languages, including [Python](https://docs.tigerbeetle.com/coding/clients/python/), [Java](https://docs.tigerbeetle.com/coding/clients/java/), [Node.js](https://docs.tigerbeetle.com/coding/clients/node/), [.Net](https://docs.tigerbeetle.com/coding/clients/dotnet/), and [Go](https://docs.tigerbeetle.com/coding/clients/go/), and more
+clients for several popular programming languages, including [Python](https://docs.tigerbeetle.com/coding/clients/python/), [Java](https://docs.tigerbeetle.com/coding/clients/java/), [Node.js](https://docs.tigerbeetle.com/coding/clients/node/), [.Net](https://docs.tigerbeetle.com/coding/clients/dotnet/), [Rust](https://docs.tigerbeetle.com/coding/clients/rust/), [Ruby](https://docs.tigerbeetle.com/coding/clients/ruby/) and [Go](https://docs.tigerbeetle.com/coding/clients/go/), and more
 are coming; see the [Coding](./coding) section for details. For this tutorial, we'll keep it simple
 and connect to the cluster using the built-in CLI client. In a separate terminal, start a REPL with:
 

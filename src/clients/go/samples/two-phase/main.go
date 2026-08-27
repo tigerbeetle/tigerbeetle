@@ -9,8 +9,6 @@ import (
 	. "github.com/tigerbeetle/tigerbeetle-go"
 )
 
-// Since we only require Go 1.17 we can't do this as a generic function
-// even though that would be fine. So do the dynamic approach for now.
 func assert(a, b interface{}, field string) {
 	if !reflect.DeepEqual(a, b) {
 		log.Fatalf("Expected %s to be [%+v (%T)], got: [%+v (%T)]", field, b, b, a, a)

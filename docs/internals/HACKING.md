@@ -65,9 +65,7 @@ See [./testing.md](./testing.md) for the explanation of the output format.
 
 In addition to the standard GitHub CI infrastructure that is used for tests and merge queue, we
 employ a cluster of machines for continuous fuzzing, via the Continuous Fuzzing Orchestrator
-([/src/scripts/cfo.zig](/src/scripts/cfo.zig)). You can see the results on devhub:
-
-<https://devhub.tigerbeetle.com>
+([/src/scripts/cfo.zig](/src/scripts/cfo.zig)). You can see the results on devhub.
 
 To direct CFO's eye of Sauron towards your PR, apply one of `fuzz` labels, e.g.,
 [`fuzz vopr`](https://github.com/tigerbeetle/tigerbeetle/labels/fuzz%20vopr).

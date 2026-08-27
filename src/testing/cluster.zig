@@ -456,11 +456,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     options.cluster.releases[0].release,
                 );
 
-                // Nonces are incremented on restart, so spread them out across 128 bit space
-                // to avoid collisions.
-                const nonce = (@as(u128, replica_index) << 64) + 1;
                 try cluster.replica_open(@intCast(replica_index), .{
-                    .nonce = nonce,
+                    .random_nonce = prng.int(u128),
                     .release = options.cluster.releases[0].release,
                 });
             }
@@ -666,7 +663,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             defer assert(cluster.replica_upgrades[replica_index] == null);
 
             try cluster.replica_open(replica_index, .{
-                .nonce = cluster.replicas[replica_index].nonce + 1,
+                .random_nonce = cluster.prng.int(u128),
                 .release = cluster.replica_releases_bundled[replica_index].last(),
             });
             cluster.replica_enable(replica_index);
@@ -706,7 +703,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn replica_open(cluster: *Cluster, replica_index: u8, options: struct {
-            nonce: u128,
+            random_nonce: u128,
             release: vsr.Release,
         }) !void {
             const release_client_min = for (cluster.options.releases) |release| {
@@ -742,7 +739,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .aof_recovery = false,
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
-                    .nonce = options.nonce,
+                    .random_nonce = options.random_nonce,
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
                     .release = options.release,
@@ -840,7 +837,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 defer cluster.storages[replica_index].faulty = faulty;
 
                 cluster.replica_open(replica_index, .{
-                    .nonce = cluster.replicas[replica_index].nonce + 1,
+                    .random_nonce = cluster.prng.int(u128),
                     .release = release,
                 }) catch |err| {
                     log.err("{}: release_execute failed: error={}", .{ replica_index, err });

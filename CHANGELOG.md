@@ -3,6 +3,30 @@
 Subscribe to the [announcements issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes and critical issues!
 
+## TigerBeetle (unreleased)
+
+Released: 2026-07-10
+
+### Features
+
+- [#3857](https://github.com/tigerbeetle/tigerbeetle/pull/3857)
+
+  Report the maximum LSM forest table counts in the tigerbeetle inspect tool.
+
+### Internals
+
+- [#3861](https://github.com/tigerbeetle/tigerbeetle/pull/3861)
+
+  Introduce explicit memory limits per zig build step to prevent out-of-memory errors in the CI.
+
+- [#3855](https://github.com/tigerbeetle/tigerbeetle/pull/3855)
+
+  Move micro-benchmarking tooling into `stdx` and add a microbenchmark for the radix sort.
+
+### TigerTracks 🎧
+
+- [I'd love to Change the World](https://open.spotify.com/track/7n3WO6ESKS1uCI9fgkGs66)
+
 ## TigerBeetle 0.17.9
 
 Released: 2026-07-03
@@ -85,7 +109,7 @@ Released: 2026-07-03
 
 - [#3817](https://github.com/tigerbeetle/tigerbeetle/pull/3817)
 
-  Workaround MacOS builds on Zig 0.14.1 (see [issue](ttps://codeberg.org/ziglang/zig/issues/31658)).
+  Workaround MacOS builds on Zig 0.14.1 (see [issue](https://codeberg.org/ziglang/zig/issues/31658)).
 
 ### TigerTracks 🎧
 
@@ -3174,7 +3198,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 ### Internals
 - [#2713](https://github.com/tigerbeetle/tigerbeetle/pull/2713)
 
-  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md) from
+  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/internals/talks.md) from
   SystemsDistributed '23, P99 CONF '23, Money2020 '24, and SYCL '24.
 
 - [#2710](https://github.com/tigerbeetle/tigerbeetle/pull/2710)
