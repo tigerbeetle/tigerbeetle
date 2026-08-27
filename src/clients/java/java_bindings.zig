@@ -286,11 +286,8 @@ fn emit_enum(
             \\
         , .{
             .enum_name = stdx.to_case(field.name, .PascalCase),
-            .int_cast = int_cast: {
-                // Explicitly cast numeric literals to types other than `int`.
-                if (std.mem.eql(u8, int_type, "int")) break :int_cast "";
-                break :int_cast "(" ++ int_type ++ ")";
-            },
+            // Explicitly cast numeric literals to types other than `int`.
+            .int_cast = if (std.mem.eql(u8, int_type, "int")) "" else "(" ++ int_type ++ ")",
             .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})
             else
