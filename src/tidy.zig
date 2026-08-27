@@ -1418,7 +1418,6 @@ test "tidy unix permissions" {
         "zig/download.ps1",
         "zig/download.sh",
         ".github/ci/test_aof.sh",
-        "src/scripts/cfo_supervisor.sh",
     };
 
     const allocator = std.testing.allocator;
@@ -1480,7 +1479,6 @@ test "tidy extensions" {
         .{"zig/download.sh"},
         .{"zig/download.ps1"},
         .{"zig/download.win.ps1"},
-        .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
         .{"src/clients/python/src/tigerbeetle/py.typed"},
