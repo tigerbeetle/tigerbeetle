@@ -188,7 +188,7 @@ fn create(
     };
     errdefer global_allocator.destroy(client);
 
-    tb_client.init(
+    tb_client.Context.init(
         global_allocator,
         client,
         cluster_id,

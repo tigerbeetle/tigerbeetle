@@ -67,7 +67,7 @@ const NativeClient = struct {
         defer env.release_string_utf_chars(addresses_obj, addresses.ptr);
 
         const jvm = JNIHelper.get_java_vm(env);
-        tb.init(
+        tb.Context.init(
             global_allocator,
             client,
             cluster_id,
