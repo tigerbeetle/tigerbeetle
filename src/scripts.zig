@@ -14,7 +14,6 @@ const std = @import("std");
 const stdx = @import("stdx");
 const Shell = stdx.Shell;
 
-const cfo = @import("./scripts/cfo.zig");
 const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
@@ -35,7 +34,6 @@ pub fn log_fn(
 pub const std_options: std.Options = .{ .logFn = log_fn };
 
 const CLIArgs = union(enum) {
-    cfo: cfo.CLIArgs,
     ci: ci.CLIArgs,
     release: release.CLIArgs,
     devhub: devhub.CLIArgs,
@@ -49,8 +47,6 @@ const CLIArgs = union(enum) {
         \\  zig build scripts -- [-h | --help]
         \\
         \\  zig build scripts -- changelog
-        \\
-        \\  zig build scripts -- cfo [--budget=<duration>] [--refresh=<duration>] [--concurrency=<n>]
         \\
         \\  zig build scripts -- ci [--language=<dotnet|go|rust|java|node|python>] [--validate-release]
         \\                          [--build-docs]
@@ -97,7 +93,6 @@ pub fn main() !void {
     const cli_args = flags.parse(CLIArgs);
 
     switch (cli_args) {
-        .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
