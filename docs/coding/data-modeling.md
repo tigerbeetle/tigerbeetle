@@ -197,7 +197,7 @@ advantage of LSM optimizations, which leads to higher database throughput.
 
 TigerBeetle clients include an `id()` function to generate IDs using the recommended scheme.
 
-TigerBeetle ID is a 128-bit number where:
+TigerBeetle ID (TBID) is a 128-bit number where:
 
 - the high 48 bits are a millisecond timestamp
 - the low 80 bits are random.
