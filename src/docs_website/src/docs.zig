@@ -208,7 +208,7 @@ fn write_single_page(
 
     const single_page = website.write_page(.{
         .page_path = "single-page/",
-        .include_search = false,
+        .include_search = true,
         .nav = nav_html.string(),
         .content = run_single_page_writer.captureStdOut(),
     });
