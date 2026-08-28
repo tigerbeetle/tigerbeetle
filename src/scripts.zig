@@ -20,6 +20,7 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
 const amqp = @import("./scripts/amqp.zig");
+const tb_client = @import("./scripts/tb_client.zig");
 
 pub fn log_fn(
     comptime message_level: std.log.Level,
@@ -40,6 +41,7 @@ const CLIArgs = union(enum) {
     devhub: devhub.CLIArgs,
     changelog: void,
     amqp: amqp.CLIArgs,
+    tbclient: tb_client.CLIArgs,
 
     pub const help =
         \\Usage:
@@ -101,5 +103,6 @@ pub fn main() !void {
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .changelog => try changelog.main(shell, gpa),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
+        .tbclient => |args_tb_client| try tb_client.main(gpa, args_tb_client),
     }
 }

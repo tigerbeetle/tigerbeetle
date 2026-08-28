@@ -23,14 +23,14 @@ enum PacketStatus {
 
     public static PacketStatus fromValue(byte value) {
         switch (value) {
-            case 0: return Ok;
-            case 1: return TooMuchData;
-            case 2: return ClientEvicted;
-            case 3: return ClientReleaseTooLow;
-            case 4: return ClientReleaseTooHigh;
-            case 5: return ClientShutdown;
-            case 6: return InvalidOperation;
-            case 7: return InvalidDataSize;
+            case (byte)0: return Ok;
+            case (byte)1: return TooMuchData;
+            case (byte)2: return ClientEvicted;
+            case (byte)3: return ClientReleaseTooLow;
+            case (byte)4: return ClientReleaseTooHigh;
+            case (byte)5: return ClientShutdown;
+            case (byte)6: return InvalidOperation;
+            case (byte)7: return InvalidDataSize;
             default: throw new IllegalArgumentException(
                 String.format("Invalid PacketStatus value=%d", value));
         }

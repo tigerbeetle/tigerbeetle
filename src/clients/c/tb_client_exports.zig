@@ -108,36 +108,7 @@ pub fn init(
         break :blk cluster_id;
     };
 
-    tb.init(
-        std.heap.c_allocator,
-        tb_client_out.cast(),
-        cluster_id,
-        addresses,
-        completion_ctx,
-        completion_callback,
-    ) catch |err| return init_error_to_status(err);
-    return .success;
-}
-
-pub fn init_echo(
-    tb_client_out: *tb_client_t,
-    cluster_id_ptr: *const [16]u8,
-    addresses_ptr: [*:0]const u8,
-    addresses_len: u32,
-    completion_ctx: usize,
-    completion_callback: tb_completion_t,
-) callconv(.c) tb_init_status {
-    const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
-
-    // See explanation in init().
-    const cluster_id: u128 = blk: {
-        var cluster_id: u128 = undefined;
-        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&cluster_id), cluster_id_ptr);
-
-        break :blk cluster_id;
-    };
-
-    tb.init_echo(
+    tb.Context.init(
         std.heap.c_allocator,
         tb_client_out.cast(),
         cluster_id,

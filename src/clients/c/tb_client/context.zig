@@ -153,9 +153,11 @@ pub const InitError = std.mem.Allocator.Error || error{
     NetworkSubsystemFailed,
 };
 
-/// Implements a `ClientInterface` with specialized `vsr.Client` and `StateMachine` types.
+/// Implements a `ClientInterface` with specialized `vsr.Client` and
+/// `StateMachine.Operation` types.
 pub fn ContextType(
     comptime Client: type,
+    comptime operations_allowed: []const Client.Operation,
 ) type {
     return struct {
         /// Thread-local variable to track whether the current thread is
@@ -199,17 +201,6 @@ pub fn ContextType(
         });
 
         const Operation = Client.Operation;
-        const operations_allowed: []const Operation = &.{
-            .create_accounts,
-            .create_transfers,
-            .lookup_accounts,
-            .lookup_transfers,
-            .get_account_transfers,
-            .get_account_balances,
-            .query_accounts,
-            .query_transfers,
-            .get_change_events,
-        };
 
         const UserData = extern struct {
             self: *Context,
@@ -969,6 +960,7 @@ const Locker = extern struct {
 };
 
 const testing = std.testing;
+
 test "Locker: smoke test" {
     var locker = Locker{};
 

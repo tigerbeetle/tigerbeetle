@@ -489,18 +489,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern InitializationStatus tb_client_init_echo(
-        \\        TBClient* out_client,
-        \\        UInt128Extensions.UnsafeU128* cluster_id,
-        \\        byte* address_ptr,
-        \\        uint address_len,
-        \\        IntPtr completion_ctx,
-        \\        delegate* unmanaged[Cdecl]<IntPtr,
-        \\                                   TBPacket*, ulong,
-        \\                                   byte*, uint, void> completion_callback
-        \\    );
-        \\
-        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\    public static unsafe extern ClientStatus tb_client_submit(
         \\        TBClient* client,
         \\        TBPacket* packet

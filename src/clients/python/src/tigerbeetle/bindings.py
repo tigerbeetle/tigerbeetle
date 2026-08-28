@@ -660,15 +660,7 @@ tb_client_init.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint
                            ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
                            OnCompletion]
 
-# Initialize a new TigerBeetle client which echos back any data submitted.
-tb_client_init_echo = tbclient.tb_client_init_echo
-tb_client_init_echo.restype = InitStatus
-tb_client_init_echo.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
-                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
-                                OnCompletion]
-
-# Returns the cluster_id and addresses passed in to either tb_client_init or
-# tb_client_init_echo.
+# Returns the cluster_id and addresses passed in to either tb_client_init.
 tb_client_init_parameters = tbclient.tb_client_init_parameters
 tb_client_init_parameters.restype = ClientStatus
 tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),

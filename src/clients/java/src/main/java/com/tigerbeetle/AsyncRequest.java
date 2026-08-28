@@ -18,7 +18,7 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
 
     private final CompletableFuture<TResponse> future;
 
-    AsyncRequest(final NativeClient nativeClient, final Operations operation, final Batch batch) {
+    AsyncRequest(final NativeClient nativeClient, final TBOperation operation, final Batch batch) {
         super(nativeClient, operation, batch);
 
         future = new CompletableFuture<TResponse>();
@@ -26,62 +26,48 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
 
     public static AsyncRequest<CreateAccountResultBatch> createAccounts(
             final NativeClient nativeClient, final AccountBatch batch) {
-        return new AsyncRequest<CreateAccountResultBatch>(nativeClient,
-                Request.Operations.CREATE_ACCOUNTS, batch);
+        return new AsyncRequest<CreateAccountResultBatch>(nativeClient, TBOperation.CreateAccounts,
+                batch);
     }
 
     public static AsyncRequest<AccountBatch> lookupAccounts(final NativeClient nativeClient,
             final IdBatch batch) {
-        return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.LOOKUP_ACCOUNTS,
-                batch);
+        return new AsyncRequest<AccountBatch>(nativeClient, TBOperation.LookupAccounts, batch);
     }
 
     public static AsyncRequest<CreateTransferResultBatch> createTransfers(
             final NativeClient nativeClient, final TransferBatch batch) {
         return new AsyncRequest<CreateTransferResultBatch>(nativeClient,
-                Request.Operations.CREATE_TRANSFERS, batch);
+                TBOperation.CreateTransfers, batch);
     }
 
     public static AsyncRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,
             final IdBatch batch) {
-        return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.LOOKUP_TRANSFERS,
-                batch);
+        return new AsyncRequest<TransferBatch>(nativeClient, TBOperation.LookupTransfers, batch);
     }
 
     public static AsyncRequest<TransferBatch> getAccountTransfers(final NativeClient nativeClient,
             final AccountFilter filter) {
-        return new AsyncRequest<TransferBatch>(nativeClient,
-                Request.Operations.GET_ACCOUNT_TRANSFERS, filter.batch);
+        return new AsyncRequest<TransferBatch>(nativeClient, TBOperation.GetAccountTransfers,
+                filter.batch);
     }
 
     public static AsyncRequest<AccountBalanceBatch> getAccountBalances(
             final NativeClient nativeClient, final AccountFilter filter) {
-        return new AsyncRequest<AccountBalanceBatch>(nativeClient,
-                Request.Operations.GET_ACCOUNT_BALANCES, filter.batch);
+        return new AsyncRequest<AccountBalanceBatch>(nativeClient, TBOperation.GetAccountBalances,
+                filter.batch);
     }
 
     public static AsyncRequest<AccountBatch> queryAccounts(final NativeClient nativeClient,
             final QueryFilter filter) {
-        return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.QUERY_ACCOUNTS,
+        return new AsyncRequest<AccountBatch>(nativeClient, TBOperation.QueryAccounts,
                 filter.batch);
     }
 
     public static AsyncRequest<TransferBatch> queryTransfers(final NativeClient nativeClient,
             final QueryFilter filter) {
-        return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.QUERY_TRANSFERS,
+        return new AsyncRequest<TransferBatch>(nativeClient, TBOperation.QueryTransfers,
                 filter.batch);
-    }
-
-    public static AsyncRequest<AccountBatch> echo(final NativeClient nativeClient,
-            final AccountBatch batch) {
-        return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.ECHO_ACCOUNTS,
-                batch);
-    }
-
-    public static AsyncRequest<TransferBatch> echo(final NativeClient nativeClient,
-            final TransferBatch batch) {
-        return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.ECHO_TRANSFERS,
-                batch);
     }
 
     public CompletableFuture<TResponse> getFuture() {

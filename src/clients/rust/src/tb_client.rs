@@ -3,7 +3,7 @@
  //              Do not manually modify.              //
  ///////////////////////////////////////////////////////
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct AccountFlags(pub u16);
@@ -43,7 +43,7 @@ pub struct tb_account_t {
     pub timestamp: u64,
 }
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct TransferFlags(pub u16);
@@ -456,7 +456,7 @@ pub struct AccountFilter {
     pub flags: AccountFilterFlags,
 }
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct AccountFilterFlags(pub u32);
@@ -501,7 +501,7 @@ pub struct QueryFilter {
     pub flags: QueryFilterFlags,
 }
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct QueryFilterFlags(pub u32);
@@ -619,27 +619,7 @@ extern "C" {
         >,
     ) -> TB_INIT_STATUS;
 
-    // Initialize a new TigerBeetle client which echos back any data submitted.
-    pub fn tb_client_init_echo(
-        client_out: *mut tb_client_t,
-        // 128-bit unsigned integer represented as a 16-byte little-endian array.
-        cluster_id: *const [u8; 16],
-        address_ptr: *const ::std::os::raw::c_char,
-        address_len: u32,
-        completion_ctx: usize,
-        completion_callback: ::std::option::Option<
-            unsafe extern "C" fn(
-                arg1: usize,
-                arg3: *mut tb_packet_t,
-                arg4: u64,
-                arg5: *const u8,
-                arg6: u32,
-            ),
-        >,
-    ) -> TB_INIT_STATUS;
-
-    // Retrieve the callback context initially passed into `tb_client_init` or
-    // `tb_client_init_echo`.
+    // Retrieve the callback context initially passed into `tb_client_init`.
     pub fn tb_client_completion_context(
         client: *mut tb_client_t,
         completion_ctx_out: *mut usize,

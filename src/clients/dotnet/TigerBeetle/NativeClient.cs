@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using static TigerBeetle.AssertionException;
 using static TigerBeetle.Native;
+using UnsafeU128 = TigerBeetle.UInt128Extensions.UnsafeU128;
 
 namespace TigerBeetle;
 
@@ -15,46 +16,16 @@ internal sealed class NativeClient : IDisposable
     /// </summary>
     private readonly TBClient[] tb_client;
 
-    private unsafe delegate InitializationStatus InitFunction(
-                TBClient* out_client,
-                UInt128Extensions.UnsafeU128* cluster_id,
-                byte* address_ptr,
-                uint address_len,
-                IntPtr completion_ctx,
-                delegate* unmanaged[Cdecl]<IntPtr, TBPacket*, ulong, byte*, uint, void> completion_callback
-            );
-
     private NativeClient(TBClient[] tb_client)
     {
         AssertTrue(tb_client.Length == 1);
         this.tb_client = tb_client;
     }
 
-    private static byte[] GetBytes(string[] addresses)
-    {
-        if (addresses == null) throw new ArgumentNullException(nameof(addresses));
-        return Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
-    }
-
     public static NativeClient Init(UInt128 clusterID, string[] addresses)
     {
-        unsafe
-        {
-            return CallInit(tb_client_init, clusterID, addresses);
-        }
-    }
-
-    public static NativeClient InitEcho(UInt128 clusterID, string[] addresses)
-    {
-        unsafe
-        {
-            return CallInit(tb_client_init_echo, clusterID, addresses);
-        }
-    }
-
-    private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses)
-    {
-        var addressesBytes = GetBytes(addresses);
+        if (addresses == null) throw new ArgumentNullException(nameof(addresses));
+        var addressesBytes = Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
         unsafe
         {
             // Creating a pinned, single-item array to hold the client handle.
@@ -64,9 +35,9 @@ internal sealed class NativeClient : IDisposable
             fixed (TBClient* client = &tb_client[0])
             fixed (byte* addressPtr = addressesBytes)
             {
-                var status = initFunction(
+                var status = tb_client_init(
                     client,
-                    &clusterID,
+                    (UnsafeU128*)&clusterID,
                     addressPtr,
                     (uint)addressesBytes.Length - 1,
                     IntPtr.Zero,
