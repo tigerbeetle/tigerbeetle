@@ -70,7 +70,7 @@ fn dump_record(record: ast.Record) void {
     print("{s}{{", .{@tagName(record.type)});
     for (record.fields, 0..) |field, index| {
         if (index > 0) print(",", .{});
-        print(" .{s} = ", .{field.name});
+        print(" .{s} = ", .{field.field.name});
         dump_expression(field.value);
     }
     print(" }}", .{});
@@ -91,18 +91,24 @@ fn dump_assertion(assertion: ast.Assertion) void {
         .ascending => |ids| print("assert_ascending({s})", .{ids}),
         .equal_field => |equal_field| {
             print("assert_equal({s}.{s}, ", .{
-                equal_field.reference,
-                equal_field.field.name,
+                equal_field.actual.reference,
+                equal_field.actual.field.name,
             });
-            dump_expression(equal_field.field.value);
+            switch (equal_field.expected) {
+                .expression => |expression| dump_expression(expression),
+                .field_reference => |field| print("{s}.{s}", .{
+                    field.reference,
+                    field.field.name,
+                }),
+            }
             print(")", .{});
         },
         .greater_than => |greater_than| {
             print("assert_greater_than({s}.{s}, ", .{
-                greater_than.reference,
-                greater_than.field.name,
+                greater_than.actual.reference,
+                greater_than.actual.field.name,
             });
-            dump_expression(greater_than.field.value);
+            dump_expression(greater_than.expected.expression);
             print(")", .{});
         },
         .fail => |call| {

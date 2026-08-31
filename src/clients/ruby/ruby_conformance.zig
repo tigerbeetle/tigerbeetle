@@ -22,6 +22,7 @@ pub fn main(init: std.process.Init) !void {
 fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => true,
+        .requires_fractional_amounts => true,
     };
 }
 
@@ -80,23 +81,24 @@ fn emit_binding(formatter: Formatter, writer: *std.Io.Writer, binding: ast.Bindi
             try emit_binding_value(formatter, writer, binding.name, binding.value);
         },
         .record => |record| switch (record.type) {
-            .U128, .AccountFlags, .AccountFilterFlags, .QueryFilterFlags, .TransferFlags => {
-                try emit_binding_value(formatter, writer, binding.name, binding.value);
-            },
-            .Account,
-            .AccountBalance,
-            .AccountFilter,
-            .CreateAccountResult,
-            .CreateTransferResult,
-            .QueryFilter,
-            .Transfer,
-            => {
+            .U128 => try emit_binding_value(formatter, writer, binding.name, binding.value),
+            .Account, .Transfer => {
                 const prefix = try std.fmt.allocPrint(formatter.arena, "{s} = ", .{binding.name});
                 try emit_record(formatter, writer, record, .{
                     .indent_level = formatter.statement_level,
                     .prefix = prefix,
                 });
             },
+            .AccountBalance,
+            .AccountFilter,
+            .AccountFilterFlags,
+            .AccountFlags,
+            .CreateAccountResult,
+            .CreateTransferResult,
+            .QueryFilter,
+            .QueryFilterFlags,
+            .TransferFlags,
+            => unreachable,
         },
         .call => |call| {
             const prefix = try std.fmt.allocPrint(formatter.arena, "{s} = ", .{binding.name});
@@ -159,14 +161,14 @@ fn emit_invocation(
         .close_client => {
             assert(options.prefix.len == 0);
             try formatter.write_indent(writer, .{ .level = options.indent_level });
-            try writer.print("{s}@client.close\n", .{options.prefix});
+            try writer.writeAll("@client.close\n");
         },
         .sleep_ms => {
             assert(options.prefix.len == 0);
             assert(call.arguments.len == 1);
             const ms = try render_expression(formatter, call.arguments[0]);
             try formatter.write_indent(writer, .{ .level = options.indent_level });
-            try writer.print("{s}sleep({s} / 1000.0)\n", .{ options.prefix, ms });
+            try writer.print("sleep({s} / 1000.0)\n", .{ms});
         },
         .create_accounts, .create_transfers, .lookup_accounts, .lookup_transfers => {
             if (!arguments_contain_record(call)) {
@@ -226,9 +228,14 @@ fn emit_record(
     try formatter.write_indent(writer, .{ .level = options.indent_level });
     try writer.print("{s}TigerBeetle::{s}.new(\n", .{ options.prefix, @tagName(record.type) });
     for (record.fields, 0..) |field, index| {
-        const value = try render_field_value(formatter, field, options.indent_level + 2);
+        const value = try render_typed_value(
+            formatter,
+            field.field,
+            field.value,
+            options.indent_level + 2,
+        );
         try formatter.write_indent(writer, .{ .level = options.indent_level + 1 });
-        try writer.print("{s}: {s}", .{ field.name, value });
+        try writer.print("{s}: {s}", .{ field.field.name, value });
         if (index < record.fields.len - 1) try writer.writeAll(",");
         try writer.writeAll("\n");
     }
@@ -249,14 +256,15 @@ fn emit_assertion(
             });
             for (equal.expected, 0..) |record, index| {
                 for (record.fields) |field| {
-                    const value = try render_field_value(
+                    const value = try render_typed_value(
                         formatter,
-                        field,
+                        field.field,
+                        field.value,
                         formatter.statement_level + 1,
                     );
                     try formatter.write_indent(writer, .{ .level = formatter.statement_level });
                     try writer.print("assert_equal({s}, {s}[{d}].{s})\n", .{
-                        value, equal.actual, index, field.name,
+                        value, equal.actual, index, field.field.name,
                     });
                 }
             }
@@ -274,18 +282,22 @@ fn emit_assertion(
             try writer.print("{s}.each_cons(2) {{ |a, b| assert_operator(a, :<, b) }}\n", .{ids});
         },
         .equal_field => |comparison| {
-            const actual = try render_field_reference(formatter, comparison);
-            const value = try render_field_value(
-                formatter,
-                comparison.field,
-                formatter.statement_level + 1,
-            );
+            const actual = try render_field_access(formatter, comparison.actual);
+            const value = switch (comparison.expected) {
+                .expression => |expression| try render_typed_value(
+                    formatter,
+                    comparison.actual.field,
+                    expression,
+                    formatter.statement_level + 1,
+                ),
+                .field_reference => |field| try render_field_access(formatter, field),
+            };
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("assert_equal({s}, {s})\n", .{ value, actual });
         },
         .greater_than => |comparison| {
-            const actual = try render_field_reference(formatter, comparison);
-            const value = try render_expression(formatter, comparison.field.value);
+            const actual = try render_field_access(formatter, comparison.actual);
+            const value = try render_expression(formatter, comparison.expected.expression);
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("assert_operator({s}, :>, {s})\n", .{ actual, value });
         },
@@ -301,12 +313,13 @@ fn emit_assertion(
     }
 }
 
-fn render_field_reference(
+fn render_field_access(
     formatter: Formatter,
-    comparison: ast.Assertion.FieldComparison,
+    reference: ast.Assertion.FieldReference,
 ) ![]const u8 {
     return std.fmt.allocPrint(formatter.arena, "{s}.{s}", .{
-        comparison.reference, comparison.field.name,
+        reference.reference,
+        reference.field.name,
     });
 }
 
@@ -387,18 +400,19 @@ fn render_flags(
             try text.writer.splatByteAll(' ', continuation_indent_level * formatter.indent_width);
         }
         try text.writer.print("TigerBeetle::{s}::{s}", .{
-            @tagName(record.type), try formatter.to_case(.UPPER_CASE, field.name),
+            @tagName(record.type), try formatter.to_case(.UPPER_CASE, field.field.name),
         });
     }
     return text.written();
 }
 
-fn render_field_value(
+fn render_typed_value(
     formatter: Formatter,
     field: ast.Field,
+    value: ast.Expression,
     continuation_indent_level: u32,
 ) ![]const u8 {
-    switch (field.value) {
+    switch (value) {
         .enum_literal => |literal| {
             return std.fmt.allocPrint(formatter.arena, "TigerBeetle::{s}::{s}", .{
                 field.type.enum_name,
@@ -408,8 +422,8 @@ fn render_field_value(
         .record => |record| if (ast.Record.is_flags(record.type)) {
             return render_flags(formatter, record, continuation_indent_level);
         } else {
-            return render_expression(formatter, field.value);
+            return render_expression(formatter, value);
         },
-        else => return render_expression(formatter, field.value),
+        else => return render_expression(formatter, value),
     }
 }
