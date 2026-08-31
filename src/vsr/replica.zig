@@ -7176,37 +7176,11 @@ pub fn ReplicaType(
         /// Returns `null` for ops which are too far in the past/future to know their checkpoint
         /// ids.
         fn checkpoint_id_for_op(self: *const Replica, op: u64) ?u128 {
-            const checkpoint_now = self.op_checkpoint_sync();
-            const checkpoint_next_1 = vsr.Checkpoint.checkpoint_after(checkpoint_now);
-            const checkpoint_next_2 = vsr.Checkpoint.checkpoint_after(checkpoint_next_1);
-
             const checkpoint: *const vsr.CheckpointState = if (self.syncing == .updating_checkpoint)
                 &self.syncing.updating_checkpoint
             else
                 &self.superblock.working.vsr_state.checkpoint;
-
-            if (op + constants.vsr_checkpoint_ops <= checkpoint_now) {
-                // Case 1: op is from a too distant past for us to know its checkpoint id.
-                return null;
-            }
-
-            if (op <= checkpoint_now) {
-                // Case 2: op is from the previous checkpoint whose id we still remember.
-                return checkpoint.grandparent_checkpoint_id;
-            }
-
-            if (op <= checkpoint_next_1) {
-                // Case 3: op is in the current checkpoint.
-                return checkpoint.parent_checkpoint_id;
-            }
-
-            if (op <= checkpoint_next_2) {
-                // Case 4: op is in the next checkpoint (which we have not checkpointed).
-                return vsr.checksum(std.mem.asBytes(checkpoint));
-            }
-
-            // Case 5: op is from the too far future for us to know anything!
-            return null;
+            return checkpoint.checkpoint_id_for_op(op);
         }
 
         /// Returns the oldest op that the replica must/(is permitted to) repair.
