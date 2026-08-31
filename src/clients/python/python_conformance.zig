@@ -26,6 +26,7 @@ pub fn main(init: std.process.Init) !void {
 fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => true,
+        .requires_fractional_amounts => true,
     };
 }
 
@@ -245,7 +246,7 @@ fn emit_record(
         .AccountFilter, .QueryFilter => {
             for (filter_fields(record.type)) |field_name| {
                 const value = if (find_field(record, field_name)) |field|
-                    try render_field_value(formatter, field)
+                    try render_typed_value(formatter, field.field, field.value)
                 else if (std.mem.eql(u8, field_name, "flags"))
                     try std.fmt.allocPrint(formatter.arena, "tb.{s}.NONE", .{
                         @tagName(flags_type(record.type)),
@@ -258,9 +259,9 @@ fn emit_record(
         },
         else => {
             for (record.fields) |field| {
-                const value = try render_field_value(formatter, field);
+                const value = try render_typed_value(formatter, field.field, field.value);
                 try formatter.write_indent(writer, .{ .level = options.indent_level + 1 });
-                try writer.print("{s}={s},\n", .{ field.name, value });
+                try writer.print("{s}={s},\n", .{ field.field.name, value });
             }
         },
     }
@@ -279,10 +280,10 @@ fn emit_assertion(
             try writer.print("assert len({s}) == {d}\n", .{ equal.actual, equal.expected.len });
             for (equal.expected, 0..) |record, index| {
                 for (record.fields) |field| {
-                    const value = try render_field_value(formatter, field);
+                    const value = try render_typed_value(formatter, field.field, field.value);
                     try formatter.write_indent(writer, .{ .level = formatter.statement_level });
                     try writer.print("assert {s}[{d}].{s} == {s}\n", .{
-                        equal.actual, index, field.name, value,
+                        equal.actual, index, field.field.name, value,
                     });
                 }
             }
@@ -303,17 +304,28 @@ fn emit_assertion(
             );
         },
         .equal_field => |comparison| {
-            const value = try render_field_value(formatter, comparison.field);
+            const value = switch (comparison.expected) {
+                .expression => |expression| try render_typed_value(
+                    formatter,
+                    comparison.actual.field,
+                    expression,
+                ),
+                .field_reference => |field| try render_field_access(formatter, field),
+            };
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("assert {s}.{s} == {s}\n", .{
-                comparison.reference, comparison.field.name, value,
+                comparison.actual.reference, comparison.actual.field.name, value,
             });
         },
         .greater_than => |comparison| {
-            const value = try render_field_value(formatter, comparison.field);
+            const value = try render_typed_value(
+                formatter,
+                comparison.actual.field,
+                comparison.expected.expression,
+            );
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("assert {s}.{s} > {s}\n", .{
-                comparison.reference, comparison.field.name, value,
+                comparison.actual.reference, comparison.actual.field.name, value,
             });
         },
         // The DSL carries no exception type, matching Ruby's `assert_raises(StandardError)`.
@@ -327,22 +339,22 @@ fn emit_assertion(
     }
 }
 
-// The Python dataclasses omit the `reserved` fields the Zig types carry, so the field lists are
-// written out here rather than reflected from the API structs.
 fn filter_fields(record_type: ast.Record.Type) []const []const u8 {
-    return switch (record_type) {
-        .AccountFilter => &.{
-            "account_id",    "user_data_128", "user_data_64",
-            "user_data_32",  "code",          "timestamp_min",
-            "timestamp_max", "limit",         "flags",
-        },
-        .QueryFilter => &.{
-            "user_data_128", "user_data_64", "user_data_32",
-            "ledger",        "code",         "timestamp_min",
-            "timestamp_max", "limit",        "flags",
+    switch (record_type) {
+        inline .AccountFilter, .QueryFilter => |comptime_type| {
+            return comptime field_names(comptime_type);
         },
         else => unreachable,
-    };
+    }
+}
+
+fn field_names(comptime record_type: ast.Record.Type) []const []const u8 {
+    var names: []const []const u8 = &.{};
+    for (std.meta.fields(ast.Record.Struct(record_type))) |field| {
+        if (std.mem.eql(u8, field.name, "reserved")) continue;
+        names = names ++ &[_][]const u8{field.name};
+    }
+    return names;
 }
 
 fn flags_type(record_type: ast.Record.Type) ast.Record.Type {
@@ -353,9 +365,9 @@ fn flags_type(record_type: ast.Record.Type) ast.Record.Type {
     };
 }
 
-fn find_field(record: ast.Record, field_name: []const u8) ?ast.Field {
+fn find_field(record: ast.Record, field_name: []const u8) ?ast.FieldValue {
     for (record.fields) |field| {
-        if (std.mem.eql(u8, field.name, field_name)) return field;
+        if (std.mem.eql(u8, field.field.name, field_name)) return field;
     }
     return null;
 }
@@ -412,14 +424,28 @@ fn render_flags(formatter: Formatter, record: ast.Record) ![]const u8 {
         if (index > 0) try text.writer.writeAll(" | ");
         try text.writer.print("tb.{s}.{s}", .{
             @tagName(record.type),
-            try formatter.to_case(.UPPER_CASE, field.name),
+            try formatter.to_case(.UPPER_CASE, field.field.name),
         });
     }
     return text.written();
 }
 
-fn render_field_value(formatter: Formatter, field: ast.Field) ![]const u8 {
-    switch (field.value) {
+fn render_field_access(
+    formatter: Formatter,
+    reference: ast.Assertion.FieldReference,
+) ![]const u8 {
+    return std.fmt.allocPrint(formatter.arena, "{s}.{s}", .{
+        reference.reference,
+        reference.field.name,
+    });
+}
+
+fn render_typed_value(
+    formatter: Formatter,
+    field: ast.Field,
+    value: ast.Expression,
+) ![]const u8 {
+    switch (value) {
         .enum_literal => |literal| {
             return std.fmt.allocPrint(formatter.arena, "tb.{s}.{s}", .{
                 field.type.enum_name,
@@ -432,7 +458,7 @@ fn render_field_value(formatter: Formatter, field: ast.Field) ![]const u8 {
         },
         // Python's int is arbitrary precision, so every integer width renders as decimal text.
         .integer, .generate_id, .boolean, .reference, .index => {
-            return render_expression(formatter, field.value);
+            return render_expression(formatter, value);
         },
         .call, .generate_ids => unreachable,
     }

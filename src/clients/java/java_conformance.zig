@@ -32,6 +32,7 @@ pub fn main(init: std.process.Init) !void {
 fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
+        .requires_fractional_amounts => false,
     };
 }
 
@@ -179,17 +180,30 @@ fn emit_row_group(
                 },
                 else => continue,
             }
-            if (!std.mem.eql(u8, comparison.reference, row)) continue;
+            if (comparison.expected == .field_reference) {
+                try emit_row_equal_field(writer, formatter, steps, .{
+                    .comparison = comparison,
+                    .row = row,
+                    .batch = batch,
+                    .consumed = &consumed[index],
+                });
+                continue;
+            }
+            if (!std.mem.eql(u8, comparison.actual.reference, row)) continue;
             consumed[index] = true;
 
-            const property = try formatter.to_case(.PascalCase, comparison.field.name);
-            const value = try render_field_value(formatter, comparison.field);
+            const property = try formatter.to_case(.PascalCase, comparison.actual.field.name);
+            const value = try render_typed_value(
+                formatter,
+                comparison.actual.field,
+                comparison.expected.expression,
+            );
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             if (greater_than) {
                 try writer.print("assertTrue({s}.get{s}() > {s});\n", .{ batch, property, value });
             } else {
                 try writer.print("{s}({s}, {s}.get{s}());\n", .{
-                    assert_function(comparison.field),
+                    assert_function(comparison.actual.field),
                     value,
                     batch,
                     property,
@@ -197,6 +211,94 @@ fn emit_row_group(
             }
         }
     }
+}
+
+fn emit_row_equal_field(
+    writer: *std.Io.Writer,
+    formatter: Formatter,
+    steps: []const ast.Step,
+    options: struct {
+        comparison: ast.Assertion.FieldComparison,
+        row: []const u8,
+        batch: []const u8,
+        consumed: *bool,
+    },
+) !void {
+    const actual = options.comparison.actual;
+    const expected = options.comparison.expected.field_reference;
+    const walks_actual = std.mem.eql(u8, actual.reference, options.row);
+    const walks_expected = std.mem.eql(u8, expected.reference, options.row);
+    if (!walks_actual and !walks_expected) return;
+
+    const assertion = assert_function(actual.field);
+    if (walks_actual and walks_expected) {
+        options.consumed.* = true;
+        try formatter.write_indent(writer, .{ .level = formatter.statement_level });
+        try writer.print("{s}({s}.get{s}(), {s}.get{s}());\n", .{
+            assertion,
+            options.batch,
+            try formatter.to_case(.PascalCase, expected.field.name),
+            options.batch,
+            try formatter.to_case(.PascalCase, actual.field.name),
+        });
+        return;
+    }
+
+    const here = if (walks_actual) actual else expected;
+    const there = if (walks_actual) expected else actual;
+    const property = try formatter.to_case(.PascalCase, here.field.name);
+    if (walks_before(steps, options.row, there.reference)) {
+        try formatter.write_indent(writer, .{ .level = formatter.statement_level });
+        try writer.print("final var {s} = {s}.get{s}();\n", .{
+            try capture_name(formatter, here),
+            options.batch,
+            property,
+        });
+        return;
+    }
+
+    options.consumed.* = true;
+    const captured = try capture_name(formatter, there);
+    const walked = try std.fmt.allocPrint(formatter.arena, "{s}.get{s}()", .{
+        options.batch,
+        property,
+    });
+    try formatter.write_indent(writer, .{ .level = formatter.statement_level });
+    try writer.print("{s}({s}, {s});\n", .{
+        assertion,
+        if (walks_actual) captured else walked,
+        if (walks_actual) walked else captured,
+    });
+}
+
+fn capture_name(formatter: Formatter, reference: ast.Assertion.FieldReference) ![]const u8 {
+    return std.fmt.allocPrint(formatter.arena, "{s}{s}", .{
+        try formatter.to_case(.camelCase, reference.reference),
+        try formatter.to_case(.PascalCase, reference.field.name),
+    });
+}
+
+fn walks_before(steps: []const ast.Step, row: []const u8, other: []const u8) bool {
+    const first = row_position(steps, row);
+    const second = row_position(steps, other);
+    if (first.batch != second.batch) return first.batch < second.batch;
+    return first.row < second.row;
+}
+
+fn row_position(steps: []const ast.Step, row: []const u8) struct { batch: usize, row: usize } {
+    for (steps, 0..) |step, index| {
+        if (step != .binding or step.binding.value != .index) continue;
+        if (!std.mem.eql(u8, step.binding.name, row)) continue;
+        const reference = step.binding.value.index.reference;
+        for (steps, 0..) |batch_step, batch_index| {
+            if (batch_step != .binding or batch_step.binding.value != .index) continue;
+            if (std.mem.eql(u8, batch_step.binding.value.index.reference, reference)) {
+                return .{ .batch = batch_index, .row = index };
+            }
+        }
+        unreachable;
+    }
+    unreachable;
 }
 
 // Java has no standalone record type, only batches, so a bound record is written out at each use.
@@ -291,7 +393,7 @@ fn hoist_record(
     record: ast.Record,
 ) !ast.Record {
     const formatter = scope.formatter;
-    const fields = try formatter.arena.alloc(ast.Field, record.fields.len);
+    const fields = try formatter.arena.alloc(ast.FieldValue, record.fields.len);
     for (record.fields, 0..) |field, index| {
         if (field.value != .generate_id) {
             fields[index] = field;
@@ -299,11 +401,11 @@ fn hoist_record(
         }
         const local = try std.fmt.allocPrint(formatter.arena, "{s}{s}", .{
             name,
-            try formatter.to_case(.PascalCase, field.name),
+            try formatter.to_case(.PascalCase, field.field.name),
         });
         try formatter.write_indent(writer, .{ .level = formatter.statement_level });
         try writer.print("final var {s} = UInt128.id();\n", .{local});
-        fields[index] = .{ .name = field.name, .value = .{ .reference = local }, .type = field.type };
+        fields[index] = .{ .field = field.field, .value = .{ .reference = local } };
     }
     return .{ .type = record.type, .fields = fields };
 }
@@ -339,7 +441,6 @@ fn emit_call(
         var thread_scope = Scope.init(formatter);
         try emit_invocation(writer, &thread_scope, call, .{
             .indent_level = formatter.statement_level + 3,
-            .error_action = .rethrow,
         });
 
         try formatter.write_indent(writer, .{ .level = formatter.statement_level + 2 });
@@ -378,11 +479,9 @@ fn emit_call(
     try emit_invocation(writer, scope, call, .{
         .indent_level = formatter.statement_level,
         .binding = options.binding,
-        .error_action = if (options.expect_error) .expected else .propagate,
+        .expect_error = options.expect_error,
     });
 }
-
-const ErrorAction = enum { propagate, rethrow, expected };
 
 fn emit_invocation(
     writer: *std.Io.Writer,
@@ -391,7 +490,7 @@ fn emit_invocation(
     options: struct {
         indent_level: u32,
         binding: ?[]const u8 = null,
-        error_action: ErrorAction,
+        expect_error: bool = false,
     },
 ) !void {
     const formatter = scope.formatter;
@@ -424,7 +523,7 @@ fn emit_invocation(
     const argument = try emit_argument(writer, scope, call, indent_level, options.binding);
 
     try formatter.write_indent(writer, .{ .level = indent_level });
-    if (options.error_action == .expected) {
+    if (options.expect_error) {
         try writer.print("assertThrows(Exception.class, () -> client.{s}({s}));\n", .{
             java_operation_name(call.name),
             argument,
@@ -524,8 +623,8 @@ fn emit_record_into(
             writer,
             indent_level,
             batch,
-            try formatter.to_case(.PascalCase, field.name),
-            try render_field_value(formatter, field),
+            try formatter.to_case(.PascalCase, field.field.name),
+            try render_typed_value(formatter, field.field, field.value),
         );
     }
 }
@@ -533,7 +632,7 @@ fn emit_record_into(
 fn emit_filter_field(
     writer: *std.Io.Writer,
     formatter: Formatter,
-    field: ast.Field,
+    field: ast.FieldValue,
     name: []const u8,
     indent_level: u32,
 ) !void {
@@ -543,7 +642,7 @@ fn emit_filter_field(
             try formatter.write_indent(writer, .{ .level = indent_level });
             try writer.print("{s}.set{s}(true);\n", .{
                 name,
-                try formatter.to_case(.PascalCase, flag.name),
+                try formatter.to_case(.PascalCase, flag.field.name),
             });
         }
         return;
@@ -553,8 +652,8 @@ fn emit_filter_field(
         writer,
         indent_level,
         name,
-        try formatter.to_case(.PascalCase, field.name),
-        try render_field_value(formatter, field),
+        try formatter.to_case(.PascalCase, field.field.name),
+        try render_typed_value(formatter, field.field, field.value),
     );
 }
 
@@ -632,19 +731,30 @@ fn emit_assertion(writer: *std.Io.Writer, scope: *Scope, assertion: ast.Assertio
             try writer.writeAll("}\n");
         },
         .equal_field => |comparison| {
-            const expected = try render_field_value(formatter, comparison.field);
+            const expected = switch (comparison.expected) {
+                .expression => |expression| try render_typed_value(
+                    formatter,
+                    comparison.actual.field,
+                    expression,
+                ),
+                .field_reference => |field| try render_field_access(formatter, field),
+            };
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("{s}({s}, {s});\n", .{
-                assert_function(comparison.field),
+                assert_function(comparison.actual.field),
                 expected,
-                try render_field_reference(formatter, comparison),
+                try render_field_access(formatter, comparison.actual),
             });
         },
         .greater_than => |comparison| {
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("assertTrue({s} > {s});\n", .{
-                try render_field_reference(formatter, comparison),
-                try render_field_value(formatter, comparison.field),
+                try render_field_access(formatter, comparison.actual),
+                try render_typed_value(
+                    formatter,
+                    comparison.actual.field,
+                    comparison.expected.expression,
+                ),
             });
         },
         .fail => |call| try emit_call(writer, scope, call, .{ .expect_error = true }),
@@ -654,15 +764,15 @@ fn emit_assertion(writer: *std.Io.Writer, scope: *Scope, assertion: ast.Assertio
 fn emit_field_equal(
     writer: *std.Io.Writer,
     formatter: Formatter,
-    field: ast.Field,
+    field: ast.FieldValue,
     actual: []const u8,
 ) !void {
     try formatter.write_indent(writer, .{ .level = formatter.statement_level });
     try writer.print("{s}({s}, {s}.get{s}());\n", .{
-        assert_function(field),
-        try render_field_value(formatter, field),
+        assert_function(field.field),
+        try render_typed_value(formatter, field.field, field.value),
         actual,
-        try formatter.to_case(.PascalCase, field.name),
+        try formatter.to_case(.PascalCase, field.field.name),
     });
 }
 
@@ -683,18 +793,22 @@ fn is_big_integer(field_name: []const u8) bool {
     return false;
 }
 
-fn render_field_reference(
+fn render_field_access(
     formatter: Formatter,
-    comparison: ast.Assertion.FieldComparison,
+    reference: ast.Assertion.FieldReference,
 ) ![]const u8 {
     return std.fmt.allocPrint(formatter.arena, "{s}.get{s}()", .{
-        try formatter.to_case(.camelCase, comparison.reference),
-        try formatter.to_case(.PascalCase, comparison.field.name),
+        try formatter.to_case(.camelCase, reference.reference),
+        try formatter.to_case(.PascalCase, reference.field.name),
     });
 }
 
-fn render_field_value(formatter: Formatter, field: ast.Field) ![]const u8 {
-    switch (field.value) {
+fn render_typed_value(
+    formatter: Formatter,
+    field: ast.Field,
+    value: ast.Expression,
+) ![]const u8 {
+    switch (value) {
         .enum_literal => |literal| {
             return std.fmt.allocPrint(formatter.arena, "{s}.{s}", .{
                 field.type.enum_name,
@@ -709,7 +823,7 @@ fn render_field_value(formatter: Formatter, field: ast.Field) ![]const u8 {
                 if (index > 0) try text.writer.writeAll(" | ");
                 try text.writer.print("{s}.{s}", .{
                     @tagName(flags.type),
-                    try formatter.to_case(.UPPER_CASE, flag.name),
+                    try formatter.to_case(.UPPER_CASE, flag.field.name),
                 });
             }
             return text.written();
@@ -732,7 +846,7 @@ fn render_field_value(formatter: Formatter, field: ast.Field) ![]const u8 {
                 index.index,
             });
         },
-        .boolean => |value| return if (value) "true" else "false",
+        .boolean => |boolean| return if (boolean) "true" else "false",
         .call, .generate_ids => unreachable,
     }
 }
