@@ -169,3 +169,25 @@ test "rejects a zero code" {
 
     ct.assert_equal(results, .{.{ .status = .code_must_not_be_zero }});
 }
+
+test "rejects a fractional amount" {
+    ct.requires_fractional_amounts();
+
+    const debit_account_id = ct.generate_id();
+    const credit_account_id = ct.generate_id();
+    ct.create_accounts(.{
+        .{ .id = debit_account_id, .ledger = 1, .code = 1 },
+        .{ .id = credit_account_id, .ledger = 1, .code = 1 },
+    });
+
+    ct.assert_fail(ct.create_transfers(.{
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .amount = 1.5,
+            .ledger = 1,
+            .code = 1,
+        },
+    }));
+}

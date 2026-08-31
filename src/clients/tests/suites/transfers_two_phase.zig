@@ -103,6 +103,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
         .flags = .{ .pending = true },
     }});
     ct.assert_greater_than(transfer_lookup_1.timeout, 0);
+    ct.assert_equal(transfer_lookup_1.timestamp, transfer_result_2.timestamp);
 
     const commit_results = ct.create_transfers(.{
         .{

@@ -461,6 +461,39 @@ class TestConformance < Minitest::Test
     assert_equal(TigerBeetle::CreateTransferStatus::CODE_MUST_NOT_BE_ZERO, results[0].status)
   end
 
+  def test_create_transfers_rejects_a_fractional_amount
+    debit_account_id = TigerBeetle.id
+    credit_account_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: debit_account_id,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Account.new(
+          id: credit_account_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    assert_raises(StandardError) do
+      @client.create_transfers(
+        [
+          TigerBeetle::Transfer.new(
+            id: TigerBeetle.id,
+            debit_account_id: debit_account_id,
+            credit_account_id: credit_account_id,
+            amount: 1.5,
+            ledger: 1,
+            code: 1
+          )
+        ]
+      )
+    end
+  end
+
   # Suite: lookup_transfers
 
   def test_lookup_transfers_returns_an_existing_transfer
@@ -882,6 +915,114 @@ class TestConformance < Minitest::Test
     assert_equal(0, balances[0].credits_posted)
     assert_equal(10, balances[1].debits_posted)
     assert_equal(20, balances[1].credits_posted)
+  end
+
+  def test_get_account_balances_pairs_each_balance_with_the_transfer_that_produced_it
+    account_id = TigerBeetle.id
+    debit_account_id = TigerBeetle.id
+    credit_account_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_id,
+          ledger: 1,
+          code: 1,
+          flags: TigerBeetle::AccountFlags::HISTORY
+        ),
+        TigerBeetle::Account.new(
+          id: debit_account_id,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Account.new(
+          id: credit_account_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    transfer_1_id = TigerBeetle.id
+    transfer_2_id = TigerBeetle.id
+    transfer_3_id = TigerBeetle.id
+    transfer_4_id = TigerBeetle.id
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: transfer_1_id,
+          debit_account_id: account_id,
+          credit_account_id: credit_account_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_2_id,
+          debit_account_id: debit_account_id,
+          credit_account_id: account_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_3_id,
+          debit_account_id: account_id,
+          credit_account_id: credit_account_id,
+          amount: 30,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_4_id,
+          debit_account_id: debit_account_id,
+          credit_account_id: account_id,
+          amount: 40,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    transfers = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_id,
+        limit: 10,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(4, transfers.length)
+    assert_equal(transfer_1_id, transfers[0].id)
+    assert_equal(transfer_2_id, transfers[1].id)
+    assert_equal(transfer_3_id, transfers[2].id)
+    assert_equal(transfer_4_id, transfers[3].id)
+    balances = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_id,
+        limit: 10,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(4, balances.length)
+    assert_equal(10, balances[0].debits_posted)
+    assert_equal(0, balances[0].credits_posted)
+    assert_equal(10, balances[1].debits_posted)
+    assert_equal(20, balances[1].credits_posted)
+    assert_equal(40, balances[2].debits_posted)
+    assert_equal(20, balances[2].credits_posted)
+    assert_equal(40, balances[3].debits_posted)
+    assert_equal(60, balances[3].credits_posted)
+    transfer_1 = transfers[0]
+    transfer_2 = transfers[1]
+    transfer_3 = transfers[2]
+    transfer_4 = transfers[3]
+    balance_1 = balances[0]
+    balance_2 = balances[1]
+    balance_3 = balances[2]
+    balance_4 = balances[3]
+    assert_equal(transfer_1.timestamp, balance_1.timestamp)
+    assert_equal(transfer_2.timestamp, balance_2.timestamp)
+    assert_equal(transfer_3.timestamp, balance_3.timestamp)
+    assert_equal(transfer_4.timestamp, balance_4.timestamp)
   end
 
   def test_get_account_balances_returns_no_balances_without_the_history_flag
@@ -1373,6 +1514,7 @@ class TestConformance < Minitest::Test
     assert_equal(1, transfers_1[0].code)
     assert_equal(TigerBeetle::TransferFlags::PENDING, transfers_1[0].flags)
     assert_operator(transfer_lookup_1.timeout, :>, 0)
+    assert_equal(transfer_result_2.timestamp, transfer_lookup_1.timestamp)
     commit_results = @client.create_transfers(
       [
         TigerBeetle::Transfer.new(
