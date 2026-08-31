@@ -20,17 +20,6 @@ const QueueType = @import("../queue.zig").QueueType;
 const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 
 pub const IO = struct {
-    pub const TCPOptions = common.TCPOptions;
-    pub const ListenOptions = common.ListenOptions;
-    pub const Stats = common.Stats;
-    const TimeoutList = DoublyLinkedListType(Completion, .timeout_back, .timeout_next);
-
-    const timerfd_epoll_tag: usize = 1;
-    comptime {
-        // alignments of Completion leaves the last bits available for pointer-tagging
-        assert(@alignOf(Completion) > timerfd_epoll_tag);
-    }
-
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
     timer_armed: bool = false,
@@ -41,6 +30,17 @@ pub const IO = struct {
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
     stats: common.Stats = .{},
+
+    pub const TCPOptions = common.TCPOptions;
+    pub const ListenOptions = common.ListenOptions;
+    pub const Stats = common.Stats;
+    const TimeoutList = DoublyLinkedListType(Completion, .timeout_back, .timeout_next);
+
+    const timerfd_epoll_tag: usize = 1;
+    comptime {
+        // alignments of Completion leaves the last bits available for pointer-tagging
+        assert(@alignOf(Completion) > timerfd_epoll_tag);
+    }
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -909,19 +909,19 @@ pub const IO = struct {
     /// Wait up to `timeout_ms` milliseconds for epoll events and process them.
     fn poll_epoll(self: *IO, timeout_ms: i32) !void {
         var events: [256]linux.epoll_event = undefined;
-        while (true) {
-            const return_code = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
-            switch (posix.errno(return_code)) {
-                .SUCCESS => {
-                    for (events[0..return_code]) |event| {
-                        self.process_epoll_event(event);
-                    }
-                    return;
-                },
-                // Signal interrupted the wait; return and let the caller retry.
-                .INTR => return,
-                else => |err| return stdx.unexpected_errno("epoll_wait", err),
-            }
+        const wait_result = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
+        switch (posix.errno(wait_result)) {
+            .SUCCESS => {
+                const events_ready = wait_result;
+                for (events[0..events_ready]) |event| {
+                    self.process_epoll_event(event);
+                }
+                return;
+            },
+            // Signal interrupted the wait; return and let the caller retry.
+            // FIXME is this the right approach, or should we retry in a loop?
+            .INTR => return,
+            else => |err| return stdx.unexpected_errno("epoll_wait", err),
         }
     }
 
