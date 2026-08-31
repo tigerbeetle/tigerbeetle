@@ -307,9 +307,14 @@ pub fn ContextType(
                     @errorName(err),
                 });
                 return switch (err) {
-                    error.ProcessFdQuotaExceeded => error.SystemResources,
+                    error.ProcessFdQuotaExceeded,
+                    error.SystemFdQuotaExceeded,
+                    error.SystemResources,
+                    => error.SystemResources,
+                    error.PermissionDenied,
+                    error.SystemOutdated,
+                    => error.NetworkSubsystemFailed,
                     error.Unexpected => error.Unexpected,
-                    else => unreachable,
                 };
             };
             errdefer context.io.deinit();
