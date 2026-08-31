@@ -554,6 +554,9 @@ func TestConformance(t *testing.T) {
 		assert.Equal(t, TransferCodeMustNotBeZero, results[0].Status)
 	})
 
+	// Omitted: "rejects a fractional amount"
+	// Reason: requires fractional amounts
+
 	// Suite: lookup_transfers
 
 	test("lookup_transfers_returns_an_existing_transfer", func(t *testing.T, client Client) {
@@ -1011,6 +1014,116 @@ func TestConformance(t *testing.T) {
 		assert.Equal(t, ToUint128(0), balances[0].CreditsPosted)
 		assert.Equal(t, ToUint128(10), balances[1].DebitsPosted)
 		assert.Equal(t, ToUint128(20), balances[1].CreditsPosted)
+	})
+
+	test("get_account_balances_pairs_each_balance_with_the_transfer_that_produced_it", func(t *testing.T, client Client) {
+		accountID := ID()
+		debitAccountID := ID()
+		creditAccountID := ID()
+		_, err := client.CreateAccounts([]Account{
+			{
+				ID:     accountID,
+				Ledger: 1,
+				Code:   1,
+				Flags:  AccountFlags{History: true}.ToUint16(),
+			},
+			{
+				ID:     debitAccountID,
+				Ledger: 1,
+				Code:   1,
+			},
+			{
+				ID:     creditAccountID,
+				Ledger: 1,
+				Code:   1,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		transfer1ID := ID()
+		transfer2ID := ID()
+		transfer3ID := ID()
+		transfer4ID := ID()
+		_, err = client.CreateTransfers([]Transfer{
+			{
+				ID:              transfer1ID,
+				DebitAccountID:  accountID,
+				CreditAccountID: creditAccountID,
+				Amount:          ToUint128(10),
+				Ledger:          1,
+				Code:            1,
+			},
+			{
+				ID:              transfer2ID,
+				DebitAccountID:  debitAccountID,
+				CreditAccountID: accountID,
+				Amount:          ToUint128(20),
+				Ledger:          1,
+				Code:            1,
+			},
+			{
+				ID:              transfer3ID,
+				DebitAccountID:  accountID,
+				CreditAccountID: creditAccountID,
+				Amount:          ToUint128(30),
+				Ledger:          1,
+				Code:            1,
+			},
+			{
+				ID:              transfer4ID,
+				DebitAccountID:  debitAccountID,
+				CreditAccountID: accountID,
+				Amount:          ToUint128(40),
+				Ledger:          1,
+				Code:            1,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		transfers, err := client.GetAccountTransfers(AccountFilter{
+			AccountID: accountID,
+			Limit:     10,
+			Flags:     AccountFilterFlags{Debits: true, Credits: true}.ToUint32(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers, 4)
+		assert.Equal(t, transfer1ID, transfers[0].ID)
+		assert.Equal(t, transfer2ID, transfers[1].ID)
+		assert.Equal(t, transfer3ID, transfers[2].ID)
+		assert.Equal(t, transfer4ID, transfers[3].ID)
+		balances, err := client.GetAccountBalances(AccountFilter{
+			AccountID: accountID,
+			Limit:     10,
+			Flags:     AccountFilterFlags{Debits: true, Credits: true}.ToUint32(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, balances, 4)
+		assert.Equal(t, ToUint128(10), balances[0].DebitsPosted)
+		assert.Equal(t, ToUint128(0), balances[0].CreditsPosted)
+		assert.Equal(t, ToUint128(10), balances[1].DebitsPosted)
+		assert.Equal(t, ToUint128(20), balances[1].CreditsPosted)
+		assert.Equal(t, ToUint128(40), balances[2].DebitsPosted)
+		assert.Equal(t, ToUint128(20), balances[2].CreditsPosted)
+		assert.Equal(t, ToUint128(40), balances[3].DebitsPosted)
+		assert.Equal(t, ToUint128(60), balances[3].CreditsPosted)
+		transfer1 := transfers[0]
+		transfer2 := transfers[1]
+		transfer3 := transfers[2]
+		transfer4 := transfers[3]
+		balance1 := balances[0]
+		balance2 := balances[1]
+		balance3 := balances[2]
+		balance4 := balances[3]
+		assert.Equal(t, transfer1.Timestamp, balance1.Timestamp)
+		assert.Equal(t, transfer2.Timestamp, balance2.Timestamp)
+		assert.Equal(t, transfer3.Timestamp, balance3.Timestamp)
+		assert.Equal(t, transfer4.Timestamp, balance4.Timestamp)
 	})
 
 	test("get_account_balances_returns_no_balances_without_the_history_flag", func(t *testing.T, client Client) {
@@ -1533,6 +1646,7 @@ func TestConformance(t *testing.T) {
 		assert.Equal(t, 1, transfers1[0].Code)
 		assert.Equal(t, TransferFlags{Pending: true}.ToUint16(), transfers1[0].Flags)
 		assert.Greater(t, uint64(transferLookup1.Timeout), uint64(0))
+		assert.Equal(t, transferResult2.Timestamp, transferLookup1.Timestamp)
 		commitResults, err := client.CreateTransfers([]Transfer{
 			{
 				ID:        ID(),

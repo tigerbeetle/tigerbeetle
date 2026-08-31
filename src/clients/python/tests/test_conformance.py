@@ -464,6 +464,37 @@ def test_create_transfers_rejects_a_zero_code(client):
     assert len(results) == 1
     assert results[0].status == tb.CreateTransferStatus.CODE_MUST_NOT_BE_ZERO
 
+def test_create_transfers_rejects_a_fractional_amount(client):
+    debit_account_id = tb.id()
+    credit_account_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=debit_account_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=credit_account_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    with pytest.raises(Exception):
+        client.create_transfers(
+            [
+                tb.Transfer(
+                    id=tb.id(),
+                    debit_account_id=debit_account_id,
+                    credit_account_id=credit_account_id,
+                    amount=1.5,
+                    ledger=1,
+                    code=1,
+                ),
+            ]
+        )
+
 # Suite: lookup_transfers
 
 def test_lookup_transfers_returns_an_existing_transfer(client):
@@ -902,6 +933,123 @@ def test_get_account_balances_returns_a_balance_per_transfer_for_a_history_accou
     assert balances[0].credits_posted == 0
     assert balances[1].debits_posted == 10
     assert balances[1].credits_posted == 20
+
+def test_get_account_balances_pairs_each_balance_with_the_transfer_that_produced_it(client):
+    account_id = tb.id()
+    debit_account_id = tb.id()
+    credit_account_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+            tb.Account(
+                id=debit_account_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=credit_account_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfer_1_id = tb.id()
+    transfer_2_id = tb.id()
+    transfer_3_id = tb.id()
+    transfer_4_id = tb.id()
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=transfer_1_id,
+                debit_account_id=account_id,
+                credit_account_id=credit_account_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_2_id,
+                debit_account_id=debit_account_id,
+                credit_account_id=account_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_3_id,
+                debit_account_id=account_id,
+                credit_account_id=credit_account_id,
+                amount=30,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_4_id,
+                debit_account_id=debit_account_id,
+                credit_account_id=account_id,
+                amount=40,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert len(transfers) == 4
+    assert transfers[0].id == transfer_1_id
+    assert transfers[1].id == transfer_2_id
+    assert transfers[2].id == transfer_3_id
+    assert transfers[3].id == transfer_4_id
+    balances = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert len(balances) == 4
+    assert balances[0].debits_posted == 10
+    assert balances[0].credits_posted == 0
+    assert balances[1].debits_posted == 10
+    assert balances[1].credits_posted == 20
+    assert balances[2].debits_posted == 40
+    assert balances[2].credits_posted == 20
+    assert balances[3].debits_posted == 40
+    assert balances[3].credits_posted == 60
+    transfer_1 = transfers[0]
+    transfer_2 = transfers[1]
+    transfer_3 = transfers[2]
+    transfer_4 = transfers[3]
+    balance_1 = balances[0]
+    balance_2 = balances[1]
+    balance_3 = balances[2]
+    balance_4 = balances[3]
+    assert balance_1.timestamp == transfer_1.timestamp
+    assert balance_2.timestamp == transfer_2.timestamp
+    assert balance_3.timestamp == transfer_3.timestamp
+    assert balance_4.timestamp == transfer_4.timestamp
 
 def test_get_account_balances_returns_no_balances_without_the_history_flag(client):
     account_1_id = tb.id()
@@ -1444,6 +1592,7 @@ def test_two_phase_transfer_creates_posts_voids_and_expires_two_phase_transfers(
     assert transfers_1[0].code == 1
     assert transfers_1[0].flags == tb.TransferFlags.PENDING
     assert transfer_lookup_1.timeout > 0
+    assert transfer_lookup_1.timestamp == transfer_result_2.timestamp
     commit_results = client.create_transfers(
         [
             tb.Transfer(

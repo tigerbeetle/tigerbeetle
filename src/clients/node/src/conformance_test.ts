@@ -526,6 +526,9 @@ test('create_transfers_rejects_a_zero_code', async (client) => {
   assert.strictEqual(results[0].status, CreateTransferStatus.code_must_not_be_zero)
 })
 
+// Omitted: "rejects a fractional amount"
+// Reason: requires fractional amounts
+
 // Suite: lookup_transfers
 
 test('lookup_transfers_returns_an_existing_transfer', async (client) => {
@@ -939,6 +942,113 @@ test('get_account_balances_returns_a_balance_per_transfer_for_a_history_account'
   assert.strictEqual(balances[0].credits_posted, 0n)
   assert.strictEqual(balances[1].debits_posted, 10n)
   assert.strictEqual(balances[1].credits_posted, 20n)
+})
+
+test('get_account_balances_pairs_each_balance_with_the_transfer_that_produced_it', async (client) => {
+  const account_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const transfer_3_id = id()
+  const transfer_4_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_4_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 40n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 4)
+  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[1].id, transfer_2_id)
+  assert.strictEqual(transfers[2].id, transfer_3_id)
+  assert.strictEqual(transfers[3].id, transfer_4_id)
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 4)
+  assert.strictEqual(balances[0].debits_posted, 10n)
+  assert.strictEqual(balances[0].credits_posted, 0n)
+  assert.strictEqual(balances[1].debits_posted, 10n)
+  assert.strictEqual(balances[1].credits_posted, 20n)
+  assert.strictEqual(balances[2].debits_posted, 40n)
+  assert.strictEqual(balances[2].credits_posted, 20n)
+  assert.strictEqual(balances[3].debits_posted, 40n)
+  assert.strictEqual(balances[3].credits_posted, 60n)
+  const transfer_1 = transfers[0]
+  const transfer_2 = transfers[1]
+  const transfer_3 = transfers[2]
+  const transfer_4 = transfers[3]
+  const balance_1 = balances[0]
+  const balance_2 = balances[1]
+  const balance_3 = balances[2]
+  const balance_4 = balances[3]
+  assert.strictEqual(balance_1.timestamp, transfer_1.timestamp)
+  assert.strictEqual(balance_2.timestamp, transfer_2.timestamp)
+  assert.strictEqual(balance_3.timestamp, transfer_3.timestamp)
+  assert.strictEqual(balance_4.timestamp, transfer_4.timestamp)
 })
 
 test('get_account_balances_returns_no_balances_without_the_history_flag', async (client) => {
@@ -1421,6 +1531,7 @@ test('two_phase_transfer_creates_posts_voids_and_expires_two_phase_transfers', a
   assert.strictEqual(transfers_1[0].code, 1)
   assert.strictEqual(transfers_1[0].flags, TransferFlags.pending)
   assert.ok(transfer_lookup_1.timeout > 0)
+  assert.strictEqual(transfer_lookup_1.timestamp, transfer_result_2.timestamp)
   const commit_results = await client.createTransfers([
     {
       ...transfer_default,
