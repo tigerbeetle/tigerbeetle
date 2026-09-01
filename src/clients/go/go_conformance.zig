@@ -260,22 +260,27 @@ fn emit_invocation(
         .create_accounts, .create_transfers => {
             const record_type: ast.Record.Type =
                 if (call.name == .create_accounts) .Account else .Transfer;
-            try writer.print("[]{s}{{\n", .{@tagName(record_type)});
-            for (call.arguments) |argument| switch (argument) {
-                .record => |record| try emit_record(formatter, writer, record, .{
-                    .indent_level = options.indent_level + 1,
-                    .suffix = ",",
-                }),
-                .reference => |reference| {
-                    try formatter.write_indent(writer, .{ .level = options.indent_level + 1 });
-                    try writer.print("{s},\n", .{
-                        try formatter.to_case(.GOCamelCase, reference),
-                    });
-                },
-                else => unreachable,
-            };
-            try formatter.write_indent(writer, .{ .level = options.indent_level });
-            try writer.writeAll("})\n");
+            if (call.arguments.len == 0) {
+                // gofmt collapses an empty composite literal onto a single line.
+                try writer.print("[]{s}{{}})\n", .{@tagName(record_type)});
+            } else {
+                try writer.print("[]{s}{{\n", .{@tagName(record_type)});
+                for (call.arguments) |argument| switch (argument) {
+                    .record => |record| try emit_record(formatter, writer, record, .{
+                        .indent_level = options.indent_level + 1,
+                        .suffix = ",",
+                    }),
+                    .reference => |reference| {
+                        try formatter.write_indent(writer, .{ .level = options.indent_level + 1 });
+                        try writer.print("{s},\n", .{
+                            try formatter.to_case(.GOCamelCase, reference),
+                        });
+                    },
+                    else => unreachable,
+                };
+                try formatter.write_indent(writer, .{ .level = options.indent_level });
+                try writer.writeAll("})\n");
+            }
         },
         .lookup_accounts, .lookup_transfers => {
             try writer.writeAll("[]Uint128{");

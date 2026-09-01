@@ -189,6 +189,10 @@ fn emit_invocation(
         },
         .create_accounts, .create_transfers => {
             try formatter.write_indent(writer, .{ .level = options.indent_level });
+            if (call.arguments.len == 0) {
+                try writer.print("{s}client.{s}([])\n", .{ options.prefix, @tagName(call.name) });
+                return;
+            }
             try writer.print("{s}client.{s}(\n", .{ options.prefix, @tagName(call.name) });
             try formatter.write_indent(writer, .{ .level = options.indent_level + 1 });
             try writer.writeAll("[\n");

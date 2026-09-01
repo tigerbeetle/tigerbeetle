@@ -51,24 +51,6 @@ account_b = tb.Account(
     timestamp=0
 )
 
-def test_range_check_u128_cannot_exceed(client):
-    account = tb.Account(**{ **asdict(account_a), "id": 9999999999999999999999999999999999999999 })
-    with pytest.raises(tb.IntegerOverflowError):
-        client.create_accounts([account])
-
-def test_range_check_u128_cannot_be_negative(client):
-    account = tb.Account(**{ **asdict(account_a), "id": -1 })
-    with pytest.raises(tb.IntegerOverflowError):
-        client.create_accounts([account])
-
-def test_range_check_u128_lookup_id_cannot_exceed(client):
-    with pytest.raises(tb.IntegerOverflowError):
-        client.lookup_accounts([2**128])
-
-def test_range_check_u128_lookup_id_cannot_be_negative(client):
-    with pytest.raises(tb.IntegerOverflowError):
-        client.lookup_transfers([-1])
-
 def test_range_check_code_on_account_to_be_u16(client):
     account = tb.Account(**{ **asdict(account_a), "id": tb.id(), "code": 65535 + 1 })
 
@@ -91,14 +73,6 @@ def test_return_error_on_account(client):
     assert results[0].status == tb.CreateAccountStatus.EXISTS
     assert results[1].timestamp > 0
     assert results[1].status == tb.CreateAccountStatus.CREATED
-
-def test_error_if_timestamp_is_not_set_to_0_on_account(client):
-    account = { **asdict(account_a), "timestamp": 2, "id": 3 }
-    results = client.create_accounts([tb.Account(**account)])
-    assert len(results) == 1
-    assert results[0].timestamp > 0
-    assert results[0].timestamp != 2
-    assert results[0].status == tb.CreateAccountStatus.TIMESTAMP_MUST_BE_ZERO
 
 def test_lookup_accounts(client):
     accounts = client.lookup_accounts([account_a.id, account_b.id])
@@ -233,62 +207,6 @@ def test_post_a_two_phase_transfer(client):
     )
 
     results = client.create_transfers([commit])
-    assert len(results) == 1
-    assert results[0].timestamp > 0
-    assert results[0].status == tb.CreateTransferStatus.CREATED
-
-    accounts = client.lookup_accounts([account_a.id, account_b.id])
-    assert len(accounts) == 2
-    assert accounts[0].credits_posted == 150
-    assert accounts[0].credits_pending == 0
-    assert accounts[0].debits_posted == 0
-    assert accounts[0].debits_pending == 0
-
-    assert accounts[1].credits_posted == 0
-    assert accounts[1].credits_pending == 0
-    assert accounts[1].debits_posted == 150
-    assert accounts[1].debits_pending == 0
-
-def test_reject_a_two_phase_transfer(client):
-    # Create a two-phase transfer:
-    transfer = tb.Transfer(
-        id=4,
-        debit_account_id=account_b.id,
-        credit_account_id=account_a.id,
-        amount=50,
-        user_data_128=0,
-        user_data_64=0,
-        user_data_32=0,
-        pending_id=0,
-        timeout=int(1e9),
-        ledger=1,
-        code=1,
-        flags=tb.TransferFlags.PENDING,
-        timestamp=0, # this will be set correctly by the TigerBeetle server
-    )
-    results = client.create_transfers([transfer])
-    assert len(results) == 1
-    assert results[0].timestamp > 0
-    assert results[0].status == tb.CreateTransferStatus.CREATED
-
-    # send in the reject
-    reject = tb.Transfer(
-        id=5,
-        debit_account_id=0,
-        credit_account_id=0,
-        amount=0,
-        user_data_128=0,
-        user_data_64=0,
-        user_data_32=0,
-        pending_id=4, # must match the id of the pending transfer
-        timeout=0,
-        ledger=1,
-        code=1,
-        flags=tb.TransferFlags.VOID_PENDING_TRANSFER,
-        timestamp=0, # this will be set correctly by the TigerBeetle server
-    )
-
-    results = client.create_transfers([reject])
     assert len(results) == 1
     assert results[0].timestamp > 0
     assert results[0].status == tb.CreateTransferStatus.CREATED
@@ -1409,22 +1327,6 @@ def test_import_accounts_and_transfers(client):
     transfers = client.lookup_transfers([transfer.id])
     assert len(transfers) == 1
     assert transfers[0].timestamp == transfers_results[0].timestamp
-
-def test_accept_zero_length_create_accounts(client):
-    results = client.create_accounts([])
-    assert results == []
-
-def test_accept_zero_length_create_transfers(client):
-    results = client.create_transfers([])
-    assert results == []
-
-def test_accept_zero_length_lookup_accounts(client):
-    accounts = client.lookup_accounts([])
-    assert accounts == []
-
-def test_accept_zero_length_lookup_transfers(client):
-    transfers = client.lookup_transfers([])
-    assert transfers == []
 
 def test_uint128(client):
     import json

@@ -1,5 +1,11 @@
 const ct = @import("../conformance_test_api.zig");
 
+test "accepts an empty batch" {
+    const results = ct.create_transfers(.{});
+
+    ct.assert_empty(results);
+}
+
 test "creates a transfer" {
     const debit_account_id = ct.generate_id();
     const credit_account_id = ct.generate_id();

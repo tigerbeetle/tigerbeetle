@@ -290,6 +290,12 @@ fn emit_invocation(
         },
         .create_accounts, .create_transfers => {
             try formatter.write_indent(writer, .{ .level = options.indent_level });
+            if (call.arguments.len == 0) {
+                try writer.print("{s}{s}client.{s}([])\n", .{
+                    options.prefix, awaited, try method_name(formatter, call.name),
+                });
+                return;
+            }
             try writer.print("{s}{s}client.{s}([\n", .{
                 options.prefix, awaited, try method_name(formatter, call.name),
             });
