@@ -204,16 +204,24 @@ fn emit_struct_ctypes(
 
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
+        const field_is_u128 = field_type_info == .int and field_type_info.int.bits == 128;
 
-        // Emit a bounds check for all integer types that aren't using the custom c_uint128 class.
-        // That has an explicit check built in, but the standard Python ctypes ones (eg,
-        // ctypes.c_uint64) don't and will happily overflow otherwise.
+        // Emit a bounds check for all integer types. The standard Python ctypes ones (eg,
+        // ctypes.c_uint64) don't check and will happily overflow, so validate them here.
+        // u128 goes through our custom c_uint128.from_param.
         if (comptime !std.mem.eql(u8, field.name, "reserved") and field_type_info == .int) {
-            buffer.print("        validate_uint(bits={[int_bits]}, name=\"{[field_name]s}\", " ++
-                "number=obj.{[field_name]s})\n", .{
-                .field_name = field.name,
-                .int_bits = field_type_info.int.bits,
-            });
+            if (field_is_u128) {
+                buffer.print("        {[field_name]s}_u128 = c_uint128.from_param(" ++
+                    "obj.{[field_name]s}, name=\"{[field_name]s}\")\n", .{
+                    .field_name = field.name,
+                });
+            } else {
+                buffer.print("        validate_uint(bits={[int_bits]}, " ++
+                    "name=\"{[field_name]s}\", number=obj.{[field_name]s})\n", .{
+                    .field_name = field.name,
+                    .int_bits = field_type_info.int.bits,
+                });
+            }
         }
     }
 
@@ -222,15 +230,15 @@ fn emit_struct_ctypes(
     inline for (type_info.fields) |field| {
         const field_type_info = @typeInfo(field.type);
         const field_is_u128 = field_type_info == .int and field_type_info.int.bits == 128;
-        const convert_prefix = if (field_is_u128) "c_uint128.from_param(" else "";
-        const convert_suffix = if (field_is_u128) ")" else "";
+        const value_prefix = if (field_is_u128) "" else "obj.";
+        const value_suffix = if (field_is_u128) "_u128" else "";
 
         if (comptime !std.mem.eql(u8, field.name, "reserved")) {
-            buffer.print("            {[field_name]s}={[convert_prefix]s}" ++
-                "obj.{[field_name]s}{[convert_suffix]s},\n", .{
+            buffer.print("            {[field_name]s}={[value_prefix]s}" ++
+                "{[field_name]s}{[value_suffix]s},\n", .{
                 .field_name = field.name,
-                .convert_prefix = convert_prefix,
-                .convert_suffix = convert_suffix,
+                .value_prefix = value_prefix,
+                .value_suffix = value_suffix,
             });
         }
     }
@@ -522,15 +530,7 @@ pub fn main() !void {
         \\                           ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
         \\                           OnCompletion]
         \\
-        \\# Initialize a new TigerBeetle client which echos back any data submitted.
-        \\tb_client_init_echo = tbclient.tb_client_init_echo
-        \\tb_client_init_echo.restype = InitStatus
-        \\tb_client_init_echo.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
-        \\                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
-        \\                                OnCompletion]
-        \\
-        \\# Returns the cluster_id and addresses passed in to either tb_client_init or
-        \\# tb_client_init_echo.
+        \\# Returns the cluster_id and addresses passed in to either tb_client_init.
         \\tb_client_init_parameters = tbclient.tb_client_init_parameters
         \\tb_client_init_parameters.restype = ClientStatus
         \\tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),

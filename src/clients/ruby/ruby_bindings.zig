@@ -471,12 +471,26 @@ fn emit_c_header_preamble(buffer: *Buffer) void {
         \\#include <stdlib.h>
         \\#include <string.h>
         \\
-        \\static inline void rb_tb_pack_u128(VALUE v, void *dst) {
+        \\static inline VALUE rb_tb_check_integer(VALUE v, const char *field) {
+        \\    if (!RB_INTEGER_TYPE_P(v)) {
+        \\        rb_raise(rb_eTypeError, "%s must be an Integer, got %s", field, rb_obj_classname(v));
+        \\    }
+        \\    return v;
+        \\}
+        \\
+        \\static inline void rb_tb_pack_u128(VALUE v, void *dst, const char *field) {
+        \\    rb_tb_check_integer(v, field);
         \\    int status = rb_integer_pack(v, dst, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
         \\    if (status != 0 && status != 1) {
         \\        rb_raise(rb_eRangeError, "integer must be between 0 and 2**128 - 1");
         \\    }
         \\}
+        \\
+        \\#define rb_tb_ivar_get_checked(item_rb, field) \
+        \\    rb_tb_check_integer(rb_ivar_get(item_rb, rb_intern("@" #field)), #field)
+        \\
+        \\#define rb_tb_pack_u128_checked(item_rb, item, field) \
+        \\    rb_tb_pack_u128(rb_ivar_get(item_rb, rb_intern("@" #field)), &item->field, #field)
         \\
         \\static inline VALUE rb_tb_unpack_u128(const void *src) {
         \\    return rb_integer_unpack(src, 16, 1, 0, INTEGER_PACK_LITTLE_ENDIAN);
@@ -548,16 +562,17 @@ fn emit_c_status_name_function(
 fn emit_c_num_from_ruby(
     buffer: *Buffer,
     comptime FieldType: type,
-    comptime ruby_value: []const u8,
+    comptime field_name: []const u8,
 ) void {
     const bits = comptime int_bits(FieldType);
-    switch (bits) {
-        8 => buffer.print("RB_NUM2CHR({s})", .{ruby_value}),
-        16 => buffer.print("RB_NUM2USHORT({s})", .{ruby_value}),
-        32 => buffer.print("RB_NUM2UINT({s})", .{ruby_value}),
-        64 => buffer.print("RB_NUM2ULL({s})", .{ruby_value}),
+    const macro: []const u8 = switch (bits) {
+        8 => "RB_NUM2CHR",
+        16 => "RB_NUM2USHORT",
+        32 => "RB_NUM2UINT",
+        64 => "RB_NUM2ULL",
         else => @compileError("unsupported Ruby numeric field"),
-    }
+    };
+    buffer.print("{s}(rb_tb_ivar_get_checked(item_rb, {s}))", .{ macro, field_name });
 }
 
 fn emit_c_value_from_field(
@@ -600,21 +615,20 @@ fn emit_c_serialize_struct(buffer: *Buffer, comptime operation: tb.Operation) vo
             }
             continue;
         }
-        const value_expr = "rb_ivar_get(item_rb, rb_intern(\"@" ++ field.name ++ "\"))";
         switch (@typeInfo(field.type)) {
             .int => |info| if (info.bits == 128) {
                 buffer.print(
-                    "        rb_tb_pack_u128({s}, &item->{s});\n",
-                    .{ value_expr, field.name },
+                    "        rb_tb_pack_u128_checked(item_rb, item, {s});\n",
+                    .{field.name},
                 );
             } else {
                 buffer.print("        item->{s} = ", .{field.name});
-                emit_c_num_from_ruby(buffer, field.type, value_expr);
+                emit_c_num_from_ruby(buffer, field.type, field.name);
                 buffer.print(";\n", .{});
             },
             .@"enum", .@"struct" => {
                 buffer.print("        item->{s} = ", .{field.name});
-                emit_c_num_from_ruby(buffer, field.type, value_expr);
+                emit_c_num_from_ruby(buffer, field.type, field.name);
                 buffer.print(";\n", .{});
             },
             else => @compileError("unsupported serializer field: " ++ @typeName(field.type)),
@@ -687,7 +701,7 @@ fn emit_c_lookup_serializer(buffer: *Buffer) void {
         \\static void rb_tb_serialize_u128(VALUE items_rb, uint8_t *buf, long count) {
         \\    tb_uint128_t *ids = (tb_uint128_t *)buf;
         \\    for (long i = 0; i < count; i++) {
-        \\        rb_tb_pack_u128(RARRAY_AREF(items_rb, i), &ids[i]);
+        \\        rb_tb_pack_u128(RARRAY_AREF(items_rb, i), &ids[i], "id");
         \\    }
         \\}
         \\

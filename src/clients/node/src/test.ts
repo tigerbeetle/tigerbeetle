@@ -1502,7 +1502,7 @@ test('query with invalid filter', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 0,
+    limit: BATCH_MAX,
     flags: 0xFFFF,
   }
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])

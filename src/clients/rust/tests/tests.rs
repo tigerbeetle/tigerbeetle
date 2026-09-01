@@ -79,7 +79,7 @@ impl TestDb {
             assert!(status.success());
         }
 
-        let server = Self::start(&["--addresses=0", "--cache-grid=128MiB", database_name])?;
+        let server = Self::start(&["--addresses=0", "--cache-grid=32MiB", database_name])?;
 
         Ok(server)
     }

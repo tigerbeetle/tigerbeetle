@@ -178,7 +178,7 @@ Additional constraints:
 
 #### Examples
 
-- For representing fractional amounts (e.g. `$12.34`), see
+- For representing fractional amounts (e.g. `12.34 USD`), see
   [Fractional Amounts](../coding/data-modeling.md#fractional-amounts-and-asset-scale).
 - For balancing transfers, see [Close Account](../coding/recipes/close-account.md).
 

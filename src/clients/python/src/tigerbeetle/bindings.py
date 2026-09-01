@@ -333,24 +333,24 @@ CClient._fields_ = [ # noqa: SLF001
 class CAccount(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=128, name="id", number=obj.id)
-        validate_uint(bits=128, name="debits_pending", number=obj.debits_pending)
-        validate_uint(bits=128, name="debits_posted", number=obj.debits_posted)
-        validate_uint(bits=128, name="credits_pending", number=obj.credits_pending)
-        validate_uint(bits=128, name="credits_posted", number=obj.credits_posted)
-        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
+        id_u128 = c_uint128.from_param(obj.id, name="id")
+        debits_pending_u128 = c_uint128.from_param(obj.debits_pending, name="debits_pending")
+        debits_posted_u128 = c_uint128.from_param(obj.debits_posted, name="debits_posted")
+        credits_pending_u128 = c_uint128.from_param(obj.credits_pending, name="credits_pending")
+        credits_posted_u128 = c_uint128.from_param(obj.credits_posted, name="credits_posted")
+        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=32, name="ledger", number=obj.ledger)
         validate_uint(bits=16, name="code", number=obj.code)
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
-            id=c_uint128.from_param(obj.id),
-            debits_pending=c_uint128.from_param(obj.debits_pending),
-            debits_posted=c_uint128.from_param(obj.debits_posted),
-            credits_pending=c_uint128.from_param(obj.credits_pending),
-            credits_posted=c_uint128.from_param(obj.credits_posted),
-            user_data_128=c_uint128.from_param(obj.user_data_128),
+            id=id_u128,
+            debits_pending=debits_pending_u128,
+            debits_posted=debits_posted_u128,
+            credits_pending=credits_pending_u128,
+            credits_posted=credits_posted_u128,
+            user_data_128=user_data_128_u128,
             user_data_64=obj.user_data_64,
             user_data_32=obj.user_data_32,
             ledger=obj.ledger,
@@ -396,12 +396,12 @@ CAccount._fields_ = [ # noqa: SLF001
 class CTransfer(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=128, name="id", number=obj.id)
-        validate_uint(bits=128, name="debit_account_id", number=obj.debit_account_id)
-        validate_uint(bits=128, name="credit_account_id", number=obj.credit_account_id)
-        validate_uint(bits=128, name="amount", number=obj.amount)
-        validate_uint(bits=128, name="pending_id", number=obj.pending_id)
-        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
+        id_u128 = c_uint128.from_param(obj.id, name="id")
+        debit_account_id_u128 = c_uint128.from_param(obj.debit_account_id, name="debit_account_id")
+        credit_account_id_u128 = c_uint128.from_param(obj.credit_account_id, name="credit_account_id")
+        amount_u128 = c_uint128.from_param(obj.amount, name="amount")
+        pending_id_u128 = c_uint128.from_param(obj.pending_id, name="pending_id")
+        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=32, name="timeout", number=obj.timeout)
@@ -409,12 +409,12 @@ class CTransfer(ctypes.Structure):
         validate_uint(bits=16, name="code", number=obj.code)
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
-            id=c_uint128.from_param(obj.id),
-            debit_account_id=c_uint128.from_param(obj.debit_account_id),
-            credit_account_id=c_uint128.from_param(obj.credit_account_id),
-            amount=c_uint128.from_param(obj.amount),
-            pending_id=c_uint128.from_param(obj.pending_id),
-            user_data_128=c_uint128.from_param(obj.user_data_128),
+            id=id_u128,
+            debit_account_id=debit_account_id_u128,
+            credit_account_id=credit_account_id_u128,
+            amount=amount_u128,
+            pending_id=pending_id_u128,
+            user_data_128=user_data_128_u128,
             user_data_64=obj.user_data_64,
             user_data_32=obj.user_data_32,
             timeout=obj.timeout,
@@ -508,8 +508,8 @@ CCreateTransferResult._fields_ = [ # noqa: SLF001
 class CAccountFilter(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=128, name="account_id", number=obj.account_id)
-        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
+        account_id_u128 = c_uint128.from_param(obj.account_id, name="account_id")
+        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=16, name="code", number=obj.code)
@@ -517,8 +517,8 @@ class CAccountFilter(ctypes.Structure):
         validate_uint(bits=64, name="timestamp_max", number=obj.timestamp_max)
         validate_uint(bits=32, name="limit", number=obj.limit)
         return cls(
-            account_id=c_uint128.from_param(obj.account_id),
-            user_data_128=c_uint128.from_param(obj.user_data_128),
+            account_id=account_id_u128,
+            user_data_128=user_data_128_u128,
             user_data_64=obj.user_data_64,
             user_data_32=obj.user_data_32,
             code=obj.code,
@@ -559,16 +559,16 @@ CAccountFilter._fields_ = [ # noqa: SLF001
 class CAccountBalance(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=128, name="debits_pending", number=obj.debits_pending)
-        validate_uint(bits=128, name="debits_posted", number=obj.debits_posted)
-        validate_uint(bits=128, name="credits_pending", number=obj.credits_pending)
-        validate_uint(bits=128, name="credits_posted", number=obj.credits_posted)
+        debits_pending_u128 = c_uint128.from_param(obj.debits_pending, name="debits_pending")
+        debits_posted_u128 = c_uint128.from_param(obj.debits_posted, name="debits_posted")
+        credits_pending_u128 = c_uint128.from_param(obj.credits_pending, name="credits_pending")
+        credits_posted_u128 = c_uint128.from_param(obj.credits_posted, name="credits_posted")
         validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
-            debits_pending=c_uint128.from_param(obj.debits_pending),
-            debits_posted=c_uint128.from_param(obj.debits_posted),
-            credits_pending=c_uint128.from_param(obj.credits_pending),
-            credits_posted=c_uint128.from_param(obj.credits_posted),
+            debits_pending=debits_pending_u128,
+            debits_posted=debits_posted_u128,
+            credits_pending=credits_pending_u128,
+            credits_posted=credits_posted_u128,
             timestamp=obj.timestamp,
         )
 
@@ -595,7 +595,7 @@ CAccountBalance._fields_ = [ # noqa: SLF001
 class CQueryFilter(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
+        user_data_128_u128 = c_uint128.from_param(obj.user_data_128, name="user_data_128")
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
         validate_uint(bits=32, name="ledger", number=obj.ledger)
@@ -604,7 +604,7 @@ class CQueryFilter(ctypes.Structure):
         validate_uint(bits=64, name="timestamp_max", number=obj.timestamp_max)
         validate_uint(bits=32, name="limit", number=obj.limit)
         return cls(
-            user_data_128=c_uint128.from_param(obj.user_data_128),
+            user_data_128=user_data_128_u128,
             user_data_64=obj.user_data_64,
             user_data_32=obj.user_data_32,
             ledger=obj.ledger,
@@ -660,15 +660,7 @@ tb_client_init.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint
                            ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
                            OnCompletion]
 
-# Initialize a new TigerBeetle client which echos back any data submitted.
-tb_client_init_echo = tbclient.tb_client_init_echo
-tb_client_init_echo.restype = InitStatus
-tb_client_init_echo.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
-                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
-                                OnCompletion]
-
-# Returns the cluster_id and addresses passed in to either tb_client_init or
-# tb_client_init_echo.
+# Returns the cluster_id and addresses passed in to either tb_client_init.
 tb_client_init_parameters = tbclient.tb_client_init_parameters
 tb_client_init_parameters.restype = ClientStatus
 tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),

@@ -137,7 +137,7 @@ class Client:
 
         # ctypes needs a reference to keep this alive through the FFI call. Having it as a temporary
         # within the call _does not_ work.
-        cluster_id_u128 = c_uint128.from_param(cluster_id)
+        cluster_id_u128 = c_uint128.from_param(cluster_id, name="cluster_id")
         init_status = bindings.tb_client_init(
             ctypes.byref(self._client),
             ctypes.cast(

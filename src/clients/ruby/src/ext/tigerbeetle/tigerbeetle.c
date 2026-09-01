@@ -182,7 +182,7 @@ static VALUE rb_tb_client_initialize(
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
     uint8_t cluster_id_bytes[16] = {0};
-    rb_tb_pack_u128(cluster_id_rb, cluster_id_bytes);
+    rb_tb_pack_u128(cluster_id_rb, cluster_id_bytes, "cluster_id");
 
     const char *addr = StringValueCStr(addresses_rb);
     uint32_t addr_len = (uint32_t)RSTRING_LEN(addresses_rb);

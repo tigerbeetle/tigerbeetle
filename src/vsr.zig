@@ -4,6 +4,10 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
 
+test {
+    _ = @import("unit_tests.zig");
+}
+
 // vsr.zig is the root of a zig package, reexport all public APIs.
 //
 // Note that we don't promise any stability of these interfaces yet.
@@ -22,6 +26,7 @@ pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const trace = @import("trace.zig");
 pub const stdx = @import("stdx");
+pub const abi = @import("abi");
 pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");

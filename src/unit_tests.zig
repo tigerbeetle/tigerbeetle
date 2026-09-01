@@ -7,7 +7,6 @@ comptime {
     _ = @import("clients/c/tb_client/context.zig");
     _ = @import("clients/c/tb_client/packet.zig");
     _ = @import("clients/c/tb_client/signal.zig");
-    _ = @import("clients/c/test.zig");
     _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
     _ = @import("ewah_benchmark.zig");
@@ -37,7 +36,6 @@ comptime {
     _ = @import("repl/completion.zig");
     _ = @import("repl/parser.zig");
     _ = @import("repl/terminal.zig");
-    _ = @import("scripts/cfo.zig");
     _ = @import("scripts/changelog.zig");
     _ = @import("stack.zig");
     _ = @import("state_machine.zig");
@@ -52,7 +50,6 @@ comptime {
     _ = @import("time.zig");
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
-    _ = @import("vsr.zig");
     _ = @import("vsr/checksum.zig");
     _ = @import("vsr/checksum_benchmark.zig");
     _ = @import("vsr/clock.zig");
@@ -160,6 +157,7 @@ const quine =
     \\        if (!std.mem.endsWith(u8, entry_path, ".zig")) continue;
     \\
     \\        if (std.mem.eql(u8, entry_path, "unit_tests.zig")) continue;
+    \\        if (std.mem.eql(u8, entry_path, "vsr.zig")) continue;
     \\        if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
     \\        if (std.mem.eql(u8, entry_path, "inspect_snapshot.zig")) continue;
     \\        if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
@@ -285,6 +283,7 @@ fn unit_test_files(arena: std.mem.Allocator, src_dir: std.fs.Dir) ![]const []con
         if (!std.mem.endsWith(u8, entry_path, ".zig")) continue;
 
         if (std.mem.eql(u8, entry_path, "unit_tests.zig")) continue;
+        if (std.mem.eql(u8, entry_path, "vsr.zig")) continue;
         if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
         if (std.mem.eql(u8, entry_path, "inspect_snapshot.zig")) continue;
         if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;

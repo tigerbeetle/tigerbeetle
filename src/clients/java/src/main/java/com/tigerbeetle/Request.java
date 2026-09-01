@@ -28,28 +28,6 @@ abstract class Request<TResponse extends Batch> {
      */
     // @formatter:on
 
-    enum Operations {
-        // TODO Auto-generate these.
-        PULSE(128),
-        CREATE_ACCOUNTS(146),
-        CREATE_TRANSFERS(147),
-        LOOKUP_ACCOUNTS(140),
-        LOOKUP_TRANSFERS(141),
-        GET_ACCOUNT_TRANSFERS(142),
-        GET_ACCOUNT_BALANCES(143),
-        QUERY_ACCOUNTS(144),
-        QUERY_TRANSFERS(145),
-
-        ECHO_ACCOUNTS(146),
-        ECHO_TRANSFERS(147);
-
-        byte value;
-
-        Operations(int value) {
-            this.value = (byte) value;
-        }
-    }
-
     static final ByteBuffer REPLY_EMPTY = ByteBuffer.allocate(0).asReadOnlyBuffer();
 
     // Used only by the JNI side
@@ -63,10 +41,10 @@ abstract class Request<TResponse extends Batch> {
     private byte[] replyBuffer;
 
     private final NativeClient nativeClient;
-    private final Operations operation;
+    private final TBOperation operation;
     private final int requestLen;
 
-    protected Request(final NativeClient nativeClient, final Operations operation,
+    protected Request(final NativeClient nativeClient, final TBOperation operation,
             final Batch batch) {
         Objects.requireNonNull(nativeClient, "Client cannot be null");
         Objects.requireNonNull(batch, "Batch cannot be null");
@@ -105,55 +83,53 @@ abstract class Request<TResponse extends Batch> {
             switch (PacketStatus.fromValue(status)) {
                 case Ok:
                     switch (operation) {
-                        case CREATE_ACCOUNTS: {
+                        case CreateAccounts: {
                             result = new CreateAccountResultBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             exception = checkResultLength(result);
                             break;
                         }
 
-                        case CREATE_TRANSFERS: {
+                        case CreateTransfers: {
                             result = new CreateTransferResultBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             exception = checkResultLength(result);
                             break;
                         }
 
-                        case ECHO_ACCOUNTS:
-                        case LOOKUP_ACCOUNTS: {
+                        case LookupAccounts: {
                             result = new AccountBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             exception = checkResultLength(result);
                             break;
                         }
 
-                        case ECHO_TRANSFERS:
-                        case LOOKUP_TRANSFERS: {
+                        case LookupTransfers: {
                             result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             exception = checkResultLength(result);
                             break;
                         }
 
-                        case GET_ACCOUNT_TRANSFERS: {
+                        case GetAccountTransfers: {
                             result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             break;
                         }
 
-                        case GET_ACCOUNT_BALANCES: {
+                        case GetAccountBalances: {
                             result = new AccountBalanceBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             break;
                         }
 
-                        case QUERY_ACCOUNTS: {
+                        case QueryAccounts: {
                             result = new AccountBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             break;
                         }
 
-                        case QUERY_TRANSFERS: {
+                        case QueryTransfers: {
                             result = new TransferBatch(replyBuffer == null ? REPLY_EMPTY
                                     : ByteBuffer.wrap(replyBuffer));
                             break;
