@@ -247,58 +247,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const FsyncError = error{
-        FileDescriptorInvalid,
-        InputOutput,
-    } || posix.UnexpectedError;
-
-    pub fn fsync(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: FsyncError!void,
-        ) void,
-        completion: *Completion,
-        fd: fd_t,
-    ) void {
-        _ = self;
-        _ = context;
-        _ = callback;
-        _ = completion;
-        _ = fd;
-        unreachable; // clients do not perform disk I/O
-    }
-
     pub const OpenatError = posix.OpenError || posix.UnexpectedError;
-
-    pub fn openat(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: OpenatError!fd_t,
-        ) void,
-        completion: *Completion,
-        dir_fd: fd_t,
-        file_path: [*:0]const u8,
-        flags: posix.O,
-        mode: posix.mode_t,
-    ) void {
-        _ = self;
-        _ = context;
-        _ = callback;
-        _ = completion;
-        _ = dir_fd;
-        _ = file_path;
-        _ = flags;
-        _ = mode;
-        unreachable; // clients do not perform disk I/O
-    }
 
     pub const ReadError = error{
         WouldBlock,
@@ -311,30 +260,6 @@ pub const IO = struct {
         Unseekable,
         ConnectionTimedOut,
     } || posix.UnexpectedError;
-
-    pub fn read(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: ReadError!usize,
-        ) void,
-        completion: *Completion,
-        fd: fd_t,
-        buffer: []u8,
-        offset: u64,
-    ) void {
-        _ = self;
-        _ = context;
-        _ = callback;
-        _ = completion;
-        _ = fd;
-        _ = buffer;
-        _ = offset;
-        unreachable; // clients do not perform disk I/O
-    }
 
     pub const RecvError = error{
         WouldBlock,
@@ -433,41 +358,6 @@ pub const IO = struct {
         ) catch return null;
     }
 
-    pub const StatxError = error{
-        SymLinkLoop,
-        FileNotFound,
-        NameTooLong,
-        NotDir,
-    } || std.fs.File.StatError || posix.UnexpectedError;
-
-    pub fn statx(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: StatxError!void,
-        ) void,
-        completion: *Completion,
-        dir_fd: fd_t,
-        file_path: [*:0]const u8,
-        flags: u32,
-        mask: u32,
-        statxbuf: *std.os.linux.Statx,
-    ) void {
-        _ = self;
-        _ = context;
-        _ = callback;
-        _ = completion;
-        _ = dir_fd;
-        _ = file_path;
-        _ = flags;
-        _ = mask;
-        _ = statxbuf;
-        unreachable; // clients do not perform disk I/O
-    }
-
     pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
 
     pub fn timeout(
@@ -492,44 +382,6 @@ pub const IO = struct {
         };
 
         self.enqueue(completion);
-    }
-
-    pub const WriteError = error{
-        WouldBlock,
-        NotOpenForWriting,
-        NotConnected,
-        DiskQuota,
-        FileTooBig,
-        Alignment,
-        InputOutput,
-        NoSpaceLeft,
-        Unseekable,
-        AccessDenied,
-        BrokenPipe,
-    } || posix.UnexpectedError;
-
-    pub fn write(
-        self: *IO,
-        comptime Context: type,
-        context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: WriteError!usize,
-        ) void,
-        completion: *Completion,
-        fd: fd_t,
-        buffer: []const u8,
-        offset: u64,
-    ) void {
-        _ = self;
-        _ = context;
-        _ = callback;
-        _ = completion;
-        _ = fd;
-        _ = buffer;
-        _ = offset;
-        unreachable; // clients do not perform disk I/O
     }
 
     pub const Event = posix.fd_t;
@@ -670,15 +522,10 @@ pub const IO = struct {
             .accept => self.enqueue_accept(completion),
             .close => self.enqueue_close(completion),
             .connect => self.enqueue_connect(completion),
-            .fsync => unreachable,
-            .openat => unreachable,
-            .read => unreachable,
             .eventfd_read => self.enqueue_eventfd_read(completion),
             .recv => self.enqueue_recv(completion),
             .send => self.enqueue_send(completion),
-            .statx => unreachable,
             .timeout => self.enqueue_timeout(completion),
-            .write => unreachable,
         }
     }
 
@@ -1403,7 +1250,6 @@ pub const IO = struct {
                     };
                     completion.callback(completion.context, completion, &result);
                 },
-                .fsync, .openat, .read, .statx, .write => unreachable,
                 .eventfd_read => {
                     const result: ReadError!usize = blk: {
                         if (completion.result < 0) {
@@ -1530,20 +1376,6 @@ pub const IO = struct {
             socket: socket_t,
             address: std.net.Address,
         },
-        fsync: struct {
-            fd: fd_t,
-        },
-        openat: struct {
-            dir_fd: fd_t,
-            file_path: [*:0]const u8,
-            flags: posix.O,
-            mode: posix.mode_t,
-        },
-        read: struct {
-            fd: fd_t,
-            buffer: []u8,
-            offset: u64,
-        },
         eventfd_read: struct {
             fd: fd_t,
         },
@@ -1555,20 +1387,8 @@ pub const IO = struct {
             socket: socket_t,
             buffer: []const u8,
         },
-        statx: struct {
-            dir_fd: fd_t,
-            file_path: [*:0]const u8,
-            flags: u32,
-            mask: u32,
-            statxbuf: *std.os.linux.Statx,
-        },
         timeout: struct {
             nanoseconds: u63,
-        },
-        write: struct {
-            fd: fd_t,
-            buffer: []const u8,
-            offset: u64,
         },
     };
 };
