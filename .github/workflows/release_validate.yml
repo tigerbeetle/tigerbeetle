@@ -3,15 +3,15 @@ permissions: {}
 
 on:
   workflow_dispatch: # Manual triggering for debugging
-  workflow_run:
-    workflows: ["Release"]
-    types:
-      - completed
+  # workflow_run:
+  #   workflows: ["Release"]
+  #   types:
+  #     - completed
 
-  schedule:
-    # Schedule a validation run every six hours to make sure we catch any bugs due to changes
-    # in systems we do not control.
-    - cron: 0 */6 * * *
+  # schedule:
+  #   # Schedule a validation run every six hours to make sure we catch any bugs due to changes
+  #   # in systems we do not control.
+  #   - cron: 0 */6 * * *
 
 # Don't run release and release_validate simultaneously, to avoid races.
 concurrency:
