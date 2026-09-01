@@ -15,6 +15,7 @@ const linux = std.os.linux;
 const log = std.log.scoped(.io);
 
 const stdx = @import("stdx");
+const TimeOS = @import("../time.zig").TimeOS;
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
@@ -30,6 +31,7 @@ pub const IO = struct {
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
     stats: common.Stats = .{},
+    time: TimeOS = .{},
 
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
@@ -100,24 +102,20 @@ pub const IO = struct {
         var total_timer = try std.time.Timer.start();
         defer self.stats.window.time_run_for_ns.ns += total_timer.read();
 
-        const deadline: i128 = monotonic_now_ns() + @as(i128, nanoseconds);
-
+        const deadline = self.time.monotonic().add(.{ .ns = nanoseconds });
         while (true) {
             self.fire_expired_timeouts();
 
-            var cb_timer = try std.time.Timer.start();
+            var callback_timer = try std.time.Timer.start();
             self.run_callbacks();
-            self.stats.window.time_callbacks.ns += cb_timer.read();
+            self.stats.window.time_callbacks.ns += callback_timer.read();
 
-            const now: i128 = monotonic_now_ns();
-            if (now >= deadline) break;
+            const now = self.time.monotonic();
+            if (now.ns >= deadline.ns) break;
 
-            const remaining_ns = deadline - now;
-            const wait_ms: i32 = @intCast(
-                @min(@divFloor(remaining_ns, std.time.ns_per_ms), std.math.maxInt(i32)),
-            );
-
-            try self.poll_epoll(wait_ms);
+            const remaining = now.elapsed(deadline);
+            const remaining_ms: i32 = @intCast(@divFloor(remaining.ns, std.time.ns_per_ms));
+            try self.poll_epoll(remaining_ms);
         }
     }
 
