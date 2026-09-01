@@ -1,5 +1,11 @@
 const ct = @import("../conformance_test_api.zig");
 
+test "accepts an empty batch" {
+    const results = ct.create_accounts(.{});
+
+    ct.assert_empty(results);
+}
+
 test "creates an account" {
     const results = ct.create_accounts(.{
         .{ .id = ct.generate_id(), .ledger = 1, .code = 1 },
@@ -55,4 +61,12 @@ test "rejects mutually exclusive flags" {
     });
 
     ct.assert_equal(results, .{.{ .status = .flags_are_mutually_exclusive }});
+}
+
+test "rejects a non-zero timestamp" {
+    const results = ct.create_accounts(.{
+        .{ .id = ct.generate_id(), .ledger = 1, .code = 1, .timestamp = 2 },
+    });
+
+    ct.assert_equal(results, .{.{ .status = .timestamp_must_be_zero }});
 }

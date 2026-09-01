@@ -30,6 +30,11 @@ class TestConformance < Minitest::Test
 
   # Suite: create_accounts
 
+  def test_create_accounts_accepts_an_empty_batch
+    results = @client.create_accounts([])
+    assert_equal(0, results.length)
+  end
+
   def test_create_accounts_creates_an_account
     results = @client.create_accounts(
       [
@@ -112,6 +117,21 @@ class TestConformance < Minitest::Test
     )
     assert_equal(1, results.length)
     assert_equal(TigerBeetle::CreateAccountStatus::FLAGS_ARE_MUTUALLY_EXCLUSIVE, results[0].status)
+  end
+
+  def test_create_accounts_rejects_a_non_zero_timestamp
+    results = @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: TigerBeetle.id,
+          ledger: 1,
+          code: 1,
+          timestamp: 2
+        )
+      ]
+    )
+    assert_equal(1, results.length)
+    assert_equal(TigerBeetle::CreateAccountStatus::TIMESTAMP_MUST_BE_ZERO, results[0].status)
   end
 
   # Suite: lookup_accounts
@@ -216,6 +236,11 @@ class TestConformance < Minitest::Test
   end
 
   # Suite: create_transfers
+
+  def test_create_transfers_accepts_an_empty_batch
+    results = @client.create_transfers([])
+    assert_equal(0, results.length)
+  end
 
   def test_create_transfers_creates_a_transfer
     debit_account_id = TigerBeetle.id
@@ -862,6 +887,136 @@ class TestConformance < Minitest::Test
     assert_equal(0, transfers.length)
   end
 
+  def test_get_account_transfers_returns_transfers_in_reverse_order_with_the_reversed_flag
+    account_1_id = TigerBeetle.id
+    account_2_id = TigerBeetle.id
+    transfer_1_id = TigerBeetle.id
+    transfer_2_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: transfer_1_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_2_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    transfers = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 10,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(2, transfers.length)
+    assert_equal(transfer_2_id, transfers[0].id)
+    assert_equal(20, transfers[0].amount)
+    assert_equal(transfer_1_id, transfers[1].id)
+    assert_equal(10, transfers[1].amount)
+  end
+
+  def test_get_account_transfers_returns_only_the_transfers_within_the_limit
+    account_1_id = TigerBeetle.id
+    account_2_id = TigerBeetle.id
+    transfer_1_id = TigerBeetle.id
+    transfer_2_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: transfer_1_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_2_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 30,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    transfers = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(2, transfers.length)
+    assert_equal(transfer_1_id, transfers[0].id)
+    assert_equal(10, transfers[0].amount)
+    assert_equal(transfer_2_id, transfers[1].id)
+    assert_equal(20, transfers[1].amount)
+  end
+
+  def test_get_account_transfers_fails_when_the_limit_is_too_large
+    assert_raises(StandardError) do
+      @client.get_account_transfers(
+        TigerBeetle::AccountFilter.new(
+          account_id: TigerBeetle.id,
+          limit: 10000,
+          flags: TigerBeetle::AccountFilterFlags::DEBITS |
+            TigerBeetle::AccountFilterFlags::CREDITS
+        )
+      )
+    end
+  end
+
   # Suite: get_account_balances
 
   def test_get_account_balances_returns_a_balance_per_transfer_for_a_history_account
@@ -1063,6 +1218,157 @@ class TestConformance < Minitest::Test
       )
     )
     assert_equal(0, balances.length)
+  end
+
+  def test_get_account_balances_returns_no_balances_for_an_account_with_no_transfers
+    account_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_id,
+          ledger: 1,
+          code: 1,
+          flags: TigerBeetle::AccountFlags::HISTORY
+        )
+      ]
+    )
+    balances = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_id,
+        limit: 10,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(0, balances.length)
+  end
+
+  def test_get_account_balances_returns_balances_in_reverse_order_with_the_reversed_flag
+    account_1_id = TigerBeetle.id
+    account_2_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1,
+          flags: TigerBeetle::AccountFlags::HISTORY
+        ),
+        TigerBeetle::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_2_id,
+          credit_account_id: account_1_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    balances = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 10,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(2, balances.length)
+    assert_equal(10, balances[0].debits_posted)
+    assert_equal(20, balances[0].credits_posted)
+    assert_equal(10, balances[1].debits_posted)
+    assert_equal(0, balances[1].credits_posted)
+  end
+
+  def test_get_account_balances_returns_only_the_balances_within_the_limit
+    account_1_id = TigerBeetle.id
+    account_2_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1,
+          flags: TigerBeetle::AccountFlags::HISTORY
+        ),
+        TigerBeetle::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_2_id,
+          credit_account_id: account_1_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 30,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    balances = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(2, balances.length)
+    assert_equal(10, balances[0].debits_posted)
+    assert_equal(0, balances[0].credits_posted)
+    assert_equal(10, balances[1].debits_posted)
+    assert_equal(20, balances[1].credits_posted)
+  end
+
+  def test_get_account_balances_fails_when_the_limit_is_too_large
+    assert_raises(StandardError) do
+      @client.get_account_balances(
+        TigerBeetle::AccountFilter.new(
+          account_id: TigerBeetle.id,
+          limit: 10000,
+          flags: TigerBeetle::AccountFilterFlags::DEBITS |
+            TigerBeetle::AccountFilterFlags::CREDITS
+        )
+      )
+    end
   end
 
   # Suite: query_accounts
@@ -1661,6 +1967,34 @@ class TestConformance < Minitest::Test
   def test_uint128_range_rejects_a_negative_u128
     assert_raises(StandardError) do
       @client.lookup_accounts([-1])
+    end
+  end
+
+  def test_uint128_range_rejects_a_u128_above_the_maximum_on_a_struct_field
+    assert_raises(StandardError) do
+      @client.create_accounts(
+        [
+          TigerBeetle::Account.new(
+            id: 340282366920938463463374607431768211456,
+            ledger: 1,
+            code: 1
+          )
+        ]
+      )
+    end
+  end
+
+  def test_uint128_range_rejects_a_negative_u128_on_a_struct_field
+    assert_raises(StandardError) do
+      @client.create_accounts(
+        [
+          TigerBeetle::Account.new(
+            id: -1,
+            ledger: 1,
+            code: 1
+          )
+        ]
+      )
     end
   end
 

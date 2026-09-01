@@ -1045,25 +1045,11 @@ public class IntegrationTest {
     }
 
     @Test
-    public void testZeroLengthLookupAccounts() throws Throwable {
-        final var ids = new IdBatch(0);
-        final var accounts = client.lookupAccounts(ids);
-        assertTrue(accounts.getLength() == 0);
-    }
-
-    @Test
     public void testZeroLengthLookupAccountsAsync() throws Throwable {
         final var ids = new IdBatch(0);
         final var accountsFuture = client.lookupAccountsAsync(ids);
         final var accounts = accountsFuture.get();
         assertTrue(accounts.getLength() == 0);
-    }
-
-    @Test
-    public void testZeroLengthLookupTransfers() throws Throwable {
-        final var ids = new IdBatch(0);
-        final var transfers = client.lookupTransfers(ids);
-        assertTrue(transfers.getLength() == 0);
     }
 
     @Test

@@ -38,6 +38,10 @@ def test_generate_ids_generates_monotonically_increasing_ids(client):
 
 # Suite: create_accounts
 
+def test_create_accounts_accepts_an_empty_batch(client):
+    results = client.create_accounts([])
+    assert results == []
+
 def test_create_accounts_creates_an_account(client):
     results = client.create_accounts(
         [
@@ -122,6 +126,20 @@ def test_create_accounts_rejects_mutually_exclusive_flags(client):
     )
     assert len(results) == 1
     assert results[0].status == tb.CreateAccountStatus.FLAGS_ARE_MUTUALLY_EXCLUSIVE
+
+def test_create_accounts_rejects_a_non_zero_timestamp(client):
+    results = client.create_accounts(
+        [
+            tb.Account(
+                id=tb.id(),
+                ledger=1,
+                code=1,
+                timestamp=2,
+            ),
+        ]
+    )
+    assert len(results) == 1
+    assert results[0].status == tb.CreateAccountStatus.TIMESTAMP_MUST_BE_ZERO
 
 # Suite: lookup_accounts
 
@@ -219,6 +237,10 @@ def test_lookup_accounts_round_trips_all_fields(client):
     assert account.timestamp > 0
 
 # Suite: create_transfers
+
+def test_create_transfers_accepts_an_empty_batch(client):
+    results = client.create_transfers([])
+    assert results == []
 
 def test_create_transfers_creates_a_transfer(client):
     debit_account_id = tb.id()
@@ -875,6 +897,146 @@ def test_get_account_transfers_returns_no_transfers_for_an_unused_account(client
     )
     assert transfers == []
 
+def test_get_account_transfers_returns_transfers_in_reverse_order_with_the_reversed_flag(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    transfer_1_id = tb.id()
+    transfer_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=transfer_1_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_2_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert len(transfers) == 2
+    assert transfers[0].id == transfer_2_id
+    assert transfers[0].amount == 20
+    assert transfers[1].id == transfer_1_id
+    assert transfers[1].amount == 10
+
+def test_get_account_transfers_returns_only_the_transfers_within_the_limit(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    transfer_1_id = tb.id()
+    transfer_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=transfer_1_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_2_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=30,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    transfers = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert len(transfers) == 2
+    assert transfers[0].id == transfer_1_id
+    assert transfers[0].amount == 10
+    assert transfers[1].id == transfer_2_id
+    assert transfers[1].amount == 20
+
+def test_get_account_transfers_fails_when_the_limit_is_too_large(client):
+    with pytest.raises(Exception):
+        client.get_account_transfers(
+            tb.AccountFilter(
+                account_id=tb.id(),
+                user_data_128=0,
+                user_data_64=0,
+                user_data_32=0,
+                code=0,
+                timestamp_min=0,
+                timestamp_max=0,
+                limit=10000,
+                flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            )
+        )
+
 # Suite: get_account_balances
 
 def test_get_account_balances_returns_a_balance_per_transfer_for_a_history_account(client):
@@ -1094,6 +1256,171 @@ def test_get_account_balances_returns_no_balances_without_the_history_flag(clien
         )
     )
     assert balances == []
+
+def test_get_account_balances_returns_no_balances_for_an_account_with_no_transfers(client):
+    account_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+        ]
+    )
+    balances = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert balances == []
+
+def test_get_account_balances_returns_balances_in_reverse_order_with_the_reversed_flag(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_2_id,
+                credit_account_id=account_1_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    balances = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=10,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert len(balances) == 2
+    assert balances[0].debits_posted == 10
+    assert balances[0].credits_posted == 20
+    assert balances[1].debits_posted == 10
+    assert balances[1].credits_posted == 0
+
+def test_get_account_balances_returns_only_the_balances_within_the_limit(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_2_id,
+                credit_account_id=account_1_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=30,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    balances = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert len(balances) == 2
+    assert balances[0].debits_posted == 10
+    assert balances[0].credits_posted == 0
+    assert balances[1].debits_posted == 10
+    assert balances[1].credits_posted == 20
+
+def test_get_account_balances_fails_when_the_limit_is_too_large(client):
+    with pytest.raises(Exception):
+        client.get_account_balances(
+            tb.AccountFilter(
+                account_id=tb.id(),
+                user_data_128=0,
+                user_data_64=0,
+                user_data_32=0,
+                code=0,
+                timestamp_min=0,
+                timestamp_max=0,
+                limit=10000,
+                flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+            )
+        )
 
 # Suite: query_accounts
 
@@ -1735,6 +2062,30 @@ def test_uint128_range_rejects_a_u128_above_the_maximum(client):
 def test_uint128_range_rejects_a_negative_u128(client):
     with pytest.raises(Exception):
         client.lookup_accounts([-1])
+
+def test_uint128_range_rejects_a_u128_above_the_maximum_on_a_struct_field(client):
+    with pytest.raises(Exception):
+        client.create_accounts(
+            [
+                tb.Account(
+                    id=340282366920938463463374607431768211456,
+                    ledger=1,
+                    code=1,
+                ),
+            ]
+        )
+
+def test_uint128_range_rejects_a_negative_u128_on_a_struct_field(client):
+    with pytest.raises(Exception):
+        client.create_accounts(
+            [
+                tb.Account(
+                    id=-1,
+                    ledger=1,
+                    code=1,
+                ),
+            ]
+        )
 
 # Suite: create_transfers_concurrent
 

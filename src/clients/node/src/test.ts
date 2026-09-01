@@ -167,14 +167,6 @@ test('can return error on account', async (): Promise<void> => {
   assert.deepStrictEqual(account_results[1].status, CreateAccountStatus.created)
 })
 
-test('error if timestamp is not set to 0n on account', async (): Promise<void> => {
-  const account = { ...accountA, timestamp: 2n, id: 3n }
-  const account_results = await client.createAccounts([account])
-  assert.deepStrictEqual(account_results.length, 1)
-  assert.ok(account_results[0].timestamp > 0)
-  assert.deepStrictEqual(account_results[0].status, CreateAccountStatus.timestamp_must_be_zero)
-})
-
 test('batch max size', async (): Promise<void> => {
   const BATCH_SIZE = 10_000;
   const transfers: Transfer[] = [];
@@ -354,63 +346,6 @@ test('can post a two-phase transfer', async (): Promise<void> => {
   }
 
   const transfers_results = await client.createTransfers([commit])
-  assert.deepStrictEqual(transfers_results.length, 1)
-  assert.ok(transfers_results[0].timestamp > 0)
-  assert.deepStrictEqual(transfers_results[0].status, CreateTransferStatus.created)
-
-  const accounts = await client.lookupAccounts([accountA.id, accountB.id])
-  assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].credits_posted, 150n)
-  assert.strictEqual(accounts[0].credits_pending, 0n)
-  assert.strictEqual(accounts[0].debits_posted, 0n)
-  assert.strictEqual(accounts[0].debits_pending, 0n)
-
-  assert.strictEqual(accounts[1].credits_posted, 0n)
-  assert.strictEqual(accounts[1].credits_pending, 0n)
-  assert.strictEqual(accounts[1].debits_posted, 150n)
-  assert.strictEqual(accounts[1].debits_pending, 0n)
-})
-
-test('can reject a two-phase transfer', async (): Promise<void> => {
-  // Create a two-phase transfer:
-  const transfer: Transfer = {
-    id: 4n,
-    debit_account_id: accountB.id,
-    credit_account_id: accountA.id,
-    amount: 50n,
-    user_data_128: 0n,
-    user_data_64: 0n,
-    user_data_32: 0,
-    pending_id: 0n,
-    timeout: 1e9,
-    ledger: 1,
-    code: 1,
-    flags: TransferFlags.pending,
-    timestamp: 0n, // this will be set correctly by the TigerBeetle server
-  }
-  let transfers_results = await client.createTransfers([transfer])
-  assert.deepStrictEqual(transfers_results.length, 1)
-  assert.ok(transfers_results[0].timestamp > 0)
-  assert.deepStrictEqual(transfers_results[0].status, CreateTransferStatus.created)
-
-  // send in the reject
-  const reject: Transfer = {
-    id: 5n,
-    debit_account_id: BigInt(0),
-    credit_account_id: BigInt(0),
-    amount: 0n,
-    user_data_128: 0n,
-    user_data_64: 0n,
-    user_data_32: 0,
-    pending_id: 4n, // must match the id of the pending transfer
-    timeout: 0,
-    ledger: 1,
-    code: 1,
-    flags: TransferFlags.void_pending_transfer,
-    timestamp: 0n, // this will be set correctly by the TigerBeetle server
-  }
-
-  transfers_results = await client.createTransfers([reject])
   assert.deepStrictEqual(transfers_results.length, 1)
   assert.ok(transfers_results[0].timestamp > 0)
   assert.deepStrictEqual(transfers_results[0].status, CreateTransferStatus.created)
@@ -1601,26 +1536,6 @@ test('can import accounts and transfers', async (): Promise<void> => {
   const transfers = await client.lookupTransfers([transfer.id])
   assert.strictEqual(transfers.length, 1)
   assert.strictEqual(transfers[0].timestamp, timestampMax + 3n)
-})
-
-test('accept zero-length create_accounts', async (): Promise<void> => {
-  const account_results = await client.createAccounts([])
-  assert.deepStrictEqual(account_results.length, 0)
-})
-
-test('accept zero-length create_transfers', async (): Promise<void> => {
-  const transfers_results = await client.createTransfers([])
-  assert.deepStrictEqual(transfers_results.length, 0)
-})
-
-test('accept zero-length lookup_accounts', async (): Promise<void> => {
-  const accounts = await client.lookupAccounts([])
-  assert.deepStrictEqual(accounts, [])
-})
-
-test('accept zero-length lookup_transfers', async (): Promise<void> => {
-  const transfers = await client.lookupTransfers([])
-  assert.deepStrictEqual(transfers, [])
 })
 
 test("destroy client in-flight", async (): Promise<void> => {
