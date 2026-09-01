@@ -112,7 +112,7 @@ pub const IO = struct {
         while (now.ns < deadline.ns) : (now = self.time.monotonic()) {
             // If there are callbacks ready to run, don't wait in the kernel: the callbacks may
             // queue more work, which should be submitted as soon as possible.
-            const block_ns = if (self.completed.count() == 0) deadline.ns -| now.ns else 0;
+            const block_ns = if (self.completed.count() == 0) deadline.ns - now.ns else 0;
 
             try self.flush_submissions(@intCast(block_ns));
             try self.flush_completions(0);
