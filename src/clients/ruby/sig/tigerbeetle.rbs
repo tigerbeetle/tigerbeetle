@@ -6,6 +6,8 @@
 module TigerBeetle
   VERSION: String
 
+  type flags = Integer | Array[Symbol]
+
   def self.id: () -> Integer
 
   class InitError < StandardError
@@ -35,6 +37,8 @@ module TigerBeetle
   end
 
   module AccountFlags
+    def self.from: (flags) -> Integer
+
     NONE: Integer
     LINKED: Integer
     DEBITS_MUST_NOT_EXCEED_CREDITS: Integer
@@ -45,6 +49,8 @@ module TigerBeetle
   end
 
   module TransferFlags
+    def self.from: (flags) -> Integer
+
     NONE: Integer
     LINKED: Integer
     PENDING: Integer
@@ -58,6 +64,8 @@ module TigerBeetle
   end
 
   module AccountFilterFlags
+    def self.from: (flags) -> Integer
+
     NONE: Integer
     DEBITS: Integer
     CREDITS: Integer
@@ -65,6 +73,8 @@ module TigerBeetle
   end
 
   module QueryFilterFlags
+    def self.from: (flags) -> Integer
+
     NONE: Integer
     REVERSED: Integer
   end
@@ -192,10 +202,11 @@ module TigerBeetle
     attr_accessor user_data_32: Integer
     attr_accessor ledger: Integer
     attr_accessor code: Integer
-    attr_accessor flags: Integer
+    attr_reader flags: Integer
+    def flags=: (flags) -> Integer
     attr_accessor timestamp: Integer
 
-    def initialize: (?id: Integer, ?debits_pending: Integer, ?debits_posted: Integer, ?credits_pending: Integer, ?credits_posted: Integer, ?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?ledger: Integer, ?code: Integer, ?flags: Integer, ?timestamp: Integer) -> void
+    def initialize: (?id: Integer, ?debits_pending: Integer, ?debits_posted: Integer, ?credits_pending: Integer, ?credits_posted: Integer, ?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?ledger: Integer, ?code: Integer, ?flags: flags, ?timestamp: Integer) -> void
   end
 
   class Transfer
@@ -210,10 +221,11 @@ module TigerBeetle
     attr_accessor timeout: Integer
     attr_accessor ledger: Integer
     attr_accessor code: Integer
-    attr_accessor flags: Integer
+    attr_reader flags: Integer
+    def flags=: (flags) -> Integer
     attr_accessor timestamp: Integer
 
-    def initialize: (?id: Integer, ?debit_account_id: Integer, ?credit_account_id: Integer, ?amount: Integer, ?pending_id: Integer, ?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?timeout: Integer, ?ledger: Integer, ?code: Integer, ?flags: Integer, ?timestamp: Integer) -> void
+    def initialize: (?id: Integer, ?debit_account_id: Integer, ?credit_account_id: Integer, ?amount: Integer, ?pending_id: Integer, ?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?timeout: Integer, ?ledger: Integer, ?code: Integer, ?flags: flags, ?timestamp: Integer) -> void
   end
 
   class AccountFilter
@@ -225,9 +237,10 @@ module TigerBeetle
     attr_accessor timestamp_min: Integer
     attr_accessor timestamp_max: Integer
     attr_accessor limit: Integer
-    attr_accessor flags: Integer
+    attr_reader flags: Integer
+    def flags=: (flags) -> Integer
 
-    def initialize: (?account_id: Integer, ?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?code: Integer, ?timestamp_min: Integer, ?timestamp_max: Integer, ?limit: Integer, ?flags: Integer) -> void
+    def initialize: (?account_id: Integer, ?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?code: Integer, ?timestamp_min: Integer, ?timestamp_max: Integer, ?limit: Integer, ?flags: flags) -> void
   end
 
   class QueryFilter
@@ -239,9 +252,10 @@ module TigerBeetle
     attr_accessor timestamp_min: Integer
     attr_accessor timestamp_max: Integer
     attr_accessor limit: Integer
-    attr_accessor flags: Integer
+    attr_reader flags: Integer
+    def flags=: (flags) -> Integer
 
-    def initialize: (?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?ledger: Integer, ?code: Integer, ?timestamp_min: Integer, ?timestamp_max: Integer, ?limit: Integer, ?flags: Integer) -> void
+    def initialize: (?user_data_128: Integer, ?user_data_64: Integer, ?user_data_32: Integer, ?ledger: Integer, ?code: Integer, ?timestamp_min: Integer, ?timestamp_max: Integer, ?limit: Integer, ?flags: flags) -> void
   end
 
   class AccountBalance
