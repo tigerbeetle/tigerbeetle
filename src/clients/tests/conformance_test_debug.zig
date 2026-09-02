@@ -63,6 +63,15 @@ fn dump_expression(expression: ast.Expression) void {
         .enum_literal => |name| print(".{s}", .{name}),
         .reference => |name| print("{s}", .{name}),
         .index => |index| print("{s}[{d}]", .{ index.reference, index.index }),
+        .field_access => |access| print("{s}.{s}", .{ access.reference, access.field.name }),
+        .increment => |arithmetic| print(
+            "increment({s}, {d})",
+            .{ arithmetic.reference, arithmetic.by },
+        ),
+        .decrement => |arithmetic| print(
+            "decrement({s}, {d})",
+            .{ arithmetic.reference, arithmetic.by },
+        ),
     }
 }
 

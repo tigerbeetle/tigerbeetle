@@ -77,7 +77,7 @@ fn emit_step(formatter: Formatter, writer: *std.Io.Writer, step: ast.Step) !void
 
 fn emit_binding(formatter: Formatter, writer: *std.Io.Writer, binding: ast.Binding) !void {
     switch (binding.value) {
-        .generate_id, .generate_ids, .index => {
+        .generate_id, .generate_ids, .index, .field_access => {
             try emit_binding_value(formatter, writer, binding.name, binding.value);
         },
         .record => |record| switch (record.type) {
@@ -104,7 +104,7 @@ fn emit_binding(formatter: Formatter, writer: *std.Io.Writer, binding: ast.Bindi
             const prefix = try std.fmt.allocPrint(formatter.arena, "{s} = ", .{binding.name});
             try emit_call(formatter, writer, call, .{ .prefix = prefix });
         },
-        .integer, .boolean, .enum_literal, .reference => unreachable,
+        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
     }
 }
 
@@ -315,7 +315,7 @@ fn emit_assertion(
 
 fn render_field_access(
     formatter: Formatter,
-    reference: ast.Assertion.FieldReference,
+    reference: ast.FieldReference,
 ) ![]const u8 {
     return std.fmt.allocPrint(formatter.arena, "{s}.{s}", .{
         reference.reference,
@@ -384,7 +384,22 @@ fn render_expression(
                 index.index,
             });
         },
+        .field_access => |access| return render_field_access(formatter, access),
+        .increment => |arithmetic| return render_arithmetic(formatter, arithmetic, "+"),
+        .decrement => |arithmetic| return render_arithmetic(formatter, arithmetic, "-"),
     }
+}
+
+fn render_arithmetic(
+    formatter: Formatter,
+    arithmetic: ast.Expression.Arithmetic,
+    operator: []const u8,
+) ![]const u8 {
+    return std.fmt.allocPrint(formatter.arena, "{s} {s} {d}", .{
+        arithmetic.reference,
+        operator,
+        arithmetic.by,
+    });
 }
 
 fn render_flags(

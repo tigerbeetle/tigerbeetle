@@ -44,6 +44,19 @@ pub const Expression = union(enum) {
         index: u32,
         record_type: Record.Type,
     },
+    field_access: FieldReference,
+    increment: Arithmetic,
+    decrement: Arithmetic,
+
+    pub const Arithmetic = struct {
+        reference: []const u8,
+        by: u64,
+    };
+};
+
+pub const FieldReference = struct {
+    reference: []const u8,
+    field: Field,
 };
 
 pub const Call = struct {
@@ -75,11 +88,6 @@ pub const Assertion = union(enum) {
             expression: Expression,
             field_reference: FieldReference,
         },
-    };
-
-    pub const FieldReference = struct {
-        reference: []const u8,
-        field: Field,
     };
 };
 

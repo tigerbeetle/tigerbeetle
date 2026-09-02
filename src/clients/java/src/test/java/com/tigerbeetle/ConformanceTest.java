@@ -1011,12 +1011,13 @@ public class ConformanceTest {
     }
 
     @Test
-    public void testGetAccountTransfersReturnsOnlyTheTransfersWithinTheLimit()
+    public void testGetAccountTransfersPagesThroughTransfersWithATimestampCursor()
             throws Exception {
         final var account1Id = UInt128.id();
         final var account2Id = UInt128.id();
         final var transfer1Id = UInt128.id();
         final var transfer2Id = UInt128.id();
+        final var transfer3Id = UInt128.id();
         {
             final var accountsBatch = new AccountBatch(2);
             accountsBatch.add();
@@ -1046,7 +1047,7 @@ public class ConformanceTest {
             transfersBatch.setLedger(1);
             transfersBatch.setCode(1);
             transfersBatch.add();
-            transfersBatch.setId(UInt128.id());
+            transfersBatch.setId(transfer3Id);
             transfersBatch.setDebitAccountId(account1Id);
             transfersBatch.setCreditAccountId(account2Id);
             transfersBatch.setAmount(BigInteger.valueOf(30L));
@@ -1054,19 +1055,134 @@ public class ConformanceTest {
             transfersBatch.setCode(1);
             client.createTransfers(transfersBatch);
         }
-        final var transfersFilter = new AccountFilter();
-        transfersFilter.setAccountId(account1Id);
-        transfersFilter.setLimit(2);
-        transfersFilter.setDebits(true);
-        transfersFilter.setCredits(true);
-        final var transfers = client.getAccountTransfers(transfersFilter);
-        assertEquals(2, transfers.getLength());
-        assertTrue(transfers.next());
-        assertArrayEquals(transfer1Id, transfers.getId());
-        assertEquals(BigInteger.valueOf(10L), transfers.getAmount());
-        assertTrue(transfers.next());
-        assertArrayEquals(transfer2Id, transfers.getId());
-        assertEquals(BigInteger.valueOf(20L), transfers.getAmount());
+        final var page1Filter = new AccountFilter();
+        page1Filter.setAccountId(account1Id);
+        page1Filter.setLimit(2);
+        page1Filter.setDebits(true);
+        page1Filter.setCredits(true);
+        final var page1 = client.getAccountTransfers(page1Filter);
+        assertEquals(2, page1.getLength());
+        assertTrue(page1.next());
+        assertArrayEquals(transfer1Id, page1.getId());
+        assertEquals(BigInteger.valueOf(10L), page1.getAmount());
+        assertTrue(page1.next());
+        assertArrayEquals(transfer2Id, page1.getId());
+        assertEquals(BigInteger.valueOf(20L), page1.getAmount());
+        page1.beforeFirst();
+        assertTrue(page1.next());
+        assertTrue(page1.next());
+        final var cursor1 = page1.getTimestamp();
+        final var page2Filter = new AccountFilter();
+        page2Filter.setAccountId(account1Id);
+        page2Filter.setTimestampMin(cursor1 + 1L);
+        page2Filter.setLimit(2);
+        page2Filter.setDebits(true);
+        page2Filter.setCredits(true);
+        final var page2 = client.getAccountTransfers(page2Filter);
+        assertEquals(1, page2.getLength());
+        assertTrue(page2.next());
+        assertArrayEquals(transfer3Id, page2.getId());
+        assertEquals(BigInteger.valueOf(30L), page2.getAmount());
+        page2.beforeFirst();
+        assertTrue(page2.next());
+        final var cursor2 = page2.getTimestamp();
+        final var page3Filter = new AccountFilter();
+        page3Filter.setAccountId(account1Id);
+        page3Filter.setTimestampMin(cursor2 + 1L);
+        page3Filter.setLimit(2);
+        page3Filter.setDebits(true);
+        page3Filter.setCredits(true);
+        final var page3 = client.getAccountTransfers(page3Filter);
+        assertEquals(0, page3.getLength());
+    }
+
+    @Test
+    public void testGetAccountTransfersPagesThroughReversedTransfersWithATimestampCursor()
+            throws Exception {
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var transfer1Id = UInt128.id();
+        final var transfer2Id = UInt128.id();
+        final var transfer3Id = UInt128.id();
+        {
+            final var accountsBatch = new AccountBatch(2);
+            accountsBatch.add();
+            accountsBatch.setId(account1Id);
+            accountsBatch.setLedger(1);
+            accountsBatch.setCode(1);
+            accountsBatch.add();
+            accountsBatch.setId(account2Id);
+            accountsBatch.setLedger(1);
+            accountsBatch.setCode(1);
+            client.createAccounts(accountsBatch);
+        }
+        {
+            final var transfersBatch = new TransferBatch(3);
+            transfersBatch.add();
+            transfersBatch.setId(transfer1Id);
+            transfersBatch.setDebitAccountId(account1Id);
+            transfersBatch.setCreditAccountId(account2Id);
+            transfersBatch.setAmount(BigInteger.valueOf(10L));
+            transfersBatch.setLedger(1);
+            transfersBatch.setCode(1);
+            transfersBatch.add();
+            transfersBatch.setId(transfer2Id);
+            transfersBatch.setDebitAccountId(account1Id);
+            transfersBatch.setCreditAccountId(account2Id);
+            transfersBatch.setAmount(BigInteger.valueOf(20L));
+            transfersBatch.setLedger(1);
+            transfersBatch.setCode(1);
+            transfersBatch.add();
+            transfersBatch.setId(transfer3Id);
+            transfersBatch.setDebitAccountId(account1Id);
+            transfersBatch.setCreditAccountId(account2Id);
+            transfersBatch.setAmount(BigInteger.valueOf(30L));
+            transfersBatch.setLedger(1);
+            transfersBatch.setCode(1);
+            client.createTransfers(transfersBatch);
+        }
+        final var page1Filter = new AccountFilter();
+        page1Filter.setAccountId(account1Id);
+        page1Filter.setLimit(2);
+        page1Filter.setDebits(true);
+        page1Filter.setCredits(true);
+        page1Filter.setReversed(true);
+        final var page1 = client.getAccountTransfers(page1Filter);
+        assertEquals(2, page1.getLength());
+        assertTrue(page1.next());
+        assertArrayEquals(transfer3Id, page1.getId());
+        assertEquals(BigInteger.valueOf(30L), page1.getAmount());
+        assertTrue(page1.next());
+        assertArrayEquals(transfer2Id, page1.getId());
+        assertEquals(BigInteger.valueOf(20L), page1.getAmount());
+        page1.beforeFirst();
+        assertTrue(page1.next());
+        assertTrue(page1.next());
+        final var cursor1 = page1.getTimestamp();
+        final var page2Filter = new AccountFilter();
+        page2Filter.setAccountId(account1Id);
+        page2Filter.setTimestampMax(cursor1 - 1L);
+        page2Filter.setLimit(2);
+        page2Filter.setDebits(true);
+        page2Filter.setCredits(true);
+        page2Filter.setReversed(true);
+        final var page2 = client.getAccountTransfers(page2Filter);
+        assertEquals(1, page2.getLength());
+        assertTrue(page2.next());
+        assertArrayEquals(transfer1Id, page2.getId());
+        assertEquals(BigInteger.valueOf(10L), page2.getAmount());
+        page2.beforeFirst();
+        assertTrue(page2.next());
+        final var cursor2 = page2.getTimestamp();
+        final var page3Filter = new AccountFilter();
+        page3Filter.setAccountId(account1Id);
+        page3Filter.setTimestampMax(cursor2 - 1L);
+        page3Filter.setLimit(2);
+        page3Filter.setDebits(true);
+        page3Filter.setCredits(true);
+        page3Filter.setReversed(true);
+        final var page3 = client.getAccountTransfers(page3Filter);
+        assertEquals(0, page3.getLength());
     }
 
     @Test
@@ -1360,7 +1476,7 @@ public class ConformanceTest {
     }
 
     @Test
-    public void testGetAccountBalancesReturnsOnlyTheBalancesWithinTheLimit()
+    public void testGetAccountBalancesPagesThroughBalancesWithATimestampCursor()
             throws Exception {
         final var account1Id = UInt128.id();
         final var account2Id = UInt128.id();
@@ -1402,19 +1518,132 @@ public class ConformanceTest {
             transfersBatch.setCode(1);
             client.createTransfers(transfersBatch);
         }
-        final var balancesFilter = new AccountFilter();
-        balancesFilter.setAccountId(account1Id);
-        balancesFilter.setLimit(2);
-        balancesFilter.setDebits(true);
-        balancesFilter.setCredits(true);
-        final var balances = client.getAccountBalances(balancesFilter);
-        assertEquals(2, balances.getLength());
-        assertTrue(balances.next());
-        assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
-        assertEquals(BigInteger.valueOf(0L), balances.getCreditsPosted());
-        assertTrue(balances.next());
-        assertEquals(BigInteger.valueOf(10L), balances.getDebitsPosted());
-        assertEquals(BigInteger.valueOf(20L), balances.getCreditsPosted());
+        final var page1Filter = new AccountFilter();
+        page1Filter.setAccountId(account1Id);
+        page1Filter.setLimit(2);
+        page1Filter.setDebits(true);
+        page1Filter.setCredits(true);
+        final var page1 = client.getAccountBalances(page1Filter);
+        assertEquals(2, page1.getLength());
+        assertTrue(page1.next());
+        assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
+        assertEquals(BigInteger.valueOf(0L), page1.getCreditsPosted());
+        assertTrue(page1.next());
+        assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
+        assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
+        page1.beforeFirst();
+        assertTrue(page1.next());
+        assertTrue(page1.next());
+        final var cursor1 = page1.getTimestamp();
+        final var page2Filter = new AccountFilter();
+        page2Filter.setAccountId(account1Id);
+        page2Filter.setTimestampMin(cursor1 + 1L);
+        page2Filter.setLimit(2);
+        page2Filter.setDebits(true);
+        page2Filter.setCredits(true);
+        final var page2 = client.getAccountBalances(page2Filter);
+        assertEquals(1, page2.getLength());
+        assertTrue(page2.next());
+        assertEquals(BigInteger.valueOf(40L), page2.getDebitsPosted());
+        assertEquals(BigInteger.valueOf(20L), page2.getCreditsPosted());
+        page2.beforeFirst();
+        assertTrue(page2.next());
+        final var cursor2 = page2.getTimestamp();
+        final var page3Filter = new AccountFilter();
+        page3Filter.setAccountId(account1Id);
+        page3Filter.setTimestampMin(cursor2 + 1L);
+        page3Filter.setLimit(2);
+        page3Filter.setDebits(true);
+        page3Filter.setCredits(true);
+        final var page3 = client.getAccountBalances(page3Filter);
+        assertEquals(0, page3.getLength());
+    }
+
+    @Test
+    public void testGetAccountBalancesPagesThroughReversedBalancesWithATimestampCursor()
+            throws Exception {
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        {
+            final var accountsBatch = new AccountBatch(2);
+            accountsBatch.add();
+            accountsBatch.setId(account1Id);
+            accountsBatch.setLedger(1);
+            accountsBatch.setCode(1);
+            accountsBatch.setFlags(AccountFlags.HISTORY);
+            accountsBatch.add();
+            accountsBatch.setId(account2Id);
+            accountsBatch.setLedger(1);
+            accountsBatch.setCode(1);
+            client.createAccounts(accountsBatch);
+        }
+        {
+            final var transfersBatch = new TransferBatch(3);
+            transfersBatch.add();
+            transfersBatch.setId(UInt128.id());
+            transfersBatch.setDebitAccountId(account1Id);
+            transfersBatch.setCreditAccountId(account2Id);
+            transfersBatch.setAmount(BigInteger.valueOf(10L));
+            transfersBatch.setLedger(1);
+            transfersBatch.setCode(1);
+            transfersBatch.add();
+            transfersBatch.setId(UInt128.id());
+            transfersBatch.setDebitAccountId(account2Id);
+            transfersBatch.setCreditAccountId(account1Id);
+            transfersBatch.setAmount(BigInteger.valueOf(20L));
+            transfersBatch.setLedger(1);
+            transfersBatch.setCode(1);
+            transfersBatch.add();
+            transfersBatch.setId(UInt128.id());
+            transfersBatch.setDebitAccountId(account1Id);
+            transfersBatch.setCreditAccountId(account2Id);
+            transfersBatch.setAmount(BigInteger.valueOf(30L));
+            transfersBatch.setLedger(1);
+            transfersBatch.setCode(1);
+            client.createTransfers(transfersBatch);
+        }
+        final var page1Filter = new AccountFilter();
+        page1Filter.setAccountId(account1Id);
+        page1Filter.setLimit(2);
+        page1Filter.setDebits(true);
+        page1Filter.setCredits(true);
+        page1Filter.setReversed(true);
+        final var page1 = client.getAccountBalances(page1Filter);
+        assertEquals(2, page1.getLength());
+        assertTrue(page1.next());
+        assertEquals(BigInteger.valueOf(40L), page1.getDebitsPosted());
+        assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
+        assertTrue(page1.next());
+        assertEquals(BigInteger.valueOf(10L), page1.getDebitsPosted());
+        assertEquals(BigInteger.valueOf(20L), page1.getCreditsPosted());
+        page1.beforeFirst();
+        assertTrue(page1.next());
+        assertTrue(page1.next());
+        final var cursor1 = page1.getTimestamp();
+        final var page2Filter = new AccountFilter();
+        page2Filter.setAccountId(account1Id);
+        page2Filter.setTimestampMax(cursor1 - 1L);
+        page2Filter.setLimit(2);
+        page2Filter.setDebits(true);
+        page2Filter.setCredits(true);
+        page2Filter.setReversed(true);
+        final var page2 = client.getAccountBalances(page2Filter);
+        assertEquals(1, page2.getLength());
+        assertTrue(page2.next());
+        assertEquals(BigInteger.valueOf(10L), page2.getDebitsPosted());
+        assertEquals(BigInteger.valueOf(0L), page2.getCreditsPosted());
+        page2.beforeFirst();
+        assertTrue(page2.next());
+        final var cursor2 = page2.getTimestamp();
+        final var page3Filter = new AccountFilter();
+        page3Filter.setAccountId(account1Id);
+        page3Filter.setTimestampMax(cursor2 - 1L);
+        page3Filter.setLimit(2);
+        page3Filter.setDebits(true);
+        page3Filter.setCredits(true);
+        page3Filter.setReversed(true);
+        final var page3 = client.getAccountBalances(page3Filter);
+        assertEquals(0, page3.getLength());
     }
 
     @Test

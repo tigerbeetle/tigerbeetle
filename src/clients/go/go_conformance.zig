@@ -140,6 +140,11 @@ fn emit_binding(writer: *std.Io.Writer, scope: *Scope, binding: ast.Binding) !vo
             try formatter.write_indent(writer, .{ .level = formatter.statement_level });
             try writer.print("{s} := {s}[{d}]\n", .{ name, reference, index.index });
         },
+        .field_access => |access| {
+            const value = try render_field_access(formatter, access);
+            try formatter.write_indent(writer, .{ .level = formatter.statement_level });
+            try writer.print("{s} := {s}\n", .{ name, value });
+        },
         .record => |record| switch (record.type) {
             .U128 => {
                 assert(record.fields.len == 1);
@@ -167,7 +172,7 @@ fn emit_binding(writer: *std.Io.Writer, scope: *Scope, binding: ast.Binding) !vo
             => unreachable,
         },
         .call => |call| try emit_call(writer, scope, call, .{ .binding = name }),
-        .integer, .boolean, .enum_literal, .reference => unreachable,
+        .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
     }
 }
 
@@ -467,11 +472,23 @@ fn emit_assertion(writer: *std.Io.Writer, scope: *Scope, assertion: ast.Assertio
 
 fn render_field_access(
     formatter: Formatter,
-    reference: ast.Assertion.FieldReference,
+    reference: ast.FieldReference,
 ) ![]const u8 {
     return std.fmt.allocPrint(formatter.arena, "{s}.{s}", .{
         try formatter.to_case(.GOCamelCase, reference.reference),
         try formatter.to_case(.GOPascalCase, reference.field.name),
+    });
+}
+
+fn render_arithmetic(
+    formatter: Formatter,
+    arithmetic: ast.Expression.Arithmetic,
+    operator: []const u8,
+) ![]const u8 {
+    return std.fmt.allocPrint(formatter.arena, "{s} {s} {d}", .{
+        try formatter.to_case(.GOCamelCase, arithmetic.reference),
+        operator,
+        arithmetic.by,
     });
 }
 
@@ -515,6 +532,9 @@ fn render_typed_value(
             });
         },
         .boolean => |boolean| return if (boolean) "true" else "false",
+        .field_access => |access| return render_field_access(formatter, access),
+        .increment => |arithmetic| return render_arithmetic(formatter, arithmetic, "+"),
+        .decrement => |arithmetic| return render_arithmetic(formatter, arithmetic, "-"),
         .call, .generate_ids => unreachable,
     }
 }
