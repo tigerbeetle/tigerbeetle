@@ -168,11 +168,12 @@ test "returns transfers in reverse order with the reversed flag" {
     });
 }
 
-test "returns only the transfers within the limit" {
+test "pages through transfers with a timestamp cursor" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
+    const transfer_3_id = ct.generate_id();
     ct.create_accounts(.{
         .{ .id = account_1_id, .ledger = 1, .code = 1 },
         .{ .id = account_2_id, .ledger = 1, .code = 1 },
@@ -195,7 +196,7 @@ test "returns only the transfers within the limit" {
             .code = 1,
         },
         .{
-            .id = ct.generate_id(),
+            .id = transfer_3_id,
             .debit_account_id = account_1_id,
             .credit_account_id = account_2_id,
             .amount = 30,
@@ -204,16 +205,109 @@ test "returns only the transfers within the limit" {
         },
     });
 
-    const transfers = ct.get_account_transfers(.{
+    const page_1 = ct.get_account_transfers(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
     });
 
-    ct.assert_equal(transfers, .{
+    ct.assert_equal(page_1, .{
         .{ .id = transfer_1_id, .amount = 10 },
         .{ .id = transfer_2_id, .amount = 20 },
     });
+
+    const page_1_last = page_1[1];
+    const cursor_1 = page_1_last.timestamp;
+    const page_2 = ct.get_account_transfers(.{
+        .account_id = account_1_id,
+        .timestamp_min = ct.increment(cursor_1, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true },
+    });
+
+    ct.assert_equal(page_2, .{.{ .id = transfer_3_id, .amount = 30 }});
+
+    const page_2_last = page_2[0];
+    const cursor_2 = page_2_last.timestamp;
+    const page_3 = ct.get_account_transfers(.{
+        .account_id = account_1_id,
+        .timestamp_min = ct.increment(cursor_2, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true },
+    });
+
+    ct.assert_empty(page_3);
+}
+
+test "pages through reversed transfers with a timestamp cursor" {
+    const account_1_id = ct.generate_id();
+    const account_2_id = ct.generate_id();
+    const transfer_1_id = ct.generate_id();
+    const transfer_2_id = ct.generate_id();
+    const transfer_3_id = ct.generate_id();
+    ct.create_accounts(.{
+        .{ .id = account_1_id, .ledger = 1, .code = 1 },
+        .{ .id = account_2_id, .ledger = 1, .code = 1 },
+    });
+    ct.create_transfers(.{
+        .{
+            .id = transfer_1_id,
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 10,
+            .ledger = 1,
+            .code = 1,
+        },
+        .{
+            .id = transfer_2_id,
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 20,
+            .ledger = 1,
+            .code = 1,
+        },
+        .{
+            .id = transfer_3_id,
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 30,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    const page_1 = ct.get_account_transfers(.{
+        .account_id = account_1_id,
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true, .reversed = true },
+    });
+
+    ct.assert_equal(page_1, .{
+        .{ .id = transfer_3_id, .amount = 30 },
+        .{ .id = transfer_2_id, .amount = 20 },
+    });
+
+    const page_1_last = page_1[1];
+    const cursor_1 = page_1_last.timestamp;
+    const page_2 = ct.get_account_transfers(.{
+        .account_id = account_1_id,
+        .timestamp_max = ct.decrement(cursor_1, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true, .reversed = true },
+    });
+
+    ct.assert_equal(page_2, .{.{ .id = transfer_1_id, .amount = 10 }});
+
+    const page_2_last = page_2[0];
+    const cursor_2 = page_2_last.timestamp;
+    const page_3 = ct.get_account_transfers(.{
+        .account_id = account_1_id,
+        .timestamp_max = ct.decrement(cursor_2, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true, .reversed = true },
+    });
+
+    ct.assert_empty(page_3);
 }
 
 test "fails when the limit is too large" {

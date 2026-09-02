@@ -155,19 +155,28 @@ fn emit_row_group(
     const origin = steps[start].binding.value.index;
     const batch = try formatter.to_case(.camelCase, origin.reference);
 
-    var rows: std.ArrayList([]const u8) = .empty;
+    const Row = struct { name: []const u8, index: u32 };
+    var rows: std.ArrayList(Row) = .empty;
     for (steps[start..], start..) |step, index| {
         if (step != .binding or step.binding.value != .index) continue;
         if (!std.mem.eql(u8, step.binding.value.index.reference, origin.reference)) continue;
-        assert(step.binding.value.index.index == rows.items.len);
-        try rows.append(formatter.arena, step.binding.name);
+        if (rows.getLastOrNull()) |last| assert(step.binding.value.index.index > last.index);
+        try rows.append(formatter.arena, .{
+            .name = step.binding.name,
+            .index = step.binding.value.index.index,
+        });
         consumed[index] = true;
     }
 
     try scope.walk(writer, batch);
-    for (rows.items) |row| {
-        try formatter.write_indent(writer, .{ .level = formatter.statement_level });
-        try writer.print("assertTrue({s}.next());\n", .{batch});
+    var position: u32 = 0;
+    for (rows.items) |entry| {
+        const row = entry.name;
+        while (position <= entry.index) : (position += 1) {
+            try formatter.write_indent(writer, .{ .level = formatter.statement_level });
+            try writer.print("assertTrue({s}.next());\n", .{batch});
+        }
+        try emit_row_captures(writer, formatter, steps, row, batch, consumed);
         for (steps, 0..) |step, index| {
             if (step != .assertion) continue;
             var comparison: ast.Assertion.FieldComparison = undefined;
@@ -210,6 +219,29 @@ fn emit_row_group(
                 });
             }
         }
+    }
+}
+
+// There is no row local, so a field bound off a row is captured while the cursor is on it.
+fn emit_row_captures(
+    writer: *std.Io.Writer,
+    formatter: Formatter,
+    steps: []const ast.Step,
+    row: []const u8,
+    batch: []const u8,
+    consumed: []bool,
+) !void {
+    for (steps, 0..) |step, index| {
+        if (step != .binding or step.binding.value != .field_access) continue;
+        const access = step.binding.value.field_access;
+        if (!std.mem.eql(u8, access.reference, row)) continue;
+        consumed[index] = true;
+        try formatter.write_indent(writer, .{ .level = formatter.statement_level });
+        try writer.print("final var {s} = {s}.get{s}();\n", .{
+            try formatter.to_case(.camelCase, step.binding.name),
+            batch,
+            try formatter.to_case(.PascalCase, access.field.name),
+        });
     }
 }
 
@@ -271,7 +303,7 @@ fn emit_row_equal_field(
     });
 }
 
-fn capture_name(formatter: Formatter, reference: ast.Assertion.FieldReference) ![]const u8 {
+fn capture_name(formatter: Formatter, reference: ast.FieldReference) ![]const u8 {
     return std.fmt.allocPrint(formatter.arena, "{s}{s}", .{
         try formatter.to_case(.camelCase, reference.reference),
         try formatter.to_case(.PascalCase, reference.field.name),
@@ -381,7 +413,14 @@ fn emit_binding(writer: *std.Io.Writer, scope: *Scope, binding: ast.Binding) !vo
             => unreachable,
         },
         .call => |call| try emit_call(writer, scope, call, .{ .binding = name }),
-        .integer, .boolean, .enum_literal, .reference => unreachable,
+        .integer,
+        .boolean,
+        .enum_literal,
+        .reference,
+        .field_access,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 
@@ -795,11 +834,23 @@ fn is_big_integer(field_name: []const u8) bool {
 
 fn render_field_access(
     formatter: Formatter,
-    reference: ast.Assertion.FieldReference,
+    reference: ast.FieldReference,
 ) ![]const u8 {
     return std.fmt.allocPrint(formatter.arena, "{s}.get{s}()", .{
         try formatter.to_case(.camelCase, reference.reference),
         try formatter.to_case(.PascalCase, reference.field.name),
+    });
+}
+
+fn render_arithmetic(
+    formatter: Formatter,
+    arithmetic: ast.Expression.Arithmetic,
+    operator: []const u8,
+) ![]const u8 {
+    return std.fmt.allocPrint(formatter.arena, "{s} {s} {d}L", .{
+        try formatter.to_case(.camelCase, arithmetic.reference),
+        operator,
+        arithmetic.by,
     });
 }
 
@@ -847,6 +898,9 @@ fn render_typed_value(
             });
         },
         .boolean => |boolean| return if (boolean) "true" else "false",
+        .field_access => |access| return render_field_access(formatter, access),
+        .increment => |arithmetic| return render_arithmetic(formatter, arithmetic, "+"),
+        .decrement => |arithmetic| return render_arithmetic(formatter, arithmetic, "-"),
         .call, .generate_ids => unreachable,
     }
 }
@@ -863,7 +917,15 @@ fn render_id(formatter: Formatter, expression: ast.Expression) ![]const u8 {
                 index.index,
             });
         },
-        .call, .generate_ids, .record, .boolean, .enum_literal => unreachable,
+        .call,
+        .generate_ids,
+        .record,
+        .boolean,
+        .enum_literal,
+        .field_access,
+        .increment,
+        .decrement,
+        => unreachable,
     }
 }
 

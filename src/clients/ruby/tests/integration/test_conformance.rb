@@ -942,11 +942,12 @@ class TestConformance < Minitest::Test
     assert_equal(10, transfers[1].amount)
   end
 
-  def test_get_account_transfers_returns_only_the_transfers_within_the_limit
+  def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cursor
     account_1_id = TigerBeetle.id
     account_2_id = TigerBeetle.id
     transfer_1_id = TigerBeetle.id
     transfer_2_id = TigerBeetle.id
+    transfer_3_id = TigerBeetle.id
     @client.create_accounts(
       [
         TigerBeetle::Account.new(
@@ -980,7 +981,7 @@ class TestConformance < Minitest::Test
           code: 1
         ),
         TigerBeetle::Transfer.new(
-          id: TigerBeetle.id,
+          id: transfer_3_id,
           debit_account_id: account_1_id,
           credit_account_id: account_2_id,
           amount: 30,
@@ -989,7 +990,7 @@ class TestConformance < Minitest::Test
         )
       ]
     )
-    transfers = @client.get_account_transfers(
+    page_1 = @client.get_account_transfers(
       TigerBeetle::AccountFilter.new(
         account_id: account_1_id,
         limit: 2,
@@ -997,11 +998,129 @@ class TestConformance < Minitest::Test
           TigerBeetle::AccountFilterFlags::CREDITS
       )
     )
-    assert_equal(2, transfers.length)
-    assert_equal(transfer_1_id, transfers[0].id)
-    assert_equal(10, transfers[0].amount)
-    assert_equal(transfer_2_id, transfers[1].id)
-    assert_equal(20, transfers[1].amount)
+    assert_equal(2, page_1.length)
+    assert_equal(transfer_1_id, page_1[0].id)
+    assert_equal(10, page_1[0].amount)
+    assert_equal(transfer_2_id, page_1[1].id)
+    assert_equal(20, page_1[1].amount)
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_min: cursor_1 + 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(1, page_2.length)
+    assert_equal(transfer_3_id, page_2[0].id)
+    assert_equal(30, page_2[0].amount)
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_min: cursor_2 + 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(0, page_3.length)
+  end
+
+  def test_get_account_transfers_pages_through_reversed_transfers_with_a_timestamp_cursor
+    account_1_id = TigerBeetle.id
+    account_2_id = TigerBeetle.id
+    transfer_1_id = TigerBeetle.id
+    transfer_2_id = TigerBeetle.id
+    transfer_3_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: transfer_1_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_2_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: transfer_3_id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 30,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    page_1 = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(2, page_1.length)
+    assert_equal(transfer_3_id, page_1[0].id)
+    assert_equal(30, page_1[0].amount)
+    assert_equal(transfer_2_id, page_1[1].id)
+    assert_equal(20, page_1[1].amount)
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_max: cursor_1 - 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(1, page_2.length)
+    assert_equal(transfer_1_id, page_2[0].id)
+    assert_equal(10, page_2[0].amount)
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = @client.get_account_transfers(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_max: cursor_2 - 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(0, page_3.length)
   end
 
   def test_get_account_transfers_fails_when_the_limit_is_too_large
@@ -1297,7 +1416,7 @@ class TestConformance < Minitest::Test
     assert_equal(0, balances[1].credits_posted)
   end
 
-  def test_get_account_balances_returns_only_the_balances_within_the_limit
+  def test_get_account_balances_pages_through_balances_with_a_timestamp_cursor
     account_1_id = TigerBeetle.id
     account_2_id = TigerBeetle.id
     @client.create_accounts(
@@ -1343,7 +1462,7 @@ class TestConformance < Minitest::Test
         )
       ]
     )
-    balances = @client.get_account_balances(
+    page_1 = @client.get_account_balances(
       TigerBeetle::AccountFilter.new(
         account_id: account_1_id,
         limit: 2,
@@ -1351,11 +1470,127 @@ class TestConformance < Minitest::Test
           TigerBeetle::AccountFilterFlags::CREDITS
       )
     )
-    assert_equal(2, balances.length)
-    assert_equal(10, balances[0].debits_posted)
-    assert_equal(0, balances[0].credits_posted)
-    assert_equal(10, balances[1].debits_posted)
-    assert_equal(20, balances[1].credits_posted)
+    assert_equal(2, page_1.length)
+    assert_equal(10, page_1[0].debits_posted)
+    assert_equal(0, page_1[0].credits_posted)
+    assert_equal(10, page_1[1].debits_posted)
+    assert_equal(20, page_1[1].credits_posted)
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_min: cursor_1 + 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(1, page_2.length)
+    assert_equal(40, page_2[0].debits_posted)
+    assert_equal(20, page_2[0].credits_posted)
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_min: cursor_2 + 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS
+      )
+    )
+    assert_equal(0, page_3.length)
+  end
+
+  def test_get_account_balances_pages_through_reversed_balances_with_a_timestamp_cursor
+    account_1_id = TigerBeetle.id
+    account_2_id = TigerBeetle.id
+    @client.create_accounts(
+      [
+        TigerBeetle::Account.new(
+          id: account_1_id,
+          ledger: 1,
+          code: 1,
+          flags: TigerBeetle::AccountFlags::HISTORY
+        ),
+        TigerBeetle::Account.new(
+          id: account_2_id,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    @client.create_transfers(
+      [
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 10,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_2_id,
+          credit_account_id: account_1_id,
+          amount: 20,
+          ledger: 1,
+          code: 1
+        ),
+        TigerBeetle::Transfer.new(
+          id: TigerBeetle.id,
+          debit_account_id: account_1_id,
+          credit_account_id: account_2_id,
+          amount: 30,
+          ledger: 1,
+          code: 1
+        )
+      ]
+    )
+    page_1 = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(2, page_1.length)
+    assert_equal(40, page_1[0].debits_posted)
+    assert_equal(20, page_1[0].credits_posted)
+    assert_equal(10, page_1[1].debits_posted)
+    assert_equal(20, page_1[1].credits_posted)
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_max: cursor_1 - 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(1, page_2.length)
+    assert_equal(10, page_2[0].debits_posted)
+    assert_equal(0, page_2[0].credits_posted)
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = @client.get_account_balances(
+      TigerBeetle::AccountFilter.new(
+        account_id: account_1_id,
+        timestamp_max: cursor_2 - 1,
+        limit: 2,
+        flags: TigerBeetle::AccountFilterFlags::DEBITS |
+          TigerBeetle::AccountFilterFlags::CREDITS |
+          TigerBeetle::AccountFilterFlags::REVERSED
+      )
+    )
+    assert_equal(0, page_3.length)
   end
 
   def test_get_account_balances_fails_when_the_limit_is_too_large

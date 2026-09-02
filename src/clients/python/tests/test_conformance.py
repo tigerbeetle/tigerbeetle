@@ -955,11 +955,12 @@ def test_get_account_transfers_returns_transfers_in_reverse_order_with_the_rever
     assert transfers[1].id == transfer_1_id
     assert transfers[1].amount == 10
 
-def test_get_account_transfers_returns_only_the_transfers_within_the_limit(client):
+def test_get_account_transfers_pages_through_transfers_with_a_timestamp_cursor(client):
     account_1_id = tb.id()
     account_2_id = tb.id()
     transfer_1_id = tb.id()
     transfer_2_id = tb.id()
+    transfer_3_id = tb.id()
     client.create_accounts(
         [
             tb.Account(
@@ -993,7 +994,7 @@ def test_get_account_transfers_returns_only_the_transfers_within_the_limit(clien
                 code=1,
             ),
             tb.Transfer(
-                id=tb.id(),
+                id=transfer_3_id,
                 debit_account_id=account_1_id,
                 credit_account_id=account_2_id,
                 amount=30,
@@ -1002,7 +1003,7 @@ def test_get_account_transfers_returns_only_the_transfers_within_the_limit(clien
             ),
         ]
     )
-    transfers = client.get_account_transfers(
+    page_1 = client.get_account_transfers(
         tb.AccountFilter(
             account_id=account_1_id,
             user_data_128=0,
@@ -1015,11 +1016,146 @@ def test_get_account_transfers_returns_only_the_transfers_within_the_limit(clien
             flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
         )
     )
-    assert len(transfers) == 2
-    assert transfers[0].id == transfer_1_id
-    assert transfers[0].amount == 10
-    assert transfers[1].id == transfer_2_id
-    assert transfers[1].amount == 20
+    assert len(page_1) == 2
+    assert page_1[0].id == transfer_1_id
+    assert page_1[0].amount == 10
+    assert page_1[1].id == transfer_2_id
+    assert page_1[1].amount == 20
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=cursor_1 + 1,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert len(page_2) == 1
+    assert page_2[0].id == transfer_3_id
+    assert page_2[0].amount == 30
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=cursor_2 + 1,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert page_3 == []
+
+def test_get_account_transfers_pages_through_reversed_transfers_with_a_timestamp_cursor(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    transfer_1_id = tb.id()
+    transfer_2_id = tb.id()
+    transfer_3_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=transfer_1_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_2_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=transfer_3_id,
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=30,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    page_1 = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert len(page_1) == 2
+    assert page_1[0].id == transfer_3_id
+    assert page_1[0].amount == 30
+    assert page_1[1].id == transfer_2_id
+    assert page_1[1].amount == 20
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=cursor_1 - 1,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert len(page_2) == 1
+    assert page_2[0].id == transfer_1_id
+    assert page_2[0].amount == 10
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = client.get_account_transfers(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=cursor_2 - 1,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert page_3 == []
 
 def test_get_account_transfers_fails_when_the_limit_is_too_large(client):
     with pytest.raises(Exception):
@@ -1341,7 +1477,7 @@ def test_get_account_balances_returns_balances_in_reverse_order_with_the_reverse
     assert balances[1].debits_posted == 10
     assert balances[1].credits_posted == 0
 
-def test_get_account_balances_returns_only_the_balances_within_the_limit(client):
+def test_get_account_balances_pages_through_balances_with_a_timestamp_cursor(client):
     account_1_id = tb.id()
     account_2_id = tb.id()
     client.create_accounts(
@@ -1387,7 +1523,7 @@ def test_get_account_balances_returns_only_the_balances_within_the_limit(client)
             ),
         ]
     )
-    balances = client.get_account_balances(
+    page_1 = client.get_account_balances(
         tb.AccountFilter(
             account_id=account_1_id,
             user_data_128=0,
@@ -1400,11 +1536,144 @@ def test_get_account_balances_returns_only_the_balances_within_the_limit(client)
             flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
         )
     )
-    assert len(balances) == 2
-    assert balances[0].debits_posted == 10
-    assert balances[0].credits_posted == 0
-    assert balances[1].debits_posted == 10
-    assert balances[1].credits_posted == 20
+    assert len(page_1) == 2
+    assert page_1[0].debits_posted == 10
+    assert page_1[0].credits_posted == 0
+    assert page_1[1].debits_posted == 10
+    assert page_1[1].credits_posted == 20
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=cursor_1 + 1,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert len(page_2) == 1
+    assert page_2[0].debits_posted == 40
+    assert page_2[0].credits_posted == 20
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=cursor_2 + 1,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS,
+        )
+    )
+    assert page_3 == []
+
+def test_get_account_balances_pages_through_reversed_balances_with_a_timestamp_cursor(client):
+    account_1_id = tb.id()
+    account_2_id = tb.id()
+    client.create_accounts(
+        [
+            tb.Account(
+                id=account_1_id,
+                ledger=1,
+                code=1,
+                flags=tb.AccountFlags.HISTORY,
+            ),
+            tb.Account(
+                id=account_2_id,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    client.create_transfers(
+        [
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=10,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_2_id,
+                credit_account_id=account_1_id,
+                amount=20,
+                ledger=1,
+                code=1,
+            ),
+            tb.Transfer(
+                id=tb.id(),
+                debit_account_id=account_1_id,
+                credit_account_id=account_2_id,
+                amount=30,
+                ledger=1,
+                code=1,
+            ),
+        ]
+    )
+    page_1 = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=0,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert len(page_1) == 2
+    assert page_1[0].debits_posted == 40
+    assert page_1[0].credits_posted == 20
+    assert page_1[1].debits_posted == 10
+    assert page_1[1].credits_posted == 20
+    page_1_last = page_1[1]
+    cursor_1 = page_1_last.timestamp
+    page_2 = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=cursor_1 - 1,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert len(page_2) == 1
+    assert page_2[0].debits_posted == 10
+    assert page_2[0].credits_posted == 0
+    page_2_last = page_2[0]
+    cursor_2 = page_2_last.timestamp
+    page_3 = client.get_account_balances(
+        tb.AccountFilter(
+            account_id=account_1_id,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            code=0,
+            timestamp_min=0,
+            timestamp_max=cursor_2 - 1,
+            limit=2,
+            flags=tb.AccountFilterFlags.DEBITS | tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.REVERSED,
+        )
+    )
+    assert page_3 == []
 
 def test_get_account_balances_fails_when_the_limit_is_too_large(client):
     with pytest.raises(Exception):

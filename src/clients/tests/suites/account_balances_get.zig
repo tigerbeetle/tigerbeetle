@@ -205,7 +205,7 @@ test "returns balances in reverse order with the reversed flag" {
     });
 }
 
-test "returns only the balances within the limit" {
+test "pages through balances with a timestamp cursor" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
     ct.create_accounts(.{
@@ -239,16 +239,106 @@ test "returns only the balances within the limit" {
         },
     });
 
-    const balances = ct.get_account_balances(.{
+    const page_1 = ct.get_account_balances(.{
         .account_id = account_1_id,
         .limit = 2,
         .flags = .{ .debits = true, .credits = true },
     });
 
-    ct.assert_equal(balances, .{
+    ct.assert_equal(page_1, .{
         .{ .debits_posted = 10, .credits_posted = 0 },
         .{ .debits_posted = 10, .credits_posted = 20 },
     });
+
+    const page_1_last = page_1[1];
+    const cursor_1 = page_1_last.timestamp;
+    const page_2 = ct.get_account_balances(.{
+        .account_id = account_1_id,
+        .timestamp_min = ct.increment(cursor_1, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true },
+    });
+
+    ct.assert_equal(page_2, .{.{ .debits_posted = 40, .credits_posted = 20 }});
+
+    const page_2_last = page_2[0];
+    const cursor_2 = page_2_last.timestamp;
+    const page_3 = ct.get_account_balances(.{
+        .account_id = account_1_id,
+        .timestamp_min = ct.increment(cursor_2, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true },
+    });
+
+    ct.assert_empty(page_3);
+}
+
+test "pages through reversed balances with a timestamp cursor" {
+    const account_1_id = ct.generate_id();
+    const account_2_id = ct.generate_id();
+    ct.create_accounts(.{
+        .{ .id = account_1_id, .ledger = 1, .code = 1, .flags = .{ .history = true } },
+        .{ .id = account_2_id, .ledger = 1, .code = 1 },
+    });
+    ct.create_transfers(.{
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 10,
+            .ledger = 1,
+            .code = 1,
+        },
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = account_2_id,
+            .credit_account_id = account_1_id,
+            .amount = 20,
+            .ledger = 1,
+            .code = 1,
+        },
+        .{
+            .id = ct.generate_id(),
+            .debit_account_id = account_1_id,
+            .credit_account_id = account_2_id,
+            .amount = 30,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    const page_1 = ct.get_account_balances(.{
+        .account_id = account_1_id,
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true, .reversed = true },
+    });
+
+    ct.assert_equal(page_1, .{
+        .{ .debits_posted = 40, .credits_posted = 20 },
+        .{ .debits_posted = 10, .credits_posted = 20 },
+    });
+
+    const page_1_last = page_1[1];
+    const cursor_1 = page_1_last.timestamp;
+    const page_2 = ct.get_account_balances(.{
+        .account_id = account_1_id,
+        .timestamp_max = ct.decrement(cursor_1, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true, .reversed = true },
+    });
+
+    ct.assert_equal(page_2, .{.{ .debits_posted = 10, .credits_posted = 0 }});
+
+    const page_2_last = page_2[0];
+    const cursor_2 = page_2_last.timestamp;
+    const page_3 = ct.get_account_balances(.{
+        .account_id = account_1_id,
+        .timestamp_max = ct.decrement(cursor_2, 1),
+        .limit = 2,
+        .flags = .{ .debits = true, .credits = true, .reversed = true },
+    });
+
+    ct.assert_empty(page_3);
 }
 
 test "fails when the limit is too large" {
