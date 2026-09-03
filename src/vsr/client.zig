@@ -445,26 +445,27 @@ pub fn ClientType(
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            if (self.on_eviction_callback) |callback| {
-                const eviction_specific_log = switch (eviction.header.reason) {
-                    .client_release_too_low => " - your client is too old; upgrade to a version " ++
-                        "compatible with your cluster",
-                    .client_release_too_high => " - your client is too new; downgrade to the " ++
-                        "same version as your cluster",
-                    else => "",
-                };
-                log.err(
-                    "{}: session evicted: reason={?s} (cluster_release={}, client_release={}){s}",
-                    .{
-                        self.id,
-                        std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
-                        eviction.header.release,
-                        self.release,
-                        eviction_specific_log,
-                    },
-                );
+            const eviction_specific_log = switch (eviction.header.reason) {
+                .client_release_too_low => " - your client is too old; upgrade to a version " ++
+                    "compatible with your cluster",
+                .client_release_too_high => " - your client is too new; downgrade to the " ++
+                    "same version as your cluster",
+                else => "",
+            };
+            log.err(
+                "{}: session evicted: reason={?s} (cluster_release={}, client_release={}){s}",
+                .{
+                    self.id,
+                    std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
+                    eviction.header.release,
+                    self.release,
+                    eviction_specific_log,
+                },
+            );
 
-                self.evicted = true;
+            self.evicted = true;
+
+            if (self.on_eviction_callback) |callback| {
                 self.on_eviction_callback = null;
                 callback(self, eviction);
             } else {
