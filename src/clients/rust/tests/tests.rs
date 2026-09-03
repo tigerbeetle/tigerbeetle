@@ -438,7 +438,7 @@ fn client_drop_before_future_awaited() -> Result<()> {
 
     match result {
         Ok(_) => {}
-        Err(tb::PacketError::ClientShutdown) => {}
+        Err(tb::PacketError::ClientClosed) => {}
         Err(_) => panic!(),
     }
 
@@ -470,7 +470,7 @@ fn client_drop_causes_shutdown_status() -> Result<()> {
     for future in futures {
         match block_on(async { future.await }) {
             Ok(_) => {}
-            Err(tb::PacketError::ClientShutdown) => shutdown_count += 1,
+            Err(tb::PacketError::ClientClosed) => shutdown_count += 1,
             Err(_) => panic!(),
         }
     }
@@ -1418,15 +1418,14 @@ fn client_evicted() -> Result<()> {
     let result = block_on(client_evict.lookup_accounts(&[tb::id()])?);
     assert_eq!(result, Err(tb::PacketError::ClientEvicted));
 
-    // After eviction, the client handle is invalidated. Subsequent
-    // submissions are rejected.
-    let result = client_evict.lookup_accounts(&[tb::id()]);
-    assert_eq!(result.err(), Some(tb::ClientClosed));
+    // After eviction, the client is still running.
+    // Subsequent submissions fail with the same eviction reason.
+    let result = block_on(client_evict.lookup_accounts(&[tb::id()])?);
+    assert_eq!(result, Err(tb::PacketError::ClientEvicted));
 
-    // After eviction, close completes with ClientClosed because the eviction
-    // callback nulls the context pointer that deinit also checks.
+    // Closing the client.
     let result = block_on(client_evict.close());
-    assert_eq!(result, Err(tb::ClientClosed));
+    assert_eq!(result, Ok(()));
 
     Ok(())
 }

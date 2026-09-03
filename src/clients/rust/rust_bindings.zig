@@ -39,7 +39,7 @@ const type_mappings = [_]TypeMapping{
         .name = "tb_client_t",
         .comment =
         \\// Opaque struct serving as a handle for the client instance.
-        \\// This struct must be "pinned" (not copyable or movable), as its address 
+        \\// This struct must be "pinned" (not copyable or movable), as its address
         \\// must remain stable throughout the lifetime of the client instance.
         ,
     },
@@ -48,7 +48,7 @@ const type_mappings = [_]TypeMapping{
         .name = "tb_packet_t",
         .comment =
         \\// Struct containing the state of a request submitted through the client.
-        \\// This struct must be "pinned" (not copyable or movable), as its address 
+        \\// This struct must be "pinned" (not copyable or movable), as its address
         \\// must remain stable throughout the lifetime of the request.
         ,
     },
@@ -455,7 +455,7 @@ pub fn main() !void {
         \\    ) -> TB_CLIENT_STATUS;
         \\
         \\    // Closes the client, causing any previously submitted packets to be completed with
-        \\    // `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
+        \\    // `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
         \\    // It is undefined behavior to use any functions on the client once deinit is called.
         \\    pub fn tb_client_deinit(
         \\        client: *mut tb_client_t,
