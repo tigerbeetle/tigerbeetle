@@ -266,7 +266,7 @@ typedef enum TB_PACKET_STATUS {
     TB_PACKET_CLIENT_EVICTED = 2,
     TB_PACKET_CLIENT_RELEASE_TOO_LOW = 3,
     TB_PACKET_CLIENT_RELEASE_TOO_HIGH = 4,
-    TB_PACKET_CLIENT_SHUTDOWN = 5,
+    TB_PACKET_CLIENT_CLOSED = 5,
     TB_PACKET_INVALID_OPERATION = 6,
     TB_PACKET_INVALID_DATA_SIZE = 7,
 } TB_PACKET_STATUS;
@@ -282,8 +282,9 @@ typedef enum TB_INIT_STATUS {
 } TB_INIT_STATUS;
 
 typedef enum TB_CLIENT_STATUS {
-    TB_CLIENT_OK = 0,
-    TB_CLIENT_INVALID = 1,
+    TB_CLIENT_SUCCESS = 0,
+    TB_CLIENT_CLOSED = 1,
+    TB_CLIENT_NOT_INITIALIZED = 2,
 } TB_CLIENT_STATUS;
 
 typedef enum TB_REGISTER_LOG_CALLBACK_STATUS {
@@ -331,16 +332,16 @@ TB_INIT_STATUS tb_client_init(
 );
 
 // Retrieve the parameters initially passed to `tb_client_init`.
-// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
-// not initialized or has already been closed.
+// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
+// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
 TB_CLIENT_STATUS tb_client_init_parameters(
     tb_client_t* client,
     tb_init_parameters_t* init_parameters_out
 );
 
 // Retrieve the callback context initially passed to `tb_client_init`.
-// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
-// not initialized or has already been closed.
+// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
+// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
 TB_CLIENT_STATUS tb_client_completion_context(
     tb_client_t* client,
     uintptr_t* completion_ctx_out
@@ -349,17 +350,17 @@ TB_CLIENT_STATUS tb_client_completion_context(
 // Submit a packet with its `operation`, `data`, and `data_size` fields set.
 // Once completed, `completion_callback` will be invoked with `completion_ctx`
 // and the given packet on the `tb_client` thread (separate from the caller's thread).
-// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
-// not initialized or has already been closed.
+// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
+// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
 TB_CLIENT_STATUS tb_client_submit(
     tb_client_t *client,
     tb_packet_t *packet
 );
 
 // Closes the client, causing any previously submitted packets to be completed with
-// `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
-// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
-// not initialized or has already been closed.
+// `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
+// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
 TB_CLIENT_STATUS tb_client_deinit(
     tb_client_t *client
 );
