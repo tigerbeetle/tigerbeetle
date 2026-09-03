@@ -19,6 +19,7 @@ pub const std_options: std.Options = .{
 };
 
 const CLIArgs = struct {
+    scenario: Scenario = .default,
     test_duration: stdx.Duration = .minutes(1),
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
@@ -30,6 +31,10 @@ const CLIArgs = struct {
     @"--": void,
     /// Vortex is non-deterministic, but providing a seed can still help constrain the scenario.
     seed: ?u64 = null,
+};
+
+const Scenario = enum {
+    default,
 };
 
 pub fn main() !void {
@@ -56,10 +61,10 @@ pub fn main() !void {
         .leak => @panic("memory leak"),
     };
 
-    const allocator = gpa_allocator.allocator();
+    const gpa = gpa_allocator.allocator();
 
-    var flags = stdx.Flags.init(allocator);
-    defer flags.deinit(allocator);
+    var flags = stdx.Flags.init(gpa);
+    defer flags.deinit(gpa);
 
     const args = flags.parse(CLIArgs);
 
@@ -73,7 +78,7 @@ pub fn main() !void {
 
     if (builtin.os.tag == .linux) {
         // Relaunch in fresh pid / network namespaces.
-        try stdx.unshare.maybe_unshare_and_relaunch(allocator, .{
+        try stdx.unshare.maybe_unshare_and_relaunch(gpa, .{
             .pid = true,
             .network = true,
         });
@@ -89,6 +94,17 @@ pub fn main() !void {
     const seed = args.seed orelse std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
+    log.info("seed={}", .{seed});
+    switch (args.scenario) {
+        .default => scenario_default(gpa, &prng),
+    }
+
+    log.info("done", .{});
+}
+
+fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) void {
+    assert(args.scenario == .default);
+
     // Even if we have past versions available, only use them sometimes.
     const release_min = prng.range_inclusive(
         u32,
@@ -96,7 +112,7 @@ pub fn main() !void {
         dependencies_count - 1,
     );
 
-    const supervisor = try Supervisor.create(allocator, .{
+    const supervisor = try Supervisor.create(gpa, .{
         .seed = prng.int(u64),
         .replica_count = args.replica_count,
         .faulty = !args.disable_faults,
@@ -104,7 +120,6 @@ pub fn main() !void {
     });
     defer supervisor.destroy();
 
-    log.info("seed={}", .{seed});
     log.info("output_directory={s}", .{supervisor.output_directory});
     log.info("duration={}", .{args.test_duration});
     log.info("releases={any}", .{supervisor.releases});
@@ -137,5 +152,4 @@ pub fn main() !void {
         });
     }
     supervisor.workload_terminate();
-    log.info("done", .{});
 }
