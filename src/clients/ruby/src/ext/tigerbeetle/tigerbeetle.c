@@ -278,10 +278,14 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
     req->packet.user_data = req;
 
     TB_CLIENT_STATUS cs = tb_client_submit(client, &req->packet);
-    if (cs == TB_CLIENT_INVALID) {
+    if (cs != TB_CLIENT_SUCCESS) {
         free(req->send_buf);
         free(req);
-        rb_raise(rb_eClientClosedError, "client is closed");
+        if (cs == TB_CLIENT_CLOSED) {
+            rb_raise(rb_eClientClosedError, "client is closed");
+        } else {
+            rb_bug("client interface not initialized");
+        }
     }
 
     return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
@@ -295,7 +299,7 @@ static VALUE rb_tb_request_id(VALUE self) {
 
 static void rb_tb_init_native_client(VALUE mTigerBeetle) {
     rb_define_const(mTigerBeetle, "PACKET_OK", RB_INT2NUM(TB_PACKET_OK));
-    rb_define_const(mTigerBeetle, "PACKET_CLIENT_SHUTDOWN", RB_INT2NUM(TB_PACKET_CLIENT_SHUTDOWN));
+    rb_define_const(mTigerBeetle, "PACKET_CLIENT_CLOSED", RB_INT2NUM(TB_PACKET_CLIENT_CLOSED));
 
     VALUE cNativeClient = rb_define_class_under(mTigerBeetle, "NativeClient", rb_cObject);
     rb_define_alloc_func(cNativeClient, rb_tb_client_alloc);
