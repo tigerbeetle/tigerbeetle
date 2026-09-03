@@ -537,7 +537,7 @@ pub fn main() !void {
         \\                                      ctypes.POINTER(InitParameters)]
         \\
         \\# Closes the client, causing any previously submitted packets to be completed with
-        \\# `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
+        \\# `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
         \\# It is undefined behavior to use any functions on the client once deinit is called.
         \\tb_client_deinit = tbclient.tb_client_deinit
         \\tb_client_deinit.restype = ClientStatus
