@@ -5,6 +5,7 @@
 const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
+const ratio = stdx.PRNG.ratio;
 
 const Supervisor = @import("testing/vortex/supervisor.zig").Supervisor;
 const Command = @import("testing/vortex/workload.zig").Command;
@@ -35,6 +36,8 @@ const CLIArgs = struct {
 
 const Scenario = enum {
     default,
+    upgrade,
+    recover,
 };
 
 pub fn main() !void {
@@ -96,13 +99,15 @@ pub fn main() !void {
 
     log.info("seed={}", .{seed});
     switch (args.scenario) {
-        .default => scenario_default(gpa, &prng),
+        .default => try scenario_default(gpa, &prng, args),
+        .upgrade => try scenario_upgrade(gpa, &prng),
+        .recover => try scenario_recover(gpa, &prng),
     }
 
     log.info("done", .{});
 }
 
-fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) void {
+fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) !void {
     assert(args.scenario == .default);
 
     // Even if we have past versions available, only use them sometimes.
@@ -152,4 +157,98 @@ fn scenario_default(gpa: std.mem.Allocator, prng: *stdx.PRNG, args: CLIArgs) voi
         });
     }
     supervisor.workload_terminate();
+}
+
+fn scenario_upgrade(gpa: std.mem.Allocator, prng: *stdx.PRNG) !void {
+    const replica_count = 3;
+    const duration_max = stdx.Duration.seconds(200);
+    const tick_ms = 10;
+    const ticks_max = duration_max.to_ms() / tick_ms;
+
+    var supervisor = try Supervisor.create(gpa, .{
+        .seed = prng.int(u64),
+        .replica_count = replica_count,
+        .faulty = false,
+        .log_debug = false,
+    });
+    defer supervisor.destroy();
+
+    assert(supervisor.release_count > 0);
+    const release_past = supervisor.release_count - 2;
+    const release_current = supervisor.release_count - 1;
+
+    for (0..replica_count) |replica_index| {
+        try supervisor.replica_install(@intCast(replica_index), release_past);
+        try supervisor.replica_format(@intCast(replica_index));
+    }
+    try supervisor.workload_start(.{ .release = release_past }, .{ .transfer_count = 1_000_000 });
+
+    for (0..replica_count) |replica_index| {
+        try supervisor.replica_start(@intCast(replica_index));
+    }
+
+    // Schedule the replica upgrades.
+    var upgrade_tick: [replica_count]u64 = @splat(0);
+    for (0..replica_count) |replica_index| {
+        upgrade_tick[replica_index] = supervisor.prng.int_inclusive(u64, ticks_max / 2);
+    }
+
+    for (0..ticks_max) |tick| {
+        try supervisor.tick();
+
+        for (0..replica_count) |replica_index| {
+            if (tick == upgrade_tick[replica_index]) {
+                try supervisor.replica_install(@intCast(replica_index), release_current);
+            }
+        }
+
+        const early = tick < ticks_max / 2;
+        const replica_index = supervisor.prng.index(supervisor.replicas);
+        const crash = early and supervisor.prng.chance(ratio(1, 400));
+        const restart = (!early) or supervisor.prng.chance(ratio(1, 200));
+
+        if (supervisor.replicas[replica_index].state == .terminated and restart) {
+            try supervisor.replica_start(@intCast(replica_index));
+        } else if (supervisor.replicas[replica_index].state == .running and crash) {
+            try supervisor.replica_terminate(@intCast(replica_index));
+        }
+    }
+
+    if (!supervisor.workload_done()) {
+        return error.WorkloadIncomplete;
+    }
+}
+
+fn scenario_recover(gpa: std.mem.Allocator, prng: *stdx.PRNG) !void {
+    const replica_count = 3;
+
+    var supervisor = try Supervisor.create(gpa, .{
+        .seed = prng.int(u64),
+        .replica_count = replica_count,
+        .faulty = false,
+        .log_debug = false,
+    });
+    defer supervisor.destroy();
+
+    const release_current = supervisor.release_count - 1;
+
+    for (0..replica_count) |replica_index| {
+        try supervisor.replica_install(@intCast(replica_index), release_current);
+        try supervisor.replica_format(@intCast(replica_index));
+        try supervisor.replica_start(@intCast(replica_index));
+    }
+    try supervisor.workload_start(.{ .release = release_current }, .{ .transfer_count = 100_000 });
+    for (0..400) |_| try supervisor.tick();
+
+    try supervisor.replica_terminate(2);
+    try supervisor.replica_reformat(2);
+
+    try supervisor.replica_terminate(1);
+    try supervisor.replica_start(2);
+    for (0..4000) |_| {
+        if (supervisor.workload_done()) break;
+        try supervisor.tick();
+    } else {
+        return error.WorkloadIncomplete;
+    }
 }
