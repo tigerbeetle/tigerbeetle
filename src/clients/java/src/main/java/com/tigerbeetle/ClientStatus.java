@@ -6,8 +6,9 @@
 package com.tigerbeetle;
 
 enum ClientStatus {
-    Ok((int) 0),
-    Invalid((int) 1);
+    Success((int) 0),
+    Closed((int) 1),
+    NotInitialized((int) 2);
 
     public final int value;
 
@@ -17,8 +18,9 @@ enum ClientStatus {
 
     public static ClientStatus fromValue(int value) {
         switch (value) {
-            case 0: return Ok;
-            case 1: return Invalid;
+            case 0: return Success;
+            case 1: return Closed;
+            case 2: return NotInitialized;
             default: throw new IllegalArgumentException(
                 String.format("Invalid ClientStatus value=%d", value));
         }

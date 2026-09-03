@@ -82,8 +82,10 @@ const NativeClient = struct {
 
     /// Native clientDeinit implementation.
     fn client_deinit(client: *tb.ClientInterface) void {
-        client.deinit() catch {
+        client.deinit() catch |err| switch (err) {
+            tb.ClientError.NotInitialized => unreachable,
             // Ignore multiple calls to `deinit`.
+            tb.ClientError.Closed => {},
         };
     }
 
@@ -124,7 +126,8 @@ const NativeClient = struct {
             env.delete_global_ref(global_ref);
             global_allocator.destroy(packet);
             switch (err) {
-                error.ClientInvalid => ReflectionHelper.client_closed_exception_throw(env),
+                tb.ClientError.NotInitialized => unreachable,
+                tb.ClientError.Closed => ReflectionHelper.client_closed_exception_throw(env),
             }
         };
     }
