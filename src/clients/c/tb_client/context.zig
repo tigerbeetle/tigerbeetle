@@ -33,12 +33,45 @@ pub const InitParameters = extern struct {
     addresses_len: u64,
 };
 
+pub const InitError = std.mem.Allocator.Error || error{
+    /// Invalid IP addresses, or malformed string.
+    AddressInvalid,
+    /// Too many IP addresses.
+    AddressLimitExceeded,
+    /// Insuficient systems resources to initialize the client.
+    SystemResources,
+    /// Network failure.
+    NetworkSubsystemFailed,
+    Unexpected,
+};
+
+pub const ClientError = error{
+    /// The client was closed.
+    Closed,
+    /// Client interface not initialized.
+    /// This is a bug in the application code.
+    NotInitialized,
+};
+
+/// Completion errors encompass any kind of failure that
+/// can prevent a submitted batch from completing.
+/// For example, validation failures (`Packet.Error`), client shutdown,
+/// and cluster eviction.
+pub const CompletionError = Packet.Error || ClientError || error{
+    /// The client session was evicted by the cluster,
+    /// usually due to too many clients being connected.
+    Evicted,
+    /// Client release is too low.
+    ReleaseTooLow,
+    /// Client release is too high.
+    ReleaseTooHigh,
+};
+
 /// Thread-safe client interface allocated by the user.
 /// Contains the `VTable` with function pointers to the StateMachine-specific implementation
 /// and the synchronization status.
 /// Safe to call from multiple threads, even after `deinit` is called.
 pub const ClientInterface = extern struct {
-    pub const Error = error{ClientInvalid};
     pub const VTable = struct {
         submit_fn: *const fn (*anyopaque, *Packet.Extern) void,
         completion_context_fn: *const fn (*anyopaque) usize,
@@ -76,55 +109,56 @@ pub const ClientInterface = extern struct {
         };
     }
 
-    pub fn submit(interface: *ClientInterface, packet: *Packet.Extern) Error!void {
-        if (interface.magic_number != beetle) return Error.ClientInvalid;
+    pub fn submit(interface: *ClientInterface, packet: *Packet.Extern) ClientError!void {
+        if (interface.magic_number != beetle) return ClientError.NotInitialized;
         assert(interface.reserved == 0);
 
         interface.locker.lock();
         defer interface.locker.unlock();
 
-        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        const context: *anyopaque = interface.context.ptr orelse return ClientError.Closed;
         interface.vtable.ptr.submit_fn(context, packet);
     }
 
-    pub fn completion_context(interface: *ClientInterface) Error!usize {
-        if (interface.magic_number != beetle) return Error.ClientInvalid;
+    pub fn completion_context(interface: *ClientInterface) ClientError!usize {
+        if (interface.magic_number != beetle) return ClientError.NotInitialized;
         assert(interface.reserved == 0);
 
         interface.locker.lock();
         defer interface.locker.unlock();
 
-        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        const context: *anyopaque = interface.context.ptr orelse return ClientError.Closed;
         return interface.vtable.ptr.completion_context_fn(context);
     }
 
-    pub fn deinit(interface: *ClientInterface) Error!void {
-        if (interface.magic_number != beetle) return Error.ClientInvalid;
+    pub fn deinit(interface: *ClientInterface) ClientError!void {
+        if (interface.magic_number != beetle) return ClientError.NotInitialized;
         assert(interface.reserved == 0);
 
         const context: *anyopaque = context: {
             interface.locker.lock();
             defer interface.locker.unlock();
 
-            const context = interface.context.ptr orelse return Error.ClientInvalid;
+            const context: *anyopaque = interface.context.ptr orelse return ClientError.Closed;
             interface.context = .{ .ptr = null };
 
             break :context context;
         };
+
         interface.vtable.ptr.deinit_fn(context);
     }
 
     pub fn init_parameters(
         interface: *ClientInterface,
         out_parameters: *InitParameters,
-    ) Error!void {
-        if (interface.magic_number != beetle) return Error.ClientInvalid;
+    ) ClientError!void {
+        if (interface.magic_number != beetle) return ClientError.NotInitialized;
         assert(interface.reserved == 0);
 
         interface.locker.lock();
         defer interface.locker.unlock();
 
-        const context = interface.context.ptr orelse return Error.ClientInvalid;
+        const context: *anyopaque = interface.context.ptr orelse return ClientError.Closed;
         return interface.vtable.ptr.init_parameters_fn(context, out_parameters);
     }
 
@@ -144,14 +178,6 @@ pub const CompletionCallback = *const fn (
     result: ?[*]const u8,
     result_size: u32,
 ) callconv(.c) void;
-
-pub const InitError = std.mem.Allocator.Error || error{
-    Unexpected,
-    AddressInvalid,
-    AddressLimitExceeded,
-    SystemResources,
-    NetworkSubsystemFailed,
-};
 
 /// Implements a `ClientInterface` with specialized `vsr.Client` and
 /// `StateMachine.Operation` types.
@@ -179,7 +205,8 @@ pub fn ContextType(
         io: IO,
         message_pool: MessagePool,
         client: Client,
-        batch_size_limit: ?u32 = null,
+        batch_size_limit: ?u32,
+        eviction_reason: ?vsr.Header.Eviction.Reason,
 
         completion_callback: CompletionCallback,
         completion_context: usize,
@@ -189,11 +216,10 @@ pub fn ContextType(
         pending: Packet.Queue,
 
         signal: Signal,
-        eviction_reason: ?vsr.Header.Eviction.Reason = null,
         thread: std.Thread,
 
         request_timer: stdx.Instant,
-        request_latency: ?stdx.Duration = null,
+        request_latency: ?stdx.Duration,
 
         const Context = @This();
         const GPA = std.heap.GeneralPurposeAllocator(.{
@@ -209,13 +235,6 @@ pub fn ContextType(
             comptime {
                 assert(@sizeOf(UserData) == @sizeOf(u128));
             }
-        };
-
-        const CompletionError = Packet.Error || error{
-            ClientShutdown,
-            ClientEvicted,
-            ClientReleaseTooLow,
-            ClientReleaseTooHigh,
         };
 
         pub fn init(
@@ -274,9 +293,12 @@ pub fn ContextType(
                 .io = undefined,
                 .message_pool = undefined,
                 .client = undefined,
+                .batch_size_limit = null,
+                .eviction_reason = null,
                 .signal = undefined,
                 .thread = undefined,
                 .request_timer = undefined,
+                .request_latency = null,
             };
             context.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_owned);
@@ -392,13 +414,13 @@ pub fn ContextType(
         }
 
         fn deinit(self: *Context) void {
-            assert(thread_caller == .io);
+            assert(thread_caller == .user);
             assert(self.signal.status() == .shutdown_completed);
             assert(self.submitted.pop() == null);
             assert(self.pending.pop() == null);
+            assert(self.client.shutdown_complete());
             maybe(self.eviction_reason != null);
 
-            assert(self.client.shutdown_complete());
             self.signal.deinit();
             self.client.deinit(self.gpa.allocator());
             self.message_pool.deinit(self.gpa.allocator());
@@ -413,9 +435,13 @@ pub fn ContextType(
         }
 
         fn tick(self: *Context) void {
-            if (self.eviction_reason == null) {
-                self.client.tick();
+            if (self.client.evicted) {
+                assert(self.eviction_reason != null);
+                return;
             }
+
+            assert(self.eviction_reason == null);
+            self.client.tick();
         }
 
         fn io_thread(self: *Context) void {
@@ -461,16 +487,19 @@ pub fn ContextType(
                     @panic("IO.run() failed");
                 };
             }
-
-            self.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
             assert(thread_caller == .io);
-            if (self.client.request_inflight) |*inflight| {
-                if (inflight.message.header.operation != .register) {
+            if (self.client.request_inflight) |inflight| {
+                const operation = inflight.message.header.operation;
+
+                self.client.request_inflight = null;
+                self.client.release_message(inflight.message.base());
+
+                if (operation != .register) {
                     const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
                     packet.assert_phase(.sent);
                     self.packet_cancel(packet);
@@ -486,14 +515,42 @@ pub fn ContextType(
             assert(packet_list.phase != .complete);
             packet_list.assert_phase(packet_list.phase);
 
-            const result = if (self.eviction_reason) |reason| switch (reason) {
-                .reserved => unreachable,
-                .client_release_too_low => error.ClientReleaseTooLow,
-                .client_release_too_high => error.ClientReleaseTooHigh,
-                else => error.ClientEvicted,
-            } else result: {
-                assert(self.signal.status() != .running);
-                break :result error.ClientShutdown;
+            const result: CompletionError = result: {
+                // When the client is explicitly closed by the user, submitted batches
+                // are canceled with `Closed` regardless of any previous eviction reason.
+                if (self.signal.status() != .running) {
+                    maybe(self.eviction_reason != null);
+
+                    break :result CompletionError.Closed;
+                }
+                assert(self.eviction_reason != null);
+
+                // While eviction reasons are very detailed, the surfaced error codes
+                // are limited to those that are the client's responsibility.
+                break :result switch (self.eviction_reason.?) {
+                    .reserved => unreachable,
+
+                    // Client evicted due to an invalid session.
+                    // The application has no option other than to try reconnecting.
+                    .no_session,
+                    .session_too_low,
+                    .session_release_mismatch,
+                    => CompletionError.Evicted,
+
+                    // Invalid client release.
+                    // The application should resolve the version mismatch.
+                    .client_release_too_low => CompletionError.ReleaseTooLow,
+                    .client_release_too_high => CompletionError.ReleaseTooHigh,
+
+                    // Invalid operation or malformed request.
+                    // This must be a bug in a high-level client,
+                    // or in an application using the `tb_client` library directly.
+                    .invalid_request_operation => CompletionError.InvalidOperation,
+                    .invalid_request_body => CompletionError.InvalidDataSize,
+
+                    // The request size is not expected to differ from the VSR header.
+                    .invalid_request_body_size => unreachable,
+                };
             };
 
             var it: ?*Packet = packet_list;
@@ -509,16 +566,14 @@ pub fn ContextType(
             assert(self.batch_size_limit != null);
             packet.assert_phase(.submitted);
 
-            // Avoid making a packet inflight by cancelling it if the client was shutdown.
-            if (self.signal.status() != .running) {
-                maybe(self.eviction_reason != null);
-                self.packet_cancel(packet);
-                return;
-            }
-
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
                 assert(self.pending.empty());
+
+                // The client might have been evicted, but we don't return early,
+                // so that batch validation errors are surfaced first.
+                maybe(self.eviction_reason != null);
+
                 const batch = packet.batch_validate(
                     Operation,
                     operations_allowed,
@@ -538,6 +593,8 @@ pub fn ContextType(
                 return;
             }
             assert(self.client.request_inflight != null);
+            // Upon eviction, `request_inflight` is cleaned up.
+            assert(self.eviction_reason == null);
             maybe(self.pending.empty());
 
             packet.batch_enqueue(
@@ -561,8 +618,9 @@ pub fn ContextType(
             assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
 
-            // On shutdown, cancel this packet as well as any others batched onto it.
-            if (self.signal.status() != .running) {
+            // Avoid making a packet inflight by cancelling it
+            // if the client was closed or evicted.
+            if (self.signal.status() != .running or self.eviction_reason != null) {
                 return self.packet_cancel(packet_list);
             }
             assert(self.eviction_reason == null);
@@ -685,8 +743,13 @@ pub fn ContextType(
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             assert(thread_caller == .io);
 
+            assert(eviction.header.command == .eviction);
+            assert(eviction.header.reason != .reserved);
+
             const self: *Context = @fieldParentPtr("client", client);
             assert(self.eviction_reason == null);
+            assert(self.client.evicted);
+            self.eviction_reason = eviction.header.reason;
 
             log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
                 self.client_id,
@@ -694,19 +757,8 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
-            // The client was evicted, clearing the interface context so no more
-            // requests can be submitted.
-            // In-flight requests fail with the eviction reason; subsequent ones fail
-            // with "shutdown".
-            self.interface.locker.lock();
-            defer self.interface.locker.unlock();
-
-            self.interface.context = .{ .ptr = null };
-
-            // Stops the IO thread, which then deinitializes the client before
-            // it exits (see `io_thread`).
-            self.eviction_reason = eviction.header.reason;
-            self.signal.stop();
+            self.cancel_request_inflight();
+            signal_notify_callback(&self.signal);
         }
 
         fn client_result_callback(
@@ -800,13 +852,14 @@ pub fn ContextType(
 
             const result = completion catch |err| {
                 packet.status = switch (err) {
-                    error.TooMuchData => .too_much_data,
-                    error.ClientEvicted => .client_evicted,
-                    error.ClientReleaseTooLow => .client_release_too_low,
-                    error.ClientReleaseTooHigh => .client_release_too_high,
-                    error.ClientShutdown => .client_shutdown,
-                    error.InvalidOperation => .invalid_operation,
-                    error.InvalidDataSize => .invalid_data_size,
+                    CompletionError.NotInitialized => unreachable,
+                    CompletionError.Closed => .client_closed,
+                    CompletionError.Evicted => .client_evicted,
+                    CompletionError.ReleaseTooLow => .client_release_too_low,
+                    CompletionError.ReleaseTooHigh => .client_release_too_high,
+                    CompletionError.InvalidOperation => .invalid_operation,
+                    CompletionError.InvalidDataSize => .invalid_data_size,
+                    CompletionError.TooMuchData => .too_much_data,
                 };
                 assert(packet.status != .ok);
                 packet.phase = .complete;
@@ -848,6 +901,8 @@ pub fn ContextType(
             packet.* = .init(packet_extern);
 
             // Enqueue the packet and notify the IO thread to process it asynchronously.
+            // The mutex is locked during this operation, so it's guaranteed
+            // that the I/O thread hasn't been canceled.
             assert(self.signal.status() == .running);
             self.submitted.push(packet);
             self.signal.notify();
@@ -862,13 +917,9 @@ pub fn ContextType(
             assert(thread_caller == .user);
 
             const self: *Context = @ptrCast(@alignCast(context));
-
-            // Copy the thread handle here, since stopping the I/O thread deinitializes
-            // the context and invalidates the `self` pointer.
-            const thread = self.thread;
-            defer thread.join();
-
             self.signal.stop();
+            self.thread.join();
+            self.deinit();
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {

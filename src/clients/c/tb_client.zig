@@ -7,7 +7,9 @@ const MessageBus = @import("../../message_bus.zig").MessageBusType(@import("../.
 
 pub const InitError = @import("tb_client/context.zig").InitError;
 pub const InitParameters = @import("tb_client/context.zig").InitParameters;
+pub const ClientError = @import("tb_client/context.zig").ClientError;
 pub const ClientInterface = @import("tb_client/context.zig").ClientInterface;
+pub const CompletionError = @import("tb_client/context.zig").CompletionError;
 pub const CompletionCallback = @import("tb_client/context.zig").CompletionCallback;
 pub const Packet = @import("tb_client/packet.zig").Packet.Extern;
 pub const PacketStatus = @import("tb_client/packet.zig").Packet.Status;
