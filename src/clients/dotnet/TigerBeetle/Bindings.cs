@@ -1178,9 +1178,11 @@ public enum InitializationStatus : uint
 
 internal enum ClientStatus : uint
 {
-    Ok = 0,
+    Success = 0,
 
-    Invalid = 1,
+    Closed = 1,
+
+    NotInitialized = 2,
 
 }
 
@@ -1196,7 +1198,7 @@ internal enum PacketStatus : byte
 
     ClientReleaseTooHigh = 4,
 
-    ClientShutdown = 5,
+    ClientClosed = 5,
 
     InvalidOperation = 6,
 
