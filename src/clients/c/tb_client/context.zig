@@ -57,7 +57,9 @@ pub const ClientError = error{
 /// can prevent a submitted batch from completing.
 /// For example, validation failures (`Packet.Error`), client shutdown,
 /// and cluster eviction.
-pub const CompletionError = Packet.Error || ClientError || error{
+pub const CompletionError = Packet.Error || error{
+    /// The client was closed.
+    Closed,
     /// The client session was evicted by the cluster,
     /// usually due to too many clients being connected.
     Evicted,
@@ -852,7 +854,6 @@ pub fn ContextType(
 
             const result = completion catch |err| {
                 packet.status = switch (err) {
-                    CompletionError.NotInitialized => unreachable,
                     CompletionError.Closed => .client_closed,
                     CompletionError.Evicted => .client_evicted,
                     CompletionError.ReleaseTooLow => .client_release_too_low,
