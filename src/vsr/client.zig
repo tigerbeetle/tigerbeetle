@@ -204,6 +204,8 @@ pub fn ClientType(
 
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
+            assert(!self.evicted);
+
             while (buffer.next_header()) |header| {
                 const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);
@@ -212,8 +214,11 @@ pub fn ClientType(
                     buffer.invalidate(.header_cluster);
                     return;
                 }
-                if (!self.evicted) {
-                    self.on_message(message);
+
+                self.on_message(message);
+                if (self.evicted) {
+                    buffer.invalidate(.evicted);
+                    return;
                 }
             }
         }
@@ -463,17 +468,18 @@ pub fn ClientType(
                 },
             );
 
-            self.evicted = true;
-
-            if (self.on_eviction_callback) |callback| {
-                self.on_eviction_callback = null;
-                callback(self, eviction);
-            } else {
-                std.debug.panic("session evicted: {?s} (cluster_release={})", .{
+            const callback = self.on_eviction_callback orelse std.debug.panic(
+                "session evicted: {?s} (cluster_release={})",
+                .{
                     std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
                     eviction.header.release,
-                });
-            }
+                },
+            );
+
+            self.evicted = true;
+            self.on_eviction_callback = null;
+
+            callback(self, eviction);
         }
 
         fn on_pong_client(self: *Client, pong: *const Message.PongClient) void {
