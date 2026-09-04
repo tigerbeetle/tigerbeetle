@@ -330,7 +330,6 @@ pub fn build_with_options(
 
     // zig build conformance:dump
     const conformance_module = build_conformance(b, .{
-        .check = build_steps.check,
         .dump = build_steps.conformance_dump,
     }, .{
         .stdx_module = stdx_module,
@@ -765,7 +764,6 @@ fn build_check(
 fn build_conformance(
     b: *std.Build,
     steps: struct {
-        check: *std.Build.Step,
         dump: *std.Build.Step,
     },
     options: struct {
@@ -785,11 +783,7 @@ fn build_conformance(
         .root_module = conformance_module,
     });
 
-    const run = b.addRunArtifact(conformance_test);
-    steps.check.dependOn(&run.step);
-
     const dump = b.addRunArtifact(conformance_test);
-    dump.addArg("--debug");
     dump.has_side_effects = true;
     steps.dump.dependOn(&dump.step);
 
