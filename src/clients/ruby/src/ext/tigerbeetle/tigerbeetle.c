@@ -277,18 +277,22 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
     req->packet.operation = (uint8_t)operation;
     req->packet.user_data = req;
 
-    TB_CLIENT_STATUS cs = tb_client_submit(client, &req->packet);
-    if (cs != TB_CLIENT_SUCCESS) {
-        free(req->send_buf);
-        free(req);
-        if (cs == TB_CLIENT_CLOSED) {
+    TB_CLIENT_STATUS status = tb_client_submit(client, &req->packet);
+    switch(status) {
+        case TB_CLIENT_SUCCESS:
+            return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
+        case TB_CLIENT_CLOSED:
+            free(req->send_buf);
+            free(req);
             rb_raise(rb_eClientClosedError, "client is closed");
-        } else {
-            rb_bug("client interface not initialized");
-        }
+            break;
+        case TB_CLIENT_NOT_INITIALIZED:
+        default:
+            tb_assert(false);
+            break;
     }
 
-    return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
+    return Qnil;
 }
 
 static VALUE rb_tb_request_id(VALUE self) {
