@@ -424,12 +424,14 @@ pub fn build_with_options(
 
     // zig build clients:$lang
     build_rust_client(b, build_steps.clients_rust, .{
+        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .tb_client_header = tb_client.header,
         .mode = options.mode,
     });
     build_go_client(b, build_steps.clients_go, .{
+        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .tb_client_header = tb_client.header,
@@ -465,6 +467,7 @@ pub fn build_with_options(
         .mode = options.mode,
     });
     build_c_client(b, build_steps.clients_c, .{
+        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .tb_client_header = tb_client.header,
@@ -1615,10 +1618,37 @@ fn build_tb_client(
     };
 }
 
+/// Zig's MachO linker starts archive members on 2-byte boundaries, while Apple's linker rejects
+/// a static library whose 64-bit Mach-O members do not start on 8-byte boundaries. Rewrites the
+/// static library with the layout of Apple's `ar`, see `src/archive_align.zig`.
+fn archive_align(b: *std.Build, options: struct {
+    stdx_module: *std.Build.Module,
+    static_lib: *std.Build.Step.Compile,
+}) std.Build.LazyPath {
+    assert(options.static_lib.isStaticLibrary());
+    if (options.static_lib.rootModuleTarget().os.tag != .macos) {
+        return options.static_lib.getEmittedBin();
+    }
+
+    const archive_align_exe = b.addExecutable(.{
+        .name = "archive_align",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/archive_align.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    archive_align_exe.root_module.addImport("stdx", options.stdx_module);
+
+    const run = b.addRunArtifact(archive_align_exe);
+    run.addPrefixedFileArg("--input=", options.static_lib.getEmittedBin());
+    return run.addPrefixedOutputFileArg("--output=", options.static_lib.out_filename);
+}
+
 fn build_rust_client(
     b: *std.Build,
     step_clients_rust: *std.Build.Step,
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         tb_client_header: std.Build.LazyPath,
@@ -1659,11 +1689,14 @@ fn build_rust_client(
         static_lib.pie = true;
         static_lib.linkLibC();
 
-        client_files.addCopyFileToSource(static_lib.getEmittedBin(), b.pathJoin(&.{
-            "src/clients/rust/assets/lib",
-            platform.target(),
-            static_lib.out_filename,
-        }));
+        client_files.addCopyFileToSource(
+            archive_align(b, .{ .stdx_module = options.stdx_module, .static_lib = static_lib }),
+            b.pathJoin(&.{
+                "src/clients/rust/assets/lib",
+                platform.target(),
+                static_lib.out_filename,
+            }),
+        );
     }
 
     const rust_bindings_generator = b.addExecutable(.{
@@ -1687,6 +1720,7 @@ fn build_go_client(
     b: *std.Build,
     step_clients_go: *std.Build.Step,
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         tb_client_header: std.Build.LazyPath,
@@ -1753,7 +1787,7 @@ fn build_go_client(
         };
 
         client_files.addCopyFileToSource(
-            lib.getEmittedBin(),
+            archive_align(b, .{ .stdx_module = options.stdx_module, .static_lib = lib }),
             b.fmt("src/clients/go/native/{s}_{s}.{s}", .{
                 file_name,
                 platform.go_target(),
@@ -2082,6 +2116,7 @@ fn build_c_client(
     b: *std.Build,
     step_clients_c: *std.Build.Step,
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         tb_client_header: std.Build.LazyPath,
@@ -2126,7 +2161,11 @@ fn build_c_client(
                 lib.linkSystemLibrary("advapi32");
             }
 
-            client_files.addCopyFileToSource(lib.getEmittedBin(), b.pathJoin(&.{
+            const emitted_bin = if (lib.isStaticLibrary())
+                archive_align(b, .{ .stdx_module = options.stdx_module, .static_lib = lib })
+            else
+                lib.getEmittedBin();
+            client_files.addCopyFileToSource(emitted_bin, b.pathJoin(&.{
                 "src/clients/c/lib",
                 platform.target(),
                 lib.out_filename,
