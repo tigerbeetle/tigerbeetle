@@ -545,13 +545,15 @@ pub fn ContextType(
                     .client_release_too_high => CompletionError.ReleaseTooHigh,
 
                     // Invalid operation or malformed request.
-                    // This must be a bug in a high-level client,
-                    // or in an application using the `tb_client` library directly.
-                    .invalid_request_operation => CompletionError.InvalidOperation,
-                    .invalid_request_body => CompletionError.InvalidDataSize,
-
-                    // The request size is not expected to differ from the VSR header.
-                    .invalid_request_body_size => unreachable,
+                    // Language clients and applications using the `tb_client`
+                    // library directly should never encounter these eviction
+                    // reasons (it would indicate a bug in `vsr.Client`).
+                    // However, network messages could be corrupted, so these
+                    // reasons are grouped as `Evicted`.
+                    .invalid_request_operation,
+                    .invalid_request_body,
+                    .invalid_request_body_size,
+                    => CompletionError.Evicted,
                 };
             };
 
