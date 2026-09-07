@@ -96,7 +96,6 @@ fn dump_assertion(assertion: ast.Assertion) void {
             print(" }})", .{});
         },
         .empty => |actual| print("assert_empty({s})", .{actual}),
-        .unique => |ids| print("assert_unique({s})", .{ids}),
         .ascending => |ids| print("assert_ascending({s})", .{ids}),
         .equal_field => |equal_field| {
             print("assert_equal({s}.{s}, ", .{

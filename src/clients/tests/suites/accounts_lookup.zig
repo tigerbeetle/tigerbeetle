@@ -6,7 +6,15 @@ test "returns an existing account" {
 
     const accounts = ct.lookup_accounts(.{account_id});
 
-    ct.assert_equal(accounts, .{.{ .id = account_id, .ledger = 1, .code = 1 }});
+    ct.assert_equal(accounts, .{.{
+        .id = account_id,
+        .user_data_128 = 0,
+        .user_data_64 = 0,
+        .user_data_32 = 0,
+        .ledger = 1,
+        .code = 1,
+        .flags = .{},
+    }});
 }
 
 test "returns no accounts for a missing id" {
@@ -15,7 +23,7 @@ test "returns no accounts for a missing id" {
     ct.assert_empty(accounts);
 }
 
-test "returns multiple existing accounts in one batch" {
+test "returns accounts in the order they were requested" {
     const account_1_id = ct.generate_id();
     const account_2_id = ct.generate_id();
     ct.create_accounts(.{
@@ -23,11 +31,25 @@ test "returns multiple existing accounts in one batch" {
         .{ .id = account_2_id, .ledger = 2, .code = 2 },
     });
 
-    const accounts = ct.lookup_accounts(.{ account_1_id, account_2_id });
+    const accounts = ct.lookup_accounts(.{ account_2_id, account_1_id });
 
     ct.assert_equal(accounts, .{
-        .{ .id = account_1_id, .ledger = 1 },
         .{ .id = account_2_id, .ledger = 2 },
+        .{ .id = account_1_id, .ledger = 1 },
+    });
+}
+
+test "returns an account once per requested id" {
+    const account_id = ct.generate_id();
+    ct.create_accounts(.{
+        .{ .id = account_id, .ledger = 1, .code = 1 },
+    });
+
+    const accounts = ct.lookup_accounts(.{ account_id, account_id });
+
+    ct.assert_equal(accounts, .{
+        .{ .id = account_id, .ledger = 1 },
+        .{ .id = account_id, .ledger = 1 },
     });
 }
 
@@ -68,6 +90,10 @@ test "round-trips all fields" {
 
     ct.assert_equal(accounts, .{.{
         .id = account_id,
+        .debits_pending = 0,
+        .debits_posted = 0,
+        .credits_pending = 0,
+        .credits_posted = 0,
         .ledger = 7,
         .code = 42,
         .user_data_128 = user_data_128,

@@ -26,6 +26,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
+        .requires_raise_on_double_close => false,
     };
 }
 
@@ -79,6 +80,9 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         try printer.write_empty_line();
         try printer.print_indented("// Suite: {s}", .{suite.name});
         for (suite.cases) |case| {
+            const case_memory = printer.mark();
+            defer printer.release(case_memory);
+
             try printer.write_empty_line();
             if (case.requirement) |requirement| {
                 if (!satisfies(requirement)) {
@@ -138,6 +142,11 @@ fn emit_binding(scope: *Scope, binding: ast.Binding) !void {
             try printer.print_indented("{s} := make([]Uint128, {d})", .{ name, count });
             try printer.print_indented("for i := range {s} {{", .{name});
             printer.indent();
+            try printer.print_indented("if i%{d} == 0 {{", .{ast.ids_between_sleeps});
+            printer.indent();
+            try printer.write_indented("time.Sleep(time.Millisecond)");
+            printer.dedent();
+            try printer.write_indented("}");
             try printer.print_indented("{s}[i] = ID()", .{name});
             printer.dedent();
             try printer.write_indented("}");
@@ -281,11 +290,15 @@ fn emit_invocation(
         .get_account_transfers, .get_account_balances, .query_accounts, .query_transfers => {
             assert(call.arguments.len == 1);
             const filter = call.arguments[0].record;
-            try printer.print("{s}{{\n", .{@tagName(filter.type)});
-            printer.indent();
-            try emit_record_fields(printer, filter);
-            printer.dedent();
-            try printer.write_indented("})");
+            if (filter.fields.len == 0) {
+                try printer.print("{s}{{}})\n", .{@tagName(filter.type)});
+            } else {
+                try printer.print("{s}{{\n", .{@tagName(filter.type)});
+                printer.indent();
+                try emit_record_fields(printer, filter);
+                printer.dedent();
+                try printer.write_indented("})");
+            }
         },
         .close_client, .sleep_ms => unreachable,
     }
@@ -377,20 +390,6 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
             const name = try printer.to_case_alloc(.GOCamelCase, actual);
             try printer.print_indented("assert.Len(t, {s}, 0)", .{name});
         },
-        .unique => |ids| {
-            const name = try printer.to_case_alloc(.GOCamelCase, ids);
-            try printer.print_indented("seen := make(map[string]struct{{}}, len({s}))", .{name});
-            try printer.print_indented("for _, id := range {s} {{", .{name});
-            printer.indent();
-            try printer.write_indented("if _, ok := seen[id.String()]; ok {");
-            printer.indent();
-            try printer.write_indented("t.Fatal(\"duplicate id\")");
-            printer.dedent();
-            try printer.write_indented("}");
-            try printer.write_indented("seen[id.String()] = struct{}{}");
-            printer.dedent();
-            try printer.write_indented("}");
-        },
         .ascending => |ids| {
             const name = try printer.to_case_alloc(.GOCamelCase, ids);
             try printer.print_indented("for i := 1; i < len({s}); i++ {{", .{name});
@@ -408,11 +407,11 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
         .equal_field => |comparison| {
             const actual = try render_field_access(printer, comparison.actual);
             const value = switch (comparison.expected) {
-                .expression => |expression| try render_typed_value(
-                    printer,
-                    comparison.actual.field,
-                    expression,
-                ),
+                .expression => |expression| switch (expression) {
+                    .increment => |arithmetic| try render_arithmetic(printer, arithmetic, "+", ""),
+                    .decrement => |arithmetic| try render_arithmetic(printer, arithmetic, "-", ""),
+                    else => try render_typed_value(printer, comparison.actual.field, expression),
+                },
                 .field_reference => |field| try render_field_access(printer, field),
             };
             try printer.print_indented("assert.Equal(t, {s}, {s})", .{ value, actual });
@@ -449,10 +448,13 @@ fn render_arithmetic(
     printer: *Printer,
     arithmetic: ast.Expression.Arithmetic,
     operator: []const u8,
+    spacing: []const u8,
 ) ![]const u8 {
-    return printer.string_alloc("{s} {s} {d}", .{
+    return printer.string_alloc("{s}{s}{s}{s}{d}", .{
         try printer.to_case_alloc(.GOCamelCase, arithmetic.reference),
+        spacing,
         operator,
+        spacing,
         arithmetic.by,
     });
 }
@@ -498,8 +500,8 @@ fn render_typed_value(
         },
         .boolean => |boolean| return if (boolean) "true" else "false",
         .field_access => |access| return render_field_access(printer, access),
-        .increment => |arithmetic| return render_arithmetic(printer, arithmetic, "+"),
-        .decrement => |arithmetic| return render_arithmetic(printer, arithmetic, "-"),
+        .increment => |arithmetic| return render_arithmetic(printer, arithmetic, "+", " "),
+        .decrement => |arithmetic| return render_arithmetic(printer, arithmetic, "-", " "),
         .call, .generate_ids => unreachable,
     }
 }

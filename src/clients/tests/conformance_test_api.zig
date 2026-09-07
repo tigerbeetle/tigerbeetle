@@ -21,6 +21,7 @@ pub const TransferFlags = tb.TransferFlags;
 
 /// Transpiles to language-specific u128 implementations where applicable.
 pub const U128 = struct { value: u128 };
+pub const uint128_max = 340282366920938463463374607431768211455;
 
 const ct_compile_error = "conformance test suites are parsed, not compiled";
 
@@ -29,7 +30,8 @@ pub fn generate_id() u128 {
     @panic(ct_compile_error);
 }
 
-/// `count` runtime-generated ids.
+/// `count` runtime-generated ids, generated across several clock ticks. See
+/// `conformance_test_ast.ids_between_sleeps`.
 pub fn generate_ids(count: u32) []const u128 {
     _ = count;
     @panic(ct_compile_error);
@@ -115,6 +117,12 @@ pub fn requires_fractional_amounts() void {
     @panic(ct_compile_error);
 }
 
+/// Restricts the case to clients that raise when an already closed client is
+/// closed again, rather than ignoring the second call.
+pub fn requires_raise_on_double_close() void {
+    @panic(ct_compile_error);
+}
+
 /// Compares only the fields listed in `expected`.
 pub fn assert_equal(actual: anytype, expected: anytype) void {
     _ = actual;
@@ -124,11 +132,6 @@ pub fn assert_equal(actual: anytype, expected: anytype) void {
 
 pub fn assert_empty(actual: anytype) void {
     _ = actual;
-    @panic(ct_compile_error);
-}
-
-pub fn assert_unique(ids: []const u128) void {
-    _ = ids;
     @panic(ct_compile_error);
 }
 

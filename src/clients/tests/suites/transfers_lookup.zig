@@ -35,7 +35,7 @@ test "returns no transfers for a missing id" {
     ct.assert_empty(transfers);
 }
 
-test "returns multiple existing transfers in one batch" {
+test "returns transfers in the order they were requested" {
     const transfer_1_id = ct.generate_id();
     const transfer_2_id = ct.generate_id();
     const debit_account_id = ct.generate_id();
@@ -63,12 +63,68 @@ test "returns multiple existing transfers in one batch" {
         },
     });
 
-    const transfers = ct.lookup_transfers(.{ transfer_1_id, transfer_2_id });
+    const transfers = ct.lookup_transfers(.{ transfer_2_id, transfer_1_id });
 
     ct.assert_equal(transfers, .{
-        .{ .id = transfer_1_id, .amount = 10 },
         .{ .id = transfer_2_id, .amount = 20 },
+        .{ .id = transfer_1_id, .amount = 10 },
     });
+}
+
+test "returns a transfer once per requested id" {
+    const transfer_id = ct.generate_id();
+    const debit_account_id = ct.generate_id();
+    const credit_account_id = ct.generate_id();
+    ct.create_accounts(.{
+        .{ .id = debit_account_id, .ledger = 1, .code = 1 },
+        .{ .id = credit_account_id, .ledger = 1, .code = 1 },
+    });
+    ct.create_transfers(.{
+        .{
+            .id = transfer_id,
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .amount = 10,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    const transfers = ct.lookup_transfers(.{ transfer_id, transfer_id });
+
+    ct.assert_equal(transfers, .{
+        .{ .id = transfer_id, .amount = 10 },
+        .{ .id = transfer_id, .amount = 10 },
+    });
+}
+
+test "returns no transfer for an id that failed" {
+    const transfer_id = ct.generate_id();
+    const debit_account_id = ct.generate_id();
+    const credit_account_id = ct.generate_id();
+    ct.create_accounts(.{
+        .{
+            .id = debit_account_id,
+            .ledger = 1,
+            .code = 1,
+            .flags = .{ .debits_must_not_exceed_credits = true },
+        },
+        .{ .id = credit_account_id, .ledger = 1, .code = 1 },
+    });
+    ct.create_transfers(.{
+        .{
+            .id = transfer_id,
+            .debit_account_id = debit_account_id,
+            .credit_account_id = credit_account_id,
+            .amount = 10,
+            .ledger = 1,
+            .code = 1,
+        },
+    });
+
+    const transfers = ct.lookup_transfers(.{transfer_id});
+
+    ct.assert_empty(transfers);
 }
 
 test "returns only the existing transfer for a partial match" {

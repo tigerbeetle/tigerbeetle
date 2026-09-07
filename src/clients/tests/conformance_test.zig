@@ -20,6 +20,9 @@ pub const suites: []const struct { []const u8, []const u8 } = &.{
     .{ "accounts_query", "query_accounts" },
     .{ "transfers_query", "query_transfers" },
     .{ "transfers_two_phase", "two_phase_transfer" },
+    .{ "transfers_closing", "closing_transfer" },
+    .{ "accounts_import", "import_accounts" },
+    .{ "transfers_import", "import_transfers" },
     .{ "uint128_range", "uint128_range" },
     .{ "transfers_create_concurrent", "create_transfers_concurrent" },
     .{ "client_close", "close_client" },
@@ -31,7 +34,7 @@ pub fn parse(arena: std.mem.Allocator) !ast.ConformanceTests {
 
 // This is occasionally useful during development/testing. It may just go away.
 pub fn main(init: std.process.Init) !void {
-    var memory: [1 * stdx.MiB]u8 = undefined;
+    var memory: [2 * stdx.MiB]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&memory);
 
     debug.dump(init.io, try parse(fba.allocator()));

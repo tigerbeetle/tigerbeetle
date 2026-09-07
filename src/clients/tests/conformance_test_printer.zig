@@ -25,7 +25,7 @@ pub const Printer = struct {
     };
 
     // What a generator needs to build a whole file. Callers are free to pass a different size.
-    pub const default_memory_size = 1 * MiB;
+    pub const default_memory_size = 2 * MiB;
 
     fba: std.heap.FixedBufferAllocator,
     writer: *std.Io.Writer,
@@ -50,6 +50,17 @@ pub const Printer = struct {
 
     pub fn arena(printer: *Printer) std.mem.Allocator {
         return printer.fba.allocator();
+    }
+
+    // The strings each case builds are temporary: the generators mark the current arena
+    // emit a case, then release the memory back.
+    pub fn mark(printer: *const Printer) usize {
+        return printer.fba.end_index;
+    }
+
+    pub fn release(printer: *Printer, marked: usize) void {
+        assert(marked <= printer.fba.end_index);
+        printer.fba.end_index = marked;
     }
 
     pub fn indent(printer: *Printer) void {
