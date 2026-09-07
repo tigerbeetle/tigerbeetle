@@ -108,7 +108,7 @@ test "creates, posts, voids, and expires two-phase transfers" {
     const commit_results = ct.create_transfers(.{
         .{
             .id = ct.generate_id(),
-            .amount = 340282366920938463463374607431768211455,
+            .amount = ct.uint128_max,
             .pending_id = transfer_2_id,
             .ledger = 1,
             .code = 1,

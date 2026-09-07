@@ -90,13 +90,14 @@ function test(name: string, fn: (client: Client) => Promise<void>) {
 
 // Suite: generate_ids
 
-test('generate_ids_generates_unique_ids', async (client) => {
-  const ids = Array.from({ length: 1000 }, () => id())
-  assert.strictEqual(new Set(ids).size, ids.length)
-})
-
 test('generate_ids_generates_monotonically_increasing_ids', async (client) => {
-  const ids = Array.from({ length: 100 }, () => id())
+  const ids: bigint[] = []
+  for (let index = 0; index < 100000; index++) {
+    if (index % 10000 === 0) {
+      await sleep_ms(1)
+    }
+    ids.push(id())
+  }
   for (let i = 1; i < ids.length; i++) {
     assert.ok(ids[i - 1] < ids[i])
   }
@@ -122,6 +123,33 @@ test('create_accounts_creates_an_account', async (client) => {
   assert.strictEqual(results[0].status, CreateAccountStatus.created)
 })
 
+test('create_accounts_returns_a_result_per_account_in_a_batch', async (client) => {
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: 0n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 3)
+  assert.strictEqual(results[0].status, CreateAccountStatus.created)
+  assert.strictEqual(results[1].status, CreateAccountStatus.id_must_not_be_zero)
+  assert.strictEqual(results[2].status, CreateAccountStatus.created)
+})
+
 test('create_accounts_returns_exists_for_a_duplicate_account', async (client) => {
   const account: Account = {
     ...account_default,
@@ -139,6 +167,28 @@ test('create_accounts_returns_exists_for_a_duplicate_account', async (client) =>
   assert.strictEqual(results[0].status, CreateAccountStatus.exists)
 })
 
+test('create_accounts_returns_exists_with_a_different_ledger', async (client) => {
+  const account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 2,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateAccountStatus.exists_with_different_ledger)
+})
+
 test('create_accounts_rejects_a_zero_id', async (client) => {
   const results = await client.createAccounts([
     {
@@ -150,6 +200,19 @@ test('create_accounts_rejects_a_zero_id', async (client) => {
   ])
   assert.strictEqual(results.length, 1)
   assert.strictEqual(results[0].status, CreateAccountStatus.id_must_not_be_zero)
+})
+
+test('create_accounts_rejects_an_id_of_the_maximum_u128', async (client) => {
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: 340282366920938463463374607431768211455n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateAccountStatus.id_must_not_be_int_max)
 })
 
 test('create_accounts_rejects_a_zero_ledger', async (client) => {
@@ -176,6 +239,62 @@ test('create_accounts_rejects_a_zero_code', async (client) => {
   ])
   assert.strictEqual(results.length, 1)
   assert.strictEqual(results[0].status, CreateAccountStatus.code_must_not_be_zero)
+})
+
+test('create_accounts_rejects_a_non_zero_debits_pending', async (client) => {
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+      debits_pending: 1n,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateAccountStatus.debits_pending_must_be_zero)
+})
+
+test('create_accounts_rejects_a_non_zero_debits_posted', async (client) => {
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+      debits_posted: 1n,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateAccountStatus.debits_posted_must_be_zero)
+})
+
+test('create_accounts_rejects_a_non_zero_credits_pending', async (client) => {
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+      credits_pending: 1n,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateAccountStatus.credits_pending_must_be_zero)
+})
+
+test('create_accounts_rejects_a_non_zero_credits_posted', async (client) => {
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+      credits_posted: 1n,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateAccountStatus.credits_posted_must_be_zero)
 })
 
 test('create_accounts_rejects_mutually_exclusive_flags', async (client) => {
@@ -221,8 +340,12 @@ test('lookup_accounts_returns_an_existing_account', async (client) => {
   const accounts = await client.lookupAccounts([account_id])
   assert.strictEqual(accounts.length, 1)
   assert.strictEqual(accounts[0].id, account_id)
+  assert.strictEqual(accounts[0].user_data_128, 0n)
+  assert.strictEqual(accounts[0].user_data_64, 0n)
+  assert.strictEqual(accounts[0].user_data_32, 0)
   assert.strictEqual(accounts[0].ledger, 1)
   assert.strictEqual(accounts[0].code, 1)
+  assert.strictEqual(accounts[0].flags, AccountFlags.none)
 })
 
 test('lookup_accounts_returns_no_accounts_for_a_missing_id', async (client) => {
@@ -230,7 +353,7 @@ test('lookup_accounts_returns_no_accounts_for_a_missing_id', async (client) => {
   assert.strictEqual(accounts.length, 0)
 })
 
-test('lookup_accounts_returns_multiple_existing_accounts_in_one_batch', async (client) => {
+test('lookup_accounts_returns_accounts_in_the_order_they_were_requested', async (client) => {
   const account_1_id = id()
   const account_2_id = id()
   await client.createAccounts([
@@ -247,12 +370,30 @@ test('lookup_accounts_returns_multiple_existing_accounts_in_one_batch', async (c
       code: 2,
     },
   ])
-  const accounts = await client.lookupAccounts([account_1_id, account_2_id])
+  const accounts = await client.lookupAccounts([account_2_id, account_1_id])
   assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].id, account_1_id)
+  assert.strictEqual(accounts[0].id, account_2_id)
+  assert.strictEqual(accounts[0].ledger, 2)
+  assert.strictEqual(accounts[1].id, account_1_id)
+  assert.strictEqual(accounts[1].ledger, 1)
+})
+
+test('lookup_accounts_returns_an_account_once_per_requested_id', async (client) => {
+  const account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const accounts = await client.lookupAccounts([account_id, account_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_id)
   assert.strictEqual(accounts[0].ledger, 1)
-  assert.strictEqual(accounts[1].id, account_2_id)
-  assert.strictEqual(accounts[1].ledger, 2)
+  assert.strictEqual(accounts[1].id, account_id)
+  assert.strictEqual(accounts[1].ledger, 1)
 })
 
 test('lookup_accounts_returns_only_the_existing_account_for_a_partial_match', async (client) => {
@@ -294,6 +435,10 @@ test('lookup_accounts_round_trips_all_fields', async (client) => {
   const accounts = await client.lookupAccounts([account_id])
   assert.strictEqual(accounts.length, 1)
   assert.strictEqual(accounts[0].id, account_id)
+  assert.strictEqual(accounts[0].debits_pending, 0n)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].credits_pending, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 0n)
   assert.strictEqual(accounts[0].ledger, 7)
   assert.strictEqual(accounts[0].code, 42)
   assert.strictEqual(accounts[0].user_data_128, user_data_128)
@@ -343,6 +488,58 @@ test('create_transfers_creates_a_transfer', async (client) => {
   assert.strictEqual(results[0].status, CreateTransferStatus.created)
 })
 
+test('create_transfers_returns_a_result_per_transfer_in_a_batch', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: 0n,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 3)
+  assert.strictEqual(results[0].status, CreateTransferStatus.created)
+  assert.strictEqual(results[1].status, CreateTransferStatus.id_must_not_be_zero)
+  assert.strictEqual(results[2].status, CreateTransferStatus.created)
+})
+
 test('create_transfers_returns_exists_for_a_duplicate_transfer', async (client) => {
   const debit_account_id = id()
   const credit_account_id = id()
@@ -369,7 +566,7 @@ test('create_transfers_returns_exists_for_a_duplicate_transfer', async (client) 
     ledger: 1,
     code: 1,
   }
-  await client.createTransfers([
+  const created_results = await client.createTransfers([
     transfer,
   ])
   const results = await client.createTransfers([
@@ -377,6 +574,53 @@ test('create_transfers_returns_exists_for_a_duplicate_transfer', async (client) 
   ])
   assert.strictEqual(results.length, 1)
   assert.strictEqual(results[0].status, CreateTransferStatus.exists)
+  const created_result = created_results[0]
+  const result = results[0]
+  assert.strictEqual(result.timestamp, created_result.timestamp)
+})
+
+test('create_transfers_returns_exists_with_a_different_amount', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 200n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.exists_with_different_amount)
 })
 
 test('create_transfers_rejects_a_zero_id', async (client) => {
@@ -411,6 +655,38 @@ test('create_transfers_rejects_a_zero_id', async (client) => {
   assert.strictEqual(results[0].status, CreateTransferStatus.id_must_not_be_zero)
 })
 
+test('create_transfers_rejects_an_id_of_the_maximum_u128', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: 340282366920938463463374607431768211455n,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.id_must_not_be_int_max)
+})
+
 test('create_transfers_rejects_a_zero_debit_account_id', async (client) => {
   const credit_account_id = id()
   await client.createAccounts([
@@ -434,6 +710,38 @@ test('create_transfers_rejects_a_zero_debit_account_id', async (client) => {
   ])
   assert.strictEqual(results.length, 1)
   assert.strictEqual(results[0].status, CreateTransferStatus.debit_account_id_must_not_be_zero)
+})
+
+test('create_transfers_rejects_a_debit_account_id_of_the_maximum_u128', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: 340282366920938463463374607431768211455n,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.debit_account_id_must_not_be_int_max)
 })
 
 test('create_transfers_rejects_a_zero_credit_account_id', async (client) => {
@@ -461,12 +769,19 @@ test('create_transfers_rejects_a_zero_credit_account_id', async (client) => {
   assert.strictEqual(results[0].status, CreateTransferStatus.credit_account_id_must_not_be_zero)
 })
 
-test('create_transfers_rejects_identical_debit_and_credit_accounts', async (client) => {
-  const account_id = id()
+test('create_transfers_rejects_a_credit_account_id_of_the_maximum_u128', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
   await client.createAccounts([
     {
       ...account_default,
-      id: account_id,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
       ledger: 1,
       code: 1,
     },
@@ -475,15 +790,15 @@ test('create_transfers_rejects_identical_debit_and_credit_accounts', async (clie
     {
       ...transfer_default,
       id: id(),
-      debit_account_id: account_id,
-      credit_account_id: account_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: 340282366920938463463374607431768211455n,
       amount: 10n,
       ledger: 1,
       code: 1,
     },
   ])
   assert.strictEqual(results.length, 1)
-  assert.strictEqual(results[0].status, CreateTransferStatus.accounts_must_be_different)
+  assert.strictEqual(results[0].status, CreateTransferStatus.credit_account_id_must_not_be_int_max)
 })
 
 test('create_transfers_rejects_a_zero_ledger', async (client) => {
@@ -550,6 +865,470 @@ test('create_transfers_rejects_a_zero_code', async (client) => {
   assert.strictEqual(results[0].status, CreateTransferStatus.code_must_not_be_zero)
 })
 
+test('create_transfers_rejects_identical_debit_and_credit_accounts', async (client) => {
+  const account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_id,
+      credit_account_id: account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.accounts_must_be_different)
+})
+
+test('create_transfers_rejects_an_unknown_debit_account', async (client) => {
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: id(),
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.debit_account_not_found)
+})
+
+test('create_transfers_rejects_an_unknown_credit_account', async (client) => {
+  const debit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: id(),
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.credit_account_not_found)
+})
+
+test('create_transfers_rejects_accounts_on_different_ledgers', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 2,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.accounts_must_have_the_same_ledger)
+})
+
+test('create_transfers_rejects_a_transfer_on_a_different_ledger_to_its_accounts', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 2,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.transfer_must_have_the_same_ledger_as_accounts)
+})
+
+test('create_transfers_rejects_mutually_exclusive_flags', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.post_pending_transfer | TransferFlags.void_pending_transfer,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.flags_are_mutually_exclusive)
+})
+
+test('create_transfers_rejects_a_non_zero_timestamp', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+      timestamp: 2n,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.timestamp_must_be_zero)
+})
+
+test('create_transfers_rejects_a_transfer_exceeding_credits', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.debits_must_not_exceed_credits,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.exceeds_credits)
+})
+
+test('create_transfers_rejects_a_transfer_exceeding_debits', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.credits_must_not_exceed_debits,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.exceeds_debits)
+})
+
+test('create_transfers_accepts_a_transfer_once_credits_allow_it', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.debits_must_not_exceed_credits,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: credit_account_id,
+      credit_account_id: debit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.created)
+})
+
+test('create_transfers_rejects_a_transfer_that_leaves_a_linked_chain_open', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.linked,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.linked_event_chain_open)
+  const accounts = await client.lookupAccounts([debit_account_id, credit_account_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, debit_account_id)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 0n)
+  assert.strictEqual(accounts[1].id, credit_account_id)
+  assert.strictEqual(accounts[1].debits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+})
+
+test('create_transfers_rejects_a_linked_chain_when_a_transfer_in_it_fails', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.linked,
+    },
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 2)
+  assert.strictEqual(results[0].status, CreateTransferStatus.linked_event_failed)
+  assert.strictEqual(results[1].status, CreateTransferStatus.exists_with_different_flags)
+  const accounts = await client.lookupAccounts([debit_account_id, credit_account_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, debit_account_id)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 0n)
+  assert.strictEqual(accounts[1].id, credit_account_id)
+  assert.strictEqual(accounts[1].debits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+})
+
+test('create_transfers_rejects_an_id_reused_after_a_transient_failure', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.debits_must_not_exceed_credits,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: credit_account_id,
+      credit_account_id: debit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.id_already_failed)
+})
+
 // Omitted: "rejects a fractional amount"
 // Reason: requires fractional amounts
 
@@ -597,7 +1376,7 @@ test('lookup_transfers_returns_no_transfers_for_a_missing_id', async (client) =>
   assert.strictEqual(transfers.length, 0)
 })
 
-test('lookup_transfers_returns_multiple_existing_transfers_in_one_batch', async (client) => {
+test('lookup_transfers_returns_transfers_in_the_order_they_were_requested', async (client) => {
   const transfer_1_id = id()
   const transfer_2_id = id()
   const debit_account_id = id()
@@ -636,12 +1415,83 @@ test('lookup_transfers_returns_multiple_existing_transfers_in_one_batch', async 
       code: 1,
     },
   ])
-  const transfers = await client.lookupTransfers([transfer_1_id, transfer_2_id])
+  const transfers = await client.lookupTransfers([transfer_2_id, transfer_1_id])
   assert.strictEqual(transfers.length, 2)
-  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[0].id, transfer_2_id)
+  assert.strictEqual(transfers[0].amount, 20n)
+  assert.strictEqual(transfers[1].id, transfer_1_id)
+  assert.strictEqual(transfers[1].amount, 10n)
+})
+
+test('lookup_transfers_returns_a_transfer_once_per_requested_id', async (client) => {
+  const transfer_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.lookupTransfers([transfer_id, transfer_id])
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_id)
   assert.strictEqual(transfers[0].amount, 10n)
-  assert.strictEqual(transfers[1].id, transfer_2_id)
-  assert.strictEqual(transfers[1].amount, 20n)
+  assert.strictEqual(transfers[1].id, transfer_id)
+  assert.strictEqual(transfers[1].amount, 10n)
+})
+
+test('lookup_transfers_returns_no_transfer_for_an_id_that_failed', async (client) => {
+  const transfer_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.debits_must_not_exceed_credits,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.lookupTransfers([transfer_id])
+  assert.strictEqual(transfers.length, 0)
 })
 
 test('lookup_transfers_returns_only_the_existing_transfer_for_a_partial_match', async (client) => {
@@ -793,6 +1643,62 @@ test('get_account_transfers_returns_debit_and_credit_transfers_for_an_account', 
   assert.strictEqual(transfers[1].amount, 20n)
 })
 
+test('get_account_transfers_returns_transfers_with_the_timestamps_of_their_create_results', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: account_2_id,
+      credit_account_id: account_1_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[1].id, transfer_2_id)
+  const transfer_result_1 = transfer_results[0]
+  const transfer_result_2 = transfer_results[1]
+  const transfer_1 = transfers[0]
+  const transfer_2 = transfers[1]
+  assert.strictEqual(transfer_1.timestamp, transfer_result_1.timestamp)
+  assert.strictEqual(transfer_2.timestamp, transfer_result_2.timestamp)
+})
+
 test('get_account_transfers_returns_only_debit_transfers_with_the_debits_flag', async (client) => {
   const account_1_id = id()
   const account_2_id = id()
@@ -905,16 +1811,6 @@ test('get_account_transfers_returns_only_credit_transfers_with_the_credits_flag'
   assert.strictEqual(transfers[0].amount, 20n)
 })
 
-test('get_account_transfers_returns_no_transfers_for_an_unused_account', async (client) => {
-  const transfers = await client.getAccountTransfers({
-    ...account_filter_default,
-    account_id: id(),
-    limit: 10,
-    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
-  })
-  assert.strictEqual(transfers.length, 0)
-})
-
 test('get_account_transfers_returns_transfers_in_reverse_order_with_the_reversed_flag', async (client) => {
   const account_1_id = id()
   const account_2_id = id()
@@ -967,6 +1863,254 @@ test('get_account_transfers_returns_transfers_in_reverse_order_with_the_reversed
   assert.strictEqual(transfers[1].amount, 10n)
 })
 
+test('get_account_transfers_returns_only_debit_transfers_in_reverse_order', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const account_3_id = id()
+  const debit_transfer_1_id = id()
+  const debit_transfer_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_3_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: debit_transfer_1_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_3_id,
+      credit_account_id: account_1_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: debit_transfer_2_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, debit_transfer_2_id)
+  assert.strictEqual(transfers[0].amount, 30n)
+  assert.strictEqual(transfers[1].id, debit_transfer_1_id)
+  assert.strictEqual(transfers[1].amount, 10n)
+})
+
+test('get_account_transfers_returns_only_credit_transfers_in_reverse_order', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const account_3_id = id()
+  const credit_transfer_1_id = id()
+  const credit_transfer_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_3_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: credit_transfer_1_id,
+      debit_account_id: account_3_id,
+      credit_account_id: account_1_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: credit_transfer_2_id,
+      debit_account_id: account_3_id,
+      credit_account_id: account_1_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, credit_transfer_2_id)
+  assert.strictEqual(transfers[0].amount, 30n)
+  assert.strictEqual(transfers[1].id, credit_transfer_1_id)
+  assert.strictEqual(transfers[1].amount, 10n)
+})
+
+test('get_account_transfers_filters_transfers_by_code', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 20n,
+      ledger: 1,
+      code: 2,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    code: 2,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 1)
+  assert.strictEqual(transfers[0].id, transfer_2_id)
+  assert.strictEqual(transfers[0].amount, 20n)
+  assert.strictEqual(transfers[0].code, 2)
+})
+
+test('get_account_transfers_filters_transfers_by_user_data', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const user_data_128 = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+      user_data_128: user_data_128,
+      user_data_64: 64n,
+      user_data_32: 32,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+      user_data_128: id(),
+      user_data_64: 65n,
+      user_data_32: 33,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    user_data_128: user_data_128,
+    user_data_64: 64n,
+    user_data_32: 32,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 1)
+  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[0].amount, 10n)
+})
+
 test('get_account_transfers_pages_through_transfers_with_a_timestamp_cursor', async (client) => {
   const account_1_id = id()
   const account_2_id = id()
@@ -1000,8 +2144,8 @@ test('get_account_transfers_pages_through_transfers_with_a_timestamp_cursor', as
     {
       ...transfer_default,
       id: transfer_2_id,
-      debit_account_id: account_1_id,
-      credit_account_id: account_2_id,
+      debit_account_id: account_2_id,
+      credit_account_id: account_1_id,
       amount: 20n,
       ledger: 1,
       code: 1,
@@ -1084,8 +2228,8 @@ test('get_account_transfers_pages_through_reversed_transfers_with_a_timestamp_cu
     {
       ...transfer_default,
       id: transfer_2_id,
-      debit_account_id: account_1_id,
-      credit_account_id: account_2_id,
+      debit_account_id: account_2_id,
+      credit_account_id: account_1_id,
       amount: 20n,
       ledger: 1,
       code: 1,
@@ -1133,6 +2277,268 @@ test('get_account_transfers_pages_through_reversed_transfers_with_a_timestamp_cu
     flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
   })
   assert.strictEqual(page_3.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_an_unused_account', async (client) => {
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: id(),
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_a_zero_account_id', async (client) => {
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: 0n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_a_default_filter', async (client) => {
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_a_zero_limit', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 0,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_when_the_timestamp_range_is_inverted', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const matched = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  const transfer = matched[0]
+  const transfer_timestamp = transfer.timestamp
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: transfer_timestamp + 1n,
+    timestamp_max: transfer_timestamp - 1n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_a_timestamp_minimum_of_u64_max', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: 18446744073709551615n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_a_timestamp_maximum_of_u64_max', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_max: 18446744073709551615n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_for_an_inverted_timestamp_range_at_u64_max', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: 18446744073709551614n,
+    timestamp_max: 1n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('get_account_transfers_returns_no_transfers_without_the_debits_or_credits_flag', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 0)
 })
 
 test('get_account_transfers_fails_when_the_limit_is_too_large', async (client) => {
@@ -1197,6 +2603,49 @@ test('get_account_balances_returns_a_balance_per_transfer_for_a_history_account'
   assert.strictEqual(balances[0].credits_posted, 0n)
   assert.strictEqual(balances[1].debits_posted, 10n)
   assert.strictEqual(balances[1].credits_posted, 20n)
+})
+
+test('get_account_balances_returns_pending_balances_for_a_history_account', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.pending,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 1)
+  assert.strictEqual(balances[0].debits_pending, 30n)
+  assert.strictEqual(balances[0].debits_posted, 0n)
+  assert.strictEqual(balances[0].credits_pending, 0n)
+  assert.strictEqual(balances[0].credits_posted, 0n)
 })
 
 test('get_account_balances_pairs_each_balance_with_the_transfer_that_produced_it', async (client) => {
@@ -1306,45 +2755,10 @@ test('get_account_balances_pairs_each_balance_with_the_transfer_that_produced_it
   assert.strictEqual(balance_4.timestamp, transfer_4.timestamp)
 })
 
-test('get_account_balances_returns_no_balances_without_the_history_flag', async (client) => {
-  const account_1_id = id()
-  const account_2_id = id()
-  await client.createAccounts([
-    {
-      ...account_default,
-      id: account_1_id,
-      ledger: 1,
-      code: 1,
-    },
-    {
-      ...account_default,
-      id: account_2_id,
-      ledger: 1,
-      code: 1,
-    },
-  ])
-  await client.createTransfers([
-    {
-      ...transfer_default,
-      id: id(),
-      debit_account_id: account_1_id,
-      credit_account_id: account_2_id,
-      amount: 10n,
-      ledger: 1,
-      code: 1,
-    },
-  ])
-  const balances = await client.getAccountBalances({
-    ...account_filter_default,
-    account_id: account_1_id,
-    limit: 10,
-    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
-  })
-  assert.strictEqual(balances.length, 0)
-})
-
-test('get_account_balances_returns_no_balances_for_an_account_with_no_transfers', async (client) => {
+test('get_account_balances_pairs_debit_balances_with_debit_transfers', async (client) => {
   const account_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
   await client.createAccounts([
     {
       ...account_default,
@@ -1353,14 +2767,364 @@ test('get_account_balances_returns_no_balances_for_an_account_with_no_transfers'
       code: 1,
       flags: AccountFlags.history,
     },
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
   ])
+  const transfer_1_id = id()
+  const transfer_3_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 40n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[1].id, transfer_3_id)
   const balances = await client.getAccountBalances({
     ...account_filter_default,
     account_id: account_id,
     limit: 10,
-    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+    flags: AccountFilterFlags.debits,
   })
-  assert.strictEqual(balances.length, 0)
+  assert.strictEqual(balances.length, 2)
+  assert.strictEqual(balances[0].debits_posted, 10n)
+  assert.strictEqual(balances[0].credits_posted, 0n)
+  assert.strictEqual(balances[1].debits_posted, 40n)
+  assert.strictEqual(balances[1].credits_posted, 20n)
+  const transfer_1 = transfers[0]
+  const transfer_3 = transfers[1]
+  const balance_1 = balances[0]
+  const balance_3 = balances[1]
+  assert.strictEqual(balance_1.timestamp, transfer_1.timestamp)
+  assert.strictEqual(balance_3.timestamp, transfer_3.timestamp)
+})
+
+test('get_account_balances_pairs_credit_balances_with_credit_transfers', async (client) => {
+  const account_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_2_id = id()
+  const transfer_4_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_4_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 40n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_2_id)
+  assert.strictEqual(transfers[1].id, transfer_4_id)
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 2)
+  assert.strictEqual(balances[0].debits_posted, 10n)
+  assert.strictEqual(balances[0].credits_posted, 20n)
+  assert.strictEqual(balances[1].debits_posted, 40n)
+  assert.strictEqual(balances[1].credits_posted, 60n)
+  const transfer_2 = transfers[0]
+  const transfer_4 = transfers[1]
+  const balance_2 = balances[0]
+  const balance_4 = balances[1]
+  assert.strictEqual(balance_2.timestamp, transfer_2.timestamp)
+  assert.strictEqual(balance_4.timestamp, transfer_4.timestamp)
+})
+
+test('get_account_balances_pairs_debit_balances_with_debit_transfers_in_reverse_order', async (client) => {
+  const account_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_1_id = id()
+  const transfer_3_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 40n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_3_id)
+  assert.strictEqual(transfers[1].id, transfer_1_id)
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(balances.length, 2)
+  assert.strictEqual(balances[0].debits_posted, 40n)
+  assert.strictEqual(balances[0].credits_posted, 20n)
+  assert.strictEqual(balances[1].debits_posted, 10n)
+  assert.strictEqual(balances[1].credits_posted, 0n)
+  const transfer_3 = transfers[0]
+  const transfer_1 = transfers[1]
+  const balance_3 = balances[0]
+  const balance_1 = balances[1]
+  assert.strictEqual(balance_3.timestamp, transfer_3.timestamp)
+  assert.strictEqual(balance_1.timestamp, transfer_1.timestamp)
+})
+
+test('get_account_balances_pairs_credit_balances_with_credit_transfers_in_reverse_order', async (client) => {
+  const account_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_2_id = id()
+  const transfer_4_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_4_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 40n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_4_id)
+  assert.strictEqual(transfers[1].id, transfer_2_id)
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(balances.length, 2)
+  assert.strictEqual(balances[0].debits_posted, 40n)
+  assert.strictEqual(balances[0].credits_posted, 60n)
+  assert.strictEqual(balances[1].debits_posted, 10n)
+  assert.strictEqual(balances[1].credits_posted, 20n)
+  const transfer_4 = transfers[0]
+  const transfer_2 = transfers[1]
+  const balance_4 = balances[0]
+  const balance_2 = balances[1]
+  assert.strictEqual(balance_4.timestamp, transfer_4.timestamp)
+  assert.strictEqual(balance_2.timestamp, transfer_2.timestamp)
 })
 
 test('get_account_balances_returns_balances_in_reverse_order_with_the_reversed_flag', async (client) => {
@@ -1412,6 +3176,113 @@ test('get_account_balances_returns_balances_in_reverse_order_with_the_reversed_f
   assert.strictEqual(balances[0].credits_posted, 20n)
   assert.strictEqual(balances[1].debits_posted, 10n)
   assert.strictEqual(balances[1].credits_posted, 0n)
+})
+
+test('get_account_balances_pairs_each_balance_with_its_transfer_in_reverse_order', async (client) => {
+  const account_id = id()
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const transfer_3_id = id()
+  const transfer_4_id = id()
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_4_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: account_id,
+      amount: 40n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 4)
+  assert.strictEqual(transfers[0].id, transfer_4_id)
+  assert.strictEqual(transfers[1].id, transfer_3_id)
+  assert.strictEqual(transfers[2].id, transfer_2_id)
+  assert.strictEqual(transfers[3].id, transfer_1_id)
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(balances.length, 4)
+  assert.strictEqual(balances[0].debits_posted, 40n)
+  assert.strictEqual(balances[0].credits_posted, 60n)
+  assert.strictEqual(balances[1].debits_posted, 40n)
+  assert.strictEqual(balances[1].credits_posted, 20n)
+  assert.strictEqual(balances[2].debits_posted, 10n)
+  assert.strictEqual(balances[2].credits_posted, 20n)
+  assert.strictEqual(balances[3].debits_posted, 10n)
+  assert.strictEqual(balances[3].credits_posted, 0n)
+  const transfer_4 = transfers[0]
+  const transfer_3 = transfers[1]
+  const transfer_2 = transfers[2]
+  const transfer_1 = transfers[3]
+  const balance_4 = balances[0]
+  const balance_3 = balances[1]
+  const balance_2 = balances[2]
+  const balance_1 = balances[3]
+  assert.strictEqual(balance_4.timestamp, transfer_4.timestamp)
+  assert.strictEqual(balance_3.timestamp, transfer_3.timestamp)
+  assert.strictEqual(balance_2.timestamp, transfer_2.timestamp)
+  assert.strictEqual(balance_1.timestamp, transfer_1.timestamp)
 })
 
 test('get_account_balances_pages_through_balances_with_a_timestamp_cursor', async (client) => {
@@ -1496,6 +3367,124 @@ test('get_account_balances_pages_through_balances_with_a_timestamp_cursor', asyn
   assert.strictEqual(page_3.length, 0)
 })
 
+test('get_account_balances_pairs_each_balance_with_its_transfer_across_pages', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const transfer_3_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: account_2_id,
+      credit_account_id: account_1_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers_page_1 = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers_page_1.length, 2)
+  assert.strictEqual(transfers_page_1[0].id, transfer_1_id)
+  assert.strictEqual(transfers_page_1[1].id, transfer_2_id)
+  const balances_page_1 = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances_page_1.length, 2)
+  assert.strictEqual(balances_page_1[0].debits_posted, 10n)
+  assert.strictEqual(balances_page_1[0].credits_posted, 0n)
+  assert.strictEqual(balances_page_1[1].debits_posted, 10n)
+  assert.strictEqual(balances_page_1[1].credits_posted, 20n)
+  const transfer_1 = transfers_page_1[0]
+  const transfer_2 = transfers_page_1[1]
+  const balance_1 = balances_page_1[0]
+  const balance_2 = balances_page_1[1]
+  assert.strictEqual(balance_1.timestamp, transfer_1.timestamp)
+  assert.strictEqual(balance_2.timestamp, transfer_2.timestamp)
+  const cursor_1 = transfer_2.timestamp
+  const transfers_page_2 = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: cursor_1 + 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers_page_2.length, 1)
+  assert.strictEqual(transfers_page_2[0].id, transfer_3_id)
+  const balances_page_2 = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: cursor_1 + 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances_page_2.length, 1)
+  assert.strictEqual(balances_page_2[0].debits_posted, 40n)
+  assert.strictEqual(balances_page_2[0].credits_posted, 20n)
+  const transfer_3 = transfers_page_2[0]
+  const balance_3 = balances_page_2[0]
+  assert.strictEqual(balance_3.timestamp, transfer_3.timestamp)
+  const cursor_2 = transfer_3.timestamp
+  const transfers_page_3 = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: cursor_2 + 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(transfers_page_3.length, 0)
+  const balances_page_3 = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: cursor_2 + 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances_page_3.length, 0)
+})
+
 test('get_account_balances_pages_through_reversed_balances_with_a_timestamp_cursor', async (client) => {
   const account_1_id = id()
   const account_2_id = id()
@@ -1578,6 +3567,439 @@ test('get_account_balances_pages_through_reversed_balances_with_a_timestamp_curs
   assert.strictEqual(page_3.length, 0)
 })
 
+test('get_account_balances_pairs_each_balance_with_its_transfer_across_reversed_pages', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const transfer_3_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: account_2_id,
+      credit_account_id: account_1_id,
+      amount: 20n,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 30n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers_page_1 = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers_page_1.length, 2)
+  assert.strictEqual(transfers_page_1[0].id, transfer_3_id)
+  assert.strictEqual(transfers_page_1[1].id, transfer_2_id)
+  const balances_page_1 = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(balances_page_1.length, 2)
+  assert.strictEqual(balances_page_1[0].debits_posted, 40n)
+  assert.strictEqual(balances_page_1[0].credits_posted, 20n)
+  assert.strictEqual(balances_page_1[1].debits_posted, 10n)
+  assert.strictEqual(balances_page_1[1].credits_posted, 20n)
+  const transfer_3 = transfers_page_1[0]
+  const transfer_2 = transfers_page_1[1]
+  const balance_3 = balances_page_1[0]
+  const balance_2 = balances_page_1[1]
+  assert.strictEqual(balance_3.timestamp, transfer_3.timestamp)
+  assert.strictEqual(balance_2.timestamp, transfer_2.timestamp)
+  const cursor_1 = transfer_2.timestamp
+  const transfers_page_2 = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_max: cursor_1 - 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers_page_2.length, 1)
+  assert.strictEqual(transfers_page_2[0].id, transfer_1_id)
+  const balances_page_2 = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_max: cursor_1 - 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(balances_page_2.length, 1)
+  assert.strictEqual(balances_page_2[0].debits_posted, 10n)
+  assert.strictEqual(balances_page_2[0].credits_posted, 0n)
+  const transfer_1 = transfers_page_2[0]
+  const balance_1 = balances_page_2[0]
+  assert.strictEqual(balance_1.timestamp, transfer_1.timestamp)
+  const cursor_2 = transfer_1.timestamp
+  const transfers_page_3 = await client.getAccountTransfers({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_max: cursor_2 - 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers_page_3.length, 0)
+  const balances_page_3 = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_max: cursor_2 - 1n,
+    limit: 2,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits | AccountFilterFlags.reversed,
+  })
+  assert.strictEqual(balances_page_3.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_without_the_history_flag', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_an_account_with_no_transfers', async (client) => {
+  const account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_a_zero_account_id', async (client) => {
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: 0n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_a_default_filter', async (client) => {
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_a_zero_limit', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 0,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_when_the_timestamp_range_is_inverted', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const matched = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  const balance = matched[0]
+  const balance_timestamp = balance.timestamp
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: balance_timestamp + 1n,
+    timestamp_max: balance_timestamp - 1n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_a_timestamp_minimum_of_u64_max', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: 18446744073709551615n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_a_timestamp_maximum_of_u64_max', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_max: 18446744073709551615n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_for_an_inverted_timestamp_range_at_u64_max', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    timestamp_min: 18446744073709551614n,
+    timestamp_max: 1n,
+    limit: 10,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.credits,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
+test('get_account_balances_returns_no_balances_without_the_debits_or_credits_flag', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 10n,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const balances = await client.getAccountBalances({
+    ...account_filter_default,
+    account_id: account_1_id,
+    limit: 10,
+  })
+  assert.strictEqual(balances.length, 0)
+})
+
 test('get_account_balances_fails_when_the_limit_is_too_large', async (client) => {
   await assert.rejects(async (): Promise<void> => {
     await client.getAccountBalances({
@@ -1630,37 +4052,6 @@ test('query_accounts_returns_accounts_matching_user_data', async (client) => {
   assert.strictEqual(accounts[1].user_data_128, user_data)
 })
 
-test('query_accounts_returns_accounts_in_reverse_order_with_the_reversed_flag', async (client) => {
-  const account_1_id = id()
-  const account_2_id = id()
-  const user_data = id()
-  await client.createAccounts([
-    {
-      ...account_default,
-      id: account_1_id,
-      user_data_128: user_data,
-      ledger: 1,
-      code: 1,
-    },
-    {
-      ...account_default,
-      id: account_2_id,
-      user_data_128: user_data,
-      ledger: 1,
-      code: 1,
-    },
-  ])
-  const accounts = await client.queryAccounts({
-    ...query_filter_default,
-    user_data_128: user_data,
-    limit: 10,
-    flags: QueryFilterFlags.reversed,
-  })
-  assert.strictEqual(accounts.length, 2)
-  assert.strictEqual(accounts[0].id, account_2_id)
-  assert.strictEqual(accounts[1].id, account_1_id)
-})
-
 test('query_accounts_returns_accounts_matching_ledger_and_code', async (client) => {
   const account_id = id()
   const user_data = id()
@@ -1700,6 +4091,259 @@ test('query_accounts_returns_accounts_matching_ledger_and_code', async (client) 
   assert.strictEqual(accounts[0].code, 42)
 })
 
+test('query_accounts_returns_accounts_matching_every_filter_field', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: id(),
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 20,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: id(),
+      user_data_128: user_data,
+      user_data_64: 200n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    user_data_64: 100n,
+    user_data_32: 10,
+    ledger: 1,
+    code: 1,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_1_id)
+  assert.strictEqual(accounts[0].user_data_64, 100n)
+  assert.strictEqual(accounts[0].user_data_32, 10)
+  assert.strictEqual(accounts[1].id, account_2_id)
+  assert.strictEqual(accounts[1].user_data_64, 100n)
+  assert.strictEqual(accounts[1].user_data_32, 10)
+})
+
+test('query_accounts_returns_accounts_matching_every_filter_field_in_reverse_order', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: id(),
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 20,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: id(),
+      user_data_128: user_data,
+      user_data_64: 200n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    user_data_64: 100n,
+    user_data_32: 10,
+    ledger: 1,
+    code: 1,
+    limit: 10,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_2_id)
+  assert.strictEqual(accounts[0].user_data_64, 100n)
+  assert.strictEqual(accounts[0].user_data_32, 10)
+  assert.strictEqual(accounts[1].id, account_1_id)
+  assert.strictEqual(accounts[1].user_data_64, 100n)
+  assert.strictEqual(accounts[1].user_data_32, 10)
+})
+
+test('query_accounts_returns_accounts_matching_code', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 999,
+    },
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 998,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 999,
+    },
+  ])
+  const result_first = results[0]
+  const result_last = results[2]
+  const timestamp_first = result_first.timestamp
+  const timestamp_last = result_last.timestamp
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    code: 999,
+    timestamp_min: timestamp_first,
+    timestamp_max: timestamp_last,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_1_id)
+  assert.strictEqual(accounts[0].code, 999)
+  assert.strictEqual(accounts[1].id, account_2_id)
+  assert.strictEqual(accounts[1].code, 999)
+})
+
+test('query_accounts_returns_accounts_in_reverse_order_with_the_reversed_flag', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 10,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_2_id)
+  assert.strictEqual(accounts[1].id, account_1_id)
+})
+
+test('query_accounts_pages_through_reversed_accounts_with_a_timestamp_cursor', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const account_3_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: account_3_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const page_1 = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 2,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(page_1.length, 2)
+  assert.strictEqual(page_1[0].id, account_3_id)
+  assert.strictEqual(page_1[1].id, account_2_id)
+  const page_1_last = page_1[1]
+  const cursor_1 = page_1_last.timestamp
+  const page_2 = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_max: cursor_1 - 1n,
+    limit: 2,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(page_2.length, 1)
+  assert.strictEqual(page_2[0].id, account_1_id)
+  const page_2_last = page_2[0]
+  const cursor_2 = page_2_last.timestamp
+  const page_3 = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_max: cursor_2 - 1n,
+    limit: 2,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(page_3.length, 0)
+})
+
 test('query_accounts_returns_no_accounts_for_unused_user_data', async (client) => {
   const accounts = await client.queryAccounts({
     ...query_filter_default,
@@ -1707,6 +4351,138 @@ test('query_accounts_returns_no_accounts_for_unused_user_data', async (client) =
     limit: 10,
   })
   assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_when_no_account_matches_every_user_data_field', async (client) => {
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: id(),
+      user_data_128: user_data,
+      user_data_64: 200n,
+      user_data_32: 20,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    user_data_64: 200n,
+    user_data_32: 10,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_for_a_default_filter', async (client) => {
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_for_a_zero_limit', async (client) => {
+  const account_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 0,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_when_the_timestamp_range_is_inverted', async (client) => {
+  const account_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_id,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const matched = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 10,
+  })
+  const account = matched[0]
+  const account_timestamp = account.timestamp
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_min: account_timestamp + 1n,
+    timestamp_max: account_timestamp - 1n,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_for_a_timestamp_minimum_of_u64_max', async (client) => {
+  const user_data = id()
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_min: 18446744073709551615n,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_for_a_timestamp_maximum_of_u64_max', async (client) => {
+  const user_data = id()
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_max: 18446744073709551615n,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_returns_no_accounts_for_an_inverted_timestamp_range_at_u64_max', async (client) => {
+  const user_data = id()
+  const accounts = await client.queryAccounts({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_min: 18446744073709551614n,
+    timestamp_max: 1n,
+    limit: 10,
+  })
+  assert.strictEqual(accounts.length, 0)
+})
+
+test('query_accounts_fails_when_the_limit_is_too_large', async (client) => {
+  await assert.rejects(async (): Promise<void> => {
+    await client.queryAccounts({
+      ...query_filter_default,
+      user_data_128: id(),
+      limit: 10000,
+    })
+  })
 })
 
 // Suite: query_transfers
@@ -1775,61 +4551,6 @@ test('query_transfers_returns_transfers_matching_user_data', async (client) => {
   assert.strictEqual(transfers[1].id, transfer_2_id)
   assert.strictEqual(transfers[1].amount, 20n)
   assert.strictEqual(transfers[1].user_data_128, user_data)
-})
-
-test('query_transfers_returns_transfers_in_reverse_order_with_the_reversed_flag', async (client) => {
-  const debit_account_id = id()
-  const credit_account_id = id()
-  const transfer_1_id = id()
-  const transfer_2_id = id()
-  const user_data = id()
-  await client.createAccounts([
-    {
-      ...account_default,
-      id: debit_account_id,
-      ledger: 1,
-      code: 1,
-    },
-    {
-      ...account_default,
-      id: credit_account_id,
-      ledger: 1,
-      code: 1,
-    },
-  ])
-  await client.createTransfers([
-    {
-      ...transfer_default,
-      id: transfer_1_id,
-      debit_account_id: debit_account_id,
-      credit_account_id: credit_account_id,
-      amount: 10n,
-      user_data_128: user_data,
-      ledger: 1,
-      code: 1,
-    },
-    {
-      ...transfer_default,
-      id: transfer_2_id,
-      debit_account_id: debit_account_id,
-      credit_account_id: credit_account_id,
-      amount: 20n,
-      user_data_128: user_data,
-      ledger: 1,
-      code: 1,
-    },
-  ])
-  const transfers = await client.queryTransfers({
-    ...query_filter_default,
-    user_data_128: user_data,
-    limit: 10,
-    flags: QueryFilterFlags.reversed,
-  })
-  assert.strictEqual(transfers.length, 2)
-  assert.strictEqual(transfers[0].id, transfer_2_id)
-  assert.strictEqual(transfers[0].amount, 20n)
-  assert.strictEqual(transfers[1].id, transfer_1_id)
-  assert.strictEqual(transfers[1].amount, 10n)
 })
 
 test('query_transfers_returns_transfers_matching_ledger_and_code', async (client) => {
@@ -1910,13 +4631,388 @@ test('query_transfers_returns_transfers_matching_ledger_and_code', async (client
   assert.strictEqual(transfers[0].code, 42)
 })
 
-test('query_transfers_fails_when_the_limit_is_too_large', async (client) => {
-  await assert.rejects(async (): Promise<void> => {
-    await client.queryTransfers({
-      ...query_filter_default,
-      limit: 10000,
-    })
+test('query_transfers_returns_transfers_matching_every_filter_field', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 20n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 20,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      user_data_128: user_data,
+      user_data_64: 200n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 40n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    user_data_64: 100n,
+    user_data_32: 10,
+    ledger: 1,
+    code: 1,
+    limit: 10,
   })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[0].amount, 10n)
+  assert.strictEqual(transfers[1].id, transfer_2_id)
+  assert.strictEqual(transfers[1].amount, 40n)
+})
+
+test('query_transfers_returns_transfers_matching_every_filter_field_in_reverse_order', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 20n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 20,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      user_data_128: user_data,
+      user_data_64: 200n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 40n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    user_data_64: 100n,
+    user_data_32: 10,
+    ledger: 1,
+    code: 1,
+    limit: 10,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_2_id)
+  assert.strictEqual(transfers[0].amount, 40n)
+  assert.strictEqual(transfers[1].id, transfer_1_id)
+  assert.strictEqual(transfers[1].amount, 10n)
+})
+
+test('query_transfers_returns_transfers_matching_code', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      ledger: 1,
+      code: 999,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 20n,
+      ledger: 1,
+      code: 998,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      ledger: 1,
+      code: 999,
+    },
+  ])
+  const result_first = results[0]
+  const result_last = results[2]
+  const timestamp_first = result_first.timestamp
+  const timestamp_last = result_last.timestamp
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    code: 999,
+    timestamp_min: timestamp_first,
+    timestamp_max: timestamp_last,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_1_id)
+  assert.strictEqual(transfers[0].amount, 10n)
+  assert.strictEqual(transfers[0].code, 999)
+  assert.strictEqual(transfers[1].id, transfer_2_id)
+  assert.strictEqual(transfers[1].amount, 30n)
+  assert.strictEqual(transfers[1].code, 999)
+})
+
+test('query_transfers_returns_transfers_in_reverse_order_with_the_reversed_flag', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 20n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 10,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(transfers.length, 2)
+  assert.strictEqual(transfers[0].id, transfer_2_id)
+  assert.strictEqual(transfers[0].amount, 20n)
+  assert.strictEqual(transfers[1].id, transfer_1_id)
+  assert.strictEqual(transfers[1].amount, 10n)
+})
+
+test('query_transfers_pages_through_reversed_transfers_with_a_timestamp_cursor', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_1_id = id()
+  const transfer_2_id = id()
+  const transfer_3_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_1_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_2_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 20n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: transfer_3_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 30n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const page_1 = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 2,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(page_1.length, 2)
+  assert.strictEqual(page_1[0].id, transfer_3_id)
+  assert.strictEqual(page_1[0].amount, 30n)
+  assert.strictEqual(page_1[1].id, transfer_2_id)
+  assert.strictEqual(page_1[1].amount, 20n)
+  const page_1_last = page_1[1]
+  const cursor_1 = page_1_last.timestamp
+  const page_2 = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_max: cursor_1 - 1n,
+    limit: 2,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(page_2.length, 1)
+  assert.strictEqual(page_2[0].id, transfer_1_id)
+  assert.strictEqual(page_2[0].amount, 10n)
+  const page_2_last = page_2[0]
+  const cursor_2 = page_2_last.timestamp
+  const page_3 = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_max: cursor_2 - 1n,
+    limit: 2,
+    flags: QueryFilterFlags.reversed,
+  })
+  assert.strictEqual(page_3.length, 0)
 })
 
 test('query_transfers_returns_no_transfers_for_unused_user_data', async (client) => {
@@ -1926,6 +5022,195 @@ test('query_transfers_returns_no_transfers_for_unused_user_data', async (client)
     limit: 10,
   })
   assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_when_no_transfer_matches_every_user_data_field', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      user_data_64: 100n,
+      user_data_32: 10,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 20n,
+      user_data_128: user_data,
+      user_data_64: 200n,
+      user_data_32: 20,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    user_data_64: 200n,
+    user_data_32: 10,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_for_a_default_filter', async (client) => {
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_for_a_zero_limit', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 0,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_when_the_timestamp_range_is_inverted', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const user_data = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 10n,
+      user_data_128: user_data,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const matched = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    limit: 10,
+  })
+  const transfer = matched[0]
+  const transfer_timestamp = transfer.timestamp
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_min: transfer_timestamp + 1n,
+    timestamp_max: transfer_timestamp - 1n,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_for_a_timestamp_minimum_of_u64_max', async (client) => {
+  const user_data = id()
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_min: 18446744073709551615n,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_for_a_timestamp_maximum_of_u64_max', async (client) => {
+  const user_data = id()
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_max: 18446744073709551615n,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_returns_no_transfers_for_an_inverted_timestamp_range_at_u64_max', async (client) => {
+  const user_data = id()
+  const transfers = await client.queryTransfers({
+    ...query_filter_default,
+    user_data_128: user_data,
+    timestamp_min: 18446744073709551614n,
+    timestamp_max: 1n,
+    limit: 10,
+  })
+  assert.strictEqual(transfers.length, 0)
+})
+
+test('query_transfers_fails_when_the_limit_is_too_large', async (client) => {
+  await assert.rejects(async (): Promise<void> => {
+    await client.queryTransfers({
+      ...query_filter_default,
+      limit: 10000,
+    })
+  })
 })
 
 // Suite: two_phase_transfer
@@ -2157,11 +5442,222 @@ test('two_phase_transfer_creates_posts_voids_and_expires_two_phase_transfers', a
   assert.strictEqual(expired_result.status, CreateTransferStatus.pending_transfer_expired)
 })
 
+// Suite: closing_transfer
+
+test('closing_transfer_closes_both_accounts_with_a_pending_closing_transfer', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 0n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.pending | TransferFlags.closing_debit | TransferFlags.closing_credit,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.created)
+  const accounts = await client.lookupAccounts([account_1_id, account_2_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_1_id)
+  assert.strictEqual(accounts[0].flags, AccountFlags.history | AccountFlags.closed)
+  assert.strictEqual(accounts[1].id, account_2_id)
+  assert.strictEqual(accounts[1].flags, AccountFlags.history | AccountFlags.closed)
+})
+
+test('closing_transfer_reopens_both_accounts_when_the_closing_transfer_is_voided', async (client) => {
+  const account_1_id = id()
+  const account_2_id = id()
+  const closing_transfer_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.history,
+    },
+  ])
+  await client.createTransfers([
+    {
+      ...transfer_default,
+      id: closing_transfer_id,
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 0n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.pending | TransferFlags.closing_debit | TransferFlags.closing_credit,
+    },
+  ])
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: id(),
+      debit_account_id: account_1_id,
+      credit_account_id: account_2_id,
+      amount: 0n,
+      pending_id: closing_transfer_id,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.void_pending_transfer,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.created)
+  const accounts = await client.lookupAccounts([account_1_id, account_2_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_1_id)
+  assert.strictEqual(accounts[0].flags, AccountFlags.history)
+  assert.strictEqual(accounts[1].id, account_2_id)
+  assert.strictEqual(accounts[1].flags, AccountFlags.history)
+})
+
+// Suite: import_accounts
+
+test('import_accounts_imports_accounts_with_explicit_timestamps', async (client) => {
+  const reference_results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const reference_result = reference_results[0]
+  const reference = reference_result.timestamp
+  await sleep_ms(10)
+  const account_1_id = id()
+  const account_2_id = id()
+  const results = await client.createAccounts([
+    {
+      ...account_default,
+      id: account_1_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.imported,
+      timestamp: reference + 1n,
+    },
+    {
+      ...account_default,
+      id: account_2_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.imported,
+      timestamp: reference + 2n,
+    },
+  ])
+  assert.strictEqual(results.length, 2)
+  assert.strictEqual(results[0].status, CreateAccountStatus.created)
+  assert.strictEqual(results[1].status, CreateAccountStatus.created)
+  const accounts = await client.lookupAccounts([account_1_id, account_2_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, account_1_id)
+  assert.strictEqual(accounts[0].flags, AccountFlags.imported)
+  assert.strictEqual(accounts[1].id, account_2_id)
+  assert.strictEqual(accounts[1].flags, AccountFlags.imported)
+  const result_1 = results[0]
+  const result_2 = results[1]
+  const account_1 = accounts[0]
+  const account_2 = accounts[1]
+  assert.strictEqual(result_1.timestamp, reference + 1n)
+  assert.strictEqual(result_2.timestamp, reference + 2n)
+  assert.strictEqual(account_1.timestamp, result_1.timestamp)
+  assert.strictEqual(account_2.timestamp, result_2.timestamp)
+})
+
+// Suite: import_transfers
+
+test('import_transfers_imports_a_transfer_with_an_explicit_timestamp', async (client) => {
+  const reference_results = await client.createAccounts([
+    {
+      ...account_default,
+      id: id(),
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const reference_result = reference_results[0]
+  const reference = reference_result.timestamp
+  await sleep_ms(10)
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.imported,
+      timestamp: reference + 1n,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+      flags: AccountFlags.imported,
+      timestamp: reference + 2n,
+    },
+  ])
+  const transfer_id = id()
+  const results = await client.createTransfers([
+    {
+      ...transfer_default,
+      id: transfer_id,
+      debit_account_id: debit_account_id,
+      credit_account_id: credit_account_id,
+      amount: 100n,
+      ledger: 1,
+      code: 1,
+      flags: TransferFlags.imported,
+      timestamp: reference + 3n,
+    },
+  ])
+  assert.strictEqual(results.length, 1)
+  assert.strictEqual(results[0].status, CreateTransferStatus.created)
+  const transfers = await client.lookupTransfers([transfer_id])
+  assert.strictEqual(transfers.length, 1)
+  assert.strictEqual(transfers[0].id, transfer_id)
+  assert.strictEqual(transfers[0].amount, 100n)
+  assert.strictEqual(transfers[0].flags, TransferFlags.imported)
+  const result = results[0]
+  const transfer = transfers[0]
+  assert.strictEqual(result.timestamp, reference + 3n)
+  assert.strictEqual(transfer.timestamp, result.timestamp)
+})
+
 // Suite: uint128_range
 
 test('uint128_range_accepts_the_maximum_u128', async (client) => {
-  const uint128_max = 340282366920938463463374607431768211455n
-  const accounts = await client.lookupAccounts([uint128_max])
+  const accounts = await client.lookupAccounts([340282366920938463463374607431768211455n])
   assert.strictEqual(accounts.length, 0)
 })
 
@@ -2246,6 +5742,90 @@ test('create_transfers_concurrent_applies_transfers_submitted_concurrently', asy
   assert.strictEqual(accounts[1].credits_posted, 1000n)
 })
 
+test('create_transfers_concurrent_applies_no_transfer_when_an_open_linked_chain_is_submitted_concurrently', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const operations = Array.from({ length: 10 }, () =>
+    client.createTransfers([
+      {
+        ...transfer_default,
+        id: id(),
+        debit_account_id: debit_account_id,
+        credit_account_id: credit_account_id,
+        amount: 10n,
+        ledger: 1,
+        code: 1,
+        flags: TransferFlags.linked,
+      },
+    ])
+  )
+  await Promise.all(operations)
+  const accounts = await client.lookupAccounts([debit_account_id, credit_account_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, debit_account_id)
+  assert.strictEqual(accounts[0].debits_posted, 0n)
+  assert.strictEqual(accounts[0].credits_posted, 0n)
+  assert.strictEqual(accounts[1].id, credit_account_id)
+  assert.strictEqual(accounts[1].debits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 0n)
+})
+
+test('create_transfers_concurrent_applies_a_transfer_once_when_its_id_is_submitted_concurrently', async (client) => {
+  const debit_account_id = id()
+  const credit_account_id = id()
+  const transfer_id = id()
+  await client.createAccounts([
+    {
+      ...account_default,
+      id: debit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+    {
+      ...account_default,
+      id: credit_account_id,
+      ledger: 1,
+      code: 1,
+    },
+  ])
+  const operations = Array.from({ length: 10 }, () =>
+    client.createTransfers([
+      {
+        ...transfer_default,
+        id: transfer_id,
+        debit_account_id: debit_account_id,
+        credit_account_id: credit_account_id,
+        amount: 10n,
+        ledger: 1,
+        code: 1,
+      },
+    ])
+  )
+  await Promise.all(operations)
+  const accounts = await client.lookupAccounts([debit_account_id, credit_account_id])
+  assert.strictEqual(accounts.length, 2)
+  assert.strictEqual(accounts[0].id, debit_account_id)
+  assert.strictEqual(accounts[0].debits_posted, 10n)
+  assert.strictEqual(accounts[0].credits_posted, 0n)
+  assert.strictEqual(accounts[1].id, credit_account_id)
+  assert.strictEqual(accounts[1].debits_posted, 0n)
+  assert.strictEqual(accounts[1].credits_posted, 10n)
+})
+
 // Suite: close_client
 
 test('close_client_fails_operations_after_close', async (client) => {
@@ -2254,6 +5834,9 @@ test('close_client_fails_operations_after_close', async (client) => {
     await client.lookupAccounts([id()])
   })
 })
+
+// Omitted: "fails a second close"
+// Reason: requires raise on double close
 
 async function main () {
   const start = new Date().getTime()

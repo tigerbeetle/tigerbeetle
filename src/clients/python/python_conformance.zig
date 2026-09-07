@@ -28,6 +28,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => true,
+        .requires_raise_on_double_close => false,
     };
 }
 
@@ -66,6 +67,9 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         try printer.write_empty_line();
         try printer.print_indented("# Suite: {s}", .{suite.name});
         for (suite.cases) |case| {
+            const case_memory = printer.mark();
+            defer printer.release(case_memory);
+
             try printer.write_empty_line();
             if (case.requirement) |requirement| {
                 if (!satisfies(requirement)) {
@@ -94,9 +98,20 @@ fn emit_step(printer: *Printer, step: ast.Step) !void {
 
 fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
     switch (binding.value) {
-        .generate_id, .generate_ids, .index, .field_access => {
+        .generate_id, .index, .field_access => {
             const rendered = try render_expression(printer, binding.value);
             try printer.print_indented("{s} = {s}", .{ binding.name, rendered });
+        },
+        .generate_ids => |count| {
+            try printer.print_indented("{s} = []", .{binding.name});
+            try printer.print_indented("for index in range({d}):", .{count});
+            printer.indent();
+            try printer.print_indented("if index % {d} == 0:", .{ast.ids_between_sleeps});
+            printer.indent();
+            try printer.write_indented("time.sleep(0.001)");
+            printer.dedent();
+            try printer.print_indented("{s}.append(tb.id())", .{binding.name});
+            printer.dedent();
         },
         .record => |record| switch (record.type) {
             .U128 => {
@@ -272,9 +287,6 @@ fn emit_assertion(
         .empty => |actual| {
             try printer.print_indented("assert {s} == []", .{actual});
         },
-        .unique => |ids| {
-            try printer.print_indented("assert len(set({s})) == len({s})", .{ ids, ids });
-        },
         .ascending => |ids| {
             try printer.print_indented(
                 "assert all({s}[i - 1] < {s}[i] for i in range(1, len({s})))",
@@ -353,10 +365,7 @@ fn render_expression(
 ) std.mem.Allocator.Error![]const u8 {
     switch (expression) {
         .generate_id => return "tb.id()",
-        .generate_ids => |count| {
-            return printer.string_alloc("[tb.id() for _ in range({d})]", .{count});
-        },
-        .call => unreachable,
+        .call, .generate_ids => unreachable,
         .record => |record| switch (record.type) {
             .U128 => {
                 assert(record.fields.len == 1);
@@ -392,6 +401,9 @@ fn render_expression(
 }
 
 fn render_flags(printer: *Printer, record: ast.Record) ![]const u8 {
+    if (record.fields.len == 0) {
+        return printer.string_alloc("tb.{s}.NONE", .{@tagName(record.type)});
+    }
     var text = std.Io.Writer.Allocating.init(printer.arena());
     for (record.fields, 0..) |field, index| {
         assert(field.value == .boolean and field.value.boolean);

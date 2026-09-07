@@ -36,6 +36,7 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
+        .requires_raise_on_double_close => false,
     };
 }
 
@@ -54,7 +55,6 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\import java.lang.ProcessBuilder.Redirect;
         \\import java.math.BigInteger;
         \\import java.time.Duration;
-        \\import java.util.HashSet;
         \\import java.util.stream.Collectors;
         \\
         \\import org.junit.After;
@@ -99,6 +99,9 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         try printer.write_empty_line();
         try printer.print_indented("// Suite: {s}", .{suite.name});
         for (suite.cases) |case| {
+            const case_memory = printer.mark();
+            defer printer.release(case_memory);
+
             try printer.write_empty_line();
             if (case.requirement) |requirement| {
                 if (!satisfies(requirement)) {
@@ -111,12 +114,7 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
                 try printer.to_case_alloc(.PascalCase, suite.name),
                 try printer.to_case_alloc(.PascalCase, case.description),
             });
-            try printer.print_indented("{s}", .{name});
-            printer.indent();
-            printer.indent();
-            try printer.write_indented("throws Exception {");
-            printer.dedent();
-            printer.dedent();
+            try emit_signature(printer, name);
             printer.indent();
             try emit_case(printer, case);
             printer.dedent();
@@ -374,6 +372,13 @@ fn emit_binding(scope: *Scope, binding: ast.Binding) !void {
             try printer.print_indented("final var {s} = new byte[{d}][];", .{ name, count });
             try printer.print_indented("for (int index = 0; index < {d}; index++) {{", .{count});
             printer.indent();
+            try printer.print_indented("if (index % {d} == 0) {{", .{
+                ast.ids_between_sleeps,
+            });
+            printer.indent();
+            try printer.write_indented("Thread.sleep(1);");
+            printer.dedent();
+            try printer.write_indented("}");
             try printer.print_indented("{s}[index] = UInt128.id();", .{name});
             printer.dedent();
             try printer.write_indented("}");
@@ -602,7 +607,8 @@ fn emit_argument(
             });
             for (call.arguments) |argument| {
                 try printer.print_indented("{s}.add({s});", .{
-                    name, try render_id(printer, argument),
+                    name,
+                    try render_id(printer, argument),
                 });
             }
             return name;
@@ -658,6 +664,15 @@ fn emit_filter_field(
     );
 }
 
+fn emit_signature(printer: *Printer, name: []const u8) !void {
+    try printer.write_indented(name);
+    printer.indent();
+    printer.indent();
+    try printer.write_indented("throws Exception {");
+    printer.dedent();
+    printer.dedent();
+}
+
 fn emit_setter(
     printer: *Printer,
     target: []const u8,
@@ -705,15 +720,6 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
             try printer.print_indented("assertEquals(0, {s}.getLength());", .{
                 try printer.to_case_alloc(.camelCase, actual),
             });
-        },
-        .unique => |ids| {
-            const name = try printer.to_case_alloc(.camelCase, ids);
-            try printer.write_indented("final var seen = new HashSet<BigInteger>();");
-            try printer.print_indented("for (final var id : {s}) {{", .{name});
-            printer.indent();
-            try printer.write_indented("assertTrue(seen.add(UInt128.asBigInteger(id)));");
-            printer.dedent();
-            try printer.write_indented("}");
         },
         .ascending => |ids| {
             const name = try printer.to_case_alloc(.camelCase, ids);
@@ -827,6 +833,9 @@ fn render_typed_value(
         },
         .record => |flags| {
             assert(ast.Record.is_flags(flags.type));
+            if (flags.fields.len == 0) {
+                return printer.string_alloc("{s}.NONE", .{@tagName(flags.type)});
+            }
             var text = std.Io.Writer.Allocating.init(printer.arena());
             for (flags.fields, 0..) |flag, index| {
                 assert(flag.value == .boolean and flag.value.boolean);
@@ -844,8 +853,12 @@ fn render_typed_value(
                 if (is_big_integer(field.name)) return render_big_integer(printer, text);
                 return render_uint128(printer, text);
             }
-            // A 64-bit literal overflows Java's `int` without the suffix.
-            if (bits == 64) return printer.string_alloc("{s}L", .{text});
+            if (bits == 64) {
+                const unsigned = std.fmt.parseInt(u64, text, 10) catch
+                    return printer.string_alloc("{s}L", .{text});
+                // -1L == ulong max value.
+                return printer.string_alloc("{d}L", .{@as(i64, @bitCast(unsigned))});
+            }
             return text;
         },
         .generate_id => return "UInt128.id()",
