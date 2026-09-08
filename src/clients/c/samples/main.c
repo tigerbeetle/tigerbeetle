@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
     printf("Creating accounts...\n");
 
     TB_CLIENT_STATUS client_status = send_request(&client, &packet, &ctx);
-    if (client_status != TB_CLIENT_OK) {
+    if (client_status != TB_CLIENT_SUCCESS) {
         printf("Failed to send the request\n");
         exit(-1);
     }
@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
         long long now = get_time_ms();
 
         client_status = send_request(&client, &packet, &ctx);
-        if (client_status != TB_CLIENT_OK) {
+        if (client_status != TB_CLIENT_SUCCESS) {
             printf("Failed to send the request\n");
             exit(-1);
         }
@@ -217,7 +217,7 @@ int main(int argc, char **argv) {
     packet.status = TB_PACKET_OK;
 
     client_status = send_request(&client, &packet, &ctx);
-    if (client_status != TB_CLIENT_OK) {
+    if (client_status != TB_CLIENT_SUCCESS) {
         printf("Failed to send the request\n");
         exit(-1);
     }
@@ -250,7 +250,7 @@ int main(int argc, char **argv) {
     // Cleanup:
     completion_context_destroy(&ctx);
     client_status = tb_client_deinit(&client);
-    if (client_status != TB_CLIENT_OK) {
+    if (client_status != TB_CLIENT_SUCCESS) {
         printf("Failed to deinit the client\n");
         exit(-1);
     }
@@ -295,7 +295,7 @@ TB_CLIENT_STATUS send_request(
     // Submits the request asynchronously:
     ctx->completed = false;
     TB_CLIENT_STATUS client_status = tb_client_submit(client, packet);
-    if (client_status == TB_CLIENT_OK) {
+    if (client_status == TB_CLIENT_SUCCESS) {
         // Uses a condvar to sync this thread with the callback:
         while (!ctx->completed) {
             if (pthread_cond_wait(&ctx->cv, &ctx->lock) != 0) {
@@ -374,7 +374,7 @@ TB_CLIENT_STATUS send_request(
     // Submits the request asynchronously:
     ctx->completed = false;
     TB_CLIENT_STATUS client_status = tb_client_submit(client, packet);
-    if (client_status == TB_CLIENT_OK) {
+    if (client_status == TB_CLIENT_SUCCESS) {
         // Uses a condvar to sync this thread with the callback:
         while (!ctx->completed) {
             SleepConditionVariableCS (&ctx->cv, &ctx->lock, INFINITE);

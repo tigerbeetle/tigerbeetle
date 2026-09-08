@@ -122,7 +122,7 @@ internal abstract class Request<TResult, TBody> : NativeRequest
                 case PacketStatus.ClientReleaseTooHigh:
                     throw new ClientReleaseException(ClientReleaseException.Reason.ClientReleaseTooHigh);
 
-                case PacketStatus.ClientShutdown:
+                case PacketStatus.ClientClosed:
                     throw new ClientClosedException();
 
                 case PacketStatus.InvalidOperation: // Not expected.

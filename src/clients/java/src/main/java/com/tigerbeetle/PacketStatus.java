@@ -11,7 +11,7 @@ enum PacketStatus {
     ClientEvicted((byte) 2),
     ClientReleaseTooLow((byte) 3),
     ClientReleaseTooHigh((byte) 4),
-    ClientShutdown((byte) 5),
+    ClientClosed((byte) 5),
     InvalidOperation((byte) 6),
     InvalidDataSize((byte) 7);
 
@@ -28,7 +28,7 @@ enum PacketStatus {
             case (byte)2: return ClientEvicted;
             case (byte)3: return ClientReleaseTooLow;
             case (byte)4: return ClientReleaseTooHigh;
-            case (byte)5: return ClientShutdown;
+            case (byte)5: return ClientClosed;
             case (byte)6: return InvalidOperation;
             case (byte)7: return InvalidDataSize;
             default: throw new IllegalArgumentException(

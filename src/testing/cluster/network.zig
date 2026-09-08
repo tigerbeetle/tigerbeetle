@@ -341,7 +341,9 @@ pub const Network = struct {
         target_bus.buffer.?.recv_advance(message.header.size);
         target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
         assert(target_bus.buffer != null);
-        assert(target_bus.buffer.?.invalid == null);
+        assert(target_bus.buffer.?.invalid == null or
+            (target_bus.process == .client and target_bus.buffer.?.invalid == .evicted));
+
         maybe(target_bus.buffer.?.receive_size > 0);
         maybe(target_bus.buffer.?.process_size > 0);
         if (target_bus.buffer.?.has_message()) {

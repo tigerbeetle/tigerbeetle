@@ -44,7 +44,7 @@ pub const Packet = extern struct {
         client_evicted,
         client_release_too_low,
         client_release_too_high,
-        client_shutdown,
+        client_closed,
         invalid_operation,
         invalid_data_size,
     };

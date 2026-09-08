@@ -207,7 +207,7 @@
 //!
 //! It is possible to drop a `Client` while request futures are still
 //! outstanding. In this case any pending requests will be completed with
-//! [`PacketError::ClientShutdown`]. Request futures may resolve to successful
+//! [`PacketError::ClientClosed`]. Request futures may resolve to successful
 //! results even after the client is closed.
 //!
 //! When `Client` is dropped without calling [`close`],
@@ -482,12 +482,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -587,12 +592,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -695,12 +705,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -792,12 +807,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -833,12 +853,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -874,12 +899,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -913,12 +943,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -952,12 +987,17 @@ impl Client {
             let packet = Box::into_raw(packet);
             let status = tbc::tb_client_submit(self.client, packet);
             match status {
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
-                tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => {}
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Box::from_raw(packet));
                     return Err(ClientClosed);
                 }
-                _ => unreachable!("unexpected status from tb_client_submit: {}", status),
+                tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                    unreachable!("Client interface not initialized")
+                }
+                _ => {
+                    unreachable!("unexpected status from tb_client_submit: {}", status)
+                }
             }
         }
 
@@ -990,9 +1030,14 @@ impl Client {
                 // This is a blocking function so we're calling it offthread.
                 let status = tbc::tb_client_deinit(client.0);
                 let result = match status {
-                    tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => Ok(()),
-                    tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => Err(ClientClosed),
-                    _ => unreachable!("unexpected status from tb_client_deinit: {}", status),
+                    tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => Ok(()),
+                    tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => Err(ClientClosed),
+                    tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
+                        unreachable!("Client interface not initialized")
+                    }
+                    _ => {
+                        unreachable!("unexpected status from tb_client_deinit: {}", status)
+                    }
                 };
                 std::mem::drop(Box::from_raw(client.0));
                 result
@@ -1258,8 +1303,8 @@ pub enum PacketError {
     ClientReleaseTooLow,
     /// The client's version is too high.
     ClientReleaseTooHigh,
-    /// The client was already destructed.
-    ClientShutdown,
+    /// The client was closed.
+    ClientClosed,
     /// An invalid operation was submitted.
     ///
     /// This should not be possible in the Rust client.
@@ -1278,7 +1323,7 @@ impl core::fmt::Display for PacketError {
             Self::ClientEvicted => f.write_str("client evicted"),
             Self::ClientReleaseTooLow => f.write_str("client release too low"),
             Self::ClientReleaseTooHigh => f.write_str("client release too high"),
-            Self::ClientShutdown => f.write_str("client shutdown"),
+            Self::ClientClosed => f.write_str("client closed"),
             Self::InvalidOperation => f.write_str("invalid operation"),
             Self::InvalidDataSize => f.write_str("invalid data size"),
         }

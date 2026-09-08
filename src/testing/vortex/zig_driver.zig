@@ -56,7 +56,7 @@ pub fn main() !void {
     }
     defer {
         const client_status = c.tb_client_deinit(&tb_client);
-        assert(client_status == c.TB_CLIENT_OK);
+        assert(client_status == c.TB_CLIENT_SUCCESS);
     }
 
     const stdin = std.io.getStdIn().reader().any();
@@ -86,7 +86,7 @@ pub fn main() !void {
             packet.status = c.TB_PACKET_OK;
 
             const client_status = c.tb_client_submit(&tb_client, &packet);
-            assert(client_status == c.TB_CLIENT_OK);
+            assert(client_status == c.TB_CLIENT_SUCCESS);
 
             while (!context.completed) {
                 context.condition.wait(&context.lock);

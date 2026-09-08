@@ -11,10 +11,6 @@ pub const tb_packet_status = tb.PacketStatus;
 pub const tb_client_t = extern struct {
     @"opaque": [4]u64,
 
-    pub inline fn cast(self: *tb_client_t) *tb.ClientInterface {
-        return @ptrCast(self);
-    }
-
     comptime {
         assert(@sizeOf(tb_client_t) == @sizeOf(tb.ClientInterface));
         assert(@bitSizeOf(tb_client_t) == @bitSizeOf(tb.ClientInterface));
@@ -33,8 +29,11 @@ pub const tb_init_status = enum(c_int) {
 };
 
 pub const tb_client_status = enum(c_int) {
-    ok = 0,
-    invalid,
+    success = 0,
+    /// The client was closed.
+    closed,
+    /// Client interface not initialized.
+    not_initialized,
 };
 
 pub const tb_register_log_callback_status = enum(c_int) {
@@ -110,7 +109,7 @@ pub fn init(
 
     tb.Context.init(
         std.heap.c_allocator,
-        tb_client_out.cast(),
+        @ptrCast(tb_client_out),
         cluster_id,
         addresses,
         completion_ctx,
@@ -120,41 +119,45 @@ pub fn init(
 }
 
 pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    client.submit(packet) catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    client.submit(packet) catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn deinit(tb_client: ?*tb_client_t) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    client.deinit() catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    client.deinit() catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn init_parameters(
     tb_client: ?*tb_client_t,
     out_parameters: *tb_init_parameters,
 ) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    client.init_parameters(out_parameters) catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    client.init_parameters(out_parameters) catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn completion_context(
     tb_client: ?*tb_client_t,
     completion_ctx_out: *usize,
 ) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    completion_ctx_out.* = client.completion_context() catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    completion_ctx_out.* = client.completion_context() catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn register_log_callback(
