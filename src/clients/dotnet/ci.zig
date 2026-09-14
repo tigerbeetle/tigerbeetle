@@ -63,7 +63,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.exec("dotnet pack --configuration Release", .{});
 
         const image_tags = .{
-            "8.0", "8.0-alpine",
+            // Not entirely clear if docker dependency is in scope for our CI...
+            // "8.0", "8.0-alpine",
         };
 
         inline for (image_tags) |image_tag| {

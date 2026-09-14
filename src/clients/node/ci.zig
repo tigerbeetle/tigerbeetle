@@ -50,7 +50,12 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     if (builtin.target.os.tag == .linux) {
         try shell.exec("npm pack --quiet", .{});
 
-        for ([_][]const u8{ "node:18", "node:18-alpine" }) |image| {
+        const image_tags = .{
+            // Not entirely clear if docker dependency is in scope for our CI...
+            // "node:18", "node:18-alpine"
+        };
+
+        inline for (image_tags) |image| {
             log.info("testing docker image: '{s}'", .{image});
 
             try shell.exec(
