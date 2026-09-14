@@ -9,8 +9,6 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 const wheel = @import("wheel.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
-    assert(shell.file_exists("pyproject.toml"));
-
     // Integration tests.
 
     // Build the native libraries.
@@ -71,7 +69,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 
     // We are checking type annotations of the entire package.
-    try shell.exec("python3 -m mypy . --strict", .{});
+    try shell.exec("python3 -m mypy . --strict --exclude samples/ --exclude tests/", .{});
 }
 
 pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {

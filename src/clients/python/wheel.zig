@@ -6,26 +6,95 @@ const stdx = @import("stdx");
 
 const file_size_max = 10 * 1024 * 1024;
 
-const metadata_header =
-    \\Metadata-Version: 2.4
-    \\Name: tigerbeetle
-    \\Version: {s}
-    \\Summary: The TigerBeetle client for Python.
-    \\Project-URL: Homepage, https://github.com/tigerbeetle/tigerbeetle
-    \\Project-URL: Issues, https://github.com/tigerbeetle/tigerbeetle/issues
-    \\Classifier: Development Status :: 5 - Production/Stable
-    \\Classifier: License :: OSI Approved :: Apache Software License
-    \\Classifier: Operating System :: MacOS :: MacOS X
-    \\Classifier: Operating System :: Microsoft :: Windows
-    \\Classifier: Operating System :: POSIX :: Linux
-    \\Classifier: Programming Language :: Python :: 3
-    \\Classifier: Topic :: Database :: Front-Ends
-    \\Requires-Python: >=3.7
-    \\Description-Content-Type: text/markdown
-    \\
-    \\
-;
 const readme = @embedFile("README.md");
+pub fn metadata(version: []const u8) [16]struct {
+    name_wheel: ?[]const u8,
+    name_http: []const u8,
+    value: []const u8,
+} {
+    return .{
+        .{
+            .name_wheel = "Metadata-Version",
+            .name_http = "metadata_version",
+            .value = "2.4",
+        },
+        .{
+            .name_wheel = "Name",
+            .name_http = "name",
+            .value = "tigerbeetle",
+        },
+        .{
+            .name_wheel = "Version",
+            .name_http = "version",
+            .value = version,
+        },
+        .{
+            .name_wheel = "Summary",
+            .name_http = "summary",
+            .value = "The TigerBeetle client for Python.",
+        },
+        .{
+            .name_wheel = "Project-URL",
+            .name_http = "project_urls",
+            .value = "Homepage, https://github.com/tigerbeetle/tigerbeetle",
+        },
+        .{
+            .name_wheel = "Project-URL",
+            .name_http = "project_urls",
+            .value = "Issues, https://github.com/tigerbeetle/tigerbeetle/issues",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "Development Status :: 5 - Production/Stable",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "License :: OSI Approved :: Apache Software License",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "Operating System :: MacOS :: MacOS X",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "Operating System :: Microsoft :: Windows",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "Operating System :: POSIX :: Linux",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "Programming Language :: Python :: 3",
+        },
+        .{
+            .name_wheel = "Classifier",
+            .name_http = "classifiers",
+            .value = "Topic :: Database :: Front-Ends",
+        },
+        .{
+            .name_wheel = "Requires-Python",
+            .name_http = "requires_python",
+            .value = ">=3.7",
+        },
+        .{
+            .name_wheel = "Description-Content-Type",
+            .name_http = "description_content_type",
+            .value = "text/markdown",
+        },
+        .{
+            .name_wheel = null, // README added after the fact for METADATA file.
+            .name_http = "description",
+            .value = readme,
+        },
+    };
+}
 
 const wheel_content =
     \\Wheel-Version: 1.0
@@ -64,9 +133,17 @@ pub fn make(
     const writer = buffered_writer.writer();
 
     var metadata_buffer = std.ArrayList(u8).init(arena);
-    try metadata_buffer.writer().print(metadata_header, .{tag});
+    for (metadata(tag)) |metadata_kv| {
+        if (metadata_kv.name_wheel) |name_wheel| {
+            try metadata_buffer.writer().print("{s}: {s}\n", .{ name_wheel, metadata_kv.value });
+        }
+    }
+
+    // "Alternatively, the distribution’s description may instead be provided in the message
+    // body (i.e., after a completely blank line following the headers, with no indentation or
+    // other special formatting necessary)."
+    try metadata_buffer.writer().print("\n", .{});
     try metadata_buffer.appendSlice(readme);
-    const metadata = metadata_buffer.items;
 
     var package_dir = try shell.cwd.openDir("src/tigerbeetle", .{ .iterate = true });
     defer package_dir.close();
@@ -93,8 +170,16 @@ pub fn make(
 
     const dist_info = try shell.fmt("tigerbeetle-{s}.dist-info", .{tag});
 
-    const metadata_name = try shell.fmt("{s}/METADATA", .{dist_info});
-    try add_entry(arena, &entries, writer, &offset, metadata_name, metadata, dos_timestamp);
+    const metadata_filename = try shell.fmt("{s}/METADATA", .{dist_info});
+    try add_entry(
+        arena,
+        &entries,
+        writer,
+        &offset,
+        metadata_filename,
+        metadata_buffer.items,
+        dos_timestamp,
+    );
 
     const wheel_name = try shell.fmt("{s}/WHEEL", .{dist_info});
     try add_entry(arena, &entries, writer, &offset, wheel_name, wheel_content, dos_timestamp);

@@ -951,18 +951,38 @@ fn detect_project_root(dir: std.fs.Dir) !void {
 }
 
 pub const HttpOptions = struct {
-    pub const ContentType = enum {
+    pub const ContentType = union(enum) {
         json,
+        multipart: struct { boundary: []const u8 },
 
-        fn string(content_type: ContentType) []const u8 {
-            return switch (content_type) {
-                .json => "application/json",
+        pub fn format(
+            self: @This(),
+            comptime _: []const u8,
+            _: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            return switch (self) {
+                .json => writer.print("application/json", .{}),
+                .multipart => |multipart| writer.print(
+                    "multipart/form-data; boundary={s}",
+                    .{multipart.boundary},
+                ),
             };
         }
     };
 
+    pub const MultipartField = struct {
+        name: []const u8,
+        value: []const u8,
+        content_type: ?[]const u8 = null,
+        filename: ?[]const u8 = null,
+    };
+
     content_type: ?ContentType = null,
-    authorization: ?[]const u8 = null,
+    authorization: ?union(enum) {
+        basic: struct { username: []const u8, password: []const u8 },
+        raw: []const u8,
+    } = null,
 
     response_body_size_max: u32 = 512 * stdx.KiB,
     expected_response_code: std.http.Status = .ok,
@@ -980,6 +1000,54 @@ pub fn http_post(
     options: HttpOptions,
 ) ![]const u8 {
     return shell.http_request(.{ .post = body }, url, options);
+}
+
+pub fn http_post_multipart(
+    shell: *Shell,
+    url: []const u8,
+    fields: []const HttpOptions.MultipartField,
+    options: HttpOptions,
+) ![]const u8 {
+    assert(options.content_type.? == .multipart);
+    const boundary = options.content_type.?.multipart.boundary;
+
+    const capacity = b: {
+        var capacity: u64 = 0;
+        for (fields) |field| {
+            capacity += field.name.len;
+            capacity += field.value.len;
+            if (field.filename) |filename| capacity += filename.len;
+
+            capacity += 256;
+        }
+        break :b capacity;
+    };
+
+    var body_multipart = try std.ArrayListUnmanaged(u8).initCapacity(
+        shell.arena.allocator(),
+        capacity,
+    );
+    const body_writer = body_multipart.fixedWriter();
+
+    for (fields) |field| {
+        assert(std.mem.indexOf(u8, field.value, boundary) == null);
+
+        try body_writer.print("--{s}\r\n", .{boundary});
+        try body_writer.print("Content-Disposition: form-data; name=\"{s}\"", .{field.name});
+        if (field.filename) |filename| try body_writer.print("; filename=\"{s}\"", .{filename});
+        try body_writer.writeAll("\r\n");
+        try body_writer.print("Content-Type: {s}\r\n\r\n", .{
+            field.content_type orelse "text/plain",
+        });
+        body_multipart.appendSliceAssumeCapacity(field.value);
+        body_multipart.appendSliceAssumeCapacity("\r\n");
+    }
+    body_multipart.appendSliceAssumeCapacity("--");
+    body_multipart.appendSliceAssumeCapacity(boundary);
+    body_multipart.appendSliceAssumeCapacity("--");
+    body_multipart.appendSliceAssumeCapacity("\r\n");
+
+    return shell.http_request(.{ .post = body_multipart.items }, url, options);
 }
 
 /// Issues an HTTP request to the given `url` and returns the response.
@@ -1013,11 +1081,27 @@ fn http_request(
     defer request.deinit();
 
     if (options.content_type) |content_type| {
-        request.headers.content_type = .{ .override = content_type.string() };
+        request.headers.content_type = .{ .override = try shell.fmt("{s}", .{content_type}) };
     }
 
     if (options.authorization) |authorization| {
-        request.headers.authorization = .{ .override = authorization };
+        switch (authorization) {
+            .raw => |raw| {
+                request.headers.authorization = .{ .override = raw };
+            },
+            .basic => |basic| {
+                var authorization_buffer: [1024]u8 = undefined;
+
+                const authorization_contents = std.base64.url_safe.Encoder.encode(
+                    &authorization_buffer,
+                    try shell.fmt("{s}:{s}", .{ basic.username, basic.password }),
+                );
+                request.headers.authorization = .{ .override = try shell.fmt(
+                    "Basic {s}",
+                    .{authorization_contents},
+                ) };
+            },
+        }
     }
 
     if (method == .post) {

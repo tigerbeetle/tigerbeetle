@@ -1480,7 +1480,6 @@ test "tidy extensions" {
         .{"zig/download.ps1"},
         .{"zig/download.win.ps1"},
         .{".github/ci/test_aof.sh"},
-        .{"src/clients/python/pyproject.toml"},
         .{"src/clients/python/src/tigerbeetle/py.typed"},
         .{".clang-format"},
         .{"Rakefile"},
