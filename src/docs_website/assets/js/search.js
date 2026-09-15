@@ -12,6 +12,10 @@ const searchClearButton = document.querySelector(".search-box>.clear-button");
 
 let sidenavWasCollapsed = false;
 let searchPreviewUsed = false;
+
+let highlightedTerm = null;
+let activeHighlight = null;
+
 document.addEventListener("keydown", event => {
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === "/" && searchInput !== document.activeElement) {
@@ -223,9 +227,7 @@ function selectResult(node) {
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
 
   const page = pages[node.pageIndex];
-  if (singlePage) {
-    removeTextHighlight(content);
-  } else {
+  if (!singlePage) {
     content.innerHTML = page.html;
     addContentEventHandlers();
     document.title = page.title;
@@ -239,11 +241,21 @@ function selectResult(node) {
   }
   statePathname = location.pathname;
   handleAnchor();
-  highlightText(searchInput.value, content);
-  if (node.tagName == "A") markActiveHighlight(content);
+  updateHighlights(content, searchInput.value);
 }
 
-function markActiveHighlight(container) {
+function updateHighlights(container, term) {
+  activeHighlight?.classList.remove("active");
+  activeHighlight = null;
+
+  if (!singlePage || highlightedTerm !== term) {
+    removeTextHighlight(container);
+    if (term != null) highlightText(term, container);
+    highlightedTerm = term;
+  }
+
+  if (term == null || !searchResults.querySelector("a.selected")) return;
+
   let element = container.firstElementChild;
   if (location.hash) {
     element = document.getElementById(location.hash.slice(1));
@@ -251,6 +263,7 @@ function markActiveHighlight(container) {
   for (; element; element = element.nextElementSibling) {
     const highlight = element.querySelector(".highlight");
     if (highlight) {
+      activeHighlight = highlight;
       highlight.classList.add("active");
       scrollIntoViewIfNeeded(highlight, container.parentNode);
       return;
@@ -329,7 +342,7 @@ function closeSearch() {
   searchHotkey.style.display = "block";
   searchInput.value = "";
   onSearchInput();
-  removeTextHighlight(content);
+  updateHighlights(content, null);
   syncSideNavWithLocation();
   if (sidenavWasCollapsed) document.body.classList.add("sidenav-collapsed");
   document.querySelector("article").focus();
