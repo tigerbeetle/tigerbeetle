@@ -1015,7 +1015,7 @@ fn build_test(
         steps.@"test".dependOn(steps.test_fmt);
     }
 
-    if (options.ci and @TypeOf(abi_builder) == TigerBeetleAbi) {
+    if (options.ci and @TypeOf(abi_builder) == *const TigerBeetleAbi) {
         const language_matrix: []const []const u8 = &.{
             "dotnet@8.0",
             "go@1.21",
