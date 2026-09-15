@@ -201,6 +201,18 @@ test "disjoint_slices" {
 
     try std.testing.expectEqual(false, disjoint_slices(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
+
+    // Adjacent slices are disjoint in either order, including different element sizes.
+    const prefix = std.mem.bytesAsSlice(u32, a[0 .. 4 * @sizeOf(u32)]);
+    const suffix = a[4 * @sizeOf(u32) ..];
+
+    try std.testing.expectEqual(true, disjoint_slices(u32, u8, prefix, suffix));
+    try std.testing.expectEqual(true, disjoint_slices(u8, u32, suffix, prefix));
+
+    const overlapping = a[4 * @sizeOf(u32) - 1 ..];
+
+    try std.testing.expectEqual(false, disjoint_slices(u32, u8, prefix, overlapping));
+    try std.testing.expectEqual(false, disjoint_slices(u8, u32, overlapping, prefix));
 }
 
 /// Checks that a byteslice is zeroed.
