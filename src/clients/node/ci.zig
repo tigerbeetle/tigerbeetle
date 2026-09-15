@@ -56,13 +56,13 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
         const image_tags = .{
             // Not entirely clear if docker dependency is in scope for our CI...
-            // "node:18", "node:18-alpine"
+            "node:18", "node:18-alpine",
         };
         inline for (image_tags) |image| {
             log.info("testing docker image: '{s}'", .{image});
 
             try shell.exec(
-                \\docker run
+                \\podman run
                 \\--security-opt seccomp=unconfined
                 \\--volume ./:/host
                 \\{image}

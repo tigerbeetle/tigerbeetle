@@ -68,7 +68,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
         const image_tags = .{
             // Not entirely clear if docker dependency is in scope for our CI...
-            // "8.0", "8.0-alpine",
+            "8.0", "8.0-alpine",
         };
 
         inline for (image_tags) |image_tag| {
@@ -77,13 +77,13 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 
             for (0..5) |attempt| {
                 if (attempt > 0) std.time.sleep(1 * std.time.ns_per_min);
-                if (shell.exec("docker image pull {image}", .{ .image = image })) {
+                if (shell.exec("podman image pull {image}", .{ .image = image })) {
                     break;
                 } else |_| {}
             }
 
             try shell.exec(
-                \\docker run
+                \\podman run
                 \\--security-opt seccomp=unconfined
                 \\--volume ./TigerBeetle/bin/Release:/host
                 \\{image}
