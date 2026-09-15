@@ -76,7 +76,14 @@ function syncSideNavWithLocation() {
   document.querySelectorAll("nav.side details").forEach(details => details.open = false);
 
   let path = location.pathname;
-  if (path.includes("single-page")) path = location.hash;
+  if (path === urlPrefix + "/single-page/") {
+    path = location.hash;
+    // The sidebar only has page titles, so we need to find the nearest H1 above
+    let heading = document.getElementById(path.slice(1));
+    while (heading && heading.parentElement !== content) heading = heading.parentElement;
+    while (heading && heading.tagName !== "H1") heading = heading.previousElementSibling;
+    if (heading) path = "#" + heading.id;
+  }
   if (path.length > 1) {
     document.querySelectorAll("nav.side a").forEach(a => {
       if (a.href.endsWith(path)) {

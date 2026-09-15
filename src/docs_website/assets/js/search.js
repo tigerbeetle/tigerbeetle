@@ -240,6 +240,7 @@ function selectResult(node) {
     searchPreviewUsed = true;
   }
   statePathname = location.pathname;
+  syncSideNavWithLocation();
   handleAnchor();
   updateHighlights(content, searchInput.value);
 }
