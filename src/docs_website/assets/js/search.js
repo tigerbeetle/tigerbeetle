@@ -1,8 +1,6 @@
 let pages = [];
 let sections = [];
 
-const singlePage = location.pathname === urlPrefix + "/single-page/";
-
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
 const searchNotFound = document.querySelector(".search-notfound");
@@ -242,22 +240,22 @@ function selectResult(node) {
   statePathname = location.pathname;
   syncSideNavWithLocation();
   handleAnchor();
-  updateHighlights(content, searchInput.value);
+  updateHighlights(searchInput.value || null);
 }
 
-function updateHighlights(container, term) {
+function updateHighlights(term) {
   activeHighlight?.classList.remove("active");
   activeHighlight = null;
 
   if (!singlePage || highlightedTerm !== term) {
-    removeTextHighlight(container);
-    if (term != null) highlightText(term, container);
+    removeTextHighlight(content);
+    if (term != null) highlightText(term, content);
     highlightedTerm = term;
   }
 
   if (term == null || !searchResults.querySelector("a.selected")) return;
 
-  let element = container.firstElementChild;
+  let element = content.firstElementChild;
   if (location.hash) {
     element = document.getElementById(location.hash.slice(1));
   }
@@ -266,7 +264,7 @@ function updateHighlights(container, term) {
     if (highlight) {
       activeHighlight = highlight;
       highlight.classList.add("active");
-      scrollIntoViewIfNeeded(highlight, container.parentNode);
+      scrollIntoViewIfNeeded(highlight, content.parentNode);
       return;
     }
   }
@@ -274,19 +272,18 @@ function updateHighlights(container, term) {
 
 let statePathname = location.pathname;
 window.addEventListener("popstate", (e) => {
-  if (singlePage) {
-    syncSideNavWithLocation();
-  } else if (e.state) {
-    const page = pages[e.state.pageIndex];
-    content.innerHTML = page.html;
-    addContentEventHandlers();
-    syncSideNavWithLocation();
-  } else {
-    if (location.pathname != statePathname) {
+  if (!singlePage) {
+    if (e.state) {
+      const page = pages[e.state.pageIndex];
+      content.innerHTML = page.html;
+      addContentEventHandlers();
+    } else if (location.pathname != statePathname) {
       location.reload();
+      return;
     }
   }
   statePathname = location.pathname;
+  syncSideNavWithLocation();
   handleAnchor();
 });
 
@@ -343,7 +340,7 @@ function closeSearch() {
   searchHotkey.style.display = "block";
   searchInput.value = "";
   onSearchInput();
-  updateHighlights(content, null);
+  updateHighlights(null);
   syncSideNavWithLocation();
   if (sidenavWasCollapsed) document.body.classList.add("sidenav-collapsed");
   document.querySelector("article").focus();
