@@ -1039,6 +1039,7 @@ fn build_test(
             script_run.addArgs(&(.{ "mise", "exec", language_version } ++ tools ++ .{"--"}));
             script_run.addArtifactArg(options.scripts);
             script_run.addArgs(&.{ "ci", "--language=" ++ language });
+            script_run.addPrefixedFileArg("--tigerbeetle=", options.tigerbeetle_test);
             script_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
             script_run.setEnvironmentVariable("MISE_FETCH_REMOTE_VERSIONS_TIMEOUT", "20s");
             script_run.step.max_rss = 4 * GiB;

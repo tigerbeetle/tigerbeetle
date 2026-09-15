@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("tigerbeetle.gemspec"));
 
     // Integration tests.
@@ -20,6 +22,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         log.info("running tests", .{});
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -44,6 +47,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();

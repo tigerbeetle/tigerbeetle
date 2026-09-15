@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("package.json"));
 
     try shell.exec_zig("build clients:node -Drelease", .{});
@@ -21,6 +23,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -37,6 +40,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -54,7 +58,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
             // Not entirely clear if docker dependency is in scope for our CI...
             // "node:18", "node:18-alpine"
         };
-
         inline for (image_tags) |image| {
             log.info("testing docker image: '{s}'", .{image});
 

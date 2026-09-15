@@ -400,6 +400,7 @@ fn run_cdc_test(
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .development = false,
+        .prebuilt = null,
     });
     defer tmp_beetle.deinit(gpa);
 
@@ -567,6 +568,7 @@ fn run_timeout_test(
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .development = false,
+        .prebuilt = null,
     });
 
     const shell = try Shell.create(gpa);

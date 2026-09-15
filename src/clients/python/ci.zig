@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
@@ -8,7 +7,9 @@ const Shell = stdx.Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 const wheel = @import("wheel.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     // Integration tests.
 
     // Build the native libraries.
@@ -37,16 +38,12 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         log.info("running pytest", .{});
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
-        const tigerbeetle_exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
-        const tigerbeetle_path = try shell.project_root.realpathAlloc(
-            shell.arena.allocator(),
-            tigerbeetle_exe,
-        );
-        try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
+        try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("python3 -m pytest tests/", .{});
@@ -60,6 +57,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();

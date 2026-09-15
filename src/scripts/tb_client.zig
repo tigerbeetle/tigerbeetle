@@ -65,6 +65,7 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .development = false,
+        .prebuilt = null,
     });
     defer tmp_beetle.deinit(gpa);
 
