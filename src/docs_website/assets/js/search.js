@@ -1,6 +1,8 @@
 let pages = [];
 let sections = [];
 
+const singlePage = location.pathname === urlPrefix + "/single-page/";
+
 const searchInput = document.querySelector("input[type=search]");
 const searchResults = document.querySelector(".search-results");
 const searchNotFound = document.querySelector(".search-notfound");
@@ -81,7 +83,7 @@ async function initSearch() {
           pageIndex,
           title,
           path: page.path,
-          hash: anchor.hash,
+          hash: singlePage && child.tagName === "H1" ? "" : anchor.hash,
           text: title,
         };
         sections.push(currentSection);
@@ -94,6 +96,15 @@ async function initSearch() {
   if (searchInput.value) onSearchInput(); // Repeat search once the index is fetched.
 }
 
+function searchResultURL(path, hash = "") {
+  if (singlePage) {
+    const slug = path.replace(/\//g, "-");
+    const fragment = hash.slice(1);
+    return urlPrefix + "/single-page/#" + [slug, fragment].filter(Boolean).join("-");
+  }
+  return urlPrefix + "/" + (path ? path + "/" : "") + hash;
+}
+
 function onSearchInput() {
   const groups = search(searchInput.value);
   let menus = [];
@@ -104,8 +115,7 @@ function onSearchInput() {
     const summary = document.createElement("summary");
     details.appendChild(summary);
     summary.pageIndex = group.pageIndex;
-    summary.href = urlPrefix + "/"
-    if (group.hits[0].section.path) summary.href += group.hits[0].section.path + "/";
+    summary.href = searchResultURL(group.hits[0].section.path);
     assert(URL.canParse(summary.href, location.href));
     const p = document.createElement("p");
     summary.appendChild(p);
@@ -122,9 +132,7 @@ function onSearchInput() {
         e.preventDefault();
         selectResult(a);
       });
-      a.href = urlPrefix + "/";
-      if (result.section.path) a.href += result.section.path + "/";
-      a.href += result.section.hash;
+      a.href = searchResultURL(result.section.path, result.section.hash);
       assert(URL.canParse(a.href, location.href));
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
@@ -214,11 +222,15 @@ function selectResult(node) {
   node.classList.add("selected");
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
 
-  // Show page preview.
   const page = pages[node.pageIndex];
-  content.innerHTML = page.html;
-  addContentEventHandlers();
-  const state = { pageIndex: node.pageIndex };
+  if (singlePage) {
+    removeTextHighlight(content);
+  } else {
+    content.innerHTML = page.html;
+    addContentEventHandlers();
+    document.title = page.title;
+  }
+  const state = singlePage ? null : { pageIndex: node.pageIndex };
   if (searchPreviewUsed) {
     history.replaceState(state, page.title, node.href);
   } else {
@@ -226,7 +238,6 @@ function selectResult(node) {
     searchPreviewUsed = true;
   }
   statePathname = location.pathname;
-  document.title = page.title;
   handleAnchor();
   highlightText(searchInput.value, content);
   if (node.tagName == "A") markActiveHighlight(content);
@@ -249,7 +260,9 @@ function markActiveHighlight(container) {
 
 let statePathname = location.pathname;
 window.addEventListener("popstate", (e) => {
-  if (e.state) {
+  if (singlePage) {
+    syncSideNavWithLocation();
+  } else if (e.state) {
     const page = pages[e.state.pageIndex];
     content.innerHTML = page.html;
     addContentEventHandlers();
@@ -353,7 +366,8 @@ function highlightText(term, container) {
 }
 
 function removeTextHighlight(container) {
-  container.querySelectorAll(".highlight").forEach(h => h.classList.remove("highlight"));
+  container.querySelectorAll(".highlight").forEach(h => h.replaceWith(...h.childNodes));
+  container.normalize();
 }
 
 function isMobileView() {

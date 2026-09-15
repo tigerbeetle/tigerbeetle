@@ -27,7 +27,6 @@ pub fn write_page(self: Website, options: struct {
     title: []const u8 = "TigerBeetle",
     author: []const u8 = "TigerBeetle Team",
     page_path: []const u8,
-    include_search: bool = true,
     nav: []const u8,
     content: LazyPath,
 }) LazyPath {
@@ -38,7 +37,6 @@ pub fn write_page(self: Website, options: struct {
         options.author,
         self.url_prefix,
         options.page_path,
-        if (options.include_search) "true" else "false",
         options.nav,
     });
     page_writer_run.addFileArg(options.content);

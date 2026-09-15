@@ -661,7 +661,8 @@ body.sidenav-collapsed {
   }
 }
 
-#single-page-link {
+#single-page-link,
+#multi-page-link {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1215,6 +1216,7 @@ article {
   body>.expand-button,
   #github-link,
   #single-page-link,
+  #multi-page-link,
   .edit-link,
   .code-wrapper button {
     display: none !important;
