@@ -466,6 +466,35 @@ pub fn exec_stdout_options(
     return captured_stdout;
 }
 
+/// Run the given command and return its status code if it returned normally via an exit syscall.
+/// Returns an error if the program failed to spawn or was killed by a signal.
+pub fn exec_status(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !u32 {
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
+    defer argv.deinit();
+
+    errdefer |err| {
+        const argv_formatted = std.mem.join(shell.gpa, " ", argv.slice()) catch @panic("OOM");
+        defer shell.gpa.free(argv_formatted);
+
+        log.err("process failed with {s}: {s}", .{ @errorName(err), argv_formatted });
+    }
+    const cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
+
+    var child = std.process.Child.init(argv.slice(), shell.gpa);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+    child.cwd = cwd;
+    child.env_map = &shell.env;
+    const term = try child.spawnAndWait();
+    errdefer log.err("term={}", .{term});
+
+    switch (term) {
+        .Exited => |status| return status,
+        else => return error.ExecFailed,
+    }
+}
+
 /// Runs the zig compiler.
 pub fn exec_zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     return shell.exec_zig_options(.{}, cmd, cmd_args);

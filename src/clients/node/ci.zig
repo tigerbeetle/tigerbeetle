@@ -101,17 +101,14 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     const attempts_max = 5;
     for (0..attempts_max) |attempt_index| {
         // TODO(zig): use `shell.http_get` when there's no TLS error.
-        const result = try shell.exec_raw(
+        const status = try shell.exec_status(
             "wget --quiet --output-document={out} {url}",
             .{
                 .out = published_tgz,
                 .url = published_url,
             },
         );
-        switch (result.term) {
-            .Exited => |code| if (code == 0) break,
-            else => {},
-        }
+        if (status == 0) break;
 
         const attempt = attempt_index + 1;
         log.warn("node package download failed. Attempt={}", .{attempt});
