@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const posix = std.posix;
 const linux = std.os.linux;
 const log = std.log.scoped(.io);
@@ -23,8 +24,7 @@ const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
-    timer_armed: bool = false,
-    timer_expiry_ns: i128 = 0,
+    timer_expiry_ns: ?i128 = null,
     timeouts: TimeoutList = .{},
 
     /// Completions that are ready to have their callbacks run.
@@ -705,7 +705,7 @@ pub const IO = struct {
         self.timeout_insert_sorted(completion);
 
         if (self.timeouts.tail == completion) {
-            self.arm_timerfd(completion.expiry_ns, now);
+            self.timerfd_arm(completion.expiry_ns, now);
         }
     }
 
@@ -772,7 +772,7 @@ pub const IO = struct {
 
     fn process_epoll_event(self: *IO, event: linux.epoll_event) void {
         if (event.data.ptr == timerfd_epoll_tag) {
-            self.drain_timerfd();
+            self.timerfd_drain();
             self.fire_expired_timeouts();
             return;
         }
@@ -976,13 +976,14 @@ pub const IO = struct {
         }
 
         if (self.timeouts.tail) |next| {
-            self.arm_timerfd(next.expiry_ns, now);
+            assert(next.expiry_ns > now);
+            self.timerfd_arm(next.expiry_ns, now);
         } else {
-            self.disarm_timerfd();
+            self.timerfd_disarm();
         }
     }
 
-    fn drain_timerfd(self: *IO) void {
+    fn timerfd_drain(self: *IO) void {
         assert(self.timer_fd >= 0);
         assert(self.epoll_fd >= 0);
 
@@ -997,8 +998,7 @@ pub const IO = struct {
             switch (linux.E.init(return_code)) {
                 .SUCCESS => {
                     assert(return_code == @sizeOf(u64));
-                    self.timer_armed = false;
-                    self.timer_expiry_ns = 0;
+                    self.timer_expiry_ns = null;
                     continue;
                 },
                 .INTR => continue,
@@ -1011,46 +1011,51 @@ pub const IO = struct {
         }
     }
 
-    fn arm_timerfd(self: *IO, expiry_ns: i128, now: i128) void {
-        assert(expiry_ns > 0);
-        if (self.timer_armed and self.timer_expiry_ns == expiry_ns) return;
+    fn timerfd_arm(self: *IO, expiry_absolute_ns: i128, now: i128) void {
+        assert(expiry_absolute_ns > now);
 
-        const delta_ns: u64 = @intCast(@max(1, expiry_ns - now));
-        assert(delta_ns >= 1);
+        if (self.timer_expiry_ns) |timer_expiry_ns| {
+            assert(timer_expiry_ns <= expiry_absolute_ns);
+            if (timer_expiry_ns == expiry_absolute_ns) return;
+        }
+        maybe(self.timer_expiry_ns != null);
 
-        var spec = linux.itimerspec{
+        const expiry_relative_ns: u64 = @intCast(@max(1, expiry_absolute_ns - now));
+        // A delta of 0 would disarm the timer instead.
+        assert(expiry_relative_ns > 0);
+
+        const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
             .it_value = .{
-                .sec = @intCast(delta_ns / std.time.ns_per_s),
-                .nsec = @intCast(delta_ns % std.time.ns_per_s),
+                .sec = @intCast(expiry_relative_ns / std.time.ns_per_s),
+                .nsec = @intCast(expiry_relative_ns % std.time.ns_per_s),
             },
         };
 
         switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
             .SUCCESS => {
-                self.timer_armed = true;
-                self.timer_expiry_ns = expiry_ns;
+                self.timer_expiry_ns = expiry_absolute_ns;
             },
-            else => |err| log.err("timerfd_settime failed: {}", .{err}),
+            else => |err| log.err("timerfd_arm failed: {}", .{err}),
         }
     }
 
-    fn disarm_timerfd(self: *IO) void {
+    fn timerfd_disarm(self: *IO) void {
         assert(self.timer_fd != INVALID_FILE);
         assert(self.timeouts.tail == null);
-        if (!self.timer_armed) return;
 
-        var spec = linux.itimerspec{
+        if (self.timer_expiry_ns == null) return;
+
+        const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
             .it_value = .{ .sec = 0, .nsec = 0 },
         };
 
         switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
             .SUCCESS => {
-                self.timer_armed = false;
-                self.timer_expiry_ns = 0;
+                self.timer_expiry_ns = null;
             },
-            else => |err| log.err("timerfd disarm failed: {}", .{err}),
+            else => |err| log.err("timerfd_disarm failed: {}", .{err}),
         }
     }
 
@@ -1066,7 +1071,6 @@ pub const IO = struct {
         // - timeout_next walks toward earlier timeouts.
 
         var current = self.timeouts.tail;
-
         while (current) |node| {
             // Insert completion on the earlier side of node.
             if (completion.expiry_ns <= node.expiry_ns) {
