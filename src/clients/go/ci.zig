@@ -39,6 +39,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         else => unreachable,
     }
 
+    try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
+
     try shell.exec("go test", .{});
 
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {

@@ -98,7 +98,7 @@ pub fn build(b: *std.Build) !void {
     const abi_builder: TigerBeetleAbi = .{};
 
     try build_with_options(b, &abi_builder, .{
-        .ci = false,
+        .ci = b.option(bool, "ci", "Enable full test suite") orelse false,
         .mode = mode,
         .target = target,
         .install_options = .{
@@ -1025,43 +1025,52 @@ fn build_test(
             "python@3.10",
             "ruby@3.3",
         };
+        const test_filters: []const []const u8 = if (b.args) |args| args else &.{};
+
         inline for (language_matrix) |language_version| {
             const at_offset = comptime std.mem.indexOfScalar(u8, language_version, '@').?;
             const language = comptime language_version[0..at_offset];
 
-            const step_name = "test client " ++ language_version;
-            const script_run = std.Build.Step.Run.create(b, step_name);
+            const enabled = if (test_filters.len == 0)
+                true
+            else for (test_filters) |filter| {
+                if (std.mem.eql(u8, language, filter)) break true;
+            } else false;
+            if (enabled) {
+                const step_name = "test client " ++ language_version;
+                const script_run = std.Build.Step.Run.create(b, step_name);
 
-            const tools = comptime if (std.mem.eql(u8, language, "java"))
-                .{"maven@3.5"}
-            else
-                .{};
-            script_run.addArgs(&(.{ "mise", "exec", language_version } ++ tools ++ .{"--"}));
-            script_run.addArtifactArg(options.scripts);
-            script_run.addArgs(&.{ "ci", "--language=" ++ language });
-            script_run.addPrefixedFileArg("--tigerbeetle=", options.tigerbeetle_test);
-            script_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
-            script_run.setEnvironmentVariable("MISE_FETCH_REMOTE_VERSIONS_TIMEOUT", "20s");
-            script_run.step.max_rss = 4 * GiB;
-            hide_stderr(script_run);
+                const tools = comptime if (std.mem.eql(u8, language, "java"))
+                    .{"maven@3.5"}
+                else
+                    .{};
+                script_run.addArgs(&(.{ "mise", "exec", language_version } ++ tools ++ .{"--"}));
+                script_run.addArtifactArg(options.scripts);
+                script_run.addArgs(&.{ "ci", "--language=" ++ language });
+                script_run.addPrefixedFileArg("--tigerbeetle=", options.tigerbeetle_test);
+                script_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+                script_run.setEnvironmentVariable("MISE_FETCH_REMOTE_VERSIONS_TIMEOUT", "20s");
+                script_run.step.max_rss = 4 * GiB;
+                hide_stderr(script_run);
 
-            if (std.mem.eql(u8, language, "python")) {
-                const install_dependencies = b.addSystemCommand(&.{
-                    "mise", "exec", language_version, "--",
-                    "pip",    "install",      "--quiet", //
-                    "pytest", "mypy<=1.18.2",
-                });
-                hide_stderr(install_dependencies);
-                script_run.step.dependOn(&install_dependencies.step);
+                if (std.mem.eql(u8, language, "python")) {
+                    const install_dependencies = b.addSystemCommand(&.{
+                        "mise", "exec", language_version, "--",
+                        "pip",    "install",      "--quiet", //
+                        "pytest", "mypy<=1.18.2",
+                    });
+                    hide_stderr(install_dependencies);
+                    script_run.step.dependOn(&install_dependencies.step);
+                }
+                if (std.mem.eql(u8, language, "java")) {
+                    const install_dependencies = b.addSystemCommand(
+                        &.{ "mise", "plugin", "install", "maven" },
+                    );
+                    hide_stderr(install_dependencies);
+                    script_run.step.dependOn(&install_dependencies.step);
+                }
+                steps.@"test".dependOn(&script_run.step);
             }
-            if (std.mem.eql(u8, language, "java")) {
-                const install_dependencies = b.addSystemCommand(
-                    &.{ "mise", "plugin", "install", "maven" },
-                );
-                hide_stderr(install_dependencies);
-                script_run.step.dependOn(&install_dependencies.step);
-            }
-            steps.@"test".dependOn(&script_run.step);
         }
     }
 }
