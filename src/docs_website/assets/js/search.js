@@ -10,6 +10,10 @@ const searchClearButton = document.querySelector(".search-box>.clear-button");
 
 let sidenavWasCollapsed = false;
 let searchPreviewUsed = false;
+
+let highlightedTerm = null;
+let activeHighlight = null;
+
 document.addEventListener("keydown", event => {
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === "/" && searchInput !== document.activeElement) {
@@ -81,7 +85,7 @@ async function initSearch() {
           pageIndex,
           title,
           path: page.path,
-          hash: anchor.hash,
+          hash: singlePage && child.tagName === "H1" ? "" : anchor.hash,
           text: title,
         };
         sections.push(currentSection);
@@ -94,6 +98,15 @@ async function initSearch() {
   if (searchInput.value) onSearchInput(); // Repeat search once the index is fetched.
 }
 
+function searchResultURL(path, hash = "") {
+  if (singlePage) {
+    const slug = path.replace(/\//g, "-");
+    const fragment = hash.slice(1);
+    return urlPrefix + "/single-page/#" + [slug, fragment].filter(Boolean).join("-");
+  }
+  return urlPrefix + "/" + (path ? path + "/" : "") + hash;
+}
+
 function onSearchInput() {
   const groups = search(searchInput.value);
   let menus = [];
@@ -104,8 +117,7 @@ function onSearchInput() {
     const summary = document.createElement("summary");
     details.appendChild(summary);
     summary.pageIndex = group.pageIndex;
-    summary.href = urlPrefix + "/"
-    if (group.hits[0].section.path) summary.href += group.hits[0].section.path + "/";
+    summary.href = searchResultURL(group.hits[0].section.path);
     assert(URL.canParse(summary.href, location.href));
     const p = document.createElement("p");
     summary.appendChild(p);
@@ -122,9 +134,7 @@ function onSearchInput() {
         e.preventDefault();
         selectResult(a);
       });
-      a.href = urlPrefix + "/";
-      if (result.section.path) a.href += result.section.path + "/";
-      a.href += result.section.hash;
+      a.href = searchResultURL(result.section.path, result.section.hash);
       assert(URL.canParse(a.href, location.href));
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
@@ -214,11 +224,13 @@ function selectResult(node) {
   node.classList.add("selected");
   scrollIntoViewIfNeeded(node, searchResults.parentNode);
 
-  // Show page preview.
   const page = pages[node.pageIndex];
-  content.innerHTML = page.html;
-  addContentEventHandlers();
-  const state = { pageIndex: node.pageIndex };
+  if (!singlePage) {
+    content.innerHTML = page.html;
+    addContentEventHandlers();
+    document.title = page.title;
+  }
+  const state = singlePage ? null : { pageIndex: node.pageIndex };
   if (searchPreviewUsed) {
     history.replaceState(state, page.title, node.href);
   } else {
@@ -226,22 +238,33 @@ function selectResult(node) {
     searchPreviewUsed = true;
   }
   statePathname = location.pathname;
-  document.title = page.title;
+  syncSideNavWithLocation();
   handleAnchor();
-  highlightText(searchInput.value, content);
-  if (node.tagName == "A") markActiveHighlight(content);
+  updateHighlights(searchInput.value || null);
 }
 
-function markActiveHighlight(container) {
-  let element = container.firstElementChild;
+function updateHighlights(term) {
+  activeHighlight?.classList.remove("active");
+  activeHighlight = null;
+
+  if (!singlePage || highlightedTerm !== term) {
+    removeTextHighlight(content);
+    if (term != null) highlightText(term, content);
+    highlightedTerm = term;
+  }
+
+  if (term == null || !searchResults.querySelector("a.selected")) return;
+
+  let element = content.firstElementChild;
   if (location.hash) {
     element = document.getElementById(location.hash.slice(1));
   }
   for (; element; element = element.nextElementSibling) {
     const highlight = element.querySelector(".highlight");
     if (highlight) {
+      activeHighlight = highlight;
       highlight.classList.add("active");
-      scrollIntoViewIfNeeded(highlight, container.parentNode);
+      scrollIntoViewIfNeeded(highlight, content.parentNode);
       return;
     }
   }
@@ -249,17 +272,18 @@ function markActiveHighlight(container) {
 
 let statePathname = location.pathname;
 window.addEventListener("popstate", (e) => {
-  if (e.state) {
-    const page = pages[e.state.pageIndex];
-    content.innerHTML = page.html;
-    addContentEventHandlers();
-    syncSideNavWithLocation();
-  } else {
-    if (location.pathname != statePathname) {
+  if (!singlePage) {
+    if (e.state) {
+      const page = pages[e.state.pageIndex];
+      content.innerHTML = page.html;
+      addContentEventHandlers();
+    } else if (location.pathname != statePathname) {
       location.reload();
+      return;
     }
   }
   statePathname = location.pathname;
+  syncSideNavWithLocation();
   handleAnchor();
 });
 
@@ -316,7 +340,7 @@ function closeSearch() {
   searchHotkey.style.display = "block";
   searchInput.value = "";
   onSearchInput();
-  removeTextHighlight(content);
+  updateHighlights(null);
   syncSideNavWithLocation();
   if (sidenavWasCollapsed) document.body.classList.add("sidenav-collapsed");
   document.querySelector("article").focus();
@@ -353,7 +377,8 @@ function highlightText(term, container) {
 }
 
 function removeTextHighlight(container) {
-  container.querySelectorAll(".highlight").forEach(h => h.classList.remove("highlight"));
+  container.querySelectorAll(".highlight").forEach(h => h.replaceWith(...h.childNodes));
+  container.normalize();
 }
 
 function isMobileView() {

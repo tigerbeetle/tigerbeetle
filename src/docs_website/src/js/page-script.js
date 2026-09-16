@@ -6,6 +6,7 @@ function assert(condition) {
 }
 
 window.urlPrefix = "$url_prefix";
+const singlePage = location.pathname === urlPrefix + "/single-page/";
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
@@ -76,7 +77,14 @@ function syncSideNavWithLocation() {
   document.querySelectorAll("nav.side details").forEach(details => details.open = false);
 
   let path = location.pathname;
-  if (path.includes("single-page")) path = location.hash;
+  if (singlePage) {
+    path = location.hash;
+    // The sidebar only has page titles, so we need to find the nearest H1 above
+    let heading = document.getElementById(path.slice(1));
+    while (heading && heading.parentElement !== content) heading = heading.parentElement;
+    while (heading && heading.tagName !== "H1") heading = heading.previousElementSibling;
+    if (heading) path = "#" + heading.id;
+  }
   if (path.length > 1) {
     document.querySelectorAll("nav.side a").forEach(a => {
       if (a.href.endsWith(path)) {
