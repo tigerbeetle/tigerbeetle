@@ -837,6 +837,7 @@ article {
       margin-left: 4px;
       opacity: 0;
       transform-origin: bottom left;
+      isolation: isolate;
     }
 
     .anchor:hover::after {
