@@ -69,13 +69,13 @@ comptime {
     }
 }
 
-pub const AbiOptions = struct {
+pub const ABIOptions = struct {
     vsr_module: *std.Build.Module,
     stdx_module: *std.Build.Module,
 };
 
-pub const TigerBeetleAbi = struct {
-    pub fn build_module(_: *const @This(), b: *std.Build, _: AbiOptions) *std.Build.Module {
+pub const TigerBeetleABI = struct {
+    pub fn build_module(_: *const @This(), b: *std.Build, _: ABIOptions) *std.Build.Module {
         return b.createModule(.{ .root_source_file = b.path("src/abi.zig") });
     }
 };
@@ -95,7 +95,7 @@ pub fn build(b: *std.Build) !void {
     );
     const target = try resolve_target(b, target_option);
 
-    const abi_builder: TigerBeetleAbi = .{};
+    const abi_builder: TigerBeetleABI = .{};
 
     try build_with_options(b, &abi_builder, .{
         .ci = false,
@@ -1015,7 +1015,7 @@ fn build_test(
         steps.@"test".dependOn(steps.test_fmt);
     }
 
-    if (options.ci and @TypeOf(abi_builder) == *const TigerBeetleAbi) {
+    if (options.ci and @TypeOf(abi_builder) == *const TigerBeetleABI) {
         const language_matrix: []const []const u8 = &.{
             "dotnet@8.0",
             "go@1.21",
