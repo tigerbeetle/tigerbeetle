@@ -16,6 +16,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.exec("dotnet restore", .{});
     try shell.exec("dotnet format --no-restore --verify-no-changes", .{});
 
+    try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
+
     // Unit tests.
     try shell.exec("dotnet build --no-restore  --configuration Release", .{});
     // Disable coverage on CI, as it is flaky, see
