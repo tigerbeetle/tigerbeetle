@@ -24,7 +24,7 @@ const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
-    timer_expiry_ns: ?i128 = null,
+    timer_expiry: ?stdx.Instant = null,
     timeouts: TimeoutList = .{},
 
     /// Completions that are ready to have their callbacks run.
@@ -376,9 +376,7 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = erase_types(Context, TimeoutError!void, callback),
-            .operation = .{
-                .timeout = .{ .nanoseconds = nanoseconds },
-            },
+            .operation = .{ .timeout = .{ .ns = nanoseconds } },
         };
 
         self.enqueue(completion);
@@ -689,23 +687,24 @@ pub const IO = struct {
     }
 
     fn enqueue_timeout(self: *IO, completion: *Completion) void {
-        const nanoseconds = completion.operation.timeout.nanoseconds;
+        assert(completion.timeout_expiry == null);
 
-        if (nanoseconds == 0) {
+        const timeout_duration = completion.operation.timeout;
+        if (timeout_duration.ns == 0) {
             completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
             self.completed.push(completion);
             return;
         }
 
-        const now = monotonic_now_ns();
-        completion.expiry_ns = now + @as(i128, nanoseconds);
+        const now = self.time.monotonic();
+        completion.timeout_expiry = now.add(timeout_duration);
         completion.in_awaiting = true;
         completion.in_timeouts = true;
 
         self.timeout_insert_sorted(completion);
 
         if (self.timeouts.tail == completion) {
-            self.timerfd_arm(completion.expiry_ns, now);
+            self.timerfd_arm(completion.timeout_expiry.?, now);
         }
     }
 
@@ -714,7 +713,7 @@ pub const IO = struct {
         assert(!completion.in_awaiting);
         assert(!completion.epoll_registered);
 
-        var ev = linux.epoll_event{
+        var event = linux.epoll_event{
             .events = events | linux.EPOLL.ERR | linux.EPOLL.HUP,
             .data = .{ .ptr = @intFromPtr(completion) },
         };
@@ -736,7 +735,7 @@ pub const IO = struct {
         assert(completion.in_awaiting);
         assert(!completion.epoll_registered);
 
-        var ev = linux.epoll_event{
+        var event = linux.epoll_event{
             .events = events | linux.EPOLL.ERR | linux.EPOLL.HUP,
             .data = .{ .ptr = @intFromPtr(completion) },
         };
@@ -950,20 +949,12 @@ pub const IO = struct {
         self.completed.push(completion);
     }
 
-    fn monotonic_now_ns() i128 {
-        var ts: linux.timespec = undefined;
-        const return_code = linux.clock_gettime(.MONOTONIC, &ts);
-        assert(linux.E.init(return_code) == .SUCCESS);
-
-        return @as(i128, ts.sec) * std.time.ns_per_s + @as(i128, ts.nsec);
-    }
-
-    /// Fire all user timeout() completions whose expiry_ns has passed.
+    /// Fire all user timeout() completions whose expiry has passed.
     fn fire_expired_timeouts(self: *IO) void {
-        const now = monotonic_now_ns();
+        const now = self.time.monotonic();
 
         while (self.timeouts.tail) |completion| {
-            if (completion.expiry_ns > now) break;
+            if (completion.timeout_expiry.?.ns > now.ns) break;
 
             self.timeouts.remove(completion);
             completion.in_timeouts = false;
@@ -976,8 +967,8 @@ pub const IO = struct {
         }
 
         if (self.timeouts.tail) |next| {
-            assert(next.expiry_ns > now);
-            self.timerfd_arm(next.expiry_ns, now);
+            assert(next.timeout_expiry.?.ns > now.ns);
+            self.timerfd_arm(next.timeout_expiry.?, now);
         } else {
             self.timerfd_disarm();
         }
@@ -998,7 +989,7 @@ pub const IO = struct {
             switch (linux.E.init(return_code)) {
                 .SUCCESS => {
                     assert(return_code == @sizeOf(u64));
-                    self.timer_expiry_ns = null;
+                    self.timer_expiry = null;
                     continue;
                 },
                 .INTR => continue,
@@ -1011,30 +1002,30 @@ pub const IO = struct {
         }
     }
 
-    fn timerfd_arm(self: *IO, expiry_absolute_ns: i128, now: i128) void {
-        assert(expiry_absolute_ns > now);
+    fn timerfd_arm(self: *IO, expiry: stdx.Instant, now: stdx.Instant) void {
+        assert(now.ns < expiry.ns);
 
-        if (self.timer_expiry_ns) |timer_expiry_ns| {
-            assert(timer_expiry_ns <= expiry_absolute_ns);
-            if (timer_expiry_ns == expiry_absolute_ns) return;
+        if (self.timer_expiry) |timer_expiry| {
+            assert(timer_expiry.ns <= expiry.ns);
+            if (timer_expiry.ns == expiry.ns) return;
         }
-        maybe(self.timer_expiry_ns != null);
+        maybe(self.timer_expiry != null);
 
-        const expiry_relative_ns: u64 = @intCast(@max(1, expiry_absolute_ns - now));
-        // A delta of 0 would disarm the timer instead.
-        assert(expiry_relative_ns > 0);
+        const expiry_relative = now.elapsed(expiry);
+        // A duration of 0 would disarm the timer instead.
+        assert(expiry_relative.ns > 0);
 
         const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
             .it_value = .{
-                .sec = @intCast(expiry_relative_ns / std.time.ns_per_s),
-                .nsec = @intCast(expiry_relative_ns % std.time.ns_per_s),
+                .sec = @intCast(expiry_relative.ns / std.time.ns_per_s),
+                .nsec = @intCast(expiry_relative.ns % std.time.ns_per_s),
             },
         };
 
         switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
             .SUCCESS => {
-                self.timer_expiry_ns = expiry_absolute_ns;
+                self.timer_expiry = expiry;
             },
             else => |err| log.err("timerfd_arm failed: {}", .{err}),
         }
@@ -1044,7 +1035,7 @@ pub const IO = struct {
         assert(self.timer_fd != INVALID_FILE);
         assert(self.timeouts.tail == null);
 
-        if (self.timer_expiry_ns == null) return;
+        if (self.timer_expiry == null) return;
 
         const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
@@ -1053,7 +1044,7 @@ pub const IO = struct {
 
         switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
             .SUCCESS => {
-                self.timer_expiry_ns = null;
+                self.timer_expiry = null;
             },
             else => |err| log.err("timerfd_disarm failed: {}", .{err}),
         }
@@ -1073,7 +1064,7 @@ pub const IO = struct {
         var current = self.timeouts.tail;
         while (current) |node| {
             // Insert completion on the earlier side of node.
-            if (completion.expiry_ns <= node.expiry_ns) {
+            if (completion.timeout_expiry.?.ns <= node.timeout_expiry.?.ns) {
                 completion.timeout_back = node;
                 completion.timeout_next = node.timeout_next;
 
@@ -1161,7 +1152,7 @@ pub const IO = struct {
         epoll_registered: bool = false,
 
         /// Absolute expiry time for timeout() operations (nanoseconds, CLOCK_MONOTONIC).
-        expiry_ns: i128 = 0,
+        timeout_expiry: ?stdx.Instant = null,
         timeout_back: ?*Completion = null,
         timeout_next: ?*Completion = null,
         in_timeouts: bool = false,
@@ -1391,8 +1382,6 @@ pub const IO = struct {
             socket: socket_t,
             buffer: []const u8,
         },
-        timeout: struct {
-            nanoseconds: u63,
-        },
+        timeout: stdx.Duration,
     };
 };
