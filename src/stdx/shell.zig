@@ -64,11 +64,20 @@ ci: bool,
 zig_exe: ?[]const u8,
 
 pub fn create(gpa: std.mem.Allocator) !*Shell {
+    var project_root = try discover_project_root();
+    defer project_root.close();
+
+    return try create_with_project_root(gpa, project_root);
+}
+
+pub fn create_with_project_root(gpa: std.mem.Allocator, project_root: std.fs.Dir) !*Shell {
+    errdefer {
+        var project_root_mutable = project_root;
+        project_root_mutable.close();
+    }
+
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
-
-    var project_root = try discover_project_root();
-    errdefer project_root.close();
 
     var cwd = try project_root.openDir(".", .{});
     errdefer cwd.close();
@@ -84,7 +93,7 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
     result.* = Shell{
         .gpa = gpa,
         .arena = arena,
-        .project_root = project_root,
+        .project_root = try project_root.openDir(".", .{}),
         .cwd = cwd,
         .cwd_stack = undefined,
         .cwd_stack_count = 0,
