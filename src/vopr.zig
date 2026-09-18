@@ -1556,7 +1556,7 @@ pub const Simulator = struct {
         var recoverable_count: usize = 0;
         for (simulator.cluster.replicas, 0..) |*r, i| {
             recoverable_count += @intFromBool(simulator.cluster.replica_health[i] == .up and
-                !simulator.replica_reformats.is_set(replica.replica) and
+                !simulator.replica_reformats.is_set(i) and
                 !r.standby() and
                 r.status != .recovering_head and
                 r.syncing == .idle);
