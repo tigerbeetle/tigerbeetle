@@ -2440,6 +2440,35 @@ test "imported events: timestamp" {
     );
 }
 
+test "imported events: timestamp after expiry" {
+    try check(
+        \\ tick 10 nanoseconds
+        \\
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ IMP _ _ 1 created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ IMP _ _ 2 created
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2 10  _ _ _ _ 1 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ transfer T2 A1 A2 20  _ _ _ _ 0 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ commit create_transfers
+        \\
+        \\ tick 1 seconds
+        \\
+        // T1's expiry timestamp is later than the latest transfer timestamp.
+        \\ transfer T3 A1 A2  7  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 15 imported_event_timestamp_must_not_regress
+        \\ transfer T4 A1 A2 20 T2 _ _ _ 0 L1 C1 _   _ POS _   _ _ IMP _ _ _ 16 imported_event_timestamp_must_not_regress
+        \\ commit create_transfers
+        \\
+        \\ lookup_account A1 20 0  0 0 _
+        \\ lookup_account A2  0 0 20 0 _
+        \\ commit lookup_accounts
+        \\
+        \\ lookup_transfer T3 exists false
+        \\ lookup_transfer T4 exists false
+        \\ commit lookup_transfers
+    );
+}
+
 test "imported events: resolve timed pending transfers" {
     try check(
         \\ tick 10 nanoseconds

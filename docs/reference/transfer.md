@@ -495,7 +495,8 @@ necessary:
 - Timestamps must be strictly increasing.
 
   Even user-defined timestamps that are required to be past dates need to be at least one
-  nanosecond ahead of the timestamp of the last transfer committed by the cluster.
+  nanosecond ahead of the timestamp of the last accounting event committed by the cluster,
+  including pending transfer expirations.
 
   Since the timestamp cannot regress, importing past events can be naturally restrictive without
   coordination, as the last timestamp can be updated using the cluster clock during regular
