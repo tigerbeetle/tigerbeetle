@@ -484,7 +484,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<Account>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -589,7 +589,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<Transfer>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -697,7 +697,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<u128>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -794,7 +794,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<u128>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -835,7 +835,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<AccountFilter>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -876,7 +876,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<AccountFilter>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -915,7 +915,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<QueryFilter>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -954,7 +954,7 @@ impl Client {
             match status {
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_OK => {}
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_INVALID => {
-                    drop(Box::from_raw(packet));
+                    free_rejected_packet::<QueryFilter>(packet);
                     return Err(ClientClosed);
                 }
                 _ => unreachable!("unexpected status from tb_client_submit: {}", status),
@@ -1451,6 +1451,38 @@ unsafe fn complete_typed<Event: Copy + 'static>(
     });
 }
 
+/// Free a packet built by [`create_packet`] but rejected by `tb_client_submit`
+/// (status `TB_CLIENT_INVALID`), so that `on_completion` / [`complete_typed`]
+/// will never run to reclaim its allocations.
+///
+/// Mirrors the teardown in [`complete_typed`], minus delivering a completion:
+/// reclaims the type-erased `CallbackData<Event>` box (which owns the oneshot
+/// `Sender`), the leaked `events` `Vec`, and the `tb_packet_t` box itself.
+///
+/// # Safety
+///
+/// `packet` must come from `Box::into_raw` of a packet built by
+/// `create_packet::<Event>`, whose `user_data`/`data` pointers are still the
+/// originals (i.e. the packet was never handed to `on_completion`).
+unsafe fn free_rejected_packet<Event>(packet: *mut tbc::tb_packet_t) {
+    // Reclaim the callback box; dropping it drops the oneshot `Sender`, letting
+    // the (unawaited) `Receiver` observe cancellation instead of leaking.
+    drop(Box::from_raw(
+        (*packet).user_data as *mut CallbackData<Event>,
+    ));
+
+    // Reclaim the `events` Vec that `create_packet` `mem::forget`-ed.
+    let events_len = (*packet).data_size as usize / mem::size_of::<Event>();
+    drop(Vec::from_raw_parts(
+        (*packet).data as *mut Event,
+        events_len,
+        events_len,
+    ));
+
+    // Reclaim the packet box itself.
+    drop(Box::from_raw(packet));
+}
+
 extern "C" fn on_completion(
     context: usize,
     packet: *mut tbc::tb_packet_t,
@@ -1462,5 +1494,27 @@ extern "C" fn on_completion(
         let header = (*packet).user_data as *mut CallbackHeader;
         (*packet).user_data = ptr::null_mut();
         ((*header).complete)(header, context, packet, timestamp, result_ptr, result_len);
+    }
+}
+
+#[cfg(test)]
+mod rejected_packet_tests {
+    use super::*;
+
+    // A packet rejected by `tb_client_submit` (TB_CLIENT_INVALID) is never
+    // handed to `on_completion`, so `free_rejected_packet` is the only thing
+    // that reclaims its callback box and forgotten `events` Vec. Run under Miri
+    // (`cargo miri test`) this asserts there is no leak and no double-free; on
+    // stable it confirms the teardown runs cleanly for a multi-element batch.
+    #[test]
+    fn free_rejected_packet_reclaims_allocations() {
+        let (packet, _rx) = create_packet::<u128>(
+            tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS,
+            &[1u128, 2u128, 3u128],
+        );
+        let raw = Box::into_raw(packet);
+        // SAFETY: `raw` came straight from `create_packet::<u128>` and was never
+        // submitted, so its `user_data`/`data` pointers are still the originals.
+        unsafe { free_rejected_packet::<u128>(raw) };
     }
 }
