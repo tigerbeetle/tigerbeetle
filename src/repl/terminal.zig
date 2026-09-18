@@ -284,18 +284,33 @@ pub const Terminal = struct {
         // We move the cursor to a location that is unlikely to exist (2^16th row and column).
         // Terminals usually handle this by placing the cursor at their end position, which we can
         // use to obtain its resolution/size.
-        const cursor_start = try terminal.get_cursor_position();
-        try terminal.print("\x1b[{};{}H", .{ std.math.maxInt(u16), std.math.maxInt(u16) });
+        //
+        // Cursor-position responses are read from stdin, which is shared with user input. Under
+        // heavy input the two requests below can have their responses read out of order, giving a
+        // `cursor_start` (the real cursor) that lies outside `cursor_end` (the screen bounds). That
+        // would construct a `Screen` violating the invariants asserted in `update_cursor_position`,
+        // so we detect the desync here and retry instead.
+        const attempts_max = 8;
+        for (0..attempts_max) |_| {
+            const cursor_start = try terminal.get_cursor_position();
+            try terminal.print("\x1b[{};{}H", .{ std.math.maxInt(u16), std.math.maxInt(u16) });
 
-        const cursor_end = try terminal.get_cursor_position();
-        try terminal.print("\x1b[{};{}H", .{ cursor_start.row, cursor_start.column });
+            const cursor_end = try terminal.get_cursor_position();
+            try terminal.print("\x1b[{};{}H", .{ cursor_start.row, cursor_start.column });
 
-        return Screen{
-            .rows = cursor_end.row,
-            .columns = cursor_end.column,
-            .cursor_row = cursor_start.row,
-            .cursor_column = cursor_start.column,
-        };
+            // The real cursor must sit within the screen bounds. If it doesn't, the two
+            // cursor-position responses desynced — discard this pair and try again.
+            if (cursor_start.row <= cursor_end.row and cursor_start.column <= cursor_end.column) {
+                return Screen{
+                    .rows = cursor_end.row,
+                    .columns = cursor_end.column,
+                    .cursor_row = cursor_start.row,
+                    .cursor_column = cursor_start.column,
+                };
+            }
+        }
+
+        return error.CursorPositionDesynchronized;
     }
 };
 
