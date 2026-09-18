@@ -36,7 +36,7 @@ function Link (link)
 
   if not is_external then
     link.target = link.target:gsub("README%.md", "")
-    link.target = link.target:gsub("%.md", "")
+    link.target = link.target:gsub("%.md", "/")
   end
 
   return link
