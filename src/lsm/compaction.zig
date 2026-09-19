@@ -1418,7 +1418,9 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 &read.grid_read,
                 table_ref.table_info.address,
                 table_ref.table_info.checksum,
-                .{ .cache_read = true, .cache_write = true },
+                // Compaction scans each input table sequentially. Reuse blocks that are already
+                // resident, but do not admit misses and displace the foreground working set.
+                .{ .cache_read = true, .cache_write = false },
             );
         }
 
@@ -1505,7 +1507,9 @@ pub fn CompactionType(comptime Tree: type, comptime Storage: type) type {
                 &read.grid_read,
                 value_block_address,
                 value_block_checksum.value,
-                .{ .cache_read = true, .cache_write = true },
+                // Value blocks are consumed as a stream during compaction. Cache hits remain
+                // useful, while admitting every miss would evict blocks used by client reads.
+                .{ .cache_read = true, .cache_write = false },
             );
         }
 

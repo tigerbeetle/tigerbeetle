@@ -1266,8 +1266,13 @@ pub fn GridType(comptime Storage: type) type {
                 var it = queue.iterate();
                 while (it.next()) |queued_read| {
                     if (queued_read.address == read.address) {
-                        // TODO check all read options match
                         if (queued_read.checksum == read.checksum) {
+                            // A physical read shared by multiple callers must preserve the
+                            // strongest cache admission request. Otherwise a cache-bypassing
+                            // reader can prevent a concurrent foreground reader from admitting
+                            // the block after the shared storage read completes.
+                            queued_read.cache_write =
+                                queued_read.cache_write or read.cache_write;
                             queued_read.resolves.push(&read.pending);
                             return;
                         } else {
