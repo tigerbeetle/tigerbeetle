@@ -183,12 +183,8 @@ pub const Header = extern struct {
         switch (self.into_any()) {
             inline else => |command_header| return command_header.invalid_header(),
             // The `Command` enum is exhaustive, so we can't write an "else" branch here. An unknown
-            // command is a possibility, but that means that someone has send us a message with
-            // matching cluster, matching version, correct checksum, and a command we don't know
-            // about. Ignoring unknown commands might be unsafe, so the replica intentionally
-            // crashes here, which is guaranteed by Zig's ReleaseSafe semantics.
-            //
-            // _ => unreachable
+            // command is rejected by MessageBuffer before the bytes are materialized as a Header,
+            // so only validated command values can reach this switch.
         }
     }
 
