@@ -1169,38 +1169,47 @@ fn build_test_jni(
 
     tests.linkSystemLibrary("jvm");
     tests.addLibraryPath(.{ .cwd_relative = libjvm_path });
-    if (builtin.os.tag == .linux) {
-        // On Linux, detects the abi by calling `ldd` to check if
-        // the libjvm.so is linked against libc or musl.
-        // It's reasonable to assume that ldd will be present.
-        var exit_code: u8 = undefined;
-        const stderr_behavior = .Ignore;
-        const ldd_result = try b.runAllowFail(
-            &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
-            &exit_code,
-            stderr_behavior,
-        );
-
-        if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
-            tests.root_module.resolved_target.?.query.abi = .musl;
-            tests.root_module.resolved_target.?.result.abi = .musl;
-        } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
-            tests.root_module.resolved_target.?.query.abi = .gnu;
-            tests.root_module.resolved_target.?.result.abi = .gnu;
-        } else {
-            std.log.err("{s}", .{ldd_result});
-            return error.JavaAbiUnrecognized;
-        }
-    }
 
     switch (builtin.os.tag) {
         .windows => set_windows_dll(b.allocator, java_home),
         .macos => try b.graph.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
-        .linux => try b.graph.env_map.put("LD_LIBRARY_PATH", libjvm_path),
+        .linux => {
+            try set_linux_abi(b, tests, libjvm_path);
+            try b.graph.env_map.put("LD_LIBRARY_PATH", libjvm_path);
+        },
         else => unreachable,
     }
 
     step_test_jni.dependOn(&b.addRunArtifact(tests).step);
+}
+
+fn set_linux_abi(
+    b: *std.Build,
+    tests: *std.Build.Step.Compile,
+    libjvm_path: []const u8,
+) !void {
+    assert(builtin.os.tag == .linux);
+    // On Linux, detects the abi by calling `ldd` to check if
+    // the libjvm.so is linked against libc or musl.
+    // It's reasonable to assume that ldd will be present.
+    var exit_code: u8 = undefined;
+    const stderr_behavior = .Ignore;
+    const ldd_result = try b.runAllowFail(
+        &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
+        &exit_code,
+        stderr_behavior,
+    );
+
+    if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
+        tests.root_module.resolved_target.?.query.abi = .musl;
+        tests.root_module.resolved_target.?.result.abi = .musl;
+    } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
+        tests.root_module.resolved_target.?.query.abi = .gnu;
+        tests.root_module.resolved_target.?.result.abi = .gnu;
+    } else {
+        std.log.err("{s}", .{ldd_result});
+        return error.JavaAbiUnrecognized;
+    }
 }
 
 fn build_vopr(
@@ -1792,6 +1801,7 @@ fn build_go_client(
             assert(std.mem.count(u8, lib.out_lib_filename, ".") == 1);
             var it = std.mem.splitScalar(u8, lib.out_lib_filename, '.');
             defer assert(it.next() == null);
+
             break :cut .{ it.next().?, it.next().? };
         };
 
