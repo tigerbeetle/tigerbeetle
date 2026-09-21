@@ -2506,7 +2506,7 @@ Released: 2025-05-02
 
 Heads up, we are changing our release process! From this point on, a TigerBeetle release is tagged
 on Friday, spends a weekend on the
-[CFO fleet](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/scripts/cfo.zig), and is
+[CFO fleet](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/vortex.zig), and is
 published on Monday. In other words, you'll still be getting a new release every Monday, but the
 date of the release will be set to Friday. This setup allows extra time for fuzzers to find problems
 in the specific commit we are trying to release.
