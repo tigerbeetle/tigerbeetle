@@ -25,7 +25,7 @@ pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
     timer_expiry: ?stdx.Instant = null,
-    timeouts: TimeoutList = .{},
+    timeouts: DoublyLinkedListType(Completion, .timeout_back, .timeout_next)= .{},
 
     /// Completions that are ready to have their callbacks run.
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
@@ -36,7 +36,6 @@ pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
     pub const Stats = common.Stats;
-    const TimeoutList = DoublyLinkedListType(Completion, .timeout_back, .timeout_next);
 
     const timerfd_epoll_tag: usize = 1;
     comptime {
@@ -51,12 +50,14 @@ pub const IO = struct {
         log.debug("Starting epoll I/O", .{});
 
         const epoll_fd = try posix.epoll_create1(linux.EPOLL.CLOEXEC);
+        if (epoll_fd < 0) return error.EpollCreate;
         errdefer posix.close(epoll_fd);
 
         const timer_fd = try posix.timerfd_create(
             linux.timerfd_clockid_t.MONOTONIC,
             .{ .CLOEXEC = true, .NONBLOCK = true },
         );
+        if (timer_fd < 0) return error.TimerCreate;
         errdefer posix.close(timer_fd);
 
         var timer_event = linux.epoll_event{
@@ -88,7 +89,6 @@ pub const IO = struct {
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
         try self.poll_epoll(0);
-        self.fire_expired_timeouts();
 
         var timer = try std.time.Timer.start();
         self.run_callbacks();
@@ -104,8 +104,6 @@ pub const IO = struct {
 
         const deadline = self.time.monotonic().add(.{ .ns = nanoseconds });
         while (true) {
-            self.fire_expired_timeouts();
-
             var callback_timer = try std.time.Timer.start();
             self.run_callbacks();
             self.stats.window.time_callbacks.ns += callback_timer.read();
@@ -704,7 +702,9 @@ pub const IO = struct {
         self.timeout_insert_sorted(completion);
 
         if (self.timeouts.tail == completion) {
-            self.timerfd_arm(completion.timeout_expiry.?, now);
+            self.timer_arm(completion.timeout_expiry.?);
+        } else {
+            assert(self.timeouts.count > 1);
         }
     }
 
@@ -771,26 +771,37 @@ pub const IO = struct {
 
     fn process_epoll_event(self: *IO, event: linux.epoll_event) void {
         if (event.data.ptr == timerfd_epoll_tag) {
-            self.timerfd_drain();
-            self.fire_expired_timeouts();
-            return;
-        }
+            assert(self.timer_expiry != null);
 
-        const completion: *Completion = @ptrFromInt(event.data.ptr);
+            const now = self.time.monotonic();
 
-        // Remove from epoll. The fd is embedded in the operation.
-        const fd = operation_fd(completion);
-        _ = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
-        assert(completion.epoll_registered);
-        completion.epoll_registered = false;
+            self.timer_drain();
+            self.timer_fire(now);
 
-        switch (completion.operation) {
-            .accept => self.process_accept(completion),
-            .recv => self.process_recv(completion),
-            .send => self.process_send(completion),
-            .connect => self.process_connect(completion),
-            .eventfd_read => self.process_eventfd_read(completion),
-            else => unreachable,
+            if (self.timeouts.tail) |next| {
+                assert(next.timeout_expiry.?.ns > now.ns);
+                self.timer_arm(next.timeout_expiry.?);
+            } else {
+                self.timer_disarm();
+            }
+        } else {
+            const completion: *Completion = @ptrFromInt(event.data.ptr);
+            assert(completion.in_awaiting);
+
+            // Remove from epoll. The fd is embedded in the operation.
+            const fd = operation_fd(completion);
+            _ = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
+            assert(completion.epoll_registered);
+            completion.epoll_registered = false;
+
+            switch (completion.operation) {
+                .accept => self.process_accept(completion),
+                .recv => self.process_recv(completion),
+                .send => self.process_send(completion),
+                .connect => self.process_connect(completion),
+                .eventfd_read => self.process_eventfd_read(completion),
+                else => unreachable,
+            }
         }
     }
 
@@ -950,60 +961,47 @@ pub const IO = struct {
     }
 
     /// Fire all user timeout() completions whose expiry has passed.
-    fn fire_expired_timeouts(self: *IO) void {
-        const now = self.time.monotonic();
-
+    fn timer_fire(self: *IO, now: stdx.Instant) void {
         while (self.timeouts.tail) |completion| {
+            assert(completion.in_timeouts);
+            assert(completion.in_awaiting);
+
             if (completion.timeout_expiry.?.ns > now.ns) break;
+            assert(completion.timeout_expiry.?.ns <= now.ns);
 
             self.timeouts.remove(completion);
             completion.in_timeouts = false;
-
-            assert(completion.in_awaiting);
             completion.in_awaiting = false;
-
             completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
             self.completed.push(completion);
         }
-
-        if (self.timeouts.tail) |next| {
-            assert(next.timeout_expiry.?.ns > now.ns);
-            self.timerfd_arm(next.timeout_expiry.?, now);
-        } else {
-            self.timerfd_disarm();
-        }
     }
 
-    fn timerfd_drain(self: *IO) void {
+    fn timer_drain(self: *IO) void {
         assert(self.timer_fd >= 0);
-        assert(self.epoll_fd >= 0);
 
-        while (true) {
-            var expirations: u64 = undefined;
-            const return_code = linux.read(
-                self.timer_fd,
-                @ptrCast(&expirations),
-                @sizeOf(u64),
-            );
+        var expiration_count: u64 = undefined;
+        const return_code = linux.read(self.timer_fd, @ptrCast(&expiration_count), @sizeOf(u64));
 
-            switch (linux.E.init(return_code)) {
-                .SUCCESS => {
-                    assert(return_code == @sizeOf(u64));
-                    self.timer_expiry = null;
-                    continue;
-                },
-                .INTR => continue,
-                .AGAIN => return,
-                else => |err| {
-                    log.err("timerfd read failed: {}", .{err});
-                    return;
-                },
-            }
+        switch (linux.E.init(return_code)) {
+            .SUCCESS => {
+                assert(return_code == @sizeOf(u64));
+                assert(expiration_count == 1);
+                self.timer_expiry = null;
+            },
+            // Epoll will report this again on the next epoll_wait().
+            .INTR => {},
+            // Spurious wakeup; ignore.
+            .AGAIN => {},
+            else => |err| {
+                // TODO Is it okay to panic here? Or, should we tear down the timerfd?
+                std.debug.panic("timer_drain unexpected error: {}", .{err});
+            },
         }
     }
 
-    fn timerfd_arm(self: *IO, expiry: stdx.Instant, now: stdx.Instant) void {
-        assert(now.ns < expiry.ns);
+    fn timer_arm(self: *IO, expiry: stdx.Instant) void {
+        assert(self.timer_fd >= 0);
 
         if (self.timer_expiry) |timer_expiry| {
             assert(timer_expiry.ns <= expiry.ns);
@@ -1011,31 +1009,32 @@ pub const IO = struct {
         }
         maybe(self.timer_expiry != null);
 
-        const expiry_relative = now.elapsed(expiry);
-        // A duration of 0 would disarm the timer instead.
-        assert(expiry_relative.ns > 0);
-
         const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
             .it_value = .{
-                .sec = @intCast(expiry_relative.ns / std.time.ns_per_s),
-                .nsec = @intCast(expiry_relative.ns % std.time.ns_per_s),
+                .sec = @intCast(expiry.ns / std.time.ns_per_s),
+                .nsec = @intCast(expiry.ns % std.time.ns_per_s),
             },
         };
+        // A duration of 0 would disarm the timer instead.
+        assert(spec.it_value.sec != 0 or spec.it_value.nsec != 0);
 
-        switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
-            .SUCCESS => {
-                self.timer_expiry = expiry;
-            },
-            else => |err| log.err("timerfd_arm failed: {}", .{err}),
+        switch (linux.E.init(linux.timerfd_settime(
+            self.timer_fd,
+            .{ .ABSTIME = true },
+            &spec,
+            null,
+        ))) {
+            .SUCCESS => self.timer_expiry = expiry,
+            else => |err| log.err("timer_arm failed: {}", .{err}),
         }
     }
 
-    fn timerfd_disarm(self: *IO) void {
+    fn timer_disarm(self: *IO) void {
         assert(self.timer_fd != INVALID_FILE);
+        assert(self.timer_fd >= 0);
+        assert(self.timer_expiry == null); // (Timer was already cleared.)
         assert(self.timeouts.tail == null);
-
-        if (self.timer_expiry == null) return;
 
         const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
@@ -1043,10 +1042,8 @@ pub const IO = struct {
         };
 
         switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
-            .SUCCESS => {
-                self.timer_expiry = null;
-            },
-            else => |err| log.err("timerfd_disarm failed: {}", .{err}),
+            .SUCCESS => {},
+            else => |err| log.err("timer_disarm failed: {}", .{err}),
         }
     }
 
