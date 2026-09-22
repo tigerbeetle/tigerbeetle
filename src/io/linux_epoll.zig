@@ -25,7 +25,7 @@ pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
     timer_expiry: ?stdx.Instant = null,
-    timeouts: DoublyLinkedListType(Completion, .timeout_back, .timeout_next)= .{},
+    timeouts: DoublyLinkedListType(Completion, .timeout_back, .timeout_next) = .{},
 
     /// Completions that are ready to have their callbacks run.
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
@@ -120,7 +120,8 @@ pub const IO = struct {
     /// Run all queued completion callbacks.
     fn run_callbacks(self: *IO) void {
         while (self.completed.pop()) |completion| {
-            completion.in_awaiting = false;
+            assert(!completion.in_awaiting);
+
             completion.complete();
         }
     }
@@ -397,6 +398,8 @@ pub const IO = struct {
             error.Unexpected => return error.Unexpected,
         };
         assert(event_fd != INVALID_EVENT);
+        errdefer std.os.close(event_fd);
+
         return event_fd;
     }
 
@@ -407,6 +410,7 @@ pub const IO = struct {
         comptime on_event: fn (*Completion) void,
     ) void {
         assert(event != INVALID_EVENT);
+
         const Context = struct {
             fn on_read(
                 _: *Completion,
@@ -514,6 +518,8 @@ pub const IO = struct {
     pub const INVALID_FILE: fd_t = -1;
 
     fn enqueue(self: *IO, completion: *Completion) void {
+        assert(!completion.in_awaiting);
+
         switch (completion.operation) {
             .accept => self.enqueue_accept(completion),
             .close => self.enqueue_close(completion),
@@ -526,6 +532,8 @@ pub const IO = struct {
     }
 
     fn enqueue_accept(self: *IO, completion: *Completion) void {
+        assert(!completion.in_awaiting);
+
         const operation = &completion.operation.accept;
         while (true) {
             const return_code = linux.accept4(
@@ -561,10 +569,10 @@ pub const IO = struct {
         const operation = completion.operation.close;
         const return_code = linux.close(operation.fd);
         // EINTR on close on Linux means the fd was closed; treat as success.
-        switch (linux.E.init(return_code)) {
-            .SUCCESS, .INTR => completion.result = 0,
-            else => |err| completion.result = -@as(i32, @intFromEnum(err)),
-        }
+        completion.result = switch (linux.E.init(return_code)) {
+            .SUCCESS, .INTR => 0,
+            else => |err| -@as(i32, @intFromEnum(err)),
+        };
         self.completed.push(completion);
     }
 
@@ -595,6 +603,8 @@ pub const IO = struct {
     }
 
     fn enqueue_eventfd_read(self: *IO, completion: *Completion) void {
+        assert(!completion.in_awaiting);
+
         const operation = completion.operation.eventfd_read;
         while (true) {
             const return_code = linux.read(
@@ -623,6 +633,8 @@ pub const IO = struct {
     }
 
     fn enqueue_recv(self: *IO, completion: *Completion) void {
+        assert(!completion.in_awaiting);
+
         const operation = completion.operation.recv;
         while (true) {
             const return_code = linux.recvfrom(
@@ -654,6 +666,8 @@ pub const IO = struct {
     }
 
     fn enqueue_send(self: *IO, completion: *Completion) void {
+        assert(!completion.in_awaiting);
+
         const operation = completion.operation.send;
         while (true) {
             const return_code = linux.sendto(
@@ -686,6 +700,8 @@ pub const IO = struct {
 
     fn enqueue_timeout(self: *IO, completion: *Completion) void {
         assert(completion.timeout_expiry == null);
+        assert(!completion.in_timeouts);
+        assert(!completion.in_awaiting);
 
         const timeout_duration = completion.operation.timeout;
         if (timeout_duration.ns == 0) {
@@ -718,15 +734,15 @@ pub const IO = struct {
             .data = .{ .ptr = @intFromPtr(completion) },
         };
         switch (linux.E.init(linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_ADD, fd, &event))) {
-            .SUCCESS => {},
+            .SUCCESS => {
+                completion.epoll_registered = true;
+                completion.in_awaiting = true;
+            },
             else => |err| {
                 completion.result = -@as(i32, @intFromEnum(err));
                 self.completed.push(completion);
-                return;
             },
         }
-        completion.epoll_registered = true;
-        completion.in_awaiting = true;
     }
 
     /// Re-register a completion with epoll (used after spurious EAGAIN on epoll wakeup).
@@ -745,6 +761,7 @@ pub const IO = struct {
             },
             else => |err| {
                 completion.result = -@as(i32, @intFromEnum(err));
+                completion.in_awaiting = false;
                 self.completed.push(completion);
             },
         }
@@ -752,19 +769,22 @@ pub const IO = struct {
 
     /// Wait up to `timeout_ms` milliseconds for epoll events and process them.
     fn poll_epoll(self: *IO, timeout_ms: i32) !void {
+        // -1 would indicate that we wait indefinitely.
+        assert(timeout_ms != -1);
+        assert(timeout_ms >= 0);
+        // FIXME registered? in_awaiting?
+
         var events: [256]linux.epoll_event = undefined;
         const wait_result = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
         switch (linux.E.init(wait_result)) {
             .SUCCESS => {
-                const events_ready = wait_result;
-                for (events[0..events_ready]) |event| {
+                const events_ready_count = wait_result;
+                for (events[0..events_ready_count]) |event| {
                     self.process_epoll_event(event);
                 }
-                return;
             },
-            // Signal interrupted the wait; return and let the caller retry.
-            // FIXME is this the right approach, or should we retry in a loop?
-            .INTR => return,
+            // Signal interrupted the wait; ignore and let the caller retry.
+            .INTR => {},
             else => |err| return stdx.unexpected_errno("epoll_wait", err),
         }
     }
@@ -806,6 +826,9 @@ pub const IO = struct {
     }
 
     fn process_accept(self: *IO, completion: *Completion) void {
+        assert(completion.in_awaiting);
+        assert(!completion.epoll_registered);
+
         const operation = &completion.operation.accept;
         while (true) {
             const return_code = linux.accept4(
@@ -821,8 +844,8 @@ pub const IO = struct {
                     return;
                 },
                 .INTR => continue,
-                // Spurious wakeup: re-register with epoll.
                 .AGAIN => {
+                    // Spurious wakeup: re-register with epoll.
                     self.epoll_reregister(completion, operation.socket, linux.EPOLL.IN);
                     return;
                 },
@@ -836,6 +859,9 @@ pub const IO = struct {
     }
 
     fn process_eventfd_read(self: *IO, completion: *Completion) void {
+        assert(completion.in_awaiting);
+        assert(!completion.epoll_registered);
+
         const operation = completion.operation.eventfd_read;
         while (true) {
             const return_code = linux.read(
@@ -846,6 +872,7 @@ pub const IO = struct {
             switch (linux.E.init(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
+                    completion.in_awaiting = false;
                     self.completed.push(completion);
                     return;
                 },
@@ -864,6 +891,9 @@ pub const IO = struct {
     }
 
     fn process_recv(self: *IO, completion: *Completion) void {
+        assert(completion.in_awaiting);
+        assert(!completion.epoll_registered);
+
         const operation = completion.operation.recv;
         while (true) {
             const return_code = linux.recvfrom(
@@ -877,6 +907,7 @@ pub const IO = struct {
             switch (linux.E.init(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
+                    completion.in_awaiting = false;
                     self.completed.push(completion);
                     return;
                 },
@@ -887,6 +918,7 @@ pub const IO = struct {
                 },
                 else => |err| {
                     completion.result = -@as(i32, @intFromEnum(err));
+                    completion.in_awaiting = false;
                     self.completed.push(completion);
                     return;
                 },
@@ -895,6 +927,9 @@ pub const IO = struct {
     }
 
     fn process_send(self: *IO, completion: *Completion) void {
+        assert(completion.in_awaiting);
+        assert(!completion.epoll_registered);
+
         const operation = completion.operation.send;
         while (true) {
             const return_code = linux.sendto(
@@ -908,6 +943,7 @@ pub const IO = struct {
             switch (linux.E.init(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
+                    completion.in_awaiting = false;
                     self.completed.push(completion);
                     return;
                 },
@@ -918,6 +954,7 @@ pub const IO = struct {
                 },
                 else => |err| {
                     completion.result = -@as(i32, @intFromEnum(err));
+                    completion.in_awaiting = false;
                     self.completed.push(completion);
                     return;
                 },
@@ -926,6 +963,7 @@ pub const IO = struct {
     }
 
     fn process_connect(self: *IO, completion: *Completion) void {
+        assert(completion.in_awaiting);
         assert(!completion.epoll_registered);
 
         const operation = completion.operation.connect;
@@ -944,20 +982,20 @@ pub const IO = struct {
         assert(so_error_len == @sizeOf(c_int));
 
         switch (linux.E.init(return_code)) {
-            .SUCCESS => {},
+            .SUCCESS => {
+                completion.result = -@as(i32, @intCast(so_error));
+                completion.in_awaiting = false;
+                self.completed.push(completion);
+            },
             .INTR => {
                 self.epoll_reregister(completion, operation.socket, linux.EPOLL.OUT);
-                return;
             },
             else => |err| {
                 completion.result = -@as(i32, @intFromEnum(err));
+                completion.in_awaiting = false;
                 self.completed.push(completion);
-                return;
             },
         }
-
-        completion.result = -@as(i32, @intCast(so_error));
-        self.completed.push(completion);
     }
 
     /// Fire all user timeout() completions whose expiry has passed.
@@ -1050,6 +1088,7 @@ pub const IO = struct {
     fn timeout_insert_sorted(self: *IO, completion: *Completion) void {
         assert(completion.operation == .timeout);
         assert(completion.in_timeouts);
+        assert(completion.in_awaiting);
         assert(completion.timeout_back == null);
         assert(completion.timeout_next == null);
 
@@ -1100,11 +1139,12 @@ pub const IO = struct {
     fn operation_fd(completion: *Completion) posix.fd_t {
         return switch (completion.operation) {
             .accept => |operation| operation.socket,
-            .recv => |operation| operation.socket,
-            .send => |operation| operation.socket,
+            .close => unreachable,
             .connect => |operation| operation.socket,
             .eventfd_read => |operation| operation.fd,
-            else => unreachable,
+            .recv => |operation| operation.socket,
+            .send => |operation| operation.socket,
+            .timeout => unreachable,
         };
     }
 
