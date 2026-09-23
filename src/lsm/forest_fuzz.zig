@@ -60,7 +60,6 @@ const GrooveTransfers = @FieldType(
     @FieldType(Forest, "grooves"),
     "transfers",
 );
-const ObjectTable = GrooveTransfers.ObjectTree.Table;
 const UniqueKey = GrooveTransfers.UniqueKey;
 
 const ScanParams = struct {
@@ -698,13 +697,16 @@ const Environment = struct {
                 while (index < model.log.readableLength()) : (index += 1) {
                     const entry = model.log.peekItem(index);
                     const id = entry.id;
-                    _ = try env.check_lookup(.{ .id = id }, snapshot, model.transfers_stashed.get(id));
+                    _ = try env.check_lookup(
+                        .{ .id = id },
+                        snapshot,
+                        model.transfers_stashed.get(id),
+                    );
 
                     if (index % groove_stash_value_count_max == 0) {
                         env.forest.grooves.transfers.objects_cache.compact();
                     }
                 }
-
                 // Here we check that we have not lost objects that should be in the checkpoint.
                 var iterator = model.transfers_stashed.valueIterator();
                 while (iterator.next()) |transfer| : (index += 1) {
