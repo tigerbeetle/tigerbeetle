@@ -360,6 +360,18 @@ const Environment = struct {
         };
     }
 
+    fn check_lookup(
+        env: *Environment,
+        key: UniqueKey,
+        snapshot: u64,
+        expected: ?tb.Transfer,
+    ) !?tb.Transfer {
+        try env.prefetch(key, snapshot);
+        const actual = env.get(key);
+        try std.testing.expectEqualDeep(expected, actual);
+        return actual;
+    }
+
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveTransfers.IndexTrees)) type {
         const Tree = @FieldType(GrooveTransfers.IndexTrees, @tagName(index));
         const Value = Tree.Table.Value;
@@ -467,129 +479,97 @@ const Environment = struct {
         }
     }
 
-    // The forest should behave like a simple key-value data-structure.
+    // The forest should behave like a simple persistent key-value data structure.
+    //
+    // The model consists of three core data structures:
+    // 1. transfers_mutable: contains all transfers in their current state.
+    // 2. transfers_stashed: contains transfers stashed during checkpointing.
+    // 3. log: records updates not yet covered by a checkpoint, since each checkpoint
+    // persists only a prefix of the log.
+    //
+    // The goal is to keep the model independent of our the LSM / forest.
     const Model = struct {
-        const ObjectsMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
-        const UniqueKeysMap = std.hash_map.AutoHashMap(UniqueKey, u128);
-        const LogEntry = struct { op: u64, transfer: tb.Transfer };
+        const ObjectMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
+        const Operation = union(enum) { put: tb.Transfer, remove };
+        const LogEntry = struct { op: u64, id: u128, operation: Operation };
         const Log = std.fifo.LinearFifo(LogEntry, .Dynamic);
 
-        // Represents persistent state:
-        checkpointed: struct {
-            objects: ObjectsMap,
-            unique_keys: UniqueKeysMap,
-        },
-
-        // Represents in-memory state:
+        transfers_mutable: ObjectMap,
+        transfers_stashed: ObjectMap,
         log: Log,
 
         pub fn init(gpa: std.mem.Allocator) Model {
             return .{
-                .checkpointed = .{
-                    .objects = ObjectsMap.init(gpa),
-                    .unique_keys = UniqueKeysMap.init(gpa),
-                },
+                .transfers_mutable = ObjectMap.init(gpa),
+                .transfers_stashed = ObjectMap.init(gpa),
                 .log = Log.init(gpa),
             };
         }
 
         pub fn deinit(model: *Model) void {
-            model.checkpointed.objects.deinit();
-            model.checkpointed.unique_keys.deinit();
+            model.transfers_mutable.deinit();
+            model.transfers_stashed.deinit();
             model.log.deinit();
         }
 
         pub fn put(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
-            try model.log.writeItem(.{ .op = op, .transfer = transfer.* });
+            try model.mutate(.{ .op = op, .id = transfer.id, .operation = .{ .put = transfer.* } });
         }
 
-        pub fn remove(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
-            var tombstone_object: tb.Transfer = ObjectTable.tombstone_from_key(transfer.timestamp);
-            tombstone_object.id = transfer.id;
-            tombstone_object.pending_id = transfer.pending_id;
-            try model.log.writeItem(.{
-                .op = op,
-                .transfer = tombstone_object,
-            });
+        pub fn remove(model: *Model, id: u128, op: u64) !void {
+            try model.mutate(.{ .op = op, .id = id, .operation = .remove });
+        }
+
+        fn mutate(model: *Model, entry: LogEntry) !void {
+            const log_count = model.log.readableLength();
+            if (log_count > 0) assert(model.log.peekItem(log_count - 1).op <= entry.op);
+
+            try model.log.writeItem(entry);
+            try apply_entry(&model.transfers_mutable, entry);
+        }
+
+        fn apply_entry(objects: *ObjectMap, entry: LogEntry) !void {
+            switch (entry.operation) {
+                .put => |transfer| {
+                    assert(transfer.id == entry.id);
+                    try objects.put(transfer.id, transfer);
+                },
+                .remove => assert(objects.remove(entry.id)),
+            }
         }
 
         pub fn get(model: *const Model, key: UniqueKey) ?tb.Transfer {
-            return switch (model.get_object_from_log(key)) {
-                .found => |object| object,
-                .tombstone => null,
-                .not_found => switch (key) {
-                    .id => model.checkpointed.objects.get(key.id),
-                    else => object: {
-                        const id = model.checkpointed.unique_keys.get(key) orelse
-                            break :object null;
-
-                        break :object model.checkpointed.objects.get(id);
-                    },
+            switch (key) {
+                .id => |id| return model.transfers_mutable.get(id),
+                .timestamp => |timestamp| {
+                    // A linear search avoids maintaining a second index in the model.
+                    var iterator = model.transfers_mutable.valueIterator();
+                    while (iterator.next()) |transfer| {
+                        if (transfer.timestamp == timestamp) return transfer.*;
+                    }
+                    return null;
                 },
-            };
-        }
-
-        fn get_object_from_log(
-            model: *const Model,
-            key: UniqueKey,
-        ) union(enum) {
-            found: tb.Transfer,
-            not_found,
-            tombstone,
-        } {
-            var latest_op: ?u64 = null;
-            const log_size = model.log.readableLength();
-            var log_left = log_size;
-            while (log_left > 0) : (log_left -= 1) {
-                const entry = model.log.peekItem(log_left - 1); // most recent first
-                if (latest_op == null) {
-                    latest_op = entry.op;
-                }
-
-                assert(latest_op.? >= entry.op);
-
-                if (switch (key) {
-                    .id => |id| entry.transfer.id == id,
-                    .timestamp => |timestamp| ObjectTable.key_from_value(
-                        &entry.transfer,
-                    ) == timestamp,
-                }) {
-                    if (ObjectTable.tombstone(&entry.transfer)) return .tombstone;
-                    return .{ .found = entry.transfer };
-                }
             }
-            return .not_found;
         }
 
         pub fn checkpoint(model: *Model, op: u64) !void {
             const checkpointable = op - (op % constants.lsm_compaction_ops) -| 1;
-            const log_size = model.log.readableLength();
+
             var log_index: usize = 0;
-            while (log_index < log_size) : (log_index += 1) {
+            while (log_index < model.log.readableLength()) : (log_index += 1) {
                 const entry = model.log.peekItem(log_index);
                 if (entry.op > checkpointable) {
                     break;
                 }
-                if (ObjectTable.tombstone(&entry.transfer)) {
-                    const removed = model.checkpointed.objects.remove(entry.transfer.id);
-                    assert(removed);
-
-                    assert(model.checkpointed.unique_keys.remove(.{
-                        .timestamp = ObjectTable.key_from_value(&entry.transfer),
-                    }));
-                    continue;
-                }
-
-                try model.checkpointed.objects.put(entry.transfer.id, entry.transfer);
-                try model.checkpointed.unique_keys.put(
-                    .{ .timestamp = entry.transfer.timestamp },
-                    entry.transfer.id,
-                );
+                try apply_entry(&model.transfers_stashed, entry);
             }
+
             model.log.discard(log_index);
         }
 
-        pub fn storage_reset(model: *Model) void {
+        pub fn storage_reset(model: *Model) !void {
+            model.transfers_mutable.deinit();
+            model.transfers_mutable = try model.transfers_stashed.clone();
             model.log.discard(model.log.readableLength());
         }
     };
@@ -609,11 +589,7 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = brk: {
-                const object_count = model.log.readableLength() +
-                    model.checkpointed.objects.count();
-                break :brk object_count * @sizeOf(tb.Transfer);
-            };
+            const model_size = model.transfers_mutable.count() * @sizeOf(tb.Transfer);
             // NOTE: This isn't accurate anymore because the model can contain multiple copies of
             // an object in the log
             log.debug("space_amplification ~= {d:.2}", .{
@@ -658,48 +634,29 @@ const Environment = struct {
 
                 try env.open(gpa);
 
-                // TODO: currently this checks that everything added to the LSM after checkpoint
-                // resets to the last checkpoint on crash by looking through what's been added
-                // afterwards. This won't work if we add account removal to the fuzzer though.
+                // Every ID changed after the checkpoint must return to its checkpointed state,
+                // including IDs that should no longer exist after recovery.
                 const snapshot = blk: {
                     if (vsr.Checkpoint.trigger_for_checkpoint(
                         env.superblock.working.vsr_state.checkpoint.header.op,
                     )) |trigger| {
                         break :blk trigger + 1;
-                    } else {
-                        break :blk 0;
-                    }
+                    } else break :blk 0;
                 };
-                const log_size = model.log.readableLength();
-                var log_index: usize = 0;
-                while (log_index < log_size) : (log_index += 1) {
-                    const entry = model.log.peekItem(log_index);
-                    const id = entry.transfer.id;
-                    if (model.checkpointed.objects.get(id)) |*checkpointed_object| {
-                        try env.prefetch(.{ .id = id }, snapshot);
-                        if (env.get(.{ .id = id })) |lsm_object| {
-                            assert(stdx.equal_bytes(tb.Transfer, &lsm_object, checkpointed_object));
-                        } else {
-                            std.debug.panic(
-                                "Object checkpointed but not in lsm after crash.\n {}\n",
-                                .{checkpointed_object},
-                            );
-                        }
+                for (0..model.log.readableLength()) |index| {
+                    const entry = model.log.peekItem(index);
+                    const id = entry.id;
+                    _ = try env.check_lookup(.{ .id = id }, snapshot, model.transfers_stashed.get(id));
 
-                        // There are strict limits around how many values can be prefetched by one
-                        // commit, see `stash_value_count_max` in groove.zig. Thus, we need to make
-                        // sure we manually call groove.objects_cache.compact() every
-                        // `stash_value_count_max` operations here.
-                        // This is specific to this fuzzing code.
-                        const groove_stash_value_count_max = env.forest.grooves
-                            .transfers.objects_cache.options.stash_value_count_max;
+                    // Recovery checks can prefetch more objects than a single commit's stash.
+                    const groove_stash_value_count_max = env.forest.grooves
+                        .transfers.objects_cache.options.stash_value_count_max;
 
-                        if (log_index % groove_stash_value_count_max == 0) {
-                            env.forest.grooves.transfers.objects_cache.compact();
-                        }
+                    if (index % groove_stash_value_count_max == 0) {
+                        env.forest.grooves.transfers.objects_cache.compact();
                     }
                 }
-                model.storage_reset();
+                try model.storage_reset();
             },
         }
     }
@@ -732,58 +689,34 @@ const Environment = struct {
                 // The forest requires prefetch before put.
                 assert(object.id != 0);
 
-                try env.prefetch(.{ .id = object.id }, snapshot);
-                const lsm_object = env.get(.{ .id = object.id });
+                const key: UniqueKey = .{ .id = object.id };
+                const lsm_object = try env.check_lookup(key, snapshot, model.get(key));
 
                 env.put(&object, lsm_object);
                 try model.put(&object, fuzz_op.op);
             },
             .remove => |id| {
-                try env.prefetch(.{ .id = id }, snapshot);
-                const lsm_object = env.get(.{ .id = id });
-
-                const model_object = model.get(.{ .id = id });
-                if (model_object == null) {
-                    // The non-checkpointed object
-                    // might have been be lost on `crash_after_ticks`.
-                    assert(lsm_object == null);
-                } else {
-                    assert(lsm_object != null);
-                    assert(stdx.equal_bytes(tb.Transfer, &model_object.?, &lsm_object.?));
-
-                    env.remove(&lsm_object.?);
-                    try model.remove(&lsm_object.?, fuzz_op.op);
+                const key: UniqueKey = .{ .id = id };
+                if (try env.check_lookup(key, snapshot, model.get(key))) |object| {
+                    env.remove(&object);
+                    try model.remove(id, fuzz_op.op);
                 }
             },
             inline .get_by_id,
             .get_by_timestamp,
             => |key, action| {
-                // Get object from lsm.
-                try env.prefetch(key, snapshot);
-                const lsm_object = lsm_object: {
-                    switch (action) {
-                        .get_by_id => {
-                            assert(key == .id);
-                            assert(key.id != 0);
-                            break :lsm_object env.get(key);
-                        },
-                        .get_by_timestamp => {
-                            assert(key == .timestamp);
-                            assert(TimestampRange.valid(key.timestamp));
-                            break :lsm_object env.get(key);
-                        },
-                        else => comptime unreachable,
-                    }
-                };
-
-                // Compare result to model.
-                const model_object = model.get(key);
-                if (model_object == null) {
-                    assert(lsm_object == null);
-                } else {
-                    assert(lsm_object != null);
-                    assert(stdx.equal_bytes(tb.Transfer, &model_object.?, &lsm_object.?));
+                switch (action) {
+                    .get_by_id => {
+                        assert(key == .id);
+                        assert(key.id != 0);
+                    },
+                    .get_by_timestamp => {
+                        assert(key == .timestamp);
+                        assert(TimestampRange.valid(key.timestamp));
+                    },
+                    else => comptime unreachable,
                 }
+                _ = try env.check_lookup(key, snapshot, model.get(key));
             },
             .scan => |params| {
                 const results = try env.scan(params, snapshot);
