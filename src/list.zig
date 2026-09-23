@@ -5,7 +5,6 @@ const constants = @import("constants.zig");
 const stdx = @import("stdx");
 
 /// An intrusive doubly-linked list.
-/// Currently it is LIFO for simplicity because its consumer (IO.awaiting) doesn't care about order.
 pub fn DoublyLinkedListType(
     comptime Node: type,
     comptime field_back_enum: std.meta.FieldEnum(Node),
@@ -109,6 +108,31 @@ pub fn DoublyLinkedListType(
             }
         }
 
+        /// Insert node_b into the list immediately following node_a.
+        pub fn insert_after(list: *DoublyLinkedList, node_a: *Node, node_b: *Node) void {
+            assert(@field(node_b, field_back) == null);
+            assert(@field(node_b, field_next) == null);
+            assert(node_a != node_b);
+
+            if (constants.verify) {
+                assert(list.contains(node_a));
+                assert(!list.contains(node_b));
+                list.verify();
+            }
+
+            if (@field(node_a, field_next)) |node_c| {
+                @field(node_b, field_next) = node_c;
+                @field(node_c, field_back) = node_b;
+            } else {
+                assert(list.tail == node_a);
+                list.tail = node_b;
+            }
+
+            @field(node_b, field_back) = node_a;
+            @field(node_a, field_next) = node_b;
+            list.count += 1;
+        }
+
         pub fn remove(list: *DoublyLinkedList, node: *Node) void {
             if (constants.verify) assert(list.contains(node));
             if (constants.verify) list.verify();
@@ -172,8 +196,13 @@ test "DoublyLinkedList fuzz" {
     const nodes_count = 1024;
     const events_max = 1 << 15;
 
-    const Event = enum { push, pop, remove };
-    const event_weights: stdx.PRNG.EnumWeightsType(Event) = .{ .push = 10, .pop = 1, .remove = 8 };
+    const Event = enum { push, pop, insert_after, remove };
+    const event_weights: stdx.PRNG.EnumWeightsType(Event) = .{
+        .push = 10,
+        .pop = 1,
+        .insert_after = 5,
+        .remove = 8,
+    };
 
     const nodes = try allocator.alloc(Node, nodes_count);
     defer allocator.free(nodes);
@@ -216,6 +245,20 @@ test "DoublyLinkedList fuzz" {
                     assert(nodes_free.count() == nodes_count);
                     assert(list_model.empty());
                 }
+            },
+            .insert_after => {
+                if (list_model.count() == 0) continue;
+
+                const node_free = nodes_free.findFirstSet() orelse continue;
+                const node = &nodes[node_free];
+
+                const list_index = prng.index(list_model.slice());
+                const target_id = list_model.get(list_index);
+                list_model.insert_at(list_index + 1, node.id);
+                list.insert_after(&nodes[target_id], node);
+
+                assert(nodes_free.isSet(node.id));
+                nodes_free.unset(node.id);
             },
             .remove => {
                 if (list_model.count() == 0) continue;
