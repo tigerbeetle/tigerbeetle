@@ -104,12 +104,6 @@ Reformat the code according to style:
 ./zig/zig fmt .
 ```
 
-Run lint checks:
-
-```
-./zig/zig build test -- tidy
-```
-
 Run macro benchmark:
 
 ```
