@@ -1021,6 +1021,7 @@ pub const HttpOptions = struct {
         basic: struct { username: []const u8, password: []const u8 },
         raw: []const u8,
     } = null,
+    extra_headers: ?[]const std.http.Header = null,
 
     response_body_size_max: u32 = 512 * stdx.KiB,
     expected_response_code: std.http.Status = .ok,
@@ -1038,6 +1039,15 @@ pub fn http_post(
     options: HttpOptions,
 ) ![]const u8 {
     return shell.http_request(.{ .post = body }, url, options);
+}
+
+pub fn http_put(
+    shell: *Shell,
+    url: []const u8,
+    body: []const u8,
+    options: HttpOptions,
+) ![]const u8 {
+    return shell.http_request(.{ .put = body }, url, options);
 }
 
 pub fn http_post_multipart(
@@ -1094,7 +1104,7 @@ pub fn http_post_multipart(
 /// If the response is not 200 OK, the response body is logged and an error is returned.
 fn http_request(
     shell: *Shell,
-    method: union(enum) { get, post: []const u8 },
+    method: union(enum) { get, post: []const u8, put: []const u8 },
     url: []const u8,
     options: HttpOptions,
 ) ![]const u8 {
@@ -1110,8 +1120,9 @@ fn http_request(
     var header_buffer: [4 * stdx.KiB]u8 = undefined;
     var request = try client.open(
         switch (method) {
-            .post => .POST,
             .get => .GET,
+            .post => .POST,
+            .put => .PUT,
         },
         uri,
         .{ .server_header_buffer = &header_buffer },
@@ -1142,14 +1153,25 @@ fn http_request(
         }
     }
 
-    if (method == .post) {
-        request.transfer_encoding = .{ .content_length = method.post.len };
+    if (options.extra_headers) |extra_headers| {
+        request.extra_headers = extra_headers;
+    }
+
+    switch (method) {
+        .get => {},
+        .post, .put => |payload| {
+            request.transfer_encoding = .{ .content_length = payload.len };
+        },
     }
 
     try request.send();
-    if (method == .post) {
-        try request.writeAll(method.post);
+    switch (method) {
+        .get => {},
+        .post, .put => |payload| {
+            try request.writeAll(payload);
+        },
     }
+
     try request.finish();
     try request.wait();
 
