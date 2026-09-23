@@ -15,7 +15,7 @@ const Message = MessagePool.Message;
 const IO = @import("io.zig").IO;
 
 const AOF = @import("../aof.zig").AOFType(IO);
-const TimeSim = @import("time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Multiversion = vsr.multiversion.Multiversion;
 const IdPermutation = @import("id.zig").IdPermutation;
 

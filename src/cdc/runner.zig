@@ -8,7 +8,7 @@ const maybe = vsr.stdx.maybe;
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const IO = vsr.io.IO;
-const Time = vsr.time.Time;
+const Time = stdx.Time;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusType(IO);
 const Operation = vsr.tigerbeetle.Operation;
@@ -987,10 +987,10 @@ pub const RateLimit = struct {
     };
 
     count: u32,
-    timer: vsr.time.Timer,
+    timer: stdx.Timer,
     options: Options,
 
-    pub fn init(time: vsr.time.Time, options: Options) RateLimit {
+    pub fn init(time: stdx.Time, options: Options) RateLimit {
         assert(options.limit > 0);
         assert(options.period.ns > 0);
 
@@ -1043,7 +1043,7 @@ pub const RateLimit = struct {
 /// though the current method of shipping the metrics is a temporary solution.
 const Metrics = struct {
     const TimingSummary = struct {
-        timer: vsr.time.Timer,
+        timer: stdx.Timer,
 
         duration_min: ?stdx.Duration = null,
         duration_max: ?stdx.Duration = null,

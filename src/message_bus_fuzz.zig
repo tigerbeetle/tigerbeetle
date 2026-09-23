@@ -24,7 +24,7 @@ const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
-const TimeOS = vsr.time.TimeOS;
+const TimeOS = stdx.TimeOS;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const messages_max = args.events_max orelse 200;

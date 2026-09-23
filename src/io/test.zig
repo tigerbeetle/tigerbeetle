@@ -10,8 +10,8 @@ const MiB = stdx.MiB;
 const Instant = stdx.Instant;
 const Duration = stdx.Duration;
 
-const TimeOS = @import("../time.zig").TimeOS;
-const Time = @import("../time.zig").Time;
+const TimeOS = stdx.TimeOS;
+const Time = stdx.Time;
 const IO = @import("../io.zig").IO;
 
 pub const tcp_options: IO.TCPOptions = .{

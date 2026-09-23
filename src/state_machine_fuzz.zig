@@ -14,7 +14,7 @@ const StateMachineType = @import("./state_machine.zig").StateMachineType;
 const MultiBatchDecoder = @import("./vsr/multi_batch.zig").MultiBatchDecoder;
 const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
 
-const TimeSim = @import("testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("testing/storage.zig").Storage;
 const Tracer = Storage.Tracer;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;

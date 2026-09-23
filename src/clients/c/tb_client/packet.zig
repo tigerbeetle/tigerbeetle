@@ -208,7 +208,7 @@ pub const Packet = extern struct {
         options: struct {
             target: *Packet.Queue,
             batch_size_limit: u32,
-            time: vsr.time.Time,
+            time: stdx.Time,
         },
     ) Error!void {
         packet.assert_phase(.submitted);

@@ -22,7 +22,7 @@ const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
-const Time = @import("../time.zig").Time;
+const Time = stdx.Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;

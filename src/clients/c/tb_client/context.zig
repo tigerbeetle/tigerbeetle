@@ -14,7 +14,7 @@ const Header = vsr.Header;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 
 const IO = vsr.io.IO;
-const TimeOS = vsr.time.TimeOS;
+const TimeOS = stdx.TimeOS;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;

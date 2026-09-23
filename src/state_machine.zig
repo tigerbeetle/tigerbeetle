@@ -709,7 +709,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             compact: TimingSummary = .{},
             checkpoint: TimingSummary = .{},
 
-            timer: vsr.time.Timer,
+            timer: stdx.Timer,
 
             const TimingSummary = struct {
                 duration_min_us: ?u64 = null,
@@ -821,7 +821,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn init(
             self: *StateMachine,
             allocator: mem.Allocator,
-            time: vsr.time.Time,
+            time: stdx.Time, // Only for metrics.
             grid: *Grid,
             options: Options,
         ) !void {
