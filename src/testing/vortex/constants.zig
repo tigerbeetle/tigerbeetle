@@ -1,4 +1,4 @@
-const std = @import("std");
+const stdx = @import("stdx");
 const constants = @This();
 
 pub const vsr = @import("../../constants.zig");
@@ -18,8 +18,7 @@ pub const vortex = struct {
     //   replicas, and alternate stopping/starting the backups (such that there is always at least
     //   2/3 replicas running) then as far as Supervisor is concerned, that cluster should be making
     //   progress, even if neither replica is up long enough to catch up to the primary.
-    pub const liveness_requirement_seconds = 180;
-    pub const liveness_requirement_micros = liveness_requirement_seconds * std.time.us_per_s;
+    pub const liveness_requirement: stdx.Duration = .seconds(180);
 
     pub const replica_ports_actual = brk: {
         var ports: [constants.vsr.replicas_max]u16 = undefined;
