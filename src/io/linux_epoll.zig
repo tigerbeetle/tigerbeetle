@@ -25,6 +25,8 @@ pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
     timer_expiry: ?stdx.Instant = null,
+    /// Ordered by expiry.
+    /// Note that the *tail* of the list is the *soonest* timeout to expire.
     timeouts: DoublyLinkedListType(Completion, .timeout_back, .timeout_next) = .{},
 
     /// Completions that are ready to have their callbacks run.
@@ -1097,42 +1099,18 @@ pub const IO = struct {
         // - timeout_back walks toward later timeouts.
         // - timeout_next walks toward earlier timeouts.
 
-        var current = self.timeouts.tail;
-        while (current) |node| {
+        var timeout_iterator = self.timeouts.tail;
+        while (timeout_iterator) |node| : (timeout_iterator = node.timeout_back) {
             // Insert completion on the earlier side of node.
             if (completion.timeout_expiry.?.ns <= node.timeout_expiry.?.ns) {
-                completion.timeout_back = node;
-                completion.timeout_next = node.timeout_next;
-
-                if (node.timeout_next) |next| {
-                    next.timeout_back = completion;
-                }
-
-                node.timeout_next = completion;
-
-                if (self.timeouts.tail == node) {
-                    self.timeouts.tail = completion;
-                }
-
-                self.timeouts.count += 1;
+                self.timeouts.insert_after(node, completion);
                 return;
             }
-
-            current = node.timeout_back;
         }
 
         // completion is later than all existing timeouts.
         // Insert it at the far back of the list.
-        if (self.timeouts.tail) |tail| {
-            var latest = tail;
-            while (latest.timeout_back) |back| latest = back;
-
-            latest.timeout_back = completion;
-            completion.timeout_next = latest;
-            self.timeouts.count += 1;
-        } else {
-            self.timeouts.push(completion);
-        }
+        self.timeouts.push(completion);
     }
 
     /// Returns the fd for operations registered with epoll.
