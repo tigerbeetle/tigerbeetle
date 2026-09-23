@@ -688,19 +688,33 @@ const Environment = struct {
                         break :blk trigger + 1;
                     } else break :blk 0;
                 };
-                for (0..model.log.readableLength()) |index| {
+
+                // Recovery checks can prefetch more objects than a single commit's stash.
+                // So we need to call `compact` in the loops below.
+                const groove_stash_value_count_max = env.forest.grooves
+                    .transfers.objects_cache.options.stash_value_count_max;
+                var index: u32 = 0;
+
+                while (index < model.log.readableLength()) : (index += 1) {
                     const entry = model.log.peekItem(index);
                     const id = entry.id;
                     _ = try env.check_lookup(.{ .id = id }, snapshot, model.transfers_stashed.get(id));
-
-                    // Recovery checks can prefetch more objects than a single commit's stash.
-                    const groove_stash_value_count_max = env.forest.grooves
-                        .transfers.objects_cache.options.stash_value_count_max;
 
                     if (index % groove_stash_value_count_max == 0) {
                         env.forest.grooves.transfers.objects_cache.compact();
                     }
                 }
+
+                // Here we check that we have not lost objects that should be in the checkpoint.
+                var iterator = model.transfers_stashed.valueIterator();
+                while (iterator.next()) |transfer| : (index += 1) {
+                    _ = try env.check_lookup(.{ .id = transfer.id }, snapshot, transfer.*);
+                    if (index % groove_stash_value_count_max == 0) {
+                        env.forest.grooves.transfers.objects_cache.compact();
+                    }
+                }
+                // This is required to reset the stash again otherwise it can overflow.
+                env.forest.grooves.transfers.objects_cache.compact();
                 try model.storage_reset();
             },
         }
