@@ -384,7 +384,7 @@ fn run_cdc_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
-    var time_os: vsr.time.TimeOS = .{};
+    var time_os: stdx.TimeOS = .{};
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
         stdx.unique_u128(),
@@ -551,7 +551,7 @@ fn run_timeout_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
-    var time_os: vsr.time.TimeOS = .{};
+    var time_os: stdx.TimeOS = .{};
     const time = &time_os.time();
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
@@ -783,7 +783,7 @@ const VSRContext = struct {
     event_buffer: []tb.ChangeEvent,
     event_count: ?u32,
 
-    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
+    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: stdx.Time, port: u16) !void {
         self.io = try vsr.io.IO.init(32, 0);
         errdefer self.io.deinit();
 

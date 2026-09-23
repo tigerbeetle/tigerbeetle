@@ -7,7 +7,7 @@ const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
-const Time = vsr.time.Time;
+const Time = stdx.Time;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -84,7 +84,7 @@ pub fn ClientType(
 
         /// Measures the time elapsed between sending a request (in `raw_request`) and receiving the
         /// corresponding reply (in `on_reply`).
-        request_completion_timer: vsr.time.Timer,
+        request_completion_timer: stdx.Timer,
 
         /// The maximum body size for `command=request` messages.
         /// Set by the `register`'s reply.

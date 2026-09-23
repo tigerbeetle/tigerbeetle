@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const stdx = @import("stdx");
+const stdx = @import("./stdx.zig");
 
 const os = std.os;
 const posix = std.posix;
@@ -11,8 +11,6 @@ const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
-
-pub const TimeSim = @import("testing/time.zig").TimeSim;
 
 pub const Time = struct {
     context: *anyopaque,
@@ -43,6 +41,7 @@ pub const Time = struct {
     }
 };
 
+/// Real Time backed by the operating system.
 pub const TimeOS = struct {
     /// Hardware and/or software bugs can mean that the monotonic clock may regress.
     /// One example (of many): https://bugzilla.redhat.com/show_bug.cgi?id=448449
@@ -177,7 +176,7 @@ pub const TimeOS = struct {
     fn tick(_: *anyopaque) void {}
 };
 
-test "Time monotonic smoke" {
+test "TimeOS monotonic smoke" {
     var time_os: TimeOS = .{};
     const time = time_os.time();
     const instant_1 = time.monotonic();
@@ -186,8 +185,104 @@ test "Time monotonic smoke" {
     assert(instant_1.elapsed(instant_2).ns >= 0);
 }
 
+/// Simulated Time for testing.
+pub const TimeSim = struct {
+    /// The duration of a single tick in nanoseconds.
+    resolution: u64,
+
+    offset_type: OffsetType,
+
+    /// Co-efficients to scale the offset according to the `offset_type`.
+    /// Linear offset is described as A * x + B: A is the drift per tick and B the initial offset.
+    /// Periodic is described as A * sin(x * pi / B): A controls the amplitude and B the period in
+    /// terms of ticks.
+    /// Step function represents a discontinuous jump in the wall-clock time. B is the period in
+    /// which the jumps occur. A is the amplitude of the step.
+    /// Non-ideal is similar to periodic except the phase is adjusted using a random number taken
+    /// from a normal distribution with mean=0, stddev=10. Finally, a random offset (up to
+    /// offset_coefficient_C) is added to the result.
+    offset_coefficient_A: i64,
+    offset_coefficient_B: i64,
+    offset_coefficient_C: u32 = 0,
+
+    prng: stdx.PRNG = stdx.PRNG.from_seed(0),
+
+    /// The number of ticks elapsed since initialization.
+    ticks: u64 = 0,
+
+    /// The instant in time chosen as the origin of this time source.
+    epoch: i64 = 0,
+
+    pub const OffsetType = enum {
+        linear,
+        periodic,
+        step,
+        non_ideal,
+    };
+
+    pub fn time(self: *TimeSim) Time {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .monotonic = monotonic,
+                .realtime = realtime,
+                .tick = tick,
+            },
+        };
+    }
+
+    fn monotonic(context: *anyopaque) u64 {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
+        return self.ticks * self.resolution;
+    }
+
+    fn realtime(context: *anyopaque) i64 {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
+        return self.epoch + @as(i64, @intCast(monotonic(context))) - self.offset(self.ticks);
+    }
+
+    pub fn offset(self: *TimeSim, ticks: u64) i64 {
+        switch (self.offset_type) {
+            .linear => {
+                const drift_per_tick = self.offset_coefficient_A;
+                return @as(i64, @intCast(ticks)) * drift_per_tick + @as(
+                    i64,
+                    @intCast(self.offset_coefficient_B),
+                );
+            },
+            .periodic => {
+                const unscaled = std.math.sin(@as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
+                    @as(f64, @floatFromInt(self.offset_coefficient_B)));
+                const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
+                return @as(i64, @intFromFloat(std.math.floor(scaled)));
+            },
+            .step => {
+                return if (ticks > self.offset_coefficient_B) self.offset_coefficient_A else 0;
+            },
+            .non_ideal => {
+                const phase: f64 = @as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
+                    (@as(f64, @floatFromInt(self.offset_coefficient_B)) +
+                        std.Random.init(&self.prng, stdx.PRNG.fill).floatNorm(f64) * 10);
+                const unscaled = std.math.sin(phase);
+                const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
+                const offset_random: i64 = -@as(i64, @intCast(self.offset_coefficient_C)) +
+                    @as(i64, @intCast(self.prng.int_inclusive(u64, 2 * self.offset_coefficient_C)));
+                return @as(i64, @intFromFloat(std.math.floor(scaled))) + offset_random;
+            },
+        }
+    }
+
+    fn tick(context: *anyopaque) void {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
+        self.ticks += 1;
+    }
+};
+
 /// Equivalent to `std.time.Timer`,
-/// but using the `vsr.Time` interface as the source of time.
+/// but using the `Time` interface as the source of time.
 pub const Timer = struct {
     time: Time,
     started: Instant,
@@ -214,11 +309,16 @@ pub const Timer = struct {
     }
 };
 
-const fixtures = @import("testing/fixtures.zig");
 const testing = std.testing;
 
 test Timer {
-    var time_sim = fixtures.init_time(.{ .resolution = 1 });
+    var time_sim: TimeSim = (.{
+        .resolution = 1,
+        .offset_type = .linear,
+        .offset_coefficient_A = 0,
+        .offset_coefficient_B = 0,
+        .offset_coefficient_C = 0,
+    });
     const time = time_sim.time();
 
     var timer = Timer.init(time);

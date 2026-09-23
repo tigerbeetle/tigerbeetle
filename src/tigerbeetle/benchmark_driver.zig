@@ -26,7 +26,7 @@ const log = std.log;
 pub fn command_benchmark(
     allocator: Allocator,
     io: *vsr.io.IO,
-    time: vsr.time.Time,
+    time: stdx.Time,
     args: *const cli.Command.Benchmark,
 ) !void {
     // Note: we intentionally don't use a temporary directory for this data file, and instead just

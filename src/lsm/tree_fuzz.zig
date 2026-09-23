@@ -15,7 +15,7 @@ const log = std.log.scoped(.lsm_tree_fuzz);
 
 const ScratchMemory = @import("scratch_memory.zig").ScratchMemory;
 const Direction = @import("../direction.zig").Direction;
-const TimeSim = @import("../testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
 const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);

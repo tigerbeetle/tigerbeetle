@@ -32,7 +32,7 @@ const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
 const Packet = @import("./clients/c/tb_client/packet.zig").Packet;
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
-const TimeSim = @import("testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("testing/storage.zig").Storage;
 const Tracer = Storage.Tracer;
 const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);

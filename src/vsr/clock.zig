@@ -88,8 +88,8 @@ const log = stdx.log.scoped(.clock);
 const constants = @import("../constants.zig");
 const ratio = stdx.PRNG.ratio;
 const Instant = stdx.Instant;
-const Time = @import("../time.zig").Time;
-const TimeSim = @import("../testing/time.zig").TimeSim;
+const Time = stdx.Time;
+const TimeSim = stdx.TimeSim;
 const Tracer = @import("../trace.zig").Tracer;
 
 const clock_offset_tolerance_max: u64 = constants.clock_offset_tolerance_max.ns;
@@ -610,7 +610,6 @@ fn minimum_one_way_delay(a: ?Sample, b: ?Sample) ?Sample {
 }
 
 const testing = std.testing;
-const OffsetType = @import("../testing/time.zig").OffsetType;
 
 const ClockUnitTestContainer = struct {
     time: TimeSim,
@@ -622,7 +621,7 @@ const ClockUnitTestContainer = struct {
     pub fn init(
         self: *ClockUnitTestContainer,
         allocator: std.mem.Allocator,
-        offset_type: OffsetType,
+        offset_type: TimeSim.OffsetType,
         offset_coefficient_A: i64,
         offset_coefficient_B: i64,
     ) !void {
@@ -737,7 +736,7 @@ test "ideal clocks get clamped to cluster time" {
     var ideal_constant_drift_clock: ClockUnitTestContainer = undefined;
     try ideal_constant_drift_clock.init(
         allocator,
-        OffsetType.linear,
+        .linear,
         std.time.ns_per_ms, // loses 1ms per tick
         0,
     );
@@ -754,7 +753,7 @@ test "ideal clocks get clamped to cluster time" {
     var ideal_periodic_drift_clock: ClockUnitTestContainer = undefined;
     try ideal_periodic_drift_clock.init(
         allocator,
-        OffsetType.periodic,
+        .periodic,
         std.time.ns_per_s, // loses up to 1s
         200, // period of 200 ticks
     );
@@ -772,7 +771,7 @@ test "ideal clocks get clamped to cluster time" {
     var ideal_jumping_clock: ClockUnitTestContainer = undefined;
     try ideal_jumping_clock.init(
         allocator,
-        OffsetType.step,
+        .step,
         -5 * std.time.ns_per_day, // jumps 5 days ahead.
         49, // after 49 ticks
     );
@@ -839,7 +838,7 @@ const ClockSimulator = struct {
                 @as(i64, @intFromFloat(std.Random.init(&prng, stdx.PRNG.fill).floatNorm(f64) * 50));
             times[replica] = .{
                 .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
-                .offset_type = OffsetType.non_ideal,
+                .offset_type = .non_ideal,
                 .offset_coefficient_A = amplitude,
                 .offset_coefficient_B = phase,
                 .offset_coefficient_C = 10,
@@ -944,8 +943,7 @@ test "clock: fuzz test" {
 
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
-    const SystemTime = @import("../testing/time.zig").TimeSim;
-    var system_time = SystemTime{
+    var system_time: TimeSim = .{
         .resolution = constants.tick_ms * std.time.ns_per_ms,
         .offset_type = .linear,
         .offset_coefficient_A = 0,

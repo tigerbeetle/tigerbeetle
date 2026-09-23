@@ -12,7 +12,7 @@ const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_fuzz);
 const tb = @import("../tigerbeetle.zig");
 
-const TimeSim = @import("../testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const Reservation = @import("../vsr/free_set.zig").Reservation;

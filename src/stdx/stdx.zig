@@ -34,6 +34,11 @@ pub const Instant = @import("time_units.zig").Instant;
 pub const Duration = @import("time_units.zig").Duration;
 pub const InstantUnix = @import("time_units.zig").InstantUnix;
 
+pub const Time = @import("time.zig").Time;
+pub const TimeOS = @import("time.zig").TimeOS;
+pub const TimeSim = @import("time.zig").TimeSim;
+pub const Timer = @import("time.zig").Timer;
+
 const net = @import("./net.zig");
 pub const IPAddress = net.IPAddress;
 pub const SocketAddress = net.SocketAddress;
@@ -1285,6 +1290,7 @@ comptime {
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
     _ = @import("testing/snaptest.zig");
+    _ = @import("time.zig");
     _ = @import("time_units.zig");
     _ = @import("unshare.zig");
     _ = @import("vendored/aegis.zig");
