@@ -498,11 +498,14 @@ const Environment = struct {
         transfers_stashed: ObjectMap,
         log: Log,
 
+        gpa: std.mem.Allocator,
+
         pub fn init(gpa: std.mem.Allocator) Model {
             return .{
                 .transfers_mutable = ObjectMap.init(gpa),
                 .transfers_stashed = ObjectMap.init(gpa),
                 .log = Log.init(gpa),
+                .gpa = gpa,
             };
         }
 
@@ -572,6 +575,51 @@ const Environment = struct {
             model.transfers_mutable = try model.transfers_stashed.clone();
             model.log.discard(model.log.readableLength());
         }
+
+        pub fn scan(model: *const Model, params: ScanParams) ![]tb.Transfer {
+            var matches = std.ArrayList(tb.Transfer).init(model.gpa);
+            errdefer matches.deinit();
+
+            var iterator = model.transfers_mutable.valueIterator();
+            while (iterator.next()) |transfer| {
+                const key = scan_key(params.index, transfer) orelse continue;
+                if (key >= params.min and key <= params.max) try matches.append(transfer.*);
+            }
+            std.mem.sort(tb.Transfer, matches.items, params, struct {
+                fn less_than(context: ScanParams, a: tb.Transfer, b: tb.Transfer) bool {
+                    const key_a = scan_key(context.index, &a).?;
+                    const key_b = scan_key(context.index, &b).?;
+                    const order = if (key_a == key_b)
+                        std.math.order(a.timestamp, b.timestamp)
+                    else
+                        std.math.order(key_a, key_b);
+                    return order == switch (context.direction) {
+                        .ascending => std.math.Order.lt,
+                        .descending => std.math.Order.gt,
+                    };
+                }
+            }.less_than);
+            return matches.toOwnedSlice();
+        }
+
+        fn scan_key(index: @FieldType(ScanParams, "index"), object: *const tb.Transfer) ?u128 {
+            return switch (index) {
+                .expires_at => if (object.flags.pending and object.timeout > 0)
+                    object.timestamp + object.timeout_ns()
+                else
+                    null,
+                .imported => if (object.flags.imported) 0 else null,
+                .closing => if (object.flags.closing_debit or object.flags.closing_credit)
+                    0
+                else
+                    null,
+                inline .pending_id, .user_data_128, .user_data_64, .user_data_32 => |field| key: {
+                    const value = @field(object, @tagName(field));
+                    break :key if (value == 0) null else value;
+                },
+                inline else => |field| @field(object, @tagName(field)),
+            };
+        }
     };
 
     fn apply(env: *Environment, gpa: std.mem.Allocator, fuzz_ops: []const FuzzOp) !void {
@@ -590,13 +638,10 @@ const Environment = struct {
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
             const model_size = model.transfers_mutable.count() * @sizeOf(tb.Transfer);
-            // NOTE: This isn't accurate anymore because the model can contain multiple copies of
-            // an object in the log
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
 
-            // Apply fuzz_op to the forest and the model.
             try env.apply_op(gpa, fuzz_op, &model);
         }
 
@@ -719,96 +764,15 @@ const Environment = struct {
                 _ = try env.check_lookup(key, snapshot, model.get(key));
             },
             .scan => |params| {
+                // TODO: Test pagination.
                 const results = try env.scan(params, snapshot);
+                const expected = try model.scan(params);
+                defer model.gpa.free(expected);
 
-                var timestamp_last: ?u64 = null;
-                var prefix_last: ?u128 = null;
+                const count = @min(expected.len, env.scan_lookup_buffer.len);
+                assert((expected.len == 0) == (results.len == 0));
 
-                // Asserting the positive space:
-                // all objects found by the scan must exist in our model.
-                for (results) |*object| {
-                    const prefix_current: u128 = switch (params.index) {
-                        .expires_at => index: {
-                            assert(object.timeout != 0);
-                            const value = object.timeout_ns();
-                            assert(value >= params.min and value <= params.max);
-                            break :index value;
-                        },
-                        .imported => index: {
-                            assert(params.min == 0);
-                            assert(params.max == 0);
-                            assert(prefix_last == null);
-                            assert(object.flags.imported);
-                            break :index undefined;
-                        },
-                        .closing => index: {
-                            assert(params.min == 0);
-                            assert(params.max == 0);
-                            assert(prefix_last == null);
-                            assert(object.flags.closing_debit or
-                                object.flags.closing_credit);
-                            break :index undefined;
-                        },
-                        inline else => |field| index: {
-                            const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
-                            comptime assert(IndexHelper.Type != void);
-
-                            const value = IndexHelper.get(object).?;
-                            assert(value >= params.min and value <= params.max);
-                            break :index value;
-                        },
-                    };
-
-                    const model_object = model.get(.{ .id = object.id }).?;
-                    assert(model_object.id == object.id);
-                    assert(model_object.debit_account_id == object.debit_account_id);
-                    assert(model_object.credit_account_id == object.credit_account_id);
-                    assert(model_object.user_data_128 == object.user_data_128);
-                    assert(model_object.user_data_64 == object.user_data_64);
-                    assert(model_object.user_data_32 == object.user_data_32);
-                    assert(model_object.timestamp == object.timestamp);
-                    assert(model_object.ledger == object.ledger);
-                    assert(model_object.code == object.code);
-                    assert(model_object.pending_id == object.pending_id);
-                    assert(model_object.timeout == object.timeout);
-                    assert(model_object.amount == object.amount);
-                    assert(model_object.flags == object.flags);
-
-                    if (params.min == params.max) {
-                        // If exact match (min == max), it's expected to be sorted by timestamp.
-                        if (timestamp_last) |timestamp| {
-                            switch (params.direction) {
-                                .ascending => assert(object.timestamp > timestamp),
-                                .descending => assert(object.timestamp < timestamp),
-                            }
-                        }
-                        timestamp_last = object.timestamp;
-                    } else {
-                        assert(params.index != .imported);
-
-                        // If not exact, it's expected to be sorted by prefix and then timestamp.
-                        if (prefix_last) |prefix| {
-                            // If range (between min .. max), it's expected to be sorted by prefix.
-                            switch (params.direction) {
-                                .ascending => assert(prefix_current >= prefix),
-                                .descending => assert(prefix_current <= prefix),
-                            }
-
-                            if (prefix_current == prefix) {
-                                if (timestamp_last) |timestamp| {
-                                    switch (params.direction) {
-                                        .ascending => assert(object.timestamp > timestamp),
-                                        .descending => assert(object.timestamp < timestamp),
-                                    }
-                                }
-                                timestamp_last = object.timestamp;
-                            } else {
-                                timestamp_last = null;
-                            }
-                        }
-                        prefix_last = prefix_current;
-                    }
-                }
+                try std.testing.expectEqualSlices(tb.Transfer, expected[0..count], results);
             },
         }
     }
