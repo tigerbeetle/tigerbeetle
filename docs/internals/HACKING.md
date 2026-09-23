@@ -39,7 +39,7 @@ Fuzzing ([/src/fuzz_tests.zig](/src/fuzz_tests.zig)):
 ./zig/zig build fuzz -- lsm_tree
 ```
 
-Continuous Integration entry point (see [ci.yml](/.github/workflows/ci.yml)):
+Continuous Integration entry point (see [release.yml](/.github/workflows/release.yml)):
 
 ```console
 ./zig/zig build ci
