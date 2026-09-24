@@ -562,7 +562,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.network.tick();
 
-            for (cluster.clients) |*client_maybe| {
+            for (cluster.clients, cluster.client_times) |*client_maybe, *time_sim| {
+                time_sim.tick();
                 if (client_maybe.*) |*client| client.tick();
             }
 
@@ -574,44 +575,35 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.replica_health,
                 0..,
             ) |*storage, *replica, *aof_io, *time_sim, *health, replica_index| {
-                const time = time_sim.interface();
+                // Time keeps ticking even if a replica is down or paused.
+                time_sim.tick();
 
-                if (health.* == .up and health.*.up.paused) {
-                    // Tick the time even in a paused state, to simulate VM migration.
-                    time.tick();
-                } else {
-                    storage.tick();
-                    switch (health.*) {
-                        .reformatting => {
-                            cluster.tick_reformat(@intCast(replica_index));
-                            time.tick();
-                        },
-                        .up => |up| {
-                            assert(!up.paused);
+                storage.tick();
+                switch (health.*) {
+                    .reformatting => {
+                        cluster.tick_reformat(@intCast(replica_index));
+                    },
+                    .up => |up| {
+                        assert(!up.paused);
 
-                            replica.tick();
-                            aof_io.run() catch |err| {
-                                std.debug.panic("{}: io.run() failed: error={}", .{
-                                    replica.replica,
-                                    err,
-                                });
-                            };
+                        replica.tick();
+                        aof_io.run() catch |err| {
+                            std.debug.panic("{}: io.run() failed: error={}", .{
+                                replica.replica,
+                                err,
+                            });
+                        };
 
-                            // For performance, don't run every tick.
-                            if (cluster.prng.chance(ratio(1, 100))) {
-                                JournalChecker.check(replica);
-                            }
+                        // For performance, don't run every tick.
+                        if (cluster.prng.chance(ratio(1, 100))) {
+                            JournalChecker.check(replica);
+                        }
 
-                            cluster.state_checker.check_state(replica.replica) catch |err| {
-                                fatal(.correctness, "state checker error: {}", .{err});
-                            };
-                        },
-                        .down => {
-                            // Keep ticking the time so that it won't have diverged too far to
-                            // synchronize when the replica restarts.
-                            time.tick();
-                        },
-                    }
+                        cluster.state_checker.check_state(replica.replica) catch |err| {
+                            fatal(.correctness, "state checker error: {}", .{err});
+                        };
+                    },
+                    .down => {},
                 }
             }
         }

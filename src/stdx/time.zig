@@ -20,7 +20,6 @@ pub const Time = struct {
     const VTable = struct {
         monotonic: *const fn (*anyopaque) Instant,
         realtime: *const fn (*anyopaque) InstantUnix,
-        tick: *const fn (*anyopaque) void,
     };
 
     /// A timestamp to measure elapsed time, meaningful only on the same system, not across reboots.
@@ -35,10 +34,6 @@ pub const Time = struct {
     /// This clock is affected by discontinuous jumps in the system time.
     pub fn realtime(self: Time) InstantUnix {
         return self.vtable.realtime(self.context);
-    }
-
-    pub fn tick(self: Time) void {
-        self.vtable.tick(self.context);
     }
 };
 
@@ -56,7 +51,6 @@ pub const TimeOS = struct {
             .vtable = &.{
                 .monotonic = vtable_monotonic,
                 .realtime = vtable_realtime,
-                .tick = tick,
             },
         };
     }
@@ -178,8 +172,6 @@ pub const TimeOS = struct {
         const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.REALTIME) catch unreachable;
         return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
     }
-
-    fn tick(_: *anyopaque) void {}
 };
 
 test "TimeOS monotonic smoke" {
@@ -240,7 +232,6 @@ pub const TimeSim = struct {
             .vtable = &.{
                 .monotonic = monotonic,
                 .realtime = realtime,
-                .tick = tick,
             },
         };
     }
@@ -289,9 +280,7 @@ pub const TimeSim = struct {
         }
     }
 
-    fn tick(context: *anyopaque) void {
-        const self: *TimeSim = @ptrCast(@alignCast(context));
-
+    pub fn tick(self: *TimeSim) void {
         self.ticks += 1;
     }
 };
@@ -341,15 +330,15 @@ test Timer {
     for (0..3) |_| {
         const time_0 = timer.read();
         try testing.expectEqual(@as(u64, 0), time_0.ns);
-        time.tick();
+        time_sim.tick();
 
         const time_1 = timer.read();
         try testing.expectEqual(@as(u64, 1), time_1.ns);
-        time.tick();
+        time_sim.tick();
 
         const time_2 = timer.read();
         try testing.expectEqual(@as(u64, 2), time_2.ns);
-        time.tick();
+        time_sim.tick();
 
         timer.reset();
     }

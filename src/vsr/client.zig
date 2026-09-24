@@ -265,7 +265,6 @@ pub fn ClientType(
             self.ticks += 1;
 
             self.message_bus.tick_client();
-            self.time.tick();
 
             self.ping_timeout.tick();
             self.request_timeout.tick();

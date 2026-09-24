@@ -381,8 +381,6 @@ pub fn round_trip_time_median_ns(self: *const Clock) ?u64 {
 }
 
 pub fn tick(self: *Clock) void {
-    self.time.tick();
-
     if (self.synchronization_disabled) return;
     self.synchronize();
     // Expire the current epoch if successive windows failed to synchronize:
@@ -642,7 +640,7 @@ const ClockUnitTestContainer = struct {
 
     pub fn run_till_tick(self: *ClockUnitTestContainer, tick_stop: u64) void {
         while (self.time.ticks < tick_stop) {
-            self.clock.time.tick();
+            self.time.tick();
 
             if (@mod(self.time.ticks, self.learn_interval) == 0) {
                 const on_pong_time = self.clock.monotonic().ns;

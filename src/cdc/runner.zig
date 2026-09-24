@@ -1508,10 +1508,10 @@ test "amqp: RateLimit" {
     );
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
     try switch (rate_limit.attempt()) {
@@ -1522,7 +1522,7 @@ test "amqp: RateLimit" {
             duration.ns,
         ),
     };
-    time.tick();
+    time_sim.tick();
 
     try switch (rate_limit.attempt()) {
         .ok => testing.expect(false),
@@ -1532,16 +1532,16 @@ test "amqp: RateLimit" {
             duration.ns,
         ),
     };
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .wait);
 }
