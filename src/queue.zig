@@ -30,6 +30,10 @@ pub fn QueueType(comptime T: type) type {
             self.any.push(&link.link);
         }
 
+        pub inline fn push_first(self: *Queue, link: *T) void {
+            self.any.push_first(&link.link);
+        }
+
         pub inline fn pop(self: *Queue) ?*T {
             const link = self.any.pop() orelse return null;
             return @alignCast(@fieldParentPtr("link", link));
@@ -56,6 +60,11 @@ pub fn QueueType(comptime T: type) type {
         /// Returns whether the linked list contains the given *exact element* (pointer comparison).
         pub inline fn contains(self: *const Queue, elem_needle: *const T) bool {
             return self.any.contains(&elem_needle.link);
+        }
+
+        /// Inserts `insert` into the queue immediately after `after`.
+        pub inline fn insert_after(self: *Queue, after: *T, insert: *T) void {
+            self.any.insert_after(&after.link, &insert.link);
         }
 
         /// Remove an element from the Queue. Asserts that the element is
@@ -112,6 +121,20 @@ const QueueAny = struct {
         self.count += 1;
     }
 
+    pub fn push_first(self: *QueueAny, link: *QueueLink) void {
+        if (constants.verify and self.verify_push) assert(!self.contains(link));
+
+        assert(link.next == null);
+
+        if (self.out) |out| {
+            link.next = out;
+        } else {
+            self.in = link;
+        }
+        self.out = link;
+        self.count += 1;
+    }
+
     pub fn pop(self: *QueueAny) ?*QueueLink {
         const result = self.out orelse return null;
         self.out = result.next;
@@ -139,6 +162,22 @@ const QueueAny = struct {
             if (link == needle) return true;
         }
         return false;
+    }
+
+    pub fn insert_after(self: *QueueAny, after: *QueueLink, insert: *QueueLink) void {
+        assert(insert.next == null);
+        assert(insert != after);
+        if (constants.verify and self.verify_push) {
+            assert(self.contains(after));
+            assert(!self.contains(insert));
+        }
+
+        insert.next = after.next;
+        after.next = insert;
+        if (self.in == after) {
+            self.in = insert;
+        }
+        self.count += 1;
     }
 
     pub fn remove(self: *QueueAny, to_remove: *QueueLink) void {
@@ -269,7 +308,7 @@ test "Queue: fuzz" {
     const gpa = std.testing.allocator;
     var prng = stdx.PRNG.from_seed_testing();
 
-    for (0..100) |_| {
+    for (0..200) |_| {
         var queue = Queue.init(.{ .name = "fuzz" });
         var model = Model{};
 
@@ -301,6 +340,13 @@ test "Queue: fuzz" {
                         const index = free.swapRemove(prng.index(free.items));
                         model.push(items[index].value);
                         queue.push(&items[index]);
+                    }
+                },
+                .push_first => {
+                    if (free.items.len > 0) {
+                        const index = free.swapRemove(prng.index(free.items));
+                        model.insert_at(0, items[index].value);
+                        queue.push_first(&items[index]);
                     }
                 },
                 .pop => {
@@ -343,6 +389,21 @@ test "Queue: fuzz" {
                         break :model_contains false;
                     };
                     assert(model_contains == queue.contains(item));
+                },
+                .insert_after => {
+                    const after = &items[prng.index(items)];
+                    if (queue.contains(after)) {
+                        const after_index = for (model.const_slice(), 0..) |value, i| {
+                            if (value == after.value) break i;
+                        } else unreachable;
+                        if (free.items.len > 0) {
+                            const insert_index = free.swapRemove(prng.index(free.items));
+                            const insert = &items[insert_index];
+                            assert(insert != after);
+                            model.insert_at(after_index + 1, insert.value);
+                            queue.insert_after(after, insert);
+                        }
+                    }
                 },
                 .remove => {
                     const item = &items[prng.index(items)];
