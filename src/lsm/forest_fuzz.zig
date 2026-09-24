@@ -480,58 +480,62 @@ const Environment = struct {
 
     // The forest should behave like a simple persistent key-value data structure.
     //
-    // The model consists of three core data structures:
+    // The model maintains two sets of transfers and a log:
     // 1. transfers_mutable: contains all transfers in their current state.
-    // 2. transfers_stashed: contains transfers stashed during checkpointing.
+    // 2. transfers_stashed: contains transfers as of the latest checkpoint.
     // 3. log: records updates not yet covered by a checkpoint, since each checkpoint
-    // persists only a prefix of the log.
+    //    persists only a prefix of the log.
     //
-    // The goal is to keep the model independent of our the LSM / forest.
+    // Each transfer set has two indexes: transfers_by_id stores transfers keyed by ID,
+    // and id_by_timestamp maps timestamp UniqueKeys to transfer IDs. On storage reset,
+    // transfers_mutable is restored from transfers_stashed and the log is discarded.
+    //
+    // The goal is to keep the model independent of the LSM / forest implementation.
     const Model = struct {
         const ObjectMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
-        const UniqueKeysMap = std.hash_map.AutoHashMap(u64, u128);
+        const UniqueKeysMap = std.hash_map.AutoHashMap(UniqueKey, u128);
         const Indexes = struct {
-            object_map: ObjectMap,
-            time_to_id: UniqueKeysMap,
+            transfers_by_id: ObjectMap,
+            id_by_timestamp: UniqueKeysMap,
 
             pub fn init(gpa: std.mem.Allocator) Indexes {
                 return .{
-                    .object_map = ObjectMap.init(gpa),
-                    .time_to_id = UniqueKeysMap.init(gpa),
+                    .transfers_by_id = ObjectMap.init(gpa),
+                    .id_by_timestamp = UniqueKeysMap.init(gpa),
                 };
             }
             pub fn deinit(indexes: *Indexes) void {
-                indexes.object_map.deinit();
-                indexes.time_to_id.deinit();
+                indexes.transfers_by_id.deinit();
+                indexes.id_by_timestamp.deinit();
             }
 
             pub fn clone(indexes: Indexes) !Indexes {
-                var object_map = try indexes.object_map.clone();
-                errdefer object_map.deinit();
+                var transfers_by_id = try indexes.transfers_by_id.clone();
+                errdefer transfers_by_id.deinit();
                 return .{
-                    .object_map = object_map,
-                    .time_to_id = try indexes.time_to_id.clone(),
+                    .transfers_by_id = transfers_by_id,
+                    .id_by_timestamp = try indexes.id_by_timestamp.clone(),
                 };
             }
 
             pub fn put(indexes: *Indexes, transfer: tb.Transfer) !void {
-                try indexes.time_to_id.put(transfer.timestamp, transfer.id);
-                try indexes.object_map.put(transfer.id, transfer);
+                try indexes.id_by_timestamp.put(.{ .timestamp = transfer.timestamp }, transfer.id);
+                try indexes.transfers_by_id.put(transfer.id, transfer);
             }
 
             pub fn get(indexes: Indexes, key: UniqueKey) ?tb.Transfer {
                 switch (key) {
-                    .id => |id| return indexes.object_map.get(id),
-                    .timestamp => |timestamp| {
-                        const transfer_id = indexes.time_to_id.get(timestamp) orelse return null;
-                        return indexes.object_map.get(transfer_id);
+                    .id => |id| return indexes.transfers_by_id.get(id),
+                    .timestamp => {
+                        const transfer_id = indexes.id_by_timestamp.get(key) orelse return null;
+                        return indexes.transfers_by_id.get(transfer_id);
                     },
                 }
             }
 
             pub fn remove(indexes: *Indexes, transfer_id: u128) void {
-                const transfer = indexes.object_map.fetchRemove(transfer_id).?;
-                assert(indexes.time_to_id.remove(transfer.value.timestamp));
+                const transfer = indexes.transfers_by_id.fetchRemove(transfer_id).?;
+                assert(indexes.id_by_timestamp.remove(.{ .timestamp = transfer.value.timestamp }));
             }
         };
 
@@ -615,7 +619,7 @@ const Environment = struct {
             var matches = std.ArrayList(tb.Transfer).init(model.gpa);
             errdefer matches.deinit();
 
-            var iterator = model.transfers_mutable.object_map.valueIterator();
+            var iterator = model.transfers_mutable.transfers_by_id.valueIterator();
             while (iterator.next()) |transfer| {
                 const key = scan_key(params.index, transfer) orelse continue;
                 if (key >= params.min and key <= params.max) try matches.append(transfer.*);
@@ -672,7 +676,8 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = model.transfers_mutable.object_map.count() * @sizeOf(tb.Transfer);
+            const model_size = model.transfers_mutable.transfers_by_id.count() *
+                @sizeOf(tb.Transfer);
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
@@ -744,7 +749,7 @@ const Environment = struct {
                     }
                 }
                 // Here we check that we have not lost objects that should be in the checkpoint.
-                var iterator = model.transfers_stashed.object_map.valueIterator();
+                var iterator = model.transfers_stashed.transfers_by_id.valueIterator();
                 while (iterator.next()) |transfer| : (index += 1) {
                     _ = try env.check_lookup(.{ .id = transfer.id }, snapshot, transfer.*);
                     if (index % groove_stash_value_count_max == 0) {
