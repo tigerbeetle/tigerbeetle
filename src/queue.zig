@@ -257,29 +257,21 @@ test "Queue: push/pop/peek/remove/empty" {
 test "Queue: fuzz" {
     const stdx = @import("stdx");
     const fuzz = @import("./testing/fuzz.zig");
+    const N = 1000;
 
     const Item = struct {
         value: u64,
         link: QueueType(@This()).Link,
     };
     const Queue = QueueType(Item);
-    const Model = stdx.RingBufferType(u64, .slice);
+    const Model = stdx.BoundedArrayType(u64, N);
 
     const gpa = std.testing.allocator;
     var prng = stdx.PRNG.from_seed_testing();
 
     for (0..100) |_| {
-        const N = 1000;
-
-        var queue = Queue.init(.{
-            .name = "fuzz",
-        });
-        var model = try Model.init(gpa, N);
-        defer model.deinit(gpa);
-
-        // Implement "remove" by copy.
-        var model_scratch = try Model.init(gpa, N);
-        defer model_scratch.deinit(gpa);
+        var queue = Queue.init(.{ .name = "fuzz" });
+        var model = Model{};
 
         var items = try gpa.alloc(Item, N);
         defer gpa.free(items);
@@ -307,7 +299,7 @@ test "Queue: fuzz" {
                 .push => {
                     if (free.items.len > 0) {
                         const index = free.swapRemove(prng.index(free.items));
-                        model.push_assume_capacity(items[index].value);
+                        model.push(items[index].value);
                         queue.push(&items[index]);
                     }
                 },
@@ -316,7 +308,7 @@ test "Queue: fuzz" {
                         assert(queue.pop() == null);
                     } else {
                         const item = queue.pop().?;
-                        assert(item.value == model.pop().?);
+                        assert(item.value == model.ordered_remove(0));
 
                         const index = @divExact(
                             (@intFromPtr(item) - @intFromPtr(items.ptr)),
@@ -326,26 +318,25 @@ test "Queue: fuzz" {
                     }
                 },
                 .peek => {
-                    if (model.head()) |head| {
-                        assert(queue.peek().?.value == head);
-                    } else {
+                    if (model.empty()) {
                         assert(queue.peek() == null);
+                    } else {
+                        assert(queue.peek().?.value == model.get(0));
                     }
                 },
                 .peek_last => {
-                    if (model.tail()) |tail| {
-                        assert(queue.peek_last().?.value == tail);
-                    } else {
+                    if (model.empty()) {
                         assert(queue.peek_last() == null);
+                    } else {
+                        assert(queue.peek_last().?.value == model.get(model.count() - 1));
                     }
                 },
                 .contains => {
                     const item = &items[prng.index(items)];
 
                     const model_contains = model_contains: {
-                        var it = model.iterator();
-                        while (it.next()) |v| {
-                            if (v == item.value) {
+                        for (model.const_slice()) |value| {
+                            if (value == item.value) {
                                 break :model_contains true;
                             }
                         }
@@ -358,13 +349,13 @@ test "Queue: fuzz" {
                     if (queue.contains(item)) {
                         queue.remove(item);
 
-                        assert(model_scratch.empty());
-                        while (model.pop()) |value| {
-                            if (value != item.value) {
-                                model_scratch.push_assume_capacity(value);
+                        for (model.const_slice(), 0..) |value, i| {
+                            if (value == item.value) {
+                                const value_removed = model.ordered_remove(i);
+                                assert(value_removed == value);
+                                break;
                             }
-                        }
-                        std.mem.swap(Model, &model, &model_scratch);
+                        } else unreachable;
                     }
                 },
                 .reset => {
@@ -373,17 +364,13 @@ test "Queue: fuzz" {
                 },
                 .iterate => {
                     var queue_iterator = queue.iterate();
-                    var model_iterator = model.iterator();
-
-                    while (queue_iterator.next()) |queue_item| {
-                        const model_item = model_iterator.next().?;
-                        assert(queue_item.value == model_item);
+                    for (model.const_slice()) |value| {
+                        assert(queue_iterator.next().?.value == value);
                     }
-                    assert(model_iterator.next() == null);
                     assert(queue_iterator.next() == null);
                 },
             }
-            assert(queue.count() == model.count);
+            assert(queue.count() == model.count());
             assert(queue.empty() == model.empty());
         }
     }
