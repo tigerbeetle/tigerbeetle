@@ -542,7 +542,7 @@ const Environment = struct {
         prng: *stdx.PRNG,
     ) !void {
         env.time_sim = fixtures.init_time(.{});
-        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.interface(), .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{

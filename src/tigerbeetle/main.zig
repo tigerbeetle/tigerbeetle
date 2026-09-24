@@ -104,7 +104,7 @@ pub fn main() !void {
     defer io.deinit();
 
     var time_os: TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
 
     var trace_file: ?std.fs.File = null;
     defer if (trace_file) |file| file.close();

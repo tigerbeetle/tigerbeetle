@@ -405,17 +405,17 @@ pub fn log_with_timestamp(
 ) void {
     const level_text = comptime message_level.asText();
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const instant_unix = InstantUnix.now();
 
     const stderr = std.io.getStdErr().writer();
     var buffered_writer = std.io.bufferedWriter(stderr);
     const writer = buffered_writer.writer();
 
-    nosuspend {
-        instant_unix.format("", .{}, writer) catch return;
-        writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
-        buffered_writer.flush() catch return;
-    }
+    var log_time: TimeOS = .{};
+    const date_time = log_time.realtime().date_time();
+    date_time.format("", .{}, writer) catch return;
+
+    writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+    buffered_writer.flush() catch return;
 }
 
 /// Compare two values by directly comparing the underlying memory.

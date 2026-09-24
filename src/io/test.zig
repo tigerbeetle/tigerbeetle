@@ -310,7 +310,7 @@ test "timeout" {
         fn run_test() !void {
             var time_os: TimeOS = .{};
             var self: Context = .{
-                .time = time_os.time(),
+                .time = time_os.interface(),
                 .io = try IO.init(32, 0),
             };
             defer self.io.deinit();

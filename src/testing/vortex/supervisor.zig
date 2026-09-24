@@ -682,7 +682,7 @@ pub const Supervisor = struct {
         const workload = try Workload.create(
             supervisor.allocator,
             supervisor.io,
-            supervisor.time.time(),
+            supervisor.time.interface(),
             proxy_ports,
             workload_driver,
             workload_driver_release,

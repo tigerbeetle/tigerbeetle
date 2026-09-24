@@ -934,7 +934,7 @@ pub fn main() !void {
     const gpa = gpa_instance.allocator();
 
     var time_os: stdx.TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
 
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);

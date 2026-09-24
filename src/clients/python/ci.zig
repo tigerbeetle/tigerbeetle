@@ -10,13 +10,15 @@ const wheel = @import("wheel.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
 }) !void {
+    var time: stdx.TimeOS = .{};
+
     // Integration tests.
 
     // Build the native libraries.
     try shell.exec_zig("build clients:python -Drelease", .{});
 
     // Only to test the build process - the samples below run directly from the src/ directory.
-    try wheel.make(shell, "0.0.1", stdx.InstantUnix.now(), "tigerbeetle-0.0.1-py3-none-any.whl");
+    try wheel.make(shell, "0.0.1", time.realtime(), "tigerbeetle-0.0.1-py3-none-any.whl");
 
     const path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
         "src",

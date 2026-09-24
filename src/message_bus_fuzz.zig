@@ -104,7 +104,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     defer gpa.free(nodes);
 
     var time_os: TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
 
     for (nodes[0..replica_count], 0..) |*node, i| {
         errdefer for (nodes[0..i]) |*n| n.message_bus.deinit(gpa);

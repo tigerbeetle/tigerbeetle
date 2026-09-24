@@ -452,7 +452,7 @@ fn run_cdc_test(
     //   at most one batch is duplicated.
     // - Start multiple CDC jobs to stress the lock queue.
     var vsr_context: VSRContext = undefined;
-    try vsr_context.init(gpa, time_os.time(), tmp_beetle.port);
+    try vsr_context.init(gpa, time_os.interface(), tmp_beetle.port);
     defer vsr_context.deinit(gpa);
 
     var count: u32 = 0;
@@ -552,7 +552,7 @@ fn run_timeout_test(
     defer arena.deinit();
 
     var time_os: stdx.TimeOS = .{};
-    const time = &time_os.time();
+    const time = &time_os.interface();
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
         stdx.crypto_u128(),

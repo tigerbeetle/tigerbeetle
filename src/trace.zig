@@ -492,7 +492,7 @@ test "trace json and statsd" {
 
     var time_sim = fixtures.init_time(.{});
 
-    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{
+    var trace = try fixtures.init_tracer(gpa, time_sim.interface(), .{
         .writer = trace_buffer.writer(gpa).any(),
         .process_id = .unknown,
     });
@@ -558,7 +558,7 @@ test "timing overflow" {
     const gpa = std.testing.allocator;
 
     var time_sim = fixtures.init_time(.{});
-    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{});
+    var trace = try fixtures.init_tracer(gpa, time_sim.interface(), .{});
     defer trace.deinit(gpa);
 
     trace.set_replica(.{ .cluster = 0, .replica = 0 });

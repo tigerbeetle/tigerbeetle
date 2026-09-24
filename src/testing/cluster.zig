@@ -269,7 +269,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             for (replica_tracers, 0..) |*tracer, replica_index| {
                 errdefer for (replica_tracers[0..replica_index]) |*t| t.deinit(allocator);
-                const time = replica_times[replica_index].time();
+                const time = replica_times[replica_index].interface();
                 tracer.* = try Tracer.init(allocator, time, .{ .replica = .{
                     .cluster = options.cluster.cluster_id,
                     .replica = @intCast(replica_index),
@@ -324,7 +324,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (clients[0..i]) |*c| c.*.?.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
-                    client_times[i].time(),
+                    client_times[i].interface(),
                     &client_pools[i],
                     .{
                         .id = client_id_permutation.encode(i + client_id_permutation_shift),
@@ -574,7 +574,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.replica_health,
                 0..,
             ) |*storage, *replica, *aof_io, *time_sim, *health, replica_index| {
-                const time = time_sim.time();
+                const time = time_sim.interface();
 
                 if (health.* == .up and health.*.up.paused) {
                     // Tick the time even in a paused state, to simulate VM migration.
@@ -716,7 +716,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.replica_tracers[replica_index].deinit(cluster.allocator);
             cluster.replica_tracers[replica_index] = try Tracer.init(
                 cluster.allocator,
-                cluster.replica_times[replica_index].time(),
+                cluster.replica_times[replica_index].interface(),
                 .{ .replica = .{
                     .cluster = cluster.replicas[replica_index].cluster,
                     .replica = @intCast(replica_index),
@@ -729,7 +729,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
-                cluster.replica_times[replica_index].time(),
+                cluster.replica_times[replica_index].interface(),
                 &cluster.storages[replica_index],
                 &cluster.replica_pools[replica_index],
                 .{

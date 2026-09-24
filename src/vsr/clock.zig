@@ -336,7 +336,7 @@ pub fn monotonic(self: *Clock) Instant {
 /// Called by `Replica.on_ping()` when responding to a ping with a pong.
 /// This should never be used by the state machine, only for measuring clock offsets.
 pub fn realtime(self: *Clock) i64 {
-    return self.time.realtime();
+    return @intCast(self.time.realtime().ns);
 }
 
 /// Called by `Replica.on_request()` when the primary wants to timestamp a batch. If the primary's
@@ -632,7 +632,7 @@ const ClockUnitTestContainer = struct {
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
             },
-            .clock = try Clock.init(allocator, self.time.time(), null, .{
+            .clock = try Clock.init(allocator, self.time.interface(), null, .{
                 .replica_count = 3,
                 .replica = 0,
                 .quorum = 2,
@@ -844,7 +844,7 @@ const ClockSimulator = struct {
                 .offset_coefficient_C = 10,
             };
 
-            clock.* = try Clock.init(allocator, times[replica].time(), null, .{
+            clock.* = try Clock.init(allocator, times[replica].interface(), null, .{
                 .replica_count = options.clock_count,
                 .replica = @intCast(replica),
                 .quorum = @divFloor(options.clock_count, 2) + 1,
@@ -943,13 +943,7 @@ test "clock: fuzz test" {
 
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
-    var system_time: TimeSim = .{
-        .resolution = constants.tick_ms * std.time.ns_per_ms,
-        .offset_type = .linear,
-        .offset_coefficient_A = 0,
-        .offset_coefficient_B = 0,
-    };
-    const seed: u64 = @intCast(system_time.time().realtime());
+    const seed: u64 = std.testing.random_seed;
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;

@@ -11,14 +11,15 @@ const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
+const InstantUnix = stdx.InstantUnix;
 
 pub const Time = struct {
     context: *anyopaque,
     vtable: *const VTable,
 
     const VTable = struct {
-        monotonic: *const fn (*anyopaque) u64,
-        realtime: *const fn (*anyopaque) i64,
+        monotonic: *const fn (*anyopaque) Instant,
+        realtime: *const fn (*anyopaque) InstantUnix,
         tick: *const fn (*anyopaque) void,
     };
 
@@ -27,12 +28,12 @@ pub const Time = struct {
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
     pub fn monotonic(self: Time) Instant {
-        return .{ .ns = self.vtable.monotonic(self.context) };
+        return self.vtable.monotonic(self.context);
     }
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
-    pub fn realtime(self: Time) i64 {
+    pub fn realtime(self: Time) InstantUnix {
         return self.vtable.realtime(self.context);
     }
 
@@ -49,20 +50,20 @@ pub const TimeOS = struct {
     /// It's better to crash and come back with a valid monotonic clock than get stuck forever.
     monotonic_guard: u64 = 0,
 
-    pub fn time(self: *TimeOS) Time {
+    pub fn interface(self: *TimeOS) Time {
         return .{
             .context = self,
             .vtable = &.{
                 .monotonic = vtable_monotonic,
-                .realtime = realtime,
+                .realtime = vtable_realtime,
                 .tick = tick,
             },
         };
     }
 
-    fn vtable_monotonic(context: *anyopaque) u64 {
+    fn vtable_monotonic(context: *anyopaque) Instant {
         const self: *TimeOS = @ptrCast(@alignCast(context));
-        return self.monotonic().ns;
+        return self.monotonic();
     }
 
     pub fn monotonic(self: *TimeOS) Instant {
@@ -145,11 +146,16 @@ pub const TimeOS = struct {
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
-    fn realtime(_: *anyopaque) i64 {
-        if (is_windows) return realtime_windows();
+    fn vtable_realtime(context: *anyopaque) InstantUnix {
+        const self: *TimeOS = @ptrCast(@alignCast(context));
+        return self.realtime();
+    }
+
+    pub fn realtime(_: *TimeOS) InstantUnix {
+        if (is_windows) return .{ .ns = @intCast(realtime_windows()) };
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
-        if (is_darwin or is_linux) return realtime_unix();
+        if (is_darwin or is_linux) return .{ .ns = @intCast(realtime_unix()) };
         @compileError("unsupported OS");
     }
 
@@ -178,11 +184,19 @@ pub const TimeOS = struct {
 
 test "TimeOS monotonic smoke" {
     var time_os: TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
     const instant_1 = time.monotonic();
     const instant_2 = time.monotonic();
     assert(instant_1.elapsed(instant_1).ns == 0);
     assert(instant_1.elapsed(instant_2).ns >= 0);
+}
+
+test "TimeOS realtime smoke" {
+    var time_os: TimeOS = .{};
+    const time = time_os.interface();
+    const instant = time.realtime();
+    assert(instant.date_time().year > 2000);
+    assert(instant.date_time().year < 2100);
 }
 
 /// Simulated Time for testing.
@@ -220,7 +234,7 @@ pub const TimeSim = struct {
         non_ideal,
     };
 
-    pub fn time(self: *TimeSim) Time {
+    pub fn interface(self: *TimeSim) Time {
         return .{
             .context = self,
             .vtable = &.{
@@ -231,16 +245,17 @@ pub const TimeSim = struct {
         };
     }
 
-    fn monotonic(context: *anyopaque) u64 {
+    fn monotonic(context: *anyopaque) Instant {
         const self: *TimeSim = @ptrCast(@alignCast(context));
 
-        return self.ticks * self.resolution;
+        return .{ .ns = self.ticks * self.resolution };
     }
 
-    fn realtime(context: *anyopaque) i64 {
+    fn realtime(context: *anyopaque) InstantUnix {
         const self: *TimeSim = @ptrCast(@alignCast(context));
 
-        return self.epoch + @as(i64, @intCast(monotonic(context))) - self.offset(self.ticks);
+        const realtime_true = self.epoch + @as(i64, @intCast(monotonic(context).ns));
+        return .{ .ns = @intCast(realtime_true - self.offset(self.ticks)) };
     }
 
     pub fn offset(self: *TimeSim, ticks: u64) i64 {
@@ -319,7 +334,7 @@ test Timer {
         .offset_coefficient_B = 0,
         .offset_coefficient_C = 0,
     });
-    const time = time_sim.time();
+    const time = time_sim.interface();
 
     var timer = Timer.init(time);
     // Repeat the cycle read/reset multiple times:

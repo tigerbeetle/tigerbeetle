@@ -210,22 +210,7 @@ test "Duration.parse_flag_value" {
 pub const InstantUnix = struct {
     ns: u64,
 
-    pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
-        return .{ .ns = instant.ns + duration.ns };
-    }
-
-    pub fn now() InstantUnix {
-        const timestamp_ns = std.time.nanoTimestamp();
-        assert(timestamp_ns > 0);
-        assert(timestamp_ns <= std.math.maxInt(u64));
-        return .{ .ns = @intCast(timestamp_ns) };
-    }
-
-    pub fn from_timestamp_s(timestamp_s: u64) InstantUnix {
-        return InstantUnix{ .ns = timestamp_s * std.time.ms_per_s * std.time.ns_per_ms };
-    }
-
-    pub fn date_time(instant: InstantUnix) struct {
+    const DateTimeUTC = struct {
         year: u16,
         month: u8,
         day: u8,
@@ -233,7 +218,36 @@ pub const InstantUnix = struct {
         minute: u8,
         second: u8,
         millisecond: u16,
-    } {
+
+        pub fn format(
+            datetime: DateTimeUTC,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+            try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
+                datetime.year,
+                datetime.month,
+                datetime.day,
+                datetime.hour,
+                datetime.minute,
+                datetime.second,
+                datetime.millisecond,
+            });
+        }
+    };
+
+    pub fn from_timestamp_s(timestamp_s: u64) InstantUnix {
+        return InstantUnix{ .ns = timestamp_s * std.time.ns_per_s };
+    }
+
+    pub fn to_seconds(instant: InstantUnix) u64 {
+        return @divFloor(instant.ns, std.time.ns_per_s);
+    }
+
+    pub fn date_time(instant: InstantUnix) DateTimeUTC {
         const timestamp_ms = @divTrunc(instant.ns, std.time.ns_per_ms);
         const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
         const year_day = epoch_seconds.getEpochDay().calculateYearDay();
@@ -251,6 +265,10 @@ pub const InstantUnix = struct {
         };
     }
 
+    pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
+        return .{ .ns = instant.ns + duration.ns };
+    }
+
     pub fn format(
         instant: InstantUnix,
         comptime fmt: []const u8,
@@ -259,33 +277,22 @@ pub const InstantUnix = struct {
     ) !void {
         _ = fmt;
         _ = options;
-        const datetime = instant.date_time();
-        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
-            datetime.year,
-            datetime.month,
-            datetime.day,
-            datetime.hour,
-            datetime.minute,
-            datetime.second,
-            datetime.millisecond,
-        });
-    }
-
-    pub fn to_seconds(instant: InstantUnix) u64 {
-        return @divFloor(instant.ns, std.time.ns_per_s);
+        _ = instant;
+        _ = writer;
+        @compileError("convert to DateTime first");
     }
 };
 
-test "InstantUnix format" {
+test "DateTimeUTC format" {
     const instant_min = InstantUnix{ .ns = 0 };
     var buffer: [24]u8 = undefined;
     try std.testing.expectEqualStrings(
         "1970-01-01 00:00:00.000Z",
-        try std.fmt.bufPrint(&buffer, "{}", .{instant_min}),
+        try std.fmt.bufPrint(&buffer, "{}", .{instant_min.date_time()}),
     );
     const instant_max = InstantUnix{ .ns = std.math.maxInt(u64) };
     try std.testing.expectEqualStrings(
         "2554-07-21 23:34:33.709Z",
-        try std.fmt.bufPrint(&buffer, "{}", .{instant_max}),
+        try std.fmt.bufPrint(&buffer, "{}", .{instant_max.date_time()}),
     );
 }

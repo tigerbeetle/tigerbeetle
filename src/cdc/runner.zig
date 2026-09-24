@@ -1119,7 +1119,7 @@ const Metrics = struct {
                     summary.event_count,
                     event_rate,
                     timestamp_last,
-                    stdx.InstantUnix{ .ns = timestamp_last },
+                    (stdx.InstantUnix{ .ns = timestamp_last }).date_time(),
                 });
             }
             summary.* = .{
@@ -1498,7 +1498,7 @@ test "amqp: RateLimit" {
     // to force an uneven ratio of 3.333 requests per second.
     const resolution: u64 = 300 * std.time.ns_per_ms;
     var time_sim = fixtures.init_time(.{ .resolution = resolution });
-    const time = time_sim.time();
+    const time = time_sim.interface();
     var rate_limit = RateLimit.init(
         time,
         .{
@@ -1681,7 +1681,7 @@ test "amqp: JSON message" {
 test "amqp: metrics" {
     var time_sim = fixtures.init_time(.{});
     var summary: Metrics.TimingSummary = .{
-        .timer = .init(time_sim.time()),
+        .timer = .init(time_sim.interface()),
     };
 
     try testing.expectEqual(@as(u64, 0), summary.count);

@@ -305,7 +305,7 @@ pub fn ContextType(
             context.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_owned);
 
-            const time = context.time_os.time();
+            const time = context.time_os.interface();
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = .{};
