@@ -25,8 +25,7 @@ pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
     timer_expiry: ?stdx.Instant = null,
-    /// Ordered by expiry.
-    /// Note that the *tail* of the list is the *soonest* timeout to expire.
+    /// Ordered by expiry, from soonest-to-expire (head) to latest-to-expire (tail).
     timeouts: DoublyLinkedListType(Completion, .timeout_back, .timeout_next) = .{},
 
     /// Completions that are ready to have their callbacks run.
@@ -719,7 +718,7 @@ pub const IO = struct {
 
         self.timeout_insert_sorted(completion);
 
-        if (self.timeouts.tail == completion) {
+        if (self.timeouts.head == completion) {
             self.timer_arm(completion.timeout_expiry.?);
         } else {
             assert(self.timeouts.count > 1);
@@ -800,7 +799,7 @@ pub const IO = struct {
             self.timer_drain();
             self.timer_fire(now);
 
-            if (self.timeouts.tail) |next| {
+            if (self.timeouts.head) |next| {
                 assert(next.timeout_expiry.?.ns > now.ns);
                 self.timer_arm(next.timeout_expiry.?);
             } else {
@@ -1002,14 +1001,16 @@ pub const IO = struct {
 
     /// Fire all user timeout() completions whose expiry has passed.
     fn timer_fire(self: *IO, now: stdx.Instant) void {
-        while (self.timeouts.tail) |completion| {
+        while (self.timeouts.head) |completion| {
             assert(completion.in_timeouts);
             assert(completion.in_awaiting);
 
             if (completion.timeout_expiry.?.ns > now.ns) break;
             assert(completion.timeout_expiry.?.ns <= now.ns);
 
-            self.timeouts.remove(completion);
+            const completion_removed = self.timeouts.pop_head();
+            assert(completion_removed == completion);
+
             completion.in_timeouts = false;
             completion.in_awaiting = false;
             completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
@@ -1074,7 +1075,7 @@ pub const IO = struct {
         assert(self.timer_fd != INVALID_FILE);
         assert(self.timer_fd >= 0);
         assert(self.timer_expiry == null); // (Timer was already cleared.)
-        assert(self.timeouts.tail == null);
+        assert(self.timeouts.empty());
 
         const spec = linux.itimerspec{
             .it_interval = .{ .sec = 0, .nsec = 0 },
@@ -1094,23 +1095,16 @@ pub const IO = struct {
         assert(completion.timeout_back == null);
         assert(completion.timeout_next == null);
 
-        // Invariant:
-        // - self.timeouts.tail is the earliest timeout.
-        // - timeout_back walks toward later timeouts.
-        // - timeout_next walks toward earlier timeouts.
-
-        var timeout_iterator = self.timeouts.tail;
-        while (timeout_iterator) |node| : (timeout_iterator = node.timeout_back) {
+        var timeout_iterator = self.timeouts.head;
+        while (timeout_iterator) |node| : (timeout_iterator = node.timeout_next) {
             // Insert completion on the earlier side of node.
             if (completion.timeout_expiry.?.ns <= node.timeout_expiry.?.ns) {
-                self.timeouts.insert_after(node, completion);
+                self.timeouts.insert_before(node, completion);
                 return;
             }
         }
-
         // completion is later than all existing timeouts.
-        // Insert it at the far back of the list.
-        self.timeouts.push(completion);
+        self.timeouts.push_tail(completion);
     }
 
     /// Returns the fd for operations registered with epoll.

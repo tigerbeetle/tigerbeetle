@@ -21,27 +21,29 @@ pub fn DoublyLinkedListType(
     return struct {
         const DoublyLinkedList = @This();
 
+        head: ?*Node = null,
         tail: ?*Node = null,
         count: u32 = 0,
 
         pub fn verify(list: *const DoublyLinkedList) void {
+            assert((list.count == 0) == (list.head == null));
             assert((list.count == 0) == (list.tail == null));
 
+            if (list.head) |node| assert(@field(node, field_back) == null);
+            if (list.tail) |node| assert(@field(node, field_next) == null);
+
             var count: u32 = 0;
-            var iterator = list.tail;
-
-            if (iterator) |node| {
-                assert(@field(node, field_next) == null);
-            }
-
+            var iterator = list.head;
             while (iterator) |node| {
-                const back = @field(node, field_back);
-                if (back) |back_node| {
-                    assert(back_node != node); // There are no cycles.
-                    assert(@field(back_node, field_next) == node);
+                const next = @field(node, field_next);
+                if (next) |next_node| {
+                    assert(next_node != node); // There are no cycles.
+                    assert(@field(next_node, field_back) == node);
+                } else {
+                    assert(list.tail == node);
                 }
                 count += 1;
-                iterator = back;
+                iterator = next;
             }
             assert(count == list.count);
         }
@@ -49,10 +51,10 @@ pub fn DoublyLinkedListType(
         fn contains(list: *const DoublyLinkedList, target: *const Node) bool {
             var count: u32 = 0;
 
-            var iterator = list.tail;
+            var iterator = list.head;
             while (iterator) |node| {
                 if (node == target) return true;
-                iterator = @field(node, field_back);
+                iterator = @field(node, field_next);
                 count += 1;
             }
 
@@ -61,11 +63,12 @@ pub fn DoublyLinkedListType(
         }
 
         pub fn empty(list: *const DoublyLinkedList) bool {
+            assert((list.count == 0) == (list.head == null));
             assert((list.count == 0) == (list.tail == null));
             return list.count == 0;
         }
 
-        pub fn push(list: *DoublyLinkedList, node: *Node) void {
+        pub fn push_tail(list: *DoublyLinkedList, node: *Node) void {
             if (constants.verify) assert(!list.contains(node));
             if (constants.verify) list.verify();
             assert(@field(node, field_back) == null);
@@ -79,29 +82,38 @@ pub fn DoublyLinkedListType(
                 @field(tail, field_next) = node;
             } else {
                 assert(list.count == 0);
+                assert(list.head == null);
+
+                list.head = node;
             }
 
             list.tail = node;
             list.count += 1;
         }
 
-        pub fn pop(list: *DoublyLinkedList) ?*Node {
+        pub fn pop_head(list: *DoublyLinkedList) ?*Node {
             if (constants.verify) list.verify();
+            assert((list.head == null) == (list.tail == null));
 
-            if (list.tail) |tail_old| {
+            if (list.head) |head_old| {
                 assert(list.count > 0);
-                assert(@field(tail_old, field_next) == null);
+                assert(@field(head_old, field_back) == null);
 
-                list.tail = @field(tail_old, field_back);
+                list.head = @field(head_old, field_next);
                 list.count -= 1;
 
-                if (list.tail) |tail_new| {
-                    assert(@field(tail_new, field_next) == tail_old);
-                    @field(tail_new, field_next) = null;
+                if (list.head) |head_new| {
+                    assert(@field(head_new, field_back) == head_old);
+                    @field(head_new, field_back) = null;
                 }
 
-                @field(tail_old, field_back) = null;
-                return tail_old;
+                if (list.count == 0) {
+                    assert(list.tail == head_old);
+                    list.tail = null;
+                }
+
+                @field(head_old, field_next) = null;
+                return head_old;
             } else {
                 assert(list.count == 0);
                 return null;
@@ -109,27 +121,27 @@ pub fn DoublyLinkedListType(
         }
 
         /// Insert node_b into the list immediately following node_a.
-        pub fn insert_after(list: *DoublyLinkedList, node_a: *Node, node_b: *Node) void {
-            assert(@field(node_b, field_back) == null);
-            assert(@field(node_b, field_next) == null);
-            assert(node_a != node_b);
+        pub fn insert_before(list: *DoublyLinkedList, node_target: *Node, node_insert: *Node) void {
+            assert(@field(node_insert, field_back) == null);
+            assert(@field(node_insert, field_next) == null);
+            assert(node_target != node_insert);
 
             if (constants.verify) {
-                assert(list.contains(node_a));
-                assert(!list.contains(node_b));
+                assert(list.contains(node_target));
+                assert(!list.contains(node_insert));
                 list.verify();
             }
 
-            if (@field(node_a, field_next)) |node_c| {
-                @field(node_b, field_next) = node_c;
-                @field(node_c, field_back) = node_b;
+            if (@field(node_target, field_back)) |node_bumped| {
+                @field(node_insert, field_back) = node_bumped;
+                @field(node_bumped, field_next) = node_insert;
             } else {
-                assert(list.tail == node_a);
-                list.tail = node_b;
+                assert(list.head == node_target);
+                list.head = node_insert;
             }
 
-            @field(node_b, field_back) = node_a;
-            @field(node_a, field_next) = node_b;
+            @field(node_insert, field_next) = node_target;
+            @field(node_target, field_back) = node_insert;
             list.count += 1;
         }
 
@@ -137,28 +149,37 @@ pub fn DoublyLinkedListType(
             if (constants.verify) assert(list.contains(node));
             if (constants.verify) list.verify();
             assert(list.count > 0);
+            assert(list.head != null);
             assert(list.tail != null);
 
-            const tail = list.tail.?;
-
-            if (node == tail) {
-                // Pop the last element of the list.
-                assert(@field(node, field_next) == null);
-                list.tail = @field(node, field_back);
-            }
             if (@field(node, field_back)) |node_back| {
                 assert(@field(node_back, field_next).? == node);
                 @field(node_back, field_next) = @field(node, field_next);
+            } else {
+                // Pop the first element of the list.
+                assert(node == list.head.?);
+                assert(@field(node, field_back) == null);
+
+                list.head = @field(node, field_next);
             }
+
             if (@field(node, field_next)) |node_next| {
                 assert(@field(node_next, field_back).? == node);
                 @field(node_next, field_back) = @field(node, field_back);
+            } else {
+                // Pop the last element of the list.
+                assert(node == list.tail.?);
+                assert(@field(node, field_next) == null);
+
+                list.tail = @field(node, field_back);
             }
+
             @field(node, field_back) = null;
             @field(node, field_next) = null;
             list.count -= 1;
 
             if (constants.verify) list.verify();
+            assert((list.count == 0) == (list.head == null));
             assert((list.count == 0) == (list.tail == null));
         }
     };
@@ -172,14 +193,14 @@ test "DoublyLinkedList LIFO" {
     for (&nodes, 0..) |*node, i| node.* = .{ .id = @intCast(i) };
 
     var list = List{};
-    list.push(&nodes[0]);
-    list.push(&nodes[1]);
-    list.push(&nodes[2]);
+    list.push_tail(&nodes[0]);
+    list.push_tail(&nodes[1]);
+    list.push_tail(&nodes[2]);
 
-    try std.testing.expectEqual(&nodes[2], list.pop().?);
-    try std.testing.expectEqual(&nodes[1], list.pop().?);
-    try std.testing.expectEqual(&nodes[0], list.pop().?);
-    try std.testing.expectEqual(null, list.pop());
+    try std.testing.expectEqual(&nodes[0], list.pop_head().?);
+    try std.testing.expectEqual(&nodes[1], list.pop_head().?);
+    try std.testing.expectEqual(&nodes[2], list.pop_head().?);
+    try std.testing.expectEqual(null, list.pop_head());
 }
 
 test "DoublyLinkedList fuzz" {
@@ -196,11 +217,11 @@ test "DoublyLinkedList fuzz" {
     const nodes_count = 1024;
     const events_max = 1 << 15;
 
-    const Event = enum { push, pop, insert_after, remove };
+    const Event = enum { push, pop, insert_before, remove };
     const event_weights: stdx.PRNG.EnumWeightsType(Event) = .{
         .push = 10,
         .pop = 1,
-        .insert_after = 5,
+        .insert_before = 5,
         .remove = 8,
     };
 
@@ -226,16 +247,16 @@ test "DoublyLinkedList fuzz" {
                 const node_free = nodes_free.findFirstSet() orelse continue;
                 const node = &nodes[node_free];
 
-                list.push(node);
+                list.push_tail(node);
                 list_model.push(node.id);
                 nodes_free.unset(node.id);
             },
             .pop => {
-                if (list.pop()) |node| {
+                if (list.pop_head()) |node| {
                     assert(node.back == null);
                     assert(node.next == null);
 
-                    const node_id = list_model.pop().?;
+                    const node_id = list_model.ordered_remove(0);
                     assert(node_id == node.id);
                     assert(nodes_free.count() < nodes_count);
                     assert(!nodes_free.isSet(node_id));
@@ -246,7 +267,7 @@ test "DoublyLinkedList fuzz" {
                     assert(list_model.empty());
                 }
             },
-            .insert_after => {
+            .insert_before => {
                 if (list_model.count() == 0) continue;
 
                 const node_free = nodes_free.findFirstSet() orelse continue;
@@ -254,8 +275,8 @@ test "DoublyLinkedList fuzz" {
 
                 const list_index = prng.index(list_model.slice());
                 const target_id = list_model.get(list_index);
-                list_model.insert_at(list_index + 1, node.id);
-                list.insert_after(&nodes[target_id], node);
+                list_model.insert_at(list_index, node.id);
+                list.insert_before(&nodes[target_id], node);
 
                 assert(nodes_free.isSet(node.id));
                 nodes_free.unset(node.id);
