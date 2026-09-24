@@ -489,20 +489,66 @@ const Environment = struct {
     // The goal is to keep the model independent of our the LSM / forest.
     const Model = struct {
         const ObjectMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
+        const UniqueKeysMap = std.hash_map.AutoHashMap(u64, u128);
+        const Indexes = struct {
+            object_map: ObjectMap,
+            time_to_id: UniqueKeysMap,
+
+            pub fn init(gpa: std.mem.Allocator) Indexes {
+                return .{
+                    .object_map = ObjectMap.init(gpa),
+                    .time_to_id = UniqueKeysMap.init(gpa),
+                };
+            }
+            pub fn deinit(indexes: *Indexes) void {
+                indexes.object_map.deinit();
+                indexes.time_to_id.deinit();
+            }
+
+            pub fn clone(indexes: Indexes) !Indexes {
+                var object_map = try indexes.object_map.clone();
+                errdefer object_map.deinit();
+                return .{
+                    .object_map = object_map,
+                    .time_to_id = try indexes.time_to_id.clone(),
+                };
+            }
+
+            pub fn put(indexes: *Indexes, transfer: tb.Transfer) !void {
+                try indexes.time_to_id.put(transfer.timestamp, transfer.id);
+                try indexes.object_map.put(transfer.id, transfer);
+            }
+
+            pub fn get(indexes: Indexes, key: UniqueKey) ?tb.Transfer {
+                switch (key) {
+                    .id => |id| return indexes.object_map.get(id),
+                    .timestamp => |timestamp| {
+                        const transfer_id = indexes.time_to_id.get(timestamp) orelse return null;
+                        return indexes.object_map.get(transfer_id);
+                    },
+                }
+            }
+
+            pub fn remove(indexes: *Indexes, transfer_id: u128) void {
+                const transfer = indexes.object_map.fetchRemove(transfer_id).?;
+                assert(indexes.time_to_id.remove(transfer.value.timestamp));
+            }
+        };
+
         const Operation = union(enum) { put: tb.Transfer, remove };
         const LogEntry = struct { op: u64, id: u128, operation: Operation };
         const Log = std.fifo.LinearFifo(LogEntry, .Dynamic);
 
-        transfers_mutable: ObjectMap,
-        transfers_stashed: ObjectMap,
+        transfers_mutable: Indexes,
+        transfers_stashed: Indexes,
         log: Log,
 
         gpa: std.mem.Allocator,
 
         pub fn init(gpa: std.mem.Allocator) Model {
             return .{
-                .transfers_mutable = ObjectMap.init(gpa),
-                .transfers_stashed = ObjectMap.init(gpa),
+                .transfers_mutable = Indexes.init(gpa),
+                .transfers_stashed = Indexes.init(gpa),
                 .log = Log.init(gpa),
                 .gpa = gpa,
             };
@@ -530,28 +576,18 @@ const Environment = struct {
             try apply_entry(&model.transfers_mutable, entry);
         }
 
-        fn apply_entry(objects: *ObjectMap, entry: LogEntry) !void {
+        fn apply_entry(indexes: *Indexes, entry: LogEntry) !void {
             switch (entry.operation) {
                 .put => |transfer| {
                     assert(transfer.id == entry.id);
-                    try objects.put(transfer.id, transfer);
+                    try indexes.put(transfer);
                 },
-                .remove => assert(objects.remove(entry.id)),
+                .remove => indexes.remove(entry.id),
             }
         }
 
         pub fn get(model: *const Model, key: UniqueKey) ?tb.Transfer {
-            switch (key) {
-                .id => |id| return model.transfers_mutable.get(id),
-                .timestamp => |timestamp| {
-                    // A linear search avoids maintaining a second index in the model.
-                    var iterator = model.transfers_mutable.valueIterator();
-                    while (iterator.next()) |transfer| {
-                        if (transfer.timestamp == timestamp) return transfer.*;
-                    }
-                    return null;
-                },
-            }
+            return model.transfers_mutable.get(key);
         }
 
         pub fn checkpoint(model: *Model, op: u64) !void {
@@ -579,7 +615,7 @@ const Environment = struct {
             var matches = std.ArrayList(tb.Transfer).init(model.gpa);
             errdefer matches.deinit();
 
-            var iterator = model.transfers_mutable.valueIterator();
+            var iterator = model.transfers_mutable.object_map.valueIterator();
             while (iterator.next()) |transfer| {
                 const key = scan_key(params.index, transfer) orelse continue;
                 if (key >= params.min and key <= params.max) try matches.append(transfer.*);
@@ -636,7 +672,7 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = model.transfers_mutable.count() * @sizeOf(tb.Transfer);
+            const model_size = model.transfers_mutable.object_map.count() * @sizeOf(tb.Transfer);
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
@@ -700,7 +736,7 @@ const Environment = struct {
                     _ = try env.check_lookup(
                         .{ .id = id },
                         snapshot,
-                        model.transfers_stashed.get(id),
+                        model.transfers_stashed.get(.{ .id = id }),
                     );
 
                     if (index % groove_stash_value_count_max == 0) {
@@ -708,7 +744,7 @@ const Environment = struct {
                     }
                 }
                 // Here we check that we have not lost objects that should be in the checkpoint.
-                var iterator = model.transfers_stashed.valueIterator();
+                var iterator = model.transfers_stashed.object_map.valueIterator();
                 while (iterator.next()) |transfer| : (index += 1) {
                     _ = try env.check_lookup(.{ .id = transfer.id }, snapshot, transfer.*);
                     if (index % groove_stash_value_count_max == 0) {
