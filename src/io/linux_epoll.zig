@@ -16,7 +16,6 @@ const linux = std.os.linux;
 const log = std.log.scoped(.io);
 
 const stdx = @import("stdx");
-const TimeOS = @import("../time.zig").TimeOS;
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
 
@@ -31,7 +30,7 @@ pub const IO = struct {
     completed: QueueType(Completion) = .init(.{ .name = "io_completed" }),
 
     stats: common.Stats = .{},
-    time: TimeOS = .{},
+    time: stdx.TimeOS = .{},
 
     pub const TCPOptions = common.TCPOptions;
     pub const ListenOptions = common.ListenOptions;
