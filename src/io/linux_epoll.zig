@@ -702,7 +702,6 @@ pub const IO = struct {
 
     fn enqueue_timeout(self: *IO, completion: *Completion) void {
         assert(completion.operation == .timeout);
-        assert(!completion.in_timeouts);
         assert(!completion.in_awaiting);
 
         const timeout_duration = completion.operation.timeout.duration;
@@ -713,7 +712,6 @@ pub const IO = struct {
         }
 
         completion.in_awaiting = true;
-        completion.in_timeouts = true;
 
         self.timeout_insert_sorted(completion);
 
@@ -1000,7 +998,6 @@ pub const IO = struct {
     fn timer_fire(self: *IO, now: stdx.Instant) void {
         while (self.timeouts.peek()) |completion| {
             assert(completion.operation == .timeout);
-            assert(completion.in_timeouts);
             assert(completion.in_awaiting);
 
             if (completion.operation.timeout.expiry.ns > now.ns) break;
@@ -1009,7 +1006,6 @@ pub const IO = struct {
             const completion_removed = self.timeouts.pop();
             assert(completion_removed == completion);
 
-            completion.in_timeouts = false;
             completion.in_awaiting = false;
             completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
             self.completed.push(completion);
@@ -1071,7 +1067,6 @@ pub const IO = struct {
 
     fn timeout_insert_sorted(self: *IO, completion: *Completion) void {
         assert(completion.operation == .timeout);
-        assert(completion.in_timeouts);
         assert(completion.in_awaiting);
         assert(completion.link.next == null);
 
@@ -1145,9 +1140,6 @@ pub const IO = struct {
 
         /// True when this completion is in-flight (registered in epoll or awaiting a timeout).
         in_awaiting: bool = false,
-
-        /// Absolute expiry time for timeout() operations (nanoseconds, CLOCK_MONOTONIC).
-        in_timeouts: bool = false,
 
         /// True when this completion is registered in epoll.
         epoll_registered: bool = false,
