@@ -374,7 +374,10 @@ pub const IO = struct {
             .io = self,
             .context = context,
             .callback = erase_types(Context, TimeoutError!void, callback),
-            .operation = .{ .timeout = .{ .ns = nanoseconds } },
+            .operation = .{ .timeout = .{
+                .duration = .{ .ns = nanoseconds },
+                .expiry = self.time.monotonic().add(.{ .ns = nanoseconds }),
+            } },
         };
 
         self.enqueue(completion);
@@ -698,26 +701,24 @@ pub const IO = struct {
     }
 
     fn enqueue_timeout(self: *IO, completion: *Completion) void {
-        assert(completion.timeout_expiry == null);
+        assert(completion.operation == .timeout);
         assert(!completion.in_timeouts);
         assert(!completion.in_awaiting);
 
-        const timeout_duration = completion.operation.timeout;
+        const timeout_duration = completion.operation.timeout.duration;
         if (timeout_duration.ns == 0) {
             completion.result = -@as(i32, @intFromEnum(posix.E.TIME));
             self.completed.push(completion);
             return;
         }
 
-        const now = self.time.monotonic();
-        completion.timeout_expiry = now.add(timeout_duration);
         completion.in_awaiting = true;
         completion.in_timeouts = true;
 
         self.timeout_insert_sorted(completion);
 
         if (self.timeouts.peek() == completion) {
-            self.timer_arm(completion.timeout_expiry.?);
+            self.timer_arm(completion.operation.timeout.expiry);
         } else {
             assert(self.timeouts.count() > 1);
         }
@@ -798,8 +799,8 @@ pub const IO = struct {
             self.timer_fire(now);
 
             if (self.timeouts.peek()) |next| {
-                assert(next.timeout_expiry.?.ns > now.ns);
-                self.timer_arm(next.timeout_expiry.?);
+                assert(next.operation.timeout.expiry.ns > now.ns);
+                self.timer_arm(next.operation.timeout.expiry);
             } else {
                 self.timer_disarm();
             }
@@ -1000,11 +1001,12 @@ pub const IO = struct {
     /// Fire all user timeout() completions whose expiry has passed.
     fn timer_fire(self: *IO, now: stdx.Instant) void {
         while (self.timeouts.peek()) |completion| {
+            assert(completion.operation == .timeout);
             assert(completion.in_timeouts);
             assert(completion.in_awaiting);
 
-            if (completion.timeout_expiry.?.ns > now.ns) break;
-            assert(completion.timeout_expiry.?.ns <= now.ns);
+            if (completion.operation.timeout.expiry.ns > now.ns) break;
+            assert(completion.operation.timeout.expiry.ns <= now.ns);
 
             const completion_removed = self.timeouts.pop();
             assert(completion_removed == completion);
@@ -1096,9 +1098,10 @@ pub const IO = struct {
         var timeout_iterator = self.timeouts.iterate();
         while (timeout_iterator.next()) |node| {
             // Insert completion on the earlier side of `node`.
-            if (completion.timeout_expiry.?.ns <= node.timeout_expiry.?.ns) {
+            if (completion.operation.timeout.expiry.ns <= node.operation.timeout.expiry.ns) {
                 if (timeout_previous) |node_previous| {
-                    assert(node_previous.timeout_expiry.?.ns < node.timeout_expiry.?.ns);
+                    assert(node_previous.operation.timeout.expiry.ns <
+                        node.operation.timeout.expiry.ns);
                     self.timeouts.insert_after(node_previous, completion);
                 } else {
                     // completion is earlier than all existing timeouts.
@@ -1162,12 +1165,11 @@ pub const IO = struct {
         /// True when this completion is in-flight (registered in epoll or awaiting a timeout).
         in_awaiting: bool = false,
 
+        /// Absolute expiry time for timeout() operations (nanoseconds, CLOCK_MONOTONIC).
+        in_timeouts: bool = false,
+
         /// True when this completion is registered in epoll.
         epoll_registered: bool = false,
-
-        /// Absolute expiry time for timeout() operations (nanoseconds, CLOCK_MONOTONIC).
-        timeout_expiry: ?stdx.Instant = null,
-        in_timeouts: bool = false,
 
         eventfd_read_buffer: u64 = undefined,
 
@@ -1394,6 +1396,9 @@ pub const IO = struct {
             socket: socket_t,
             buffer: []const u8,
         },
-        timeout: stdx.Duration,
+        timeout: struct {
+            duration: stdx.Duration,
+            expiry: stdx.Instant,
+        },
     };
 };
