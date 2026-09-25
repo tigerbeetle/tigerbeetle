@@ -227,6 +227,36 @@ pub fn GridType(comptime Storage: type) type {
 
         canceling_tick_context: NextTick = undefined,
 
+        // Allocate grid blocks without std.mem.Allocator's undefined-memory initialization
+        // to improve startup time with large cache.
+        fn blocks_alloc_uninitialized(
+            allocator: mem.Allocator,
+            blocks_count: usize,
+        ) ![]align(constants.sector_size) [constants.block_size]u8 {
+            const bytes = std.math.mul(usize, blocks_count, constants.block_size) catch
+                return error.OutOfMemory;
+            const ptr = allocator.rawAlloc(
+                bytes,
+                .fromByteUnits(constants.sector_size),
+                @returnAddress(),
+            ) orelse return error.OutOfMemory;
+            return @as(
+                [*]align(constants.sector_size) [constants.block_size]u8,
+                @ptrCast(@alignCast(ptr)),
+            )[0..blocks_count];
+        }
+
+        fn blocks_free(
+            allocator: mem.Allocator,
+            blocks: []align(constants.sector_size) [constants.block_size]u8,
+        ) void {
+            const bytes = @as(
+                [*]align(constants.sector_size) u8,
+                @ptrCast(blocks.ptr),
+            )[0 .. blocks.len * constants.block_size];
+            allocator.rawFree(bytes, .fromByteUnits(constants.sector_size), @returnAddress());
+        }
+
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
             trace: *Tracer,
@@ -258,12 +288,9 @@ pub fn GridType(comptime Storage: type) type {
                 vsr.checkpoint_trailer.block_count_for_trailer_size(free_set_encoded_size_max) * 2 +
                 1; // +1 for burst in read_block_callback();
             const blocks_count = options.cache_blocks_count + stash_blocks_count;
-            const blocks = try allocator.alignedAlloc(
-                [constants.block_size]u8,
-                constants.sector_size,
-                blocks_count,
-            );
-            errdefer allocator.free(blocks);
+            const blocks_count_usize: usize = @intCast(blocks_count);
+            const blocks = try blocks_alloc_uninitialized(allocator, blocks_count_usize);
+            errdefer blocks_free(allocator, blocks);
 
             const blocks_references = try allocator.alloc(u8, blocks_count);
             errdefer allocator.free(blocks_references);
@@ -342,7 +369,7 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.blocks_missing.deinit(allocator);
             allocator.free(grid.blocks_references);
-            allocator.free(grid.blocks);
+            blocks_free(allocator, grid.blocks);
 
             grid.stash_used.deinit(allocator);
             grid.stash_free.deinit(allocator);
