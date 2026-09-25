@@ -106,32 +106,6 @@ def test_get_account_transfers(client):
         assert result.timestamp > 0
         assert result.status == tb.CreateTransferStatus.CREATED
 
-    # TooMuchData
-    filter = tb.AccountFilter(
-        account_id=accountC.id,
-        user_data_128=0,
-        user_data_64=0,
-        user_data_32=0,
-        code=0,
-        timestamp_min=0,
-        timestamp_max=0,
-        limit=10_000,
-        flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.DEBITS,
-    )
-    try:
-        client.get_account_transfers(filter)
-    except Exception as err:
-        assert isinstance(err, tb.TooMuchDataError)
-    else:
-        assert False
-    try:
-        client.get_account_balances(filter)
-    except Exception as err:
-        assert isinstance(err, tb.TooMuchDataError)
-    else:
-        assert False
-
-
     # Invalid flags:
     filter = tb.AccountFilter(
         account_id=accountC.id,
@@ -149,31 +123,6 @@ def test_get_account_transfers(client):
 
 
 def test_query_with_invalid_filter(client):
-    # TooMuchData
-    filter = tb.QueryFilter(
-        user_data_128=0,
-        user_data_64=0,
-        user_data_32=0,
-        ledger=0,
-        code=0,
-        timestamp_min=0,
-        timestamp_max=0,
-        limit=10_000,
-        flags=tb.QueryFilterFlags.NONE,
-    )
-    try:
-        client.query_accounts(filter)
-    except Exception as err:
-        assert isinstance(err, tb.TooMuchDataError)
-    else:
-        assert False
-    try:
-        client.query_transfers(filter)
-    except Exception as err:
-        assert isinstance(err, tb.TooMuchDataError)
-    else:
-        assert False
-
     # Invalid flags:
     filter = tb.QueryFilter(
         user_data_128=0,

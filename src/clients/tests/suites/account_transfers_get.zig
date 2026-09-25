@@ -729,9 +729,9 @@ test "returns no transfers without the debits or credits flag" {
 }
 
 test "fails when the limit is too large" {
-    ct.assert_fail(ct.get_account_transfers(.{
+    ct.assert_fail_with(ct.get_account_transfers(.{
         .account_id = ct.generate_id(),
         .limit = 10000,
         .flags = .{ .debits = true, .credits = true },
-    }));
+    }), .too_much_data);
 }

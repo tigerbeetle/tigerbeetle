@@ -476,6 +476,16 @@ const Parser = struct {
 
     const AssertionCall = stdx.EnumType(ast.api_decl_names(ast.is_assertion));
 
+    fn parse_failing_call(parser: *Parser, node: std.zig.Ast.Node.Index) !ast.Call {
+        var buffer: [1]std.zig.Ast.Node.Index = undefined;
+        const inner = parser.tree.fullCall(&buffer, node) orelse
+            return parser.fail_node(node, "expected a call");
+        const name = try parser.parse_call_name(inner);
+        const call_name = std.meta.stringToEnum(ast.Call.Name, name) orelse
+            return parser.fail_node(inner.ast.fn_expr, "unknown call");
+        return parser.parse_call(call_name, inner);
+    }
+
     fn parse_assertion(
         parser: *Parser,
         name: []const u8,
@@ -546,13 +556,23 @@ const Parser = struct {
             },
             .assert_fail => {
                 const inner_node = try parser.assert_one_argument(call, "(call)");
-                var buffer: [1]std.zig.Ast.Node.Index = undefined;
-                const inner = tree.fullCall(&buffer, inner_node) orelse
-                    return parser.fail_node(inner_node, "expected a call");
-                const inner_name = try parser.parse_call_name(inner);
-                const operation = std.meta.stringToEnum(ast.Call.Name, inner_name) orelse
-                    return parser.fail_node(inner.ast.fn_expr, "expected an operation");
-                return .{ .fail = try parser.parse_call(operation, inner) };
+                return .{ .fail = .{
+                    .call = try parser.parse_failing_call(inner_node),
+                    .client_error = null,
+                } };
+            },
+            .assert_fail_with => {
+                const args = try parser.assert_two_arguments(call, "(call, client_error)");
+                const value = try parser.parse_expression(args[1]);
+                if (value != .enum_literal) {
+                    return parser.fail_node(args[1], "expected a client error");
+                }
+                const client_error = std.meta.stringToEnum(ast.ClientError, value.enum_literal) orelse
+                    return parser.fail_node(args[1], "unknown client error");
+                return .{ .fail = .{
+                    .call = try parser.parse_failing_call(args[0]),
+                    .client_error = client_error,
+                } };
             },
         }
     }

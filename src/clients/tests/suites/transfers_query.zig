@@ -569,5 +569,5 @@ test "returns no transfers for an inverted timestamp range at u64 max" {
 }
 
 test "fails when the limit is too large" {
-    ct.assert_fail(ct.query_transfers(.{ .limit = 10000 }));
+    ct.assert_fail_with(ct.query_transfers(.{ .limit = 10000 }), .too_much_data);
 }

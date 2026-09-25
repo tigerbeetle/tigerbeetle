@@ -47,9 +47,11 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\  createClient,
         \\  CreateAccountStatus,
         \\  CreateTransferStatus,
+        \\  ErrorCodes,
         \\  id,
         \\  QueryFilter,
         \\  QueryFilterFlags,
+        \\  RequestError,
         \\  Transfer,
         \\  TransferFlags,
         \\} from '.'
@@ -402,14 +404,33 @@ fn emit_assertion(
                 comparison.actual.reference, comparison.actual.field.name, value,
             });
         },
-        .fail => |call| {
+        .fail => |failure| {
             try printer.write_indented("await assert.rejects(async (): Promise<void> => {");
             printer.indent();
-            try emit_invocation(printer, call, .{});
+            try emit_invocation(printer, failure.call, .{});
             printer.dedent();
-            try printer.write_indented("})");
+            if (failure.client_error) |client_error| {
+                try printer.write_indented("}, (error: unknown): boolean => {");
+                printer.indent();
+                try printer.write_indented("assert.ok(error instanceof RequestError)");
+                try printer.print_indented("assert.strictEqual(error.code, ErrorCodes.{s})", .{
+                    node_error_code(client_error),
+                });
+                try printer.write_indented("return true");
+                printer.dedent();
+                try printer.write_indented("})");
+            } else {
+                try printer.write_indented("})");
+            }
         },
     }
+}
+
+fn node_error_code(client_error: ast.ClientError) []const u8 {
+    return switch (client_error) {
+        .too_much_data => "ERR_TOO_MUCH_DATA",
+        .client_closed => "ERR_CLIENT_CLOSED",
+    };
 }
 
 fn method_name(printer: *Printer, name: ast.Call.Name) ![]const u8 {

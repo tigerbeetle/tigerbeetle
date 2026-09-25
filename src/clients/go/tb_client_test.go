@@ -3,7 +3,6 @@ package tigerbeetle_go
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -350,27 +349,8 @@ func doTestClient(t *testing.T, client Client) {
 		}
 		assertCreateTransfersOK(t, transfer_results, len(transfers_created))
 
-		// TooMuchData:
-		filter := AccountFilter{
-			AccountID:    accountC.ID,
-			TimestampMin: 0,
-			TimestampMax: 0,
-			Limit:        10_000,
-			Flags: AccountFilterFlags{
-				Debits:   true,
-				Credits:  true,
-				Reversed: false,
-			}.ToUint32(),
-		}
-
-		_, err = client.GetAccountTransfers(filter)
-		assert.True(t, errors.Is(err, ErrTooMuchData))
-
-		_, err = client.GetAccountBalances(filter)
-		assert.True(t, errors.Is(err, ErrTooMuchData))
-
 		// Invalid flags:
-		filter = AccountFilter{
+		filter := AccountFilter{
 			AccountID:    accountC.ID,
 			TimestampMin: 0,
 			TimestampMax: 0,
@@ -395,28 +375,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		BATCH_MAX := uint32(8189)
 
-		// TooMuchData:
-		filter := QueryFilter{
-			UserData128:  ToUint128(0),
-			UserData64:   0,
-			UserData32:   0,
-			Ledger:       0,
-			Code:         0,
-			TimestampMin: 0,
-			TimestampMax: 0,
-			Limit:        10_000,
-			Flags: QueryFilterFlags{
-				Reversed: false,
-			}.ToUint32(),
-		}
-		_, err := client.QueryTransfers(filter)
-		assert.True(t, errors.Is(err, ErrTooMuchData))
-
-		_, err = client.QueryAccounts(filter)
-		assert.True(t, errors.Is(err, ErrTooMuchData))
-
 		// Invalid flags:
-		filter = QueryFilter{
+		filter := QueryFilter{
 			UserData128:  ToUint128(0),
 			UserData64:   0,
 			UserData32:   0,

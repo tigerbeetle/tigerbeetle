@@ -23,6 +23,9 @@ pub const TransferFlags = tb.TransferFlags;
 pub const U128 = struct { value: u128 };
 pub const uint128_max = 340282366920938463463374607431768211455;
 
+/// Client errors for `assert_fail_with`. Emitters map them for the target language.
+pub const ClientError = enum { too_much_data, client_closed };
+
 const ct_compile_error = "conformance test suites are parsed, not compiled";
 
 /// A runtime-generated TigerBeetle id.
@@ -149,5 +152,12 @@ pub fn assert_greater_than(actual: anytype, value: anytype) void {
 /// The wrapped call must fail with any client error.
 pub fn assert_fail(call: anytype) void {
     _ = call;
+    @panic(ct_compile_error);
+}
+
+/// The wrapped call must fail with a specific client error.
+pub fn assert_fail_with(call: anytype, client_error: ClientError) void {
+    _ = call;
+    _ = client_error;
     @panic(ct_compile_error);
 }

@@ -8,6 +8,7 @@ package tigerbeetle_go
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -2775,9 +2776,7 @@ func TestConformance(t *testing.T) {
 			Limit:     10000,
 			Flags:     AccountFilterFlags{Debits: true, Credits: true}.ToUint32(),
 		})
-		if err == nil {
-			t.Fatal("expected an error")
-		}
+		assert.True(t, errors.Is(err, ErrTooMuchData))
 	})
 
 	// Suite: get_account_balances
@@ -4349,9 +4348,7 @@ func TestConformance(t *testing.T) {
 			Limit:     10000,
 			Flags:     AccountFilterFlags{Debits: true, Credits: true}.ToUint32(),
 		})
-		if err == nil {
-			t.Fatal("expected an error")
-		}
+		assert.True(t, errors.Is(err, ErrTooMuchData))
 	})
 
 	// Suite: query_accounts
@@ -4862,9 +4859,7 @@ func TestConformance(t *testing.T) {
 			UserData128: ID(),
 			Limit:       10000,
 		})
-		if err == nil {
-			t.Fatal("expected an error")
-		}
+		assert.True(t, errors.Is(err, ErrTooMuchData))
 	})
 
 	// Suite: query_transfers
@@ -5637,9 +5632,7 @@ func TestConformance(t *testing.T) {
 		_, err := client.QueryTransfers(QueryFilter{
 			Limit: 10000,
 		})
-		if err == nil {
-			t.Fatal("expected an error")
-		}
+		assert.True(t, errors.Is(err, ErrTooMuchData))
 	})
 
 	// Suite: two_phase_transfer
@@ -6336,9 +6329,7 @@ func TestConformance(t *testing.T) {
 	test("close_client_fails_operations_after_close", func(t *testing.T, client Client) {
 		client.Close()
 		_, err := client.LookupAccounts([]Uint128{ID()})
-		if err == nil {
-			t.Fatal("expected an error")
-		}
+		assert.True(t, errors.Is(err, ErrClientClosed))
 	})
 
 	// Omitted: "fails a second close"

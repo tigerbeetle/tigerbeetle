@@ -7,11 +7,9 @@ import {
   CreateAccountStatus,
   CreateTransferStatus,
   AccountFilter,
-  AccountFilterFlags,
   AccountFlags,
   id,
   QueryFilter,
-  QueryFilterFlags,
   ErrorCodes,
   RequestError,
 } from '.'
@@ -223,31 +221,8 @@ test('can get account transfers', async (): Promise<void> => {
     assert.deepStrictEqual(result.status, CreateTransferStatus.created)
   }
 
-  // TooMuchData
-  let filter: AccountFilter = {
-    account_id: accountC.id,
-    user_data_128: 0n,
-    user_data_64: 0n,
-    user_data_32: 0,
-    code: 0,
-    timestamp_min: 0n,
-    timestamp_max: 0n,
-    limit: 10_000,
-    flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
-  }
-  assert.rejects(async() => await client.getAccountTransfers(filter), (err) => {
-    assert.ok(err instanceof RequestError)
-    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
-    return true
-  })
-  assert.rejects(async() => await client.getAccountBalances(filter), (err) => {
-    assert.ok(err instanceof RequestError)
-    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
-    return true
-  })
-
   // Invalid flags:
-  filter = {
+  const filter: AccountFilter = {
     account_id: accountC.id,
     user_data_128: 0n,
     user_data_64: 0n,
@@ -264,31 +239,8 @@ test('can get account transfers', async (): Promise<void> => {
 })
 
 test('query with invalid filter', async (): Promise<void> => {
-  // TooMuchData
-  var filter: QueryFilter = {
-    user_data_128: 0n,
-    user_data_64: 0n,
-    user_data_32: 0,
-    ledger: 0,
-    code: 0,
-    timestamp_min: 0n,
-    timestamp_max: 0n,
-    limit: 10_000,
-    flags: QueryFilterFlags.none,
-  }
-  assert.rejects(async() => await client.queryAccounts(filter), (err) => {
-    assert.ok(err instanceof RequestError)
-    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
-    return true
-  })
-  assert.rejects(async() => await client.queryTransfers(filter), (err) => {
-    assert.ok(err instanceof RequestError)
-    assert.strictEqual(err.code,  ErrorCodes.ERR_TOO_MUCH_DATA)
-    return true
-  })
-
   // Invalid flags:
-  filter = {
+  const filter: QueryFilter = {
     user_data_128: 0n,
     user_data_64: 0n,
     user_data_32: 0,

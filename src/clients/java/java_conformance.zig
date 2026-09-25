@@ -450,6 +450,7 @@ fn emit_call(
     options: struct {
         binding: ?[]const u8 = null,
         expect_error: bool = false,
+        client_error: ?ast.ClientError = null,
     },
 ) !void {
     const printer = scope.printer;
@@ -505,6 +506,7 @@ fn emit_call(
     try emit_invocation(scope, call, .{
         .binding = options.binding,
         .expect_error = options.expect_error,
+        .client_error = options.client_error,
     });
 }
 
@@ -514,6 +516,7 @@ fn emit_invocation(
     options: struct {
         binding: ?[]const u8 = null,
         expect_error: bool = false,
+        client_error: ?ast.ClientError = null,
     },
 ) !void {
     const printer = scope.printer;
@@ -544,7 +547,8 @@ fn emit_invocation(
 
     try printer.write_indent();
     if (options.expect_error) {
-        try printer.print("assertThrows(Exception.class, () -> client.{s}({s}));\n", .{
+        try printer.print("assertThrows({s}.class, () -> client.{s}({s}));\n", .{
+            if (options.client_error) |client_error| java_exception_name(client_error) else "Exception",
             java_operation_name(call.name),
             argument,
         });
@@ -763,7 +767,10 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
                 ),
             });
         },
-        .fail => |call| try emit_call(scope, call, .{ .expect_error = true }),
+        .fail => |failure| try emit_call(scope, failure.call, .{
+            .expect_error = true,
+            .client_error = failure.client_error,
+        }),
     }
 }
 
@@ -915,6 +922,13 @@ fn render_big_integer(printer: *Printer, text: []const u8) ![]const u8 {
         return printer.string_alloc("BigInteger.valueOf({d}L)", .{value});
     }
     return printer.string_alloc("new BigInteger(\"{d}\")", .{value});
+}
+
+fn java_exception_name(client_error: ast.ClientError) []const u8 {
+    return switch (client_error) {
+        .too_much_data => "TooMuchDataException",
+        .client_closed => "ClientClosedException",
+    };
 }
 
 fn java_operation_name(name: ast.Call.Name) []const u8 {

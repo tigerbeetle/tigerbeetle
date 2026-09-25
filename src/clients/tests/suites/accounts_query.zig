@@ -351,8 +351,8 @@ test "returns no accounts for an inverted timestamp range at u64 max" {
 }
 
 test "fails when the limit is too large" {
-    ct.assert_fail(ct.query_accounts(.{
+    ct.assert_fail_with(ct.query_accounts(.{
         .user_data_128 = ct.generate_id(),
         .limit = 10000,
-    }));
+    }), .too_much_data);
 }
