@@ -120,6 +120,7 @@ pub const IO = struct {
     fn run_callbacks(self: *IO) void {
         while (self.completed.pop()) |completion| {
             assert(!completion.in_awaiting);
+            assert(!completion.epoll_registered);
 
             completion.complete();
         }
@@ -521,6 +522,7 @@ pub const IO = struct {
 
     fn enqueue(self: *IO, completion: *Completion) void {
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         switch (completion.operation) {
             .accept => self.enqueue_accept(completion),
@@ -535,6 +537,7 @@ pub const IO = struct {
 
     fn enqueue_accept(self: *IO, completion: *Completion) void {
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const operation = &completion.operation.accept;
         while (true) {
@@ -567,6 +570,7 @@ pub const IO = struct {
     fn enqueue_close(self: *IO, completion: *Completion) void {
         assert(completion.io == self);
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const operation = completion.operation.close;
         const return_code = linux.close(operation.fd);
@@ -581,6 +585,7 @@ pub const IO = struct {
     fn enqueue_connect(self: *IO, completion: *Completion) void {
         assert(completion.io == self);
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const operation = completion.operation.connect;
         const return_code = linux.connect(
@@ -606,6 +611,7 @@ pub const IO = struct {
 
     fn enqueue_eventfd_read(self: *IO, completion: *Completion) void {
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const operation = completion.operation.eventfd_read;
         while (true) {
@@ -636,6 +642,7 @@ pub const IO = struct {
 
     fn enqueue_recv(self: *IO, completion: *Completion) void {
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const operation = completion.operation.recv;
         while (true) {
@@ -669,6 +676,7 @@ pub const IO = struct {
 
     fn enqueue_send(self: *IO, completion: *Completion) void {
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const operation = completion.operation.send;
         while (true) {
@@ -703,6 +711,7 @@ pub const IO = struct {
     fn enqueue_timeout(self: *IO, completion: *Completion) void {
         assert(completion.operation == .timeout);
         assert(!completion.in_awaiting);
+        assert(!completion.epoll_registered);
 
         const timeout_duration = completion.operation.timeout.duration;
         if (timeout_duration.ns == 0) {
@@ -770,7 +779,6 @@ pub const IO = struct {
         // -1 would indicate that we wait indefinitely.
         assert(timeout_ms != -1);
         assert(timeout_ms >= 0);
-        // FIXME registered? in_awaiting?
 
         var events: [256]linux.epoll_event = undefined;
         const wait_result = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
@@ -803,11 +811,11 @@ pub const IO = struct {
         } else {
             const completion: *Completion = @ptrFromInt(event.data.ptr);
             assert(completion.in_awaiting);
+            assert(completion.epoll_registered);
 
             // Remove from epoll. The fd is embedded in the operation.
             const fd = operation_fd(completion);
             _ = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
-            assert(completion.epoll_registered);
             completion.epoll_registered = false;
 
             switch (completion.operation) {
@@ -999,6 +1007,7 @@ pub const IO = struct {
         while (self.timeouts.peek()) |completion| {
             assert(completion.operation == .timeout);
             assert(completion.in_awaiting);
+            assert(!completion.epoll_registered);
 
             if (completion.operation.timeout.expiry.ns > now.ns) break;
             assert(completion.operation.timeout.expiry.ns <= now.ns);
@@ -1068,6 +1077,7 @@ pub const IO = struct {
     fn timeout_insert_sorted(self: *IO, completion: *Completion) void {
         assert(completion.operation == .timeout);
         assert(completion.in_awaiting);
+        assert(!completion.epoll_registered);
         assert(completion.link.next == null);
 
         var timeout_previous: ?*Completion = null;
