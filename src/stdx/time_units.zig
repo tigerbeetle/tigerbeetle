@@ -239,7 +239,7 @@ pub const InstantUnix = struct {
         }
     };
 
-    pub fn from_timestamp_s(timestamp_s: u64) InstantUnix {
+    pub fn from_seconds(timestamp_s: u64) InstantUnix {
         return InstantUnix{ .ns = timestamp_s * std.time.ns_per_s };
     }
 

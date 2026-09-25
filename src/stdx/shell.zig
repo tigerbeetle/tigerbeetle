@@ -741,7 +741,7 @@ pub fn git_commit_timestamp(shell: *Shell, sha: []const u8) !stdx.InstantUnix {
     assert(sha.len == 40);
 
     const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
-    return stdx.InstantUnix.from_timestamp_s(
+    return stdx.InstantUnix.from_seconds(
         try stdx.parse_int(u64, timestamp_s, .{}),
     );
 }
