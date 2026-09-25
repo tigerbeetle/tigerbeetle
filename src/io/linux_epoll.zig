@@ -19,17 +19,16 @@ const stdx = @import("stdx");
 const TimeOS = @import("../time.zig").TimeOS;
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
-const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
 
 pub const IO = struct {
     epoll_fd: posix.fd_t,
     timer_fd: posix.fd_t,
     timer_expiry: ?stdx.Instant = null,
-    /// Ordered by expiry, from soonest-to-expire (head) to latest-to-expire (tail).
-    timeouts: DoublyLinkedListType(Completion, .timeout_back, .timeout_next) = .{},
+    /// Ordered by expiry, from soonest-to-expire (out) to latest-to-expire (in).
+    timeouts: QueueType(Completion) = .init(.{ .name = "timeouts" }),
 
     /// Completions that are ready to have their callbacks run.
-    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
+    completed: QueueType(Completion) = .init(.{ .name = "io_completed" }),
 
     stats: common.Stats = .{},
     time: TimeOS = .{},
@@ -718,10 +717,10 @@ pub const IO = struct {
 
         self.timeout_insert_sorted(completion);
 
-        if (self.timeouts.head == completion) {
+        if (self.timeouts.peek() == completion) {
             self.timer_arm(completion.timeout_expiry.?);
         } else {
-            assert(self.timeouts.count > 1);
+            assert(self.timeouts.count() > 1);
         }
     }
 
@@ -799,7 +798,7 @@ pub const IO = struct {
             self.timer_drain();
             self.timer_fire(now);
 
-            if (self.timeouts.head) |next| {
+            if (self.timeouts.peek()) |next| {
                 assert(next.timeout_expiry.?.ns > now.ns);
                 self.timer_arm(next.timeout_expiry.?);
             } else {
@@ -1001,14 +1000,14 @@ pub const IO = struct {
 
     /// Fire all user timeout() completions whose expiry has passed.
     fn timer_fire(self: *IO, now: stdx.Instant) void {
-        while (self.timeouts.head) |completion| {
+        while (self.timeouts.peek()) |completion| {
             assert(completion.in_timeouts);
             assert(completion.in_awaiting);
 
             if (completion.timeout_expiry.?.ns > now.ns) break;
             assert(completion.timeout_expiry.?.ns <= now.ns);
 
-            const completion_removed = self.timeouts.pop_head();
+            const completion_removed = self.timeouts.pop();
             assert(completion_removed == completion);
 
             completion.in_timeouts = false;
@@ -1092,19 +1091,26 @@ pub const IO = struct {
         assert(completion.operation == .timeout);
         assert(completion.in_timeouts);
         assert(completion.in_awaiting);
-        assert(completion.timeout_back == null);
-        assert(completion.timeout_next == null);
+        assert(completion.link.next == null);
 
-        var timeout_iterator = self.timeouts.head;
-        while (timeout_iterator) |node| : (timeout_iterator = node.timeout_next) {
-            // Insert completion on the earlier side of node.
+        var timeout_previous: ?*Completion = null;
+        var timeout_iterator = self.timeouts.iterate();
+        while (timeout_iterator.next()) |node| {
+            // Insert completion on the earlier side of `node`.
             if (completion.timeout_expiry.?.ns <= node.timeout_expiry.?.ns) {
-                self.timeouts.insert_before(node, completion);
+                if (timeout_previous) |node_previous| {
+                    assert(node_previous.timeout_expiry.?.ns < node.timeout_expiry.?.ns);
+                    self.timeouts.insert_after(node_previous, completion);
+                } else {
+                    // completion is earlier than all existing timeouts.
+                    self.timeouts.push_first(completion);
+                }
                 return;
             }
+            timeout_previous = node;
         }
         // completion is later than all existing timeouts.
-        self.timeouts.push_tail(completion);
+        self.timeouts.push(completion);
     }
 
     /// Returns the fd for operations registered with epoll.
@@ -1162,8 +1168,6 @@ pub const IO = struct {
 
         /// Absolute expiry time for timeout() operations (nanoseconds, CLOCK_MONOTONIC).
         timeout_expiry: ?stdx.Instant = null,
-        timeout_back: ?*Completion = null,
-        timeout_next: ?*Completion = null,
         in_timeouts: bool = false,
 
         eventfd_read_buffer: u64 = undefined,
