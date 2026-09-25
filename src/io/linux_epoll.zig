@@ -801,8 +801,6 @@ pub const IO = struct {
             if (self.timeouts.peek()) |next| {
                 assert(next.operation.timeout.expiry.ns > now.ns);
                 self.timer_arm(next.operation.timeout.expiry);
-            } else {
-                self.timer_disarm();
             }
         } else {
             const completion: *Completion = @ptrFromInt(event.data.ptr);
@@ -1068,23 +1066,6 @@ pub const IO = struct {
         ))) {
             .SUCCESS => self.timer_expiry = expiry,
             else => |err| log.err("timer_arm failed: {}", .{err}),
-        }
-    }
-
-    fn timer_disarm(self: *IO) void {
-        assert(self.timer_fd != INVALID_FILE);
-        assert(self.timer_fd >= 0);
-        assert(self.timer_expiry == null); // (Timer was already cleared.)
-        assert(self.timeouts.empty());
-
-        const spec = linux.itimerspec{
-            .it_interval = .{ .sec = 0, .nsec = 0 },
-            .it_value = .{ .sec = 0, .nsec = 0 },
-        };
-
-        switch (linux.E.init(linux.timerfd_settime(self.timer_fd, .{}, &spec, null))) {
-            .SUCCESS => {},
-            else => |err| log.err("timer_disarm failed: {}", .{err}),
         }
     }
 
