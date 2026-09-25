@@ -77,7 +77,7 @@ fn run_protocol_test(gpa: std.mem.Allocator, options: struct { host: stdx.Socket
 
     const default_exchange = "";
     const testing_queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     defer gpa.free(testing_queue);
 
@@ -193,7 +193,7 @@ fn run_protocol_test(gpa: std.mem.Allocator, options: struct { host: stdx.Socket
     // Asserting the progress queue "drop head" behavior,
     // where only the last published message must remain.
     const progress_queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     defer gpa.free(progress_queue);
 
@@ -278,7 +278,7 @@ fn run_serialization_test(
     try context.connect(options.host);
     const default_exchange = "";
     const queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     defer gpa.free(queue);
 
@@ -387,7 +387,7 @@ fn run_cdc_test(
     var time_os: stdx.TimeOS = .{};
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     amqp_context.queue_declare(.{
         .queue = queue,
@@ -555,7 +555,7 @@ fn run_timeout_test(
     const time = &time_os.time();
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     amqp_context.queue_declare(.{
         .queue = queue,
@@ -796,7 +796,7 @@ const VSRContext = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.unique_u128(),
+                .id = stdx.crypto_u128(),
                 .cluster = 0,
                 .replica_count = 1,
                 .aof_recovery = false,
@@ -924,7 +924,7 @@ const TmpRabbitMQ = struct {
         const shell = try Shell.create(gpa);
         defer shell.destroy();
 
-        const id = stdx.unique_u128();
+        const id = stdx.crypto_u128();
 
         // Spawning a RabbitMQ server as a Docker container.
         _ = try try_execute(shell, "docker image pull {image}", .{ .image = options.image });

@@ -70,7 +70,7 @@ pub fn command_inspect_integrity(
         // If no seed was given, use a random seed for better coverage.
         const seed: u64 = seed_from_arg: {
             const seed_argument = args.seed orelse
-                break :seed_from_arg @truncate(stdx.unique_u128());
+                break :seed_from_arg @truncate(stdx.crypto_u128());
             break :seed_from_arg vsr.testing.parse_seed(seed_argument);
         };
 

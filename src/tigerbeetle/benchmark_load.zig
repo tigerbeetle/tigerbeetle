@@ -115,7 +115,7 @@ pub fn main(
             time,
             &message_pools.slice()[i],
             .{
-                .id = stdx.unique_u128(),
+                .id = stdx.crypto_u128(),
                 .cluster = cluster_id,
                 .replica_count = @intCast(addresses.len),
                 .aof_recovery = false,
@@ -184,7 +184,7 @@ pub fn main(
 
     const use_tbid = cli_args.id_order == .tbid;
     const account_id_start: ?u128 = if (use_tbid)
-        stdx.unique_u128()
+        stdx.crypto_u128()
     else
         null;
 

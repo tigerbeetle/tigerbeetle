@@ -1034,7 +1034,7 @@ pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.Un
     return error.Unexpected;
 }
 
-pub fn unique_u128() u128 {
+pub fn crypto_u128() u128 {
     const value = std.crypto.random.int(u128);
 
     // Broken CSPRNG is the likeliest explanation for zero or all ones.

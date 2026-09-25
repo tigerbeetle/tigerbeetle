@@ -275,7 +275,7 @@ pub fn ContextType(
             context.* = .{
                 .gpa = context.gpa,
 
-                .client_id = stdx.unique_u128(),
+                .client_id = stdx.crypto_u128(),
                 .cluster_id = cluster_id,
 
                 .completion_callback = completion_callback,

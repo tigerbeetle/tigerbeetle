@@ -641,7 +641,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
 
-            const client_id = stdx.unique_u128();
+            const client_id = stdx.crypto_u128();
             const client = try Client.init(
                 allocator,
                 time,

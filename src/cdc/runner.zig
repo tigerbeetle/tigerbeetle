@@ -255,7 +255,7 @@ pub const Runner = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.unique_u128(),
+                .id = stdx.crypto_u128(),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
                 .aof_recovery = false,
