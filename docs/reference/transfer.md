@@ -60,8 +60,8 @@ Fields used by each mode of transfer:
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
-| `flags.closing_debit`         | optional     | true     | false        | false        |
-| `flags.closing_credit`        | optional     | true     | false        | false        |
+| `flags.closing_debit`         | false        | true     | false        | false        |
+| `flags.closing_credit`        | false        | true     | false        | false        |
 | `flags.imported`              | optional     | optional | optional     | optional     |
 | `timestamp`                   | none²        | none²    | none²        | none²        |
 
