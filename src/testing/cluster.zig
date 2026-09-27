@@ -583,9 +583,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .reformatting => {
                         cluster.tick_reformat(@intCast(replica_index));
                     },
-                    .up => |up| {
-                        assert(!up.paused);
-
+                    .up => |up| if (!up.paused) {
                         replica.tick();
                         aof_io.run() catch |err| {
                             std.debug.panic("{}: io.run() failed: error={}", .{
