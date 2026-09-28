@@ -42,6 +42,7 @@ pub const Runner = struct {
         );
     };
 
+    time: Time,
     io: IO,
     idle_completion: IO.Completion = undefined,
     idle_interval: stdx.Duration,
@@ -215,6 +216,7 @@ pub const Runner = struct {
             .progress_tracker_queue = progress_tracker_queue_owned,
             .locker_queue = locker_queue_owned,
             .connected = .{},
+            .time = time,
             .io = undefined,
             .producer = .idle,
             .consumer = .idle,
@@ -916,9 +918,7 @@ pub const Runner = struct {
                     .immediate = false,
                     .properties = .{
                         .delivery_mode = .persistent,
-                        .timestamp = @intCast(
-                            std.Io.Timestamp.now(self.io.io_std, .real).toMilliseconds(),
-                        ),
+                        .timestamp = self.time.realtime().to_ms(),
                         .headers = progress_tracker.header(),
                     },
                     .body = null,
