@@ -389,6 +389,37 @@ pub const SuperBlockHeader = extern struct {
 
         reserved: [408]u8 = @splat(0),
 
+        /// Returns the checkpoint id associated with `op`, or `null` when `op` is outside the
+        /// checkpoint history retained in this state.
+        pub fn checkpoint_id_for_op(checkpoint: *const CheckpointState, op: u64) ?u128 {
+            const checkpoint_now = checkpoint.header.op;
+            const checkpoint_next_1 = vsr.Checkpoint.checkpoint_after(checkpoint_now);
+            const checkpoint_next_2 = vsr.Checkpoint.checkpoint_after(checkpoint_next_1);
+
+            if (op + constants.vsr_checkpoint_ops <= checkpoint_now) {
+                // Case 1: op is from a too distant past for us to know its checkpoint id.
+                return null;
+            }
+
+            if (op <= checkpoint_now) {
+                // Case 2: op is from the previous checkpoint whose id we still remember.
+                return checkpoint.grandparent_checkpoint_id;
+            }
+
+            if (op <= checkpoint_next_1) {
+                // Case 3: op is in the current checkpoint.
+                return checkpoint.parent_checkpoint_id;
+            }
+
+            if (op <= checkpoint_next_2) {
+                // Case 4: op is in the next checkpoint (which we have not checkpointed).
+                return vsr.checksum(std.mem.asBytes(checkpoint));
+            }
+
+            // Case 5: op is from the too far future for us to know anything!
+            return null;
+        }
+
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(@sizeOf(CheckpointState) == 1024);
@@ -1583,6 +1614,28 @@ pub const Caller = enum {
         };
     }
 };
+
+test "CheckpointState.checkpoint_id_for_op" {
+    const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);
+    const checkpoint_2 = vsr.Checkpoint.checkpoint_after(checkpoint_1);
+    const checkpoint_3 = vsr.Checkpoint.checkpoint_after(checkpoint_2);
+    const checkpoint_4 = vsr.Checkpoint.checkpoint_after(checkpoint_3);
+
+    var checkpoint = std.mem.zeroes(SuperBlockHeader.CheckpointState);
+    checkpoint.header.op = checkpoint_2;
+    checkpoint.parent_checkpoint_id = 1;
+    checkpoint.grandparent_checkpoint_id = 2;
+    const checkpoint_id = vsr.checksum(std.mem.asBytes(&checkpoint));
+
+    try std.testing.expectEqual(null, checkpoint.checkpoint_id_for_op(checkpoint_1));
+    try std.testing.expectEqual(2, checkpoint.checkpoint_id_for_op(checkpoint_1 + 1));
+    try std.testing.expectEqual(2, checkpoint.checkpoint_id_for_op(checkpoint_2));
+    try std.testing.expectEqual(1, checkpoint.checkpoint_id_for_op(checkpoint_2 + 1));
+    try std.testing.expectEqual(1, checkpoint.checkpoint_id_for_op(checkpoint_3));
+    try std.testing.expectEqual(checkpoint_id, checkpoint.checkpoint_id_for_op(checkpoint_3 + 1));
+    try std.testing.expectEqual(checkpoint_id, checkpoint.checkpoint_id_for_op(checkpoint_4));
+    try std.testing.expectEqual(null, checkpoint.checkpoint_id_for_op(checkpoint_4 + 1));
+}
 
 test "SuperBlockHeader" {
     const expect = std.testing.expect;
