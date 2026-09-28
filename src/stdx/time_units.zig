@@ -409,3 +409,80 @@ test "InstantUnix formats" {
         instant_max.date_time_rfc1123(),
     });
 }
+
+test "InstantUnix formats fuzz" {
+    var prng = stdx.PRNG.from_seed_testing();
+
+    const Context = struct {
+        fn check(ns: u64) anyerror!void {
+            const instant: InstantUnix = .{ .ns = ns };
+
+            const date_time = instant.date_time();
+            try std.testing.expect(date_time.year >= 1970);
+            try std.testing.expect(date_time.year <= 2554);
+            try std.testing.expect(date_time.month >= 1 and date_time.month <= 12);
+            try std.testing.expect(date_time.day >= 1 and date_time.day <= 31);
+            try std.testing.expect(date_time.hour < 24);
+            try std.testing.expect(date_time.minute < 60);
+            try std.testing.expect(date_time.second < 60);
+            try std.testing.expect(date_time.millisecond < 1000);
+
+            var utc_buffer: [24]u8 = undefined;
+            const utc = try std.fmt.bufPrint(&utc_buffer, "{}", .{date_time});
+            try std.testing.expectEqual(utc_buffer.len, utc.len);
+
+            var iso8601_basic_buffer: [16]u8 = undefined;
+            const iso8601_basic = try std.fmt.bufPrint(
+                &iso8601_basic_buffer,
+                "{}",
+                .{instant.date_time_iso8601_basic()},
+            );
+            try std.testing.expectEqual(iso8601_basic_buffer.len, iso8601_basic.len);
+
+            var date_buffer: [8]u8 = undefined;
+            const date = try std.fmt.bufPrint(&date_buffer, "{}", .{instant.date_iso8601_basic()});
+            try std.testing.expectEqual(date_buffer.len, date.len);
+
+            var rfc1123_buffer: [29]u8 = undefined;
+            const rfc1123 = try std.fmt.bufPrint(
+                &rfc1123_buffer,
+                "{}",
+                .{instant.date_time_rfc1123()},
+            );
+            try std.testing.expectEqual(rfc1123_buffer.len, rfc1123.len);
+
+            try std.testing.expectStringStartsWith(iso8601_basic, date);
+        }
+    };
+
+    const ns_per_s = std.time.ns_per_s;
+    const ns_per_day = ns_per_s * std.time.s_per_day;
+    const ns_max = std.math.maxInt(u64);
+    for (0..100_000) |_| {
+        const offset = prng.int_inclusive(u64, std.time.ns_per_ms);
+        const ns: u64 = b: switch (prng.chances(.{
+            .random = 5,
+            .day_boundary = 2,
+            .second_boundary = 2,
+            .u64_boundary = 1,
+        })) {
+            .random => break :b prng.int(u64),
+            .day_boundary => {
+                const day = prng.int_inclusive(u64, @divFloor(ns_max, ns_per_day));
+                const ns = day * ns_per_day;
+
+                break :b if (prng.boolean()) ns -| offset else ns +| offset;
+            },
+            .second_boundary => {
+                const second = prng.int_inclusive(u64, @divFloor(ns_max, ns_per_s));
+                const ns = second * ns_per_s;
+
+                break :b if (prng.boolean()) ns -| offset else ns +| offset;
+            },
+            .u64_boundary => {
+                break :b if (prng.boolean()) ns_max - offset else offset;
+            },
+        };
+        try Context.check(ns);
+    }
+}
