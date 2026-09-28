@@ -918,7 +918,7 @@ pub const Runner = struct {
                     .immediate = false,
                     .properties = .{
                         .delivery_mode = .persistent,
-                        .timestamp = self.time.realtime().to_ms(),
+                        .timestamp = self.time.realtime().to_seconds(),
                         .headers = progress_tracker.header(),
                     },
                     .body = null,
