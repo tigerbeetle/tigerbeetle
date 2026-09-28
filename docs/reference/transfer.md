@@ -43,36 +43,35 @@ Fields used by each mode of transfer:
 
 ### Fields by Mode
 
-_Required_ means a valid nonzero value must be supplied. _Optional_ means zero is allowed,
-with the behavior described below. _Inherit or match_ means zero copies the pending transfer's
-value, while a nonzero value must equal the pending transfer's value exactly. 
-All values remain subject to the individual [field constraints](#fields), 
-account constraints, and balance limits.
+- _Required_ means a valid nonzero value must be supplied.
+- _Optional_ means zero is allowed, with the behavior described below.
+- _Inherit or match_ means zero copies the pending transfer's
+  value, while a nonzero value must equal the pending transfer's value exactly.
+  For each `user_data_*` field, _inherit or new_ will either copy the old transfer's user_data field 
+  if set to zero, or set the provided user data field on the newly created transfer.
+  The original pending transfer is immutable.
+- All values remain subject to the individual [field constraints](#fields), 
+  account constraints, and balance limits.
 
 | Field               | Single-Phase | Pending   | Post-Pending     | Void-Pending     |
 |---------------------|--------------|-----------|------------------|------------------|
-| `id`                | required     | required  | required         | required         |
+| `id`                | required     | required  | required¹        | required¹        |
 | `debit_account_id`  | required     | required  | inherit or match | inherit or match |
 | `credit_account_id` | required     | required  | inherit or match | inherit or match |
 | `amount`            | required     | optional  | optional         | inherit or match |
-| `pending_id`        | none         | none      | required         | required         |
+| `pending_id`²       | none         | none      | required         | required         |
 | `user_data_128`     | optional     | optional  | inherit or new   | inherit or new   |
 | `user_data_64`      | optional     | optional  | inherit or new   | inherit or new   |
 | `user_data_32`      | optional     | optional  | inherit or new   | inherit or new   |
-| `timeout`           | none         | optional² | none             | none             |
+| `timeout`           | none         | optional³ | none             | none             |
 | `ledger`            | required     | required  | inherit or match | inherit or match |
 | `code`              | required     | required  | inherit or match | inherit or match |
-| `timestamp`         | none³        | none³     | none³            | none³            |
+| `timestamp`         | none⁴        | none⁴     | none⁴            | none⁴            |
 
-> _¹ None if `flags.imported` is set._<br/>
-> _² Required if `flags.imported` is set._
-
-For each `user_data_*` field, _inherit or new_ will either copy the old transfer's user_data field 
-if set to zero, or set the provided user data field on the newly created transfer.
-The original pending transfer is immutable.
-
-Posting and voiding require a new transfer `id`; `pending_id` identifies an existing pending
-transfer that has not already been posted, voided, or expired.
+> _¹ Posting and voiding require a new transfer `id`._<br/>
+> _² `pending_id` identifies an existing pending transfer that has not been posted, voided, or expired._<br/>
+> _³ None if `flags.imported` is set._<br/>
+> _⁴ Required if `flags.imported` is set._
 
 ### Flags by Mode  
 
@@ -91,19 +90,25 @@ means either is allowed subject to the rules below.
 | `flags.linked`                | optional     | optional  | optional     | optional     |
 | `flags.imported`              | optional     | optional  | optional     | optional     |
 
-The three mode flags (`pending`, `post_pending_transfer`, and `void_pending_transfer`) are
-mutually exclusive. Single-phase transfers set none of them. Both balancing flags may be set
-together. On a pending transfer, any combination of the two balancing and two closing flags is
-allowed, including all four or none. Closing requires a pending status, therefore, all accounts 
-can be reopened by voiding the transfer that closed the account or once the transfer expires.
-Pending does not require closing. The posting or voiding transfer must not repeat balancing or 
-closing flags from the original pending transfer.
+- The three mode flags (`pending`, `post_pending_transfer`, and `void_pending_transfer`) are 
+  mutually exclusive.
+  - Single-phase transfers set none of them.
+- `flags.balancing_debit` and `flags.balancing_credit` may be set together.
+  - On a pending transfer, any combination of the two balancing and two closing flags is allowed, 
+    including all four or none.
+- Only a pending transfer can set `flags.closing_debit` or `flags.closing_credit`.
+  - Closed accounts can be reopened by voiding the closing transfer or once the closing 
+    transfer expires.
+  - Closing transfers cannot be posted.
+- Pending does not require closing.
+- The posting or voiding transfer must not repeat balancing or closing flags from the original 
+  pending transfer.
 
-### Linked and imported transfers
+### Linked and Imported Transfers
 
 These rules apply in every mode, including pending transfers with balancing or closing flags.
 
-| Condition                   | Requirement / behavior                                             |
+| Condition                   | Requirement / Behavior                                             |
 |----------------------------|---------------------------------------------------------------------|
 | `flags.linked` set         | Link to the next event in the batch; the chain succeeds/fails as one|
 | Last event in linked chain | Unset `linked`; otherwise `linked_event_chain_open`                 |
@@ -113,11 +118,12 @@ These rules apply in every mode, including pending transfers with balancing or c
 | `linked` + `imported` set  | Both rules apply; last event unsets `linked`, keeps `imported`      |
 
 
-A valid imported `timestamp` is `> 0` and `< 2^63`, and must satisfy the 
-[import ordering and uniqueness constraints](#flagsimported).
-The `imported` flag on a posting or voiding transfer does not have to match the original pending
-transfer's flag. An imported posting or voiding transfer can resolve a regular pending transfer
-with a timeout, provided it has not expired.
+- A valid imported `timestamp` is `> 0` and `< 2^63`, and must satisfy the 
+  [import ordering and uniqueness constraints](#flagsimported).
+- The `imported` flag on a posting or voiding transfer does not have to match the original pending
+  transfer's flag.  
+- Imported and regular transfers can post or void pending transfers of either type, including those 
+  with a `timeout` that have not yet expired.
 
 ## Fields
 
