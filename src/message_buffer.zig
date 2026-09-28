@@ -45,6 +45,7 @@ pub const MessageBuffer = struct {
     const InvalidReason = enum {
         header_checksum,
         header_size,
+        header_command,
         header_cluster,
         body_checksum,
         misdirected,
@@ -139,17 +140,8 @@ pub const MessageBuffer = struct {
             @FieldType(Header, "command") == vsr.Command);
         const command_raw: u8 = header_bytes[@offsetOf(Header, "command")];
         _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
-            vsr.fatal(
-                .unknown_vsr_command,
-                "unknown VSR command, crashing for safety " ++
-                    "(command={d} protocol={d} replica={d} release={})",
-                .{
-                    command_raw,
-                    header.protocol,
-                    header.replica,
-                    header.release,
-                },
-            );
+            buffer.invalidate(.header_command);
+            return;
         };
 
         if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
@@ -341,6 +333,47 @@ pub const MessageBuffer = struct {
         buffer.advance();
     }
 };
+
+test "MessageBuffer rejects unknown command" {
+    const gpa = std.testing.allocator;
+
+    var pool = try MessagePool.init(gpa, .{ .replica = .{
+        .members_count = 1,
+        .pipeline_requests_limit = 1,
+        .message_bus = .testing,
+    } });
+    defer pool.deinit(gpa);
+
+    var buffer = MessageBuffer.init(&pool);
+    defer buffer.deinit(&pool);
+
+    var header: vsr.Header.Prepare = .{
+        .cluster = 1,
+        .view = 1,
+        .command = .prepare,
+        .parent = 0,
+        .request_checksum = 0,
+        .checkpoint_id = 0,
+        .client = 1,
+        .commit = 0,
+        .timestamp = 0,
+        .request = 1,
+        .operation = .register,
+        .release = vsr.Release.minimum,
+        .op = 1,
+        .size = @sizeOf(Header),
+    };
+    const header_bytes = std.mem.asBytes(&header);
+    header_bytes[@offsetOf(Header, "command")] = std.math.maxInt(u8);
+    header.set_checksum_body(&.{});
+    header.set_checksum();
+
+    stdx.copy_disjoint(.exact, u8, buffer.recv_slice()[0..header_bytes.len], header_bytes);
+    buffer.recv_advance(@intCast(header_bytes.len));
+
+    try std.testing.expectEqual(MessageBuffer.InvalidReason.header_command, buffer.invalid.?);
+    try std.testing.expect(!buffer.has_message());
+}
 
 test "MessageBuffer fuzz" {
     // Generate a byte buffer with a bunch of prepares side-by-side.
