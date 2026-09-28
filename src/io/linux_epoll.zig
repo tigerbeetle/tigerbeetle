@@ -101,23 +101,21 @@ pub const IO = struct {
         var total_timer = try std.time.Timer.start();
         defer self.stats.window.time_run_for_ns.ns += total_timer.read();
 
-        const deadline = self.time.monotonic().add(.{ .ns = nanoseconds });
-        while (true) {
+        var now = self.time.monotonic();
+        const deadline = now.add(.{ .ns = nanoseconds });
+        while (now.ns < deadline.ns) : (now = self.time.monotonic()) {
+            try self.poll_epoll(now.elapsed(deadline));
+
             var callback_timer = try std.time.Timer.start();
             self.run_callbacks();
             self.stats.window.time_callbacks.ns += callback_timer.read();
-
-            const now = self.time.monotonic();
-            if (now.ns >= deadline.ns) break;
-
-            const remaining = now.elapsed(deadline);
-            try self.poll_epoll(remaining);
         }
     }
 
     /// Run all queued completion callbacks.
     fn run_callbacks(self: *IO) void {
         while (self.completed.pop()) |completion| {
+            assert(completion.io == self);
             assert(!completion.awaiting);
 
             completion.complete();
