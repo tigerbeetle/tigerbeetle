@@ -358,8 +358,12 @@ pub const IO = struct {
         return error.Unexpected;
     }
 
-    pub fn aof_blocking_open(_: *IO, _: []const u8) !fd_t {
-        return error.Unexpected;
+    pub fn aof_blocking_open(io: *IO, _: []const u8) !fd_t {
+        assert(io.files.len == 1);
+        // NB: We assume that each test AOF is supplied with its
+        // own testing IO instance with exactly one in-memory
+        // file. So, we can safely use fd as 0 here.
+        return 0;
     }
 
     pub fn reset(self: *IO) void {

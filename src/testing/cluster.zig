@@ -407,11 +407,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 });
                 errdefer for (cluster.aof_ios[0..i]) |*io| io.deinit();
 
-                aof.* = AOF{
-                    .io = aof_io,
-                    .path = "test.aof",
-                    .fd = 0,
-                };
+                aof.* = try AOF.init(aof_io, "test.aof");
+
                 errdefer for (cluster.aofs[0..i]) |*aof_| aof_.deinit(allocator);
             }
 

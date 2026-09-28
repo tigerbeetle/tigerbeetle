@@ -4,13 +4,15 @@
 //! It should be logically identical though -- the same data (minus the client table), just in
 //! different places.
 const std = @import("std");
+const stdx = @import("stdx");
+
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const tb = vsr.tigerbeetle;
 
-const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusType(vsr.io.IO);
@@ -145,13 +147,10 @@ pub fn AOFType(comptime IO: type) type {
         /// (except on Windows). This ensures everything (including the dir) is fsync'd
         /// appropriately. Closing dir_fd is the responsibility of the caller, which can be done
         /// immediately after .init() finishes.
-        pub fn init(
-            io: *IO,
-            path: []const u8,
-        ) !AOF {
-            stdx.maybe(std.fs.path.isAbsolute(path));
+        pub fn init(io: *IO, path: []const u8) !AOF {
             assert(std.mem.endsWith(u8, path, ".aof"));
 
+            maybe(std.fs.path.isAbsolute(path));
             return AOF{
                 .io = io,
                 .path = path,
@@ -302,7 +301,7 @@ pub fn AOFType(comptime IO: type) type {
                     try validation_checksums.put(header.parent, {});
                 } else {
                     // (Null due to state sync skipping commits.)
-                    stdx.maybe(validation_checksums.get(header.parent) == null);
+                    maybe(validation_checksums.get(header.parent) == null);
                 }
 
                 try validation_checksums.put(header.checksum, {});
@@ -795,23 +794,29 @@ pub fn AOFType(comptime IO: type) type {
 const testing = std.testing;
 
 test "aof write / read" {
+    const io_testing = std.testing.io;
     const IO = @import("io.zig").IO;
     const AOF = AOFType(IO);
     const AOFIterator = AOF.Iterator;
 
-    const aof_file = "test.aof";
-    std.Io.Dir.cwd().deleteFile(std.testing.io, aof_file) catch {};
-    defer std.Io.Dir.cwd().deleteFile(std.testing.io, aof_file) catch {};
-
     const allocator = std.testing.allocator;
 
-    var io = try IO.init(std.testing.io, 32, 0);
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const tmp_dir_realpath = try tmp_dir.dir.realPathFileAlloc(io_testing, ".", allocator);
+    defer allocator.free(tmp_dir_realpath);
+
+    const aof_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_realpath, "test.aof" });
+    defer allocator.free(aof_file_path);
+
+    var io = try IO.init(io_testing, 32, 0);
     defer io.deinit();
 
     const dir_fd = try io.open_dir(".");
     defer stdx.posix.close(dir_fd);
 
-    var aof = try AOF.init(&io, aof_file);
+    var aof = try AOF.init(&io, aof_file_path);
 
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
@@ -849,7 +854,7 @@ test "aof write / read" {
     try aof.write(demo_message);
     aof.close();
 
-    var it = try AOFIterator.init(&io, aof_file);
+    var it = try AOFIterator.init(&io, aof_file_path);
     defer it.close();
 
     const read_entry = (try it.next(target)).?;
