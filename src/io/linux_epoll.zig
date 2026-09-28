@@ -111,8 +111,7 @@ pub const IO = struct {
             if (now.ns >= deadline.ns) break;
 
             const remaining = now.elapsed(deadline);
-            const remaining_ms: i32 = @intCast(@divFloor(remaining.ns, std.time.ns_per_ms));
-            try self.poll_epoll(remaining_ms);
+            try self.poll_epoll(remaining);
         }
     }
 
@@ -778,14 +777,15 @@ pub const IO = struct {
         }
     }
 
-    /// Wait up to `timeout_ms` milliseconds for epoll events and process them.
-    fn poll_epoll(self: *IO, timeout_ms: i32) !void {
+    /// Wait up to `remaining` for epoll events and process them.
+    fn poll_epoll(self: *IO, remaining: stdx.Duration) !void {
+        const remaining_ms: i32 = @intCast(remaining.to_ms());
+        assert(remaining_ms >= 0);
         // -1 would indicate that we wait indefinitely.
-        assert(timeout_ms != -1);
-        assert(timeout_ms >= 0);
+        assert(remaining_ms != -1);
 
         var events: [256]linux.epoll_event = undefined;
-        const wait_result = linux.epoll_wait(self.epoll_fd, &events, events.len, timeout_ms);
+        const wait_result = linux.epoll_wait(self.epoll_fd, &events, events.len, remaining_ms);
         switch (linux.E.init(wait_result)) {
             .SUCCESS => {
                 const events_ready_count = wait_result;
