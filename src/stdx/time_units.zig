@@ -199,12 +199,15 @@ test "Duration.parse_flag_value" {
 }
 
 /// A moment in non-monotonic Unix time.
-/// Timestamp is relative to epoch 1970-01-1.
+/// Timestamp is relative to epoch 1970-01-01.
 ///
 /// See also `Instant`.
 pub const InstantUnix = struct {
     ns: u64,
 
+    /// RFC 3339 human-readable date and time with milliseconds.
+    /// Example: `2022-08-28 08:49:37.000Z`.
+    /// https://www.rfc-editor.org/rfc/rfc3339#section-5.6
     const DateTimeUTC = struct {
         year: u16,
         month: u8,
@@ -223,6 +226,76 @@ pub const InstantUnix = struct {
                 datetime.minute,
                 datetime.second,
                 datetime.millisecond,
+            });
+        }
+    };
+
+    /// ISO 8601 basic format date and time. Example: `20220828T084937Z`.
+    const DateTimeISO8601Basic = struct {
+        year: u16,
+        month: u8,
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+
+        pub fn format(datetime: DateTimeISO8601Basic, writer: *std.Io.Writer) !void {
+            try writer.print("{d:0>4}{d:0>2}{d:0>2}T{d:0>2}{d:0>2}{d:0>2}Z", .{
+                datetime.year,
+                datetime.month,
+                datetime.day,
+                datetime.hour,
+                datetime.minute,
+                datetime.second,
+            });
+        }
+    };
+
+    /// ISO 8601 basic format calendar date. Example: `20220828`.
+    const DateISO8601Basic = struct {
+        year: u16,
+        month: u8,
+        day: u8,
+
+        pub fn format(date: DateISO8601Basic, writer: *std.Io.Writer) !void {
+            try writer.print("{d:0>4}{d:0>2}{d:0>2}", .{
+                date.year,
+                date.month,
+                date.day,
+            });
+        }
+    };
+
+    /// RFC 1123 date and time.
+    /// Example: `Sun, 28 Aug 2022 08:49:37 GMT`.
+    /// https://www.rfc-editor.org/info/rfc1123/#page-55 (Section 5.2.14)
+    const DateTimeRFC1123 = struct {
+        weekday_index: u8, // Mon = 0
+        year: u16,
+        month_index: u8, // Jan = 0
+        day: u8,
+        hour: u8,
+        minute: u8,
+        second: u8,
+
+        const days = [_][]const u8{ "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+        const months = [_][]const u8{
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        };
+
+        pub fn format(datetime: DateTimeRFC1123, writer: *std.Io.Writer) !void {
+            assert(datetime.weekday_index < days.len);
+            assert(datetime.month_index < months.len);
+
+            try writer.print("{s}, {d:0>2} {s} {d:0>4} {d:0>2}:{d:0>2}:{d:0>2} GMT", .{
+                days[datetime.weekday_index],
+                datetime.day,
+                months[datetime.month_index],
+                datetime.year,
+                datetime.hour,
+                datetime.minute,
+                datetime.second,
             });
         }
     };
@@ -253,6 +326,45 @@ pub const InstantUnix = struct {
         };
     }
 
+    pub fn date_time_iso8601_basic(instant: InstantUnix) DateTimeISO8601Basic {
+        const date_time_utc = instant.date_time();
+        return .{
+            .year = date_time_utc.year,
+            .month = date_time_utc.month,
+            .day = date_time_utc.day,
+            .hour = date_time_utc.hour,
+            .minute = date_time_utc.minute,
+            .second = date_time_utc.second,
+        };
+    }
+
+    pub fn date_iso8601_basic(instant: InstantUnix) DateISO8601Basic {
+        const date_time_utc = instant.date_time();
+        return .{
+            .year = date_time_utc.year,
+            .month = date_time_utc.month,
+            .day = date_time_utc.day,
+        };
+    }
+
+    pub fn date_time_rfc1123(instant: InstantUnix) DateTimeRFC1123 {
+        const date_time_utc = instant.date_time();
+        assert(date_time_utc.month >= 1);
+        assert(date_time_utc.month <= 12);
+
+        // 1970-01-01 was a Thursday (= index 3 when Monday = index 0).
+        const epoch_day = @divTrunc(instant.ns, std.time.ns_per_s * std.time.s_per_day);
+        return .{
+            .weekday_index = @intCast((epoch_day + 3) % 7),
+            .year = date_time_utc.year,
+            .month_index = date_time_utc.month - 1,
+            .day = date_time_utc.day,
+            .hour = date_time_utc.hour,
+            .minute = date_time_utc.minute,
+            .second = date_time_utc.second,
+        };
+    }
+
     pub fn add(instant: InstantUnix, duration: Duration) InstantUnix {
         return .{ .ns = instant.ns + duration.ns };
     }
@@ -264,16 +376,36 @@ pub const InstantUnix = struct {
     }
 };
 
-test "DateTimeUTC format" {
+test "InstantUnix formats" {
+    const tigerbeetle_birthday = InstantUnix.from_seconds(1661676577);
+
+    const expectFmt = std.testing.expectFmT;
+    try expectFmt("2022-08-28 08:49:37.000Z", "{f}", .{
+        tigerbeetle_birthday.date_time(),
+    });
+    try expectFmt("20220828T084937Z", "{f}", .{
+        tigerbeetle_birthday.date_time_iso8601_basic(),
+    });
+    try expectFmt("20220828", "{f}", .{
+        tigerbeetle_birthday.date_iso8601_basic(),
+    });
+    try expectFmt("Sun, 28 Aug 2022 08:49:37 GMT", "{f}", .{
+        tigerbeetle_birthday.date_time_rfc1123(),
+    });
+
     const instant_min = InstantUnix{ .ns = 0 };
-    var buffer: [24]u8 = undefined;
-    try std.testing.expectEqualStrings(
-        "1970-01-01 00:00:00.000Z",
-        try std.fmt.bufPrint(&buffer, "{f}", .{instant_min.date_time()}),
-    );
+    try expectFmt("1970-01-01 00:00:00.000Z", "{f}", .{instant_min.date_time()});
+    try expectFmt("19700101T000000Z", "{f}", .{instant_min.date_time_iso8601_basic()});
+    try expectFmt("19700101", "{f}", .{instant_min.date_iso8601_basic()});
+    try expectFmt("Thu, 01 Jan 1970 00:00:00 GMT", "{f}", .{
+        instant_min.date_time_rfc1123(),
+    });
+
     const instant_max = InstantUnix{ .ns = std.math.maxInt(u64) };
-    try std.testing.expectEqualStrings(
-        "2554-07-21 23:34:33.709Z",
-        try std.fmt.bufPrint(&buffer, "{f}", .{instant_max.date_time()}),
-    );
+    try expectFmt("2554-07-21 23:34:33.709Z", "{f}", .{instant_max.date_time()});
+    try expectFmt("25540721T233433Z", "{f}", .{instant_max.date_time_iso8601_basic()});
+    try expectFmt("25540721", "{f}", .{instant_max.date_iso8601_basic()});
+    try expectFmt("Sun, 21 Jul 2554 23:34:33 GMT", "{f}", .{
+        instant_max.date_time_rfc1123(),
+    });
 }
