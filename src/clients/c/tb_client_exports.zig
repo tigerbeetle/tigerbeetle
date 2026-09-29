@@ -164,8 +164,8 @@ pub fn register_log_callback(
     callback_maybe: ?Logging.Callback,
     debug: bool,
 ) callconv(.c) tb_register_log_callback_status {
-    Logging.global.mutex.lockUncancelable(Logging.io);
-    defer Logging.global.mutex.unlock(Logging.io);
+    Logging.global.lock();
+    defer Logging.global.unlock();
 
     if (Logging.global.callback == null) {
         if (callback_maybe) |callback| {
@@ -204,9 +204,6 @@ pub const Logging = struct {
     buffer: [log_line_max]u8 = undefined,
     debug: bool = false,
 
-    // Logging is called from arbitrary threads via the C ABI, without an `Io` instance in scope.
-    const io = std.Io.Threaded.global_single_threaded.io();
-
     /// A logger which defers to an application provided handler.
     pub fn application_logger(
         comptime message_level: std.log.Level,
@@ -230,8 +227,8 @@ pub const Logging = struct {
 
         // Protect everything with a mutex - logging can be called from different threads
         // simultaneously, and there's only one buffer for now.
-        Logging.global.mutex.lockUncancelable(Logging.io);
-        defer Logging.global.mutex.unlock(Logging.io);
+        Logging.global.lock();
+        defer Logging.global.unlock();
 
         const callback = Logging.global.callback orelse return;
 
@@ -254,5 +251,13 @@ pub const Logging = struct {
         };
 
         callback(tb_message_level, output.ptr, @intCast(output.len));
+    }
+
+    fn lock(logging: *Logging) void {
+        std.Io.Threaded.mutexLock(&logging.mutex);
+    }
+
+    fn unlock(logging: *Logging) void {
+        std.Io.Threaded.mutexUnlock(&logging.mutex);
     }
 };
