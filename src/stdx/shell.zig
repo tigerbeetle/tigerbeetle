@@ -1306,7 +1306,7 @@ pub fn unix_to_dos_timestamp(instant: stdx.InstantUnix) DOSTimestamp {
 
     const date: u16 =
         ((@as(u16, date_time.year - 1980)) << 9) |
-        (@as(u16, date_time.month) << 5) |
+        (@as(u16, @intFromEnum(date_time.month) + 1) << 5) |
         (@as(u16, date_time.day));
 
     return .{ .time = time, .date = date };
