@@ -1,5 +1,7 @@
 //! Vendored from Zig 0.14's `std.once`, which was removed in Zig 0.16.
 const std = @import("std");
+const stdx = @import("./stdx.zig");
+const Mutex = stdx.Mutex;
 
 pub fn once(comptime f: fn () void) OnceType(f) {
     return .{};
@@ -8,25 +10,27 @@ pub fn once(comptime f: fn () void) OnceType(f) {
 pub fn OnceType(comptime f: fn () void) type {
     return struct {
         done: bool = false,
-        mutex: std.Io.Mutex = .init,
+        mutex: Mutex = .{},
 
-        pub fn call(self: *@This()) void {
+        const Once = @This();
+
+        pub fn call(self: *Once) void {
             if (@atomicLoad(bool, &self.done, .acquire)) return;
             return self.call_slow();
         }
 
-        fn call_slow(self: *@This()) void {
+        fn call_slow(self: *Once) void {
             @branchHint(.cold);
-            // Callers might not have an `Io` instance in scope (for example, arbitrary JVM
-            // threads). The single-threaded `Io` still locks via the OS futex.
-            const io = std.Io.Threaded.global_single_threaded.io();
-            self.mutex.lockUncancelable(io);
-            defer self.mutex.unlock(io);
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
-            if (!self.done) {
-                f();
-                @atomicStore(bool, &self.done, true, .release);
-            }
+            // An unsynchronized load is fine here: it doesn't synchronize with the store,
+            // but we've already synchronized via the mutex unlock.
+            // <https://www.open-std.org/JTC1/SC22/WG21/docs/papers/2024/p2135r1.pdf#page=6>
+            if (self.done) return;
+
+            f();
+            @atomicStore(bool, &self.done, true, .release);
         }
     };
 }
