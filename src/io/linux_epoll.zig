@@ -11,7 +11,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
-const posix = std.posix;
+const posix = stdx.posix;
 const linux = std.os.linux;
 const log = std.log.scoped(.io);
 
@@ -42,21 +42,30 @@ pub const IO = struct {
         assert(@alignOf(Completion) > timerfd_epoll_tag);
     }
 
-    pub fn init(entries: u12, flags: u32) !IO {
+    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
+        _ = io_std;
         _ = entries;
         _ = flags;
 
         log.debug("Starting epoll I/O", .{});
 
-        const epoll_fd = try posix.epoll_create1(linux.EPOLL.CLOEXEC);
-        if (epoll_fd < 0) return error.EpollCreate;
+        const epoll_create_result = linux.epoll_create1(linux.EPOLL.CLOEXEC);
+        const epoll_fd: fd_t = switch (linux.errno(epoll_create_result)) {
+            .SUCCESS => @intCast(epoll_create_result),
+            .MFILE => return error.ProcessFdQuotaExceeded,
+            else => |err| return stdx.unexpected_errno("epoll_create1", err),
+        };
         errdefer posix.close(epoll_fd);
 
-        const timer_fd = try posix.timerfd_create(
+        const timer_create_result = linux.timerfd_create(
             linux.timerfd_clockid_t.MONOTONIC,
             .{ .CLOEXEC = true, .NONBLOCK = true },
         );
-        if (timer_fd < 0) return error.TimerCreate;
+        const timer_fd: fd_t = switch (linux.errno(timer_create_result)) {
+            .SUCCESS => @intCast(timer_create_result),
+            .MFILE => return error.ProcessFdQuotaExceeded,
+            else => |err| return stdx.unexpected_errno("timerfd_create", err),
+        };
         errdefer posix.close(timer_fd);
 
         var timer_event = linux.epoll_event{
@@ -64,7 +73,7 @@ pub const IO = struct {
             .data = .{ .ptr = timerfd_epoll_tag },
         };
 
-        switch (linux.E.init(linux.epoll_ctl(
+        switch (linux.errno(linux.epoll_ctl(
             epoll_fd,
             linux.EPOLL.CTL_ADD,
             timer_fd,
@@ -89,26 +98,31 @@ pub const IO = struct {
     pub fn run(self: *IO) !void {
         try self.poll_epoll(0);
 
-        var timer = try std.time.Timer.start();
+        const timer = self.time.monotonic();
+        defer self.stats.window.time_callbacks.ns +=
+            timer.elapsed(self.time.monotonic()).ns;
+
         self.run_callbacks();
-        self.stats.window.time_callbacks.ns += timer.read();
     }
 
     /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
         defer self.stats.trace();
 
-        var total_timer = try std.time.Timer.start();
-        defer self.stats.window.time_run_for_ns.ns += total_timer.read();
+        const timer_run_for_ns = self.time.monotonic();
+        defer self.stats.window.time_run_for_ns.ns +=
+            timer_run_for_ns.elapsed(self.time.monotonic()).ns;
 
         var now = self.time.monotonic();
         const deadline = now.add(.{ .ns = nanoseconds });
         while (now.ns < deadline.ns) : (now = self.time.monotonic()) {
             try self.poll_epoll(now.elapsed(deadline));
 
-            var callback_timer = try std.time.Timer.start();
+            const timer_callback = self.time.monotonic();
+            defer self.stats.window.time_callbacks.ns +=
+                timer_callback.elapsed(self.time.monotonic()).ns;
+
             self.run_callbacks();
-            self.stats.window.time_callbacks.ns += callback_timer.read();
         }
     }
 
@@ -235,7 +249,7 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address.to_std(),
+                    .address = address.to_raw(),
                 },
             },
         };
@@ -441,7 +455,7 @@ pub const IO = struct {
         const value: u64 = 1;
         while (true) {
             const return_code = linux.write(event, @ptrCast(&value), @sizeOf(u64));
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     assert(return_code == @sizeOf(u64));
                     return;
@@ -545,7 +559,7 @@ pub const IO = struct {
                 &operation.address_size,
                 linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -573,7 +587,7 @@ pub const IO = struct {
         const operation = completion.operation.close;
         const return_code = linux.close(operation.fd);
         // EINTR on close on Linux means the fd was closed; treat as success.
-        completion.result = switch (linux.E.init(return_code)) {
+        completion.result = switch (linux.errno(return_code)) {
             .SUCCESS, .INTR => 0,
             else => |err| -@as(i32, @intFromEnum(err)),
         };
@@ -591,7 +605,7 @@ pub const IO = struct {
             @ptrCast(&operation.address.any),
             operation.address.getOsSockLen(),
         );
-        switch (linux.E.init(return_code)) {
+        switch (linux.errno(return_code)) {
             .SUCCESS => {
                 completion.result = 0;
                 self.completed.push(completion);
@@ -619,7 +633,7 @@ pub const IO = struct {
                 @ptrCast(&completion.eventfd_read_buffer),
                 @sizeOf(u64),
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -654,7 +668,7 @@ pub const IO = struct {
                 null,
                 null,
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -689,7 +703,7 @@ pub const IO = struct {
                 null,
                 0,
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -741,7 +755,7 @@ pub const IO = struct {
             .events = events | linux.EPOLL.ERR | linux.EPOLL.HUP,
             .data = .{ .ptr = @intFromPtr(completion) },
         };
-        switch (linux.E.init(linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_ADD, fd, &event))) {
+        switch (linux.errno(linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_ADD, fd, &event))) {
             .SUCCESS => {
                 completion.awaiting = true;
             },
@@ -764,7 +778,7 @@ pub const IO = struct {
             .events = events | linux.EPOLL.ERR | linux.EPOLL.HUP,
             .data = .{ .ptr = @intFromPtr(completion) },
         };
-        switch (linux.E.init(linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_ADD, fd, &event))) {
+        switch (linux.errno(linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_ADD, fd, &event))) {
             .SUCCESS => {
                 completion.awaiting = true;
             },
@@ -784,7 +798,7 @@ pub const IO = struct {
 
         var events: [256]linux.epoll_event = undefined;
         const wait_result = linux.epoll_wait(self.epoll_fd, &events, events.len, remaining_ms);
-        switch (linux.E.init(wait_result)) {
+        switch (linux.errno(wait_result)) {
             .SUCCESS => {
                 const events_ready_count = wait_result;
                 for (events[0..events_ready_count]) |event| {
@@ -844,7 +858,7 @@ pub const IO = struct {
                 &operation.address_size,
                 linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -876,7 +890,7 @@ pub const IO = struct {
                 @ptrCast(&completion.eventfd_read_buffer),
                 @sizeOf(u64),
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -909,7 +923,7 @@ pub const IO = struct {
                 null,
                 null,
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -942,7 +956,7 @@ pub const IO = struct {
                 null,
                 0,
             );
-            switch (linux.E.init(return_code)) {
+            switch (linux.errno(return_code)) {
                 .SUCCESS => {
                     completion.result = @intCast(return_code);
                     self.completed.push(completion);
@@ -980,7 +994,7 @@ pub const IO = struct {
         );
         assert(so_error_len == @sizeOf(c_int));
 
-        switch (linux.E.init(return_code)) {
+        switch (linux.errno(return_code)) {
             .SUCCESS => {
                 completion.result = -@as(i32, @intCast(so_error));
                 self.completed.push(completion);
@@ -1019,7 +1033,7 @@ pub const IO = struct {
         var expiration_count: u64 = undefined;
         const return_code = linux.read(self.timer_fd, @ptrCast(&expiration_count), @sizeOf(u64));
 
-        switch (linux.E.init(return_code)) {
+        switch (linux.errno(return_code)) {
             .SUCCESS => {
                 assert(return_code == @sizeOf(u64));
                 assert(expiration_count == 1);
@@ -1055,7 +1069,7 @@ pub const IO = struct {
         // A duration of 0 would disarm the timer instead.
         assert(spec.it_value.sec != 0 or spec.it_value.nsec != 0);
 
-        switch (linux.E.init(linux.timerfd_settime(
+        switch (linux.errno(linux.timerfd_settime(
             self.timer_fd,
             .{ .ABSTIME = true },
             &spec,
@@ -1362,7 +1376,7 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: std.net.Address,
+            address: stdx.RawAddress,
         },
         eventfd_read: struct {
             fd: fd_t,
