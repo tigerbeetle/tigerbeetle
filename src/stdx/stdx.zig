@@ -10,8 +10,6 @@ const assert = std.debug.assert;
 
 pub const BitSetType = @import("bit_set.zig").BitSetType;
 pub const IOPSType = @import("iops.zig").IOPSType;
-pub const OnceType = @import("once.zig").OnceType;
-pub const once = @import("once.zig").once;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
 pub const PRNG = @import("prng.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
@@ -23,6 +21,10 @@ pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 
 pub const huge_page_allocator = @import("huge_page_allocator.zig").huge_page_allocator;
+
+pub const Mutex = @import("mutex.zig");
+pub const OnceType = @import("once.zig").OnceType;
+pub const once = @import("once.zig").once;
 
 pub const aegis = @import("vendored/aegis.zig");
 pub const Flags = @import("flags.zig");
@@ -1293,6 +1295,7 @@ comptime {
     _ = @import("flags.zig");
     _ = @import("huge_page_allocator.zig");
     _ = @import("iops.zig");
+    _ = @import("mutex.zig");
     _ = @import("net.zig");
     _ = @import("once.zig");
     _ = @import("prng.zig");

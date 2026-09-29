@@ -164,8 +164,8 @@ pub fn register_log_callback(
     callback_maybe: ?Logging.Callback,
     debug: bool,
 ) callconv(.c) tb_register_log_callback_status {
-    Logging.global.lock();
-    defer Logging.global.unlock();
+    Logging.global.mutex.lock();
+    defer Logging.global.mutex.unlock();
 
     if (Logging.global.callback == null) {
         if (callback_maybe) |callback| {
@@ -200,7 +200,7 @@ pub const Logging = struct {
     var global: Logging = .{};
 
     callback: ?Callback = null,
-    mutex: std.Io.Mutex = .init,
+    mutex: stdx.Mutex = .{},
     buffer: [log_line_max]u8 = undefined,
     debug: bool = false,
 
@@ -227,8 +227,8 @@ pub const Logging = struct {
 
         // Protect everything with a mutex - logging can be called from different threads
         // simultaneously, and there's only one buffer for now.
-        Logging.global.lock();
-        defer Logging.global.unlock();
+        Logging.global.mutex.lock();
+        defer Logging.global.mutex.unlock();
 
         const callback = Logging.global.callback orelse return;
 
@@ -251,13 +251,5 @@ pub const Logging = struct {
         };
 
         callback(tb_message_level, output.ptr, @intCast(output.len));
-    }
-
-    fn lock(logging: *Logging) void {
-        std.Io.Threaded.mutexLock(&logging.mutex);
-    }
-
-    fn unlock(logging: *Logging) void {
-        std.Io.Threaded.mutexUnlock(&logging.mutex);
     }
 };

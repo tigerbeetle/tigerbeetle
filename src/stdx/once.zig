@@ -10,23 +10,25 @@ pub fn OnceType(comptime f: fn () void) type {
         done: bool = false,
         mutex: std.Io.Mutex = .init,
 
-        pub fn call(self: *@This()) void {
+        const Once = @This();
+
+        pub fn call(self: *Once) void {
             if (@atomicLoad(bool, &self.done, .acquire)) return;
             return self.call_slow();
         }
 
-        fn call_slow(self: *@This()) void {
+        fn call_slow(self: *Once) void {
             @branchHint(.cold);
-            // Callers might not have an `Io` instance in scope (for example, arbitrary JVM
-            // threads). The single-threaded `Io` still locks via the OS futex.
-            const io = std.Io.Threaded.global_single_threaded.io();
-            self.mutex.lockUncancelable(io);
-            defer self.mutex.unlock(io);
+            std.Io.Threaded.mutexLock(&self.mutex);
+            defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
-            if (!self.done) {
-                f();
-                @atomicStore(bool, &self.done, true, .release);
-            }
+            // Unsynchronized load is fine: we won't synchronized with the store, but have
+            // already synchronized with mutex unlock.
+            // <https://www.open-std.org/JTC1/SC22/WG21/docs/papers/2024/p2135r1.pdf#page=6>
+            if (self.done) return;
+
+            f();
+            @atomicStore(bool, &self.done, true, .release);
         }
     };
 }
