@@ -407,6 +407,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 });
                 errdefer for (cluster.aof_ios[0..i]) |*io| io.deinit();
 
+                // NB: This path isn't used at all when AOF is passed a Test IO
+                // instance, so this *isn't* shared global state.
                 aof.* = try AOF.init(aof_io, "test.aof");
 
                 errdefer for (cluster.aofs[0..i]) |*aof_| aof_.deinit(allocator);
