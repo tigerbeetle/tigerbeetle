@@ -26,7 +26,7 @@ User docs roughly follow the Django-style organization. Specifically, they come 
   the basics, and what to get a specific thing done. Unlike tutorials, guides should _always_
   explain the why. Every page under [coding](/docs/coding/) and [operating](/docs/operating) is a
   guide.
-- Reference ([reference](/docs/reference>)) is the API-docs level documentation. It specifies
+- Reference ([reference](/docs/reference/)) is the API-docs level documentation. It specifies
   behaviors with maximum level of precision. A reference is not good for reading start to finish, it
   is a random-access document.
 
