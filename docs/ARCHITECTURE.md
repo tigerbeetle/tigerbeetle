@@ -640,7 +640,7 @@ The collection of logical and magical art behind TigerBeetle:
   a relational database is not the right solution.
 
 - [The LMAX Exchange Architecture - High Throughput, Low Latency and Plain Old Java -
-  2014](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
+  2014](https://web.archive.org/web/20160923005004/https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
   - Sam Adams on the high-level design of LMAX.
 
 - [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf) - A high
@@ -662,14 +662,14 @@ The collection of logical and magical art behind TigerBeetle:
   time."
 
 - [The Tail at
-  Scale](https://www2.cs.duke.edu/courses/cps296.4/fall13/838-CloudPapers/dean_longtail.pdf) - "A
+  Scale](https://doi.org/10.1145/2408776.2408794) - "A
   simple way to curb latency variability is to issue the same request to multiple replicas and use
   the results from whichever replica responds first."
 
 - [Viewstamped Replication Revisited](https://hdl.handle.net/1721.1/71763)
 
 - [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed
-  Systems](http://pmg.csail.mit.edu/papers/vr.pdf)
+  Systems](https://doi.org/10.1145/62546.62549)
 
 - [Flexible Paxos: Quorum intersection revisited](https://arxiv.org/pdf/1608.06696v1)
 
