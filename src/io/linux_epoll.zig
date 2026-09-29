@@ -1,12 +1,12 @@
 //! Epoll-only IO backend for TigerBeetle client libraries.
 //!
 //! Clients only perform network I/O (TCP to replicas), so this backend uses:
-//!   - epoll for all async operations (connect, send, recv, accept, eventfd reads)
-//!   - Synchronous syscalls for close
-//!   - timerfd for user-submitted timeout() operations
+//! - epoll for all async operations (connect, send, recv, accept, eventfd reads)
+//! - Synchronous syscalls for close
+//! - timerfd for timeout() operations
 //!
-//! Disk operations (read for files, write, fsync, openat) are unreachable; clients
-//! never open or write data files. For server disk I/O use the io_uring backend.
+//! Disk operations (read for files, write, fsync, openat) are not implemented; clients never open
+//! or write data files.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -96,7 +96,7 @@ pub const IO = struct {
 
     /// Pass all queued submissions to the kernel and peek for completions.
     pub fn run(self: *IO) !void {
-        try self.poll_epoll(0);
+        try self.poll_epoll(.{ .ns = 0 });
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_callbacks.ns +=
@@ -828,11 +828,16 @@ pub const IO = struct {
             const completion: *Completion = @ptrFromInt(event.data.ptr);
             assert(completion.awaiting);
             assert(completion.operation != .timeout);
+            assert(completion.operation != .close);
             assert(completion.io == self);
 
             // Remove from epoll. The fd is embedded in the operation.
             const fd = operation_fd(completion);
-            _ = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
+            const epoll_ctl_result = linux.epoll_ctl(self.epoll_fd, linux.EPOLL.CTL_DEL, fd, null);
+            switch (linux.errno(epoll_ctl_result)) {
+                .SUCCESS => {},
+                else => |err| std.debug.panic("epoll_ctl unexpected error: {}", .{err}),
+            }
 
             completion.awaiting = false;
 
@@ -842,7 +847,8 @@ pub const IO = struct {
                 .send => self.process_send(completion),
                 .connect => self.process_connect(completion),
                 .eventfd_read => self.process_eventfd_read(completion),
-                else => unreachable,
+                .timeout => unreachable,
+                .close => unreachable,
             }
         }
     }
@@ -1044,7 +1050,6 @@ pub const IO = struct {
             // Spurious wakeup; ignore.
             .AGAIN => {},
             else => |err| {
-                // TODO Is it okay to panic here? Or, should we tear down the timerfd?
                 std.debug.panic("timer_drain unexpected error: {}", .{err});
             },
         }
@@ -1054,8 +1059,8 @@ pub const IO = struct {
         assert(self.timer_fd >= 0);
 
         if (self.timer_expiry) |timer_expiry| {
-            assert(timer_expiry.ns <= expiry.ns);
-            if (timer_expiry.ns == expiry.ns) return;
+            assert(expiry.ns <= timer_expiry.ns);
+            if (expiry.ns == timer_expiry.ns) return;
         }
         maybe(self.timer_expiry != null);
 
