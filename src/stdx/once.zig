@@ -22,8 +22,8 @@ pub fn OnceType(comptime f: fn () void) type {
             std.Io.Threaded.mutexLock(&self.mutex);
             defer std.Io.Threaded.mutexUnlock(&self.mutex);
 
-            // Unsynchronized load is fine: we won't synchronized with the store, but have
-            // already synchronized with mutex unlock.
+            // An unsynchronized load is fine here: it doesn't synchronize with the store,
+            // but we've already synchronized via the mutex unlock.
             // <https://www.open-std.org/JTC1/SC22/WG21/docs/papers/2024/p2135r1.pdf#page=6>
             if (self.done) return;
 
