@@ -270,7 +270,7 @@ Constraints:
 
   It is set by TigerBeetle to the moment the account arrives at the cluster.
 
-- Must be greater than `0` and less than `2^63` when the `Account` is created with
+- Must be greater than `0` and not be larger than `2^63` when the `Account` is created with
   [`flags.imported`](#flagsimported) set
 
 ## Internals
