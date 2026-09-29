@@ -487,6 +487,7 @@ pub fn build_with_options(
     build_dotnet_client(b, build_steps.clients_dotnet, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .conformance_module = conformance_module,
         .tb_client = tb_client,
         .mode = options.mode,
     });
@@ -2047,10 +2048,24 @@ fn build_dotnet_client(
     options: struct {
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
+        conformance_module: *std.Build.Module,
         tb_client: TBClientPrebuilt,
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const dotnet_conformance_generator = b.addExecutable(.{
+        .name = "dotnet_conformance",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/dotnet/dotnet_conformance.zig"),
+            .target = b.graph.host,
+        }),
+    });
+    dotnet_conformance_generator.root_module.addImport("conformance", options.conformance_module);
+    step_clients_dotnet.dependOn(&Generated.file(b, .{
+        .generator = dotnet_conformance_generator,
+        .path = "./src/clients/dotnet/TigerBeetle.Tests/ConformanceTests.cs",
+    }).step);
+
     const dotnet_bindings_generator = b.addExecutable(.{
         .name = "dotnet_bindings",
         .root_module = b.createModule(.{
