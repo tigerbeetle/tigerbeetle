@@ -200,7 +200,7 @@ test "Duration.parse_flag_value" {
 
 const DateTimeUTC = struct {
     year: u16,
-    month: enum(u4) { Jan = 1, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec },
+    month: enum(u4) { Jan = 0, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec },
     day: u8,
     week_day: enum(u3) { Mon = 0, Tue, Wed, Thu, Fri, Sat, Sun },
     hour: u8,
@@ -209,58 +209,62 @@ const DateTimeUTC = struct {
     millisecond: u16,
 
     pub fn format(datetime: DateTimeUTC, writer: *std.Io.Writer) !void {
-        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
-            datetime.year,
-            @intFromEnum(datetime.month),
-            datetime.day,
-            datetime.hour,
-            datetime.minute,
-            datetime.second,
-            datetime.millisecond,
-        });
+        const buffer: [24]u8 =
+            format_fixed_width(4, datetime.year) ++ "-".* ++
+            format_fixed_width(2, @intFromEnum(datetime.month) + 1) ++ "-".* ++
+            format_fixed_width(2, datetime.day) ++ " ".* ++
+            format_fixed_width(2, datetime.hour) ++ ":".* ++
+            format_fixed_width(2, datetime.minute) ++ ":".* ++
+            format_fixed_width(2, datetime.second) ++ ".".* ++
+            format_fixed_width(3, datetime.millisecond) ++ "Z".*;
+        try writer.writeAll(&buffer);
     }
 
     /// RFC 1123 date and time.
     /// Example: `Sun, 28 Aug 2022 08:49:37 GMT`.
     /// https://www.rfc-editor.org/info/rfc1123/#page-55 (Section 5.2.14)
     pub fn format_rfc1123(datetime: DateTimeUTC, buffer: *[29]u8) void {
-        const result = std.fmt.bufPrint(
-            buffer,
-            "{s}, {d:0>2} {s} {d:0>4} {d:0>2}:{d:0>2}:{d:0>2} GMT",
-            .{
-                @tagName(datetime.week_day),
-                datetime.day,
-                @tagName(datetime.month),
-                datetime.year,
-                datetime.hour,
-                datetime.minute,
-                datetime.second,
-            },
-        ) catch unreachable;
-        assert(result.len == buffer.len);
+        buffer.* =
+            @tagName(datetime.week_day)[0..3].* ++ ", ".* ++
+            format_fixed_width(2, datetime.day) ++ " ".* ++
+            @tagName(datetime.month)[0..3].* ++ " ".* ++
+            format_fixed_width(4, datetime.year) ++ " ".* ++
+            format_fixed_width(2, datetime.hour) ++ ":".* ++
+            format_fixed_width(2, datetime.minute) ++ ":".* ++
+            format_fixed_width(2, datetime.second) ++ " GMT".*;
     }
 
     /// ISO 8601 basic format date and time. Example: `20220828T084937Z`.
     pub fn format_iso8601(datetime: DateTimeUTC, buffer: *[16]u8) void {
-        const result = std.fmt.bufPrint(buffer, "{d:0>4}{d:0>2}{d:0>2}T{d:0>2}{d:0>2}{d:0>2}Z", .{
-            datetime.year,
-            @intFromEnum(datetime.month),
-            datetime.day,
-            datetime.hour,
-            datetime.minute,
-            datetime.second,
-        }) catch unreachable;
-        assert(result.len == buffer.len);
+        var date: [8]u8 = undefined;
+        datetime.format_iso8601_date(&date);
+        buffer.* = date ++ "T".* ++
+            format_fixed_width(2, datetime.hour) ++
+            format_fixed_width(2, datetime.minute) ++
+            format_fixed_width(2, datetime.second) ++ "Z".*;
     }
 
     /// ISO 8601 basic format calendar date. Example: `20220828`.
     pub fn format_iso8601_date(datetime: DateTimeUTC, buffer: *[8]u8) void {
-        const result = std.fmt.bufPrint(buffer, "{d:0>4}{d:0>2}{d:0>2}", .{
-            datetime.year,
-            @intFromEnum(datetime.month),
-            datetime.day,
-        }) catch unreachable;
-        assert(result.len == buffer.len);
+        buffer.* =
+            format_fixed_width(4, datetime.year) ++
+            format_fixed_width(2, @intFromEnum(datetime.month) + 1) ++
+            format_fixed_width(2, datetime.day);
+    }
+
+    /// Formats `value` as exactly `width` decimal digits, left-padded with zeros.
+    fn format_fixed_width(comptime width: comptime_int, value: u64) [width]u8 {
+        assert(value < std.math.pow(u64, 10, width));
+        var result: [width]u8 = undefined;
+        var rest = value;
+        inline for (1..width + 1) |offset| {
+            const index = width - offset;
+            const digit: u8 = @intCast(rest % 10);
+            rest = @divFloor(rest, 10);
+            result[index] = '0' + digit;
+        }
+        assert(rest == 0);
+        return result;
     }
 };
 
@@ -285,15 +289,18 @@ pub const InstantUnix = struct {
         const epoch_day = @divTrunc(instant.ns, std.time.ns_per_s * std.time.s_per_day);
         const year_day = epoch_seconds.getEpochDay().calculateYearDay();
         const month_day = year_day.calculateMonthDay();
+        const month = month_day.month.numeric();
+        assert(month >= 1);
+        assert(month <= 12);
         const time = epoch_seconds.getDaySeconds();
         // 1970-01-01 was a Thursday (= index 3 when Monday = index 0).
         const weekday_index: u3 = @intCast((epoch_day + 3) % 7);
 
         return .{
             .year = year_day.year,
-            .month = @enumFromInt(month_day.month.numeric()),
+            .month = @enumFromInt(month - 1), // Zero-indexed month.
             .day = month_day.day_index + 1,
-            .week_day = @enumFromInt(weekday_index),
+            .week_day = @enumFromInt(weekday_index), // Zero-indexed week.
             .hour = time.getHoursIntoDay(),
             .minute = time.getMinutesIntoHour(),
             .second = time.getSecondsIntoMinute(),
@@ -320,44 +327,150 @@ test "InstantUnix formats" {
     var iso8601: [16]u8 = undefined;
     var iso8601_date: [8]u8 = undefined;
 
-    const tigerbeetle_birthday = InstantUnix.from_seconds(1661676577).date_time();
+    {
+        // TigerBeetle birthday
+        const date_time = InstantUnix.from_seconds(1661676577).date_time();
 
-    try expectFmt("2022-08-28 08:49:37.000Z", "{f}", .{
-        tigerbeetle_birthday,
-    });
+        try expectFmt("2022-08-28 08:49:37.000Z", "{f}", .{
+            date_time,
+        });
 
-    tigerbeetle_birthday.format_iso8601(&iso8601);
-    try expectEqualStrings("20220828T084937Z", &iso8601);
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("20220828T084937Z", &iso8601);
 
-    tigerbeetle_birthday.format_iso8601_date(&iso8601_date);
-    try expectEqualStrings("20220828", &iso8601_date);
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("20220828", &iso8601_date);
 
-    tigerbeetle_birthday.format_rfc1123(&rfc1123);
-    try expectEqualStrings("Sun, 28 Aug 2022 08:49:37 GMT", &rfc1123);
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Sun, 28 Aug 2022 08:49:37 GMT", &rfc1123);
+    }
+    const instant_min = InstantUnix{ .ns = 0 };
+    {
+        // Epoch timestamp.
+        const date_time = instant_min.date_time();
+        try expectFmt("1970-01-01 00:00:00.000Z", "{f}", .{date_time});
 
-    const instant_min = (InstantUnix{ .ns = 0 }).date_time();
-    try expectFmt("1970-01-01 00:00:00.000Z", "{f}", .{instant_min});
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19700101T000000Z", &iso8601);
 
-    instant_min.format_iso8601(&iso8601);
-    try expectEqualStrings("19700101T000000Z", &iso8601);
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19700101", &iso8601_date);
 
-    instant_min.format_iso8601_date(&iso8601_date);
-    try expectEqualStrings("19700101", &iso8601_date);
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Thu, 01 Jan 1970 00:00:00 GMT", &rfc1123);
+    }
 
-    instant_min.format_rfc1123(&rfc1123);
-    try expectEqualStrings("Thu, 01 Jan 1970 00:00:00 GMT", &rfc1123);
+    const one_year = Duration{ .ns = std.time.ns_per_day * 365 };
+    const instant_min_plus_year = instant_min.add(one_year);
+    {
+        // One year after minimum timestamp.
+        const date_time = instant_min_plus_year.date_time();
+        try expectFmt("1971-01-01 00:00:00.000Z", "{f}", .{date_time});
 
-    const instant_max = (InstantUnix{ .ns = std.math.maxInt(u64) }).date_time();
-    try expectFmt("2554-07-21 23:34:33.709Z", "{f}", .{instant_max});
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19710101T000000Z", &iso8601);
 
-    instant_max.format_iso8601(&iso8601);
-    try expectEqualStrings("25540721T233433Z", &iso8601);
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19710101", &iso8601_date);
 
-    instant_max.format_iso8601_date(&iso8601_date);
-    try expectEqualStrings("25540721", &iso8601_date);
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Fri, 01 Jan 1971 00:00:00 GMT", &rfc1123);
+    }
 
-    instant_max.format_rfc1123(&rfc1123);
-    try expectEqualStrings("Sun, 21 Jul 2554 23:34:33 GMT", &rfc1123);
+    const instant_last_ns = InstantUnix{ .ns = instant_min_plus_year.ns - 1 };
+    {
+        // Check that ns -= 1 flips every counter correctly.
+        const date_time = instant_last_ns.date_time();
+        try expectFmt("1970-12-31 23:59:59.999Z", "{f}", .{date_time});
+
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19701231T235959Z", &iso8601);
+
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19701231", &iso8601_date);
+
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Thu, 31 Dec 1970 23:59:59 GMT", &rfc1123);
+    }
+
+    {
+        // Maximum timestamp.
+        const date_time = (InstantUnix{ .ns = std.math.maxInt(u64) }).date_time();
+        try expectFmt("2554-07-21 23:34:33.709Z", "{f}", .{date_time});
+
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("25540721T233433Z", &iso8601);
+
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("25540721", &iso8601_date);
+
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Sun, 21 Jul 2554 23:34:33 GMT", &rfc1123);
+    }
+    // Test vectors from RFC3339
+    // https://www.rfc-editor.org/info/rfc3339/#section-5.8
+    {
+        // 1985-04-12T23:20:50.52Z
+        const date_time = (InstantUnix{ .ns = 482196050520 * std.time.ns_per_ms }).date_time();
+        try expectFmt("1985-04-12 23:20:50.520Z", "{f}", .{date_time});
+
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19850412T232050Z", &iso8601);
+
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19850412", &iso8601_date);
+
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Fri, 12 Apr 1985 23:20:50 GMT", &rfc1123);
+    }
+    {
+        // 1996-12-19T16:39:57-08:00, which is 1996-12-20T00:39:57Z.
+        const date_time = InstantUnix.from_seconds(851042397).date_time();
+        try expectFmt("1996-12-20 00:39:57.000Z", "{f}", .{date_time});
+
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19961220T003957Z", &iso8601);
+
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19961220", &iso8601_date);
+
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Fri, 20 Dec 1996 00:39:57 GMT", &rfc1123);
+    }
+
+    const instant_before_leap_second = InstantUnix.from_seconds(662687999);
+    {
+        // 1990-12-31T23:59:59Z
+        const date_time = instant_before_leap_second.date_time();
+        try expectFmt("1990-12-31 23:59:59.000Z", "{f}", .{date_time});
+
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19901231T235959Z", &iso8601);
+
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19901231", &iso8601_date);
+
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Mon, 31 Dec 1990 23:59:59 GMT", &rfc1123);
+    }
+
+    const instant_after_leap_second = instant_before_leap_second.add(Duration.seconds(1));
+    {
+        // 1990-12-31T23:59:60Z and 1990-12-31T15:59:60-08:00 (leap second).
+        // Unix time does not count leap seconds, so 23:59:60 shares its timestamp with the
+        // following 00:00:00.
+        const date_time = instant_after_leap_second.date_time();
+        try expectFmt("1991-01-01 00:00:00.000Z", "{f}", .{date_time});
+
+        date_time.format_iso8601(&iso8601);
+        try expectEqualStrings("19910101T000000Z", &iso8601);
+
+        date_time.format_iso8601_date(&iso8601_date);
+        try expectEqualStrings("19910101", &iso8601_date);
+
+        date_time.format_rfc1123(&rfc1123);
+        try expectEqualStrings("Tue, 01 Jan 1991 00:00:00 GMT", &rfc1123);
+    }
 }
 
 test "InstantUnix formats fuzz" {
