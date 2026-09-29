@@ -487,7 +487,8 @@ necessary:
   The application must submit batches of imported events separately.
 
 - User-defined timestamps must be **unique** and expressed as nanoseconds since the UNIX epoch.
-  No two objects can have the same timestamp, even different objects like an `Account` and a `Transfer` cannot share the same timestamp.
+  No two objects can have the same timestamp, even different objects like an `Account` and a
+  `Transfer` cannot share the same timestamp.
 
 - User-defined timestamps must be a past date, never ahead of the cluster clock at the time the
   request arrives.
@@ -495,7 +496,8 @@ necessary:
 - Timestamps must be strictly increasing.
 
   Even user-defined timestamps that are required to be past dates need to be at least one
-  nanosecond ahead of the timestamp of the last transfer committed by the cluster.
+  nanosecond ahead of the timestamp of the last transfer committed or
+  [automatically expired](#timeout) by the cluster.
 
   Since the timestamp cannot regress, importing past events can be naturally restrictive without
   coordination, as the last timestamp can be updated using the cluster clock during regular
