@@ -36,7 +36,7 @@ test Mutex {
         }
     };
 
-    var t = .{
+    var t: T = .{
         .mutex = .{},
         .counter = 0,
     };

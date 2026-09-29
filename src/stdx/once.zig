@@ -1,5 +1,7 @@
 //! Vendored from Zig 0.14's `std.once`, which was removed in Zig 0.16.
 const std = @import("std");
+const stdx = @import("./stdx.zig");
+const Mutex = stdx.Mutex;
 
 pub fn once(comptime f: fn () void) OnceType(f) {
     return .{};
@@ -8,7 +10,7 @@ pub fn once(comptime f: fn () void) OnceType(f) {
 pub fn OnceType(comptime f: fn () void) type {
     return struct {
         done: bool = false,
-        mutex: std.Io.Mutex = .init,
+        mutex: Mutex = .{},
 
         const Once = @This();
 
@@ -19,8 +21,8 @@ pub fn OnceType(comptime f: fn () void) type {
 
         fn call_slow(self: *Once) void {
             @branchHint(.cold);
-            std.Io.Threaded.mutexLock(&self.mutex);
-            defer std.Io.Threaded.mutexUnlock(&self.mutex);
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
             // An unsynchronized load is fine here: it doesn't synchronize with the store,
             // but we've already synchronized via the mutex unlock.
