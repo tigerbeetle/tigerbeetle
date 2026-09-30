@@ -357,37 +357,34 @@ pub fn ScanType(
         /// Maps the index name -> `Groove` relation.
         const index_map: T: {
             const GrooveName = std.meta.FieldEnum(Forest.Grooves);
-            var indexes: []const std.builtin.Type.StructField = &.{};
-
             // Timestamp from the ObjectTree:
-            indexes = indexes ++ [_]std.builtin.Type.StructField{.{
-                .name = "timestamp",
-                .type = GrooveName,
-                .is_comptime = true,
+            var names: []const []const u8 = &.{"timestamp"};
+            var attributes: []const std.builtin.Type.StructField.Attributes = &.{.{
+                .@"comptime" = true,
+                .@"align" = @alignOf(GrooveName),
                 .default_value_ptr = &scan_config.object_groove,
-                .alignment = @alignOf(GrooveName),
             }};
 
             // Secondary indexes from joined Grooves' IndexTrees:
             for (scan_config.index_grooves) |*groove_name| {
                 const Groove = @FieldType(Forest.Grooves, @tagName(groove_name.*));
                 for (std.meta.fields(Groove.IndexTrees)) |field| {
-                    indexes = indexes ++ [_]std.builtin.Type.StructField{.{
-                        .name = field.name,
-                        .type = GrooveName,
-                        .is_comptime = true,
+                    names = names ++ .{field.name};
+                    attributes = attributes ++ .{std.builtin.Type.StructField.Attributes{
+                        .@"comptime" = true,
+                        .@"align" = @alignOf(GrooveName),
                         .default_value_ptr = groove_name,
-                        .alignment = @alignOf(GrooveName),
                     }};
                 }
             }
 
-            break :T @Type(.{ .@"struct" = .{
-                .layout = .auto,
-                .fields = indexes,
-                .decls = &.{},
-                .is_tuple = false,
-            } });
+            break :T @Struct(
+                .auto,
+                null,
+                names,
+                &@splat(GrooveName),
+                attributes[0..names.len],
+            );
         } = .{};
 
         pub const Indexes = std.meta.FieldEnum(@TypeOf(index_map));
@@ -428,21 +425,21 @@ pub fn ScanType(
         /// };
         /// ```
         pub const Dispatcher = T: {
-            var type_info = @typeInfo(union(enum) {
+            const Base = union(enum) {
                 merge_union: ScanMergeUnionType(Storage, Forest, scan_config),
                 merge_intersection: ScanMergeIntersectionType(Storage, Forest, scan_config),
                 merge_difference: ScanMergeDifferenceType(Storage, Forest, scan_config),
-            });
+            };
+            var names: []const []const u8 = std.meta.fieldNames(Base);
+            var types: []const type = &.{};
+            for (std.meta.fields(Base)) |field| types = types ++ .{field.type};
 
+            // Union fields for each index tree:
             for (std.meta.fields(Indexes)) |index| {
-                const Tree = TreeType(index);
+                const Tree = TreeType(@field(Indexes, index.name));
                 const ScanTree = ScanTreeType(*Context, Tree, Storage);
-                type_info.@"union".fields = type_info.@"union".fields ++
-                    [_]std.builtin.Type.UnionField{.{
-                        .name = @tagName(index),
-                        .type = ScanTree,
-                        .alignment = @alignOf(ScanTree),
-                    }};
+                names = names ++ .{index.name};
+                types = types ++ .{ScanTree};
             }
 
             // We need a tagged union for dynamic dispatching.
@@ -486,7 +483,7 @@ pub fn ScanType(
                             continue;
                         }
 
-                        const Groove = GrooveType(comptime std.enums.nameCast(Indexes, index));
+                        const Groove = GrooveType(comptime @field(Indexes, @tagName(index)));
                         if (comptime Groove.is_primary_key(index)) {
                             // When iterating over the primary key,
                             // it can return a timestamp zero, which indicates an orphaned id.
@@ -540,7 +537,7 @@ pub fn ScanType(
                             .timestamp = timestamp,
                         }));
                     } else {
-                        const Groove = GrooveType(std.enums.nameCast(Indexes, index));
+                        const Groove = GrooveType(@field(Indexes, @tagName(index)));
                         comptime assert(is_unique_key(Value));
                         comptime assert(Groove.config.unique_keys.len > 0);
 
@@ -568,7 +565,7 @@ pub fn ScanType(
                         assert(Value.key_prefix(scan_impl.key_lower) ==
                             Value.key_prefix(scan_impl.key_upper));
                     } else {
-                        const Groove = GrooveType(std.enums.nameCast(Indexes, index));
+                        const Groove = GrooveType(@field(Indexes, @tagName(index)));
                         comptime assert(is_unique_key(Value));
                         comptime assert(Groove.config.unique_keys.len > 0);
                         assert(scan_impl.key_lower == scan_impl.key_upper);
