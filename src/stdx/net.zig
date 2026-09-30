@@ -89,13 +89,16 @@ pub const IPAddress = extern struct {
         var rest = text;
         for (0..octets.len - 1) |index| {
             const octet_text, rest = stdx.cut(rest, ".") orelse return error.InvalidIPAddress;
-            octets[index] = stdx.parse_int(u8, octet_text, .{ .base = 10 }) catch
-                return error.InvalidIPAddress;
+            octets[index] = try parse_octet(octet_text);
         }
-        octets[octets.len - 1] = stdx.parse_int(u8, rest, .{ .base = 10 }) catch
-            return error.InvalidIPAddress;
+        octets[octets.len - 1] = try parse_octet(rest);
 
         return IPAddress.from_v4(octets);
+    }
+
+    fn parse_octet(text: []const u8) error{InvalidIPAddress}!u8 {
+        return stdx.parse_int(u8, text, .{ .base = 10 }) catch
+            return error.InvalidIPAddress;
     }
 
     fn parse_v6(text: []const u8) error{InvalidIPAddress}!IPAddress {
@@ -127,25 +130,28 @@ pub const IPAddress = extern struct {
             if (count > 0) {
                 for (0..count - 1) |_| {
                     const quibble_text, rest = stdx.cut(rest, ":").?;
-                    const quibble = stdx.parse_int(u16, quibble_text, .{
-                        .base = 16,
-                        .allow_leading_zero = true,
-                    }) catch
-                        return error.InvalidIPAddress;
+                    const quibble = try parse_quibble(quibble_text);
                     quibbles_big[index] = std.mem.nativeToBig(u16, quibble);
                     index += 1;
                 }
-                const quibble = stdx.parse_int(u16, rest, .{
-                    .base = 16,
-                    .allow_leading_zero = true,
-                }) catch
-                    return error.InvalidIPAddress;
+                const quibble = try parse_quibble(rest);
                 quibbles_big[index] = std.mem.nativeToBig(u16, quibble);
                 index += 1;
             }
         }
 
         return .{ .big = @bitCast(quibbles_big) };
+    }
+
+    fn parse_quibble(text: []const u8) error{InvalidIPAddress}!u16 {
+        if (text.len > 4) {
+            // Leading zeros are allowed but not required, and a quibble is at most 4 digits.
+            return error.InvalidIPAddress;
+        }
+        return stdx.parse_int(u16, text, .{
+            .base = 16,
+            .allow_leading_zero = true,
+        }) catch return error.InvalidIPAddress;
     }
 
     fn quibble_count(text: []const u8) usize {
@@ -433,6 +439,7 @@ test IPAddress {
             "::::",
             "b::8%4",
             "::ffff:192.0.2.128",
+            "ff01::00101",
         },
     });
 }
