@@ -21,7 +21,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const Snap = stdx.Snap;
 const snap = Snap.snap_fn("src/stdx");
 
-/// An IPv6 or IPv6-mapped IPv4.
+/// An IPv6 or IPv6-mapped IPv4, a logical and physical representation.
 pub const IPAddress = extern struct {
     // - Array instead of u128 to avoid endian ambiguity.
     // - Natural alignment to allow re-interpreting as u128.
@@ -454,73 +454,9 @@ test "IPAddress: from_v4" {
     ).diff_hex(&v4.big);
 }
 
-/// A `sockaddr` for passing to the kernel directly, replacing `std.net.Address` (removed in 0.16).
-pub const RawAddress = extern union {
-    any: std.posix.sockaddr,
-    in: std.posix.sockaddr.in,
-    in6: std.posix.sockaddr.in6,
-
-    pub fn getOsSockLen(address: RawAddress) std.posix.socklen_t {
-        return switch (address.any.family) {
-            std.posix.AF.INET => @sizeOf(std.posix.sockaddr.in),
-            std.posix.AF.INET6 => @sizeOf(std.posix.sockaddr.in6),
-            else => unreachable,
-        };
-    }
-};
-
 pub const SocketAddress = struct {
     ip: IPAddress,
     port: u16,
-
-    pub fn to_raw(socket: SocketAddress) RawAddress {
-        switch (socket.ip.family()) {
-            .IPv4 => {
-                const octets: [4]u8 = socket.ip.as_v4().?;
-                return .{ .in = .{
-                    .port = std.mem.nativeToBig(u16, socket.port),
-                    .addr = @bitCast(octets),
-                } };
-            },
-            .IPv6 => {
-                // The following two fields are machine-local and can be safely zeroed-out.
-                //
-                // Flowinfo corresponds to the matching field in the IPv6 header, and is a property
-                // of a connection, rather than a part of the address proper. We need it because
-                // the kernel API works this way.
-                const flowinfo = 0;
-                // On a machine with several network interfaces, each network interface might have
-                // the _same_ link-local IPv6 address (in addition to a separate, globally routable
-                // IPv6 address). Scope-id is another machine-local kernel API, telling the kernel
-                // which interface to use.
-                const scopeid = 0;
-
-                return .{ .in6 = .{
-                    .port = std.mem.nativeToBig(u16, socket.port),
-                    .flowinfo = flowinfo,
-                    .addr = socket.ip.big,
-                    .scope_id = scopeid,
-                } };
-            },
-        }
-    }
-
-    pub fn from_raw(address: RawAddress) error{UnsupportedFamily}!SocketAddress {
-        switch (address.any.family) {
-            std.posix.AF.INET => {
-                const octets_big: [4]u8 = @bitCast(address.in.addr);
-                const ip = IPAddress.from_v4(octets_big);
-                const port = std.mem.bigToNative(u16, address.in.port);
-                return .{ .ip = ip, .port = port };
-            },
-            std.posix.AF.INET6 => {
-                const ip: IPAddress = .{ .big = address.in6.addr };
-                const port = std.mem.bigToNative(u16, address.in6.port);
-                return .{ .ip = ip, .port = port };
-            },
-            else => return error.UnsupportedFamily,
-        }
-    }
 
     pub fn to_std(socket: SocketAddress) std.Io.net.IpAddress {
         switch (socket.ip.family()) {
@@ -545,26 +481,3 @@ pub const SocketAddress = struct {
         return .{ .ip = IPAddress.arbitrary(prng), .port = prng.int(u16) };
     }
 };
-
-test "SocketAddress: from_raw bad family" {
-    if (builtin.os.tag == .windows) return;
-    var unix_domain: RawAddress = undefined;
-    unix_domain.any.family = std.posix.AF.UNIX;
-    try expectError(error.UnsupportedFamily, SocketAddress.from_raw(unix_domain));
-}
-
-test "SocketAddress: fuzz to_std/from_std" {
-    var prng = stdx.PRNG.from_seed_testing();
-    for (0..1000) |_| {
-        const socket = SocketAddress.arbitrary(&prng);
-        const address = socket.to_raw();
-        const socket_roundtrip = try SocketAddress.from_raw(address);
-        assert(std.meta.eql(socket, socket_roundtrip));
-        assert(std.meta.eql(socket, SocketAddress.from_std(socket.to_std())));
-
-        switch (socket.ip.family()) {
-            .IPv4 => assert(address.any.family == std.posix.AF.INET),
-            .IPv6 => assert(address.any.family == std.posix.AF.INET6),
-        }
-    }
-}

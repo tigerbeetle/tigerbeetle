@@ -197,20 +197,9 @@ test "accept/connect/send/receive" {
             const client = try io.open_socket_tcp(address.ip.family(), tcp_options);
             defer io.close_socket(client);
 
-            try posix.setsockopt(
-                server,
-                posix.SOL.SOCKET,
-                posix.SO.REUSEADDR,
-                &std.mem.toBytes(@as(c_int, 1)),
-            );
-            const address_std = address.to_raw();
-            try posix.bind(server, &address_std.any, address_std.getOsSockLen());
-            try posix.listen(server, kernel_backlog);
-
-            var client_address_std: stdx.RawAddress = .{ .any = undefined };
-            var client_address_std_len: posix.socklen_t = @sizeOf(stdx.RawAddress);
-            try posix.getsockname(server, &client_address_std.any, &client_address_std_len);
-            const client_address = try stdx.SocketAddress.from_raw(client_address_std);
+            const client_address = try io.listen(server, address, .{
+                .backlog = kernel_backlog,
+            });
 
             var self: Context = .{
                 .io = &io,
@@ -495,20 +484,9 @@ test "tick to wait" {
             const server = try self.io.open_socket_tcp(address.ip.family(), tcp_options);
             defer self.io.close_socket(server);
 
-            try posix.setsockopt(
-                server,
-                posix.SOL.SOCKET,
-                posix.SO.REUSEADDR,
-                &std.mem.toBytes(@as(c_int, 1)),
-            );
-            const address_std = address.to_raw();
-            try posix.bind(server, &address_std.any, address_std.getOsSockLen());
-            try posix.listen(server, kernel_backlog);
-
-            var client_address_std: stdx.RawAddress = .{ .any = undefined };
-            var client_address_std_len: posix.socklen_t = @sizeOf(stdx.RawAddress);
-            try posix.getsockname(server, &client_address_std.any, &client_address_std_len);
-            const client_address = try stdx.SocketAddress.from_raw(client_address_std);
+            const client_address = try self.io.listen(server, address, .{
+                .backlog = kernel_backlog,
+            });
 
             const client = try self.io.open_socket_tcp(client_address.ip.family(), tcp_options);
             defer self.io.close_socket(client);
@@ -657,25 +635,7 @@ test "pipe data over socket" {
             defer self.io.close_socket(self.server.fd.?);
 
             const address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
-            try posix.setsockopt(
-                self.server.fd.?,
-                posix.SOL.SOCKET,
-                posix.SO.REUSEADDR,
-                &std.mem.toBytes(@as(c_int, 1)),
-            );
-
-            const address_std = address.to_raw();
-            try posix.bind(self.server.fd.?, &address_std.any, address_std.getOsSockLen());
-            try posix.listen(self.server.fd.?, 1);
-
-            var client_address_std: stdx.RawAddress = .{ .any = undefined };
-            var client_address_std_len: posix.socklen_t = @sizeOf(stdx.RawAddress);
-            try posix.getsockname(
-                self.server.fd.?,
-                &client_address_std.any,
-                &client_address_std_len,
-            );
-            const client_address = try stdx.SocketAddress.from_raw(client_address_std);
+            const client_address = try self.io.listen(self.server.fd.?, address, .{ .backlog = 1 });
 
             self.io.accept(
                 *Context,

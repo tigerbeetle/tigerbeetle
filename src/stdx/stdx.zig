@@ -47,7 +47,6 @@ pub const Timer = @import("time.zig").Timer;
 const net = @import("./net.zig");
 pub const IPAddress = net.IPAddress;
 pub const SocketAddress = net.SocketAddress;
-pub const RawAddress = net.RawAddress;
 
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;

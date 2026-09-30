@@ -388,7 +388,7 @@ pub const IO = struct {
                 .accept => |*op| {
                     sqe.prep_accept(
                         op.socket,
-                        &op.address,
+                        &op.address.any,
                         &op.address_size,
                         posix.SOCK.CLOEXEC,
                     );
@@ -400,7 +400,7 @@ pub const IO = struct {
                     sqe.prep_connect(
                         op.socket,
                         &op.address.any,
-                        op.address.getOsSockLen(),
+                        op.address_size,
                     );
                 },
                 .fsync => |op| {
@@ -778,15 +778,16 @@ pub const IO = struct {
     const Operation = union(enum) {
         accept: struct {
             socket: socket_t,
-            address: posix.sockaddr = undefined,
-            address_size: posix.socklen_t = @sizeOf(posix.sockaddr),
+            address: common.PosixAddress,
+            address_size: posix.socklen_t,
         },
         close: struct {
             fd: fd_t,
         },
         connect: struct {
             socket: socket_t,
-            address: stdx.RawAddress,
+            address: common.PosixAddress,
+            address_size: posix.socklen_t,
         },
         fsync: struct {
             fd: fd_t,
@@ -865,7 +866,7 @@ pub const IO = struct {
                 .accept = .{
                     .socket = socket,
                     .address = undefined,
-                    .address_size = @sizeOf(posix.sockaddr),
+                    .address_size = @sizeOf(linux.sockaddr),
                 },
             },
         };
@@ -944,10 +945,15 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address.to_raw(),
+                    .address = undefined,
+                    .address_size = undefined,
                 },
             },
         };
+        completion.operation.connect.address_size = common.address_to_posix(
+            address,
+            &completion.operation.connect.address,
+        );
         self.enqueue(completion);
     }
 
