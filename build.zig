@@ -160,7 +160,7 @@ pub fn build_with_options(
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
         .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
-        .conformance_dump = b.step("conformance:dump", "Dump the parsed conformance test model"),
+        .conformance_list = b.step("conformance:list", "List conformance suites and cases"),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -328,9 +328,9 @@ pub fn build_with_options(
         .mode = options.mode,
     });
 
-    // zig build conformance:dump
+    // zig build conformance:list
     const conformance_module = build_conformance(b, .{
-        .dump = build_steps.conformance_dump,
+        .list = build_steps.conformance_list,
     }, .{
         .stdx_module = stdx_module,
         .vsr_module = vsr_module,
@@ -765,7 +765,7 @@ fn build_check(
 fn build_conformance(
     b: *std.Build,
     steps: struct {
-        dump: *std.Build.Step,
+        list: *std.Build.Step,
     },
     options: struct {
         stdx_module: *std.Build.Module,
@@ -779,14 +779,19 @@ fn build_conformance(
     conformance_module.addImport("stdx", options.stdx_module);
     conformance_module.addImport("vsr", options.vsr_module);
 
-    const conformance_test = b.addExecutable(.{
-        .name = "conformance_test",
-        .root_module = conformance_module,
+    const conformance_list = b.addExecutable(.{
+        .name = "conformance_list",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/clients/tests/conformance_test_list.zig"),
+            .target = b.graph.host,
+        }),
     });
+    conformance_list.root_module.addImport("stdx", options.stdx_module);
+    conformance_list.root_module.addImport("conformance", conformance_module);
 
-    const dump = b.addRunArtifact(conformance_test);
-    dump.has_side_effects = true;
-    steps.dump.dependOn(&dump.step);
+    const list = b.addRunArtifact(conformance_list);
+    list.has_side_effects = true;
+    steps.list.dependOn(&list.step);
 
     return conformance_module;
 }

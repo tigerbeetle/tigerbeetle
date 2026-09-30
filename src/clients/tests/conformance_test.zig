@@ -1,10 +1,8 @@
 const std = @import("std");
-const stdx = @import("stdx");
 
 pub const Printer = @import("conformance_test_printer.zig").Printer;
 pub const ast = @import("conformance_test_ast.zig");
 const parser = @import("conformance_test_parser.zig");
-const debug = @import("conformance_test_debug.zig");
 
 // In the generated test files, suites appear in the order defined here. We are trying to structure
 // this like a walkthrough for readers of the conformance test suite. The second tuple item is used
@@ -30,12 +28,4 @@ pub const suites: []const struct { []const u8, []const u8 } = &.{
 
 pub fn parse(arena: std.mem.Allocator) !ast.ConformanceTests {
     return parser.parse(arena, suites);
-}
-
-// This is occasionally useful during development/testing. It may just go away.
-pub fn main(init: std.process.Init) !void {
-    var memory: [2 * stdx.MiB]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&memory);
-
-    debug.dump(init.io, try parse(fba.allocator()));
 }
