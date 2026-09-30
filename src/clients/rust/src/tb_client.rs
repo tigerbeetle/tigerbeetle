@@ -542,12 +542,8 @@ pub struct tb_packet_t {
     pub opaque: [u8; 64],
 }
 
-mod operation_sealed {
-    pub trait Sealed {}
-}
-
 #[doc(hidden)]
-pub trait Operation: operation_sealed::Sealed + Send + Sync + 'static {
+pub(crate) trait Operation: Send + Sync + 'static {
     type OpSource: Send + 'static;
     type OutputItem: Copy + Send + 'static;
     const OP_CODE: u8;
@@ -555,8 +551,7 @@ pub trait Operation: operation_sealed::Sealed + Send + Sync + 'static {
     fn source_parts(source: &Self::OpSource) -> (*const std::ffi::c_void, usize);
 }
 
-pub struct LookupAccounts;
-impl operation_sealed::Sealed for LookupAccounts {}
+pub(crate) struct LookupAccounts;
 impl Operation for LookupAccounts {
     type OpSource = Vec<u128>;
     type OutputItem = Account;
@@ -568,8 +563,7 @@ impl Operation for LookupAccounts {
     }
 }
 
-pub struct LookupTransfers;
-impl operation_sealed::Sealed for LookupTransfers {}
+pub(crate) struct LookupTransfers;
 impl Operation for LookupTransfers {
     type OpSource = Vec<u128>;
     type OutputItem = Transfer;
@@ -581,8 +575,7 @@ impl Operation for LookupTransfers {
     }
 }
 
-pub struct GetAccountTransfers;
-impl operation_sealed::Sealed for GetAccountTransfers {}
+pub(crate) struct GetAccountTransfers;
 impl Operation for GetAccountTransfers {
     type OpSource = AccountFilter;
     type OutputItem = Transfer;
@@ -594,8 +587,7 @@ impl Operation for GetAccountTransfers {
     }
 }
 
-pub struct GetAccountBalances;
-impl operation_sealed::Sealed for GetAccountBalances {}
+pub(crate) struct GetAccountBalances;
 impl Operation for GetAccountBalances {
     type OpSource = AccountFilter;
     type OutputItem = AccountBalance;
@@ -607,8 +599,7 @@ impl Operation for GetAccountBalances {
     }
 }
 
-pub struct QueryAccounts;
-impl operation_sealed::Sealed for QueryAccounts {}
+pub(crate) struct QueryAccounts;
 impl Operation for QueryAccounts {
     type OpSource = QueryFilter;
     type OutputItem = Account;
@@ -620,8 +611,7 @@ impl Operation for QueryAccounts {
     }
 }
 
-pub struct QueryTransfers;
-impl operation_sealed::Sealed for QueryTransfers {}
+pub(crate) struct QueryTransfers;
 impl Operation for QueryTransfers {
     type OpSource = QueryFilter;
     type OutputItem = Transfer;
@@ -633,8 +623,7 @@ impl Operation for QueryTransfers {
     }
 }
 
-pub struct CreateAccounts;
-impl operation_sealed::Sealed for CreateAccounts {}
+pub(crate) struct CreateAccounts;
 impl Operation for CreateAccounts {
     type OpSource = Vec<Account>;
     type OutputItem = CreateAccountResult;
@@ -646,8 +635,7 @@ impl Operation for CreateAccounts {
     }
 }
 
-pub struct CreateTransfers;
-impl operation_sealed::Sealed for CreateTransfers {}
+pub(crate) struct CreateTransfers;
 impl Operation for CreateTransfers {
     type OpSource = Vec<Transfer>;
     type OutputItem = CreateTransferResult;

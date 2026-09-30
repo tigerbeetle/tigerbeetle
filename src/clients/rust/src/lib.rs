@@ -983,7 +983,9 @@ impl Client {
     unsafe fn deinit_raw(client: *mut tbc::tb_client_t) -> Result<(), PacketError> {
         // This is a blocking function, so callers should run it off-thread.
         let status = tbc::tb_client_deinit(client);
-        let result = match status {
+        drop(Box::from_raw(client));
+
+        match status {
             tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => Ok(()),
             tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => Err(PacketError::ClientClosed),
             tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
@@ -992,9 +994,7 @@ impl Client {
             _ => {
                 unreachable!("unexpected status from tb_client_deinit: {}", status)
             }
-        };
-        drop(Box::from_raw(client));
-        result
+        }
     }
 }
 
@@ -1006,7 +1006,7 @@ impl Drop for Client {
         struct SendClient(*mut tbc::tb_client_t);
         unsafe impl Send for SendClient {}
 
-        let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
+        let client = std::mem::take(&mut self.client);
         let client = SendClient(client);
 
         std::thread::spawn(move || {

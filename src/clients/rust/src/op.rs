@@ -54,7 +54,7 @@ where
 }
 
 impl Client {
-    pub(super) fn execute<Operation>(
+    pub(crate) fn execute<Operation>(
         &self,
         completion: Completion,
         source: Operation::OpSource,
@@ -90,7 +90,7 @@ impl Client {
         OpAwaiting::<Operation>(Some(shared), PhantomData)
     }
 
-    pub(super) fn execute_allocating<Operation>(
+    pub(crate) fn execute_allocating<Operation>(
         &self,
         source: Operation::OpSource,
     ) -> impl Future<Output = Result<Vec<Operation::OutputItem>, PacketError>>
@@ -217,7 +217,7 @@ impl Drop for PayloadOwner {
 }
 
 #[repr(C)]
-pub(super) struct OpState {
+pub(crate) struct OpState {
     // Fields drop in declaration order: destroy the payload owner before its backing storage.
     payload: CompletionCell<PayloadOwner, Result<PayloadOwner, PacketError>>,
     storage: UnsafeCell<PayloadBytes>,
@@ -231,7 +231,7 @@ unsafe impl Send for OpState {}
 unsafe impl Sync for OpState {}
 
 impl OpState {
-    pub(super) fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             payload: CompletionCell::reusable(),
             packet: UnsafeCell::new(tbc::tb_packet_t {

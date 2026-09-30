@@ -370,12 +370,8 @@ fn emit_operations(
     assert(Operation == exports.tb_operation);
 
     try writer.print(
-        \\mod operation_sealed {{
-        \\    pub trait Sealed {{}}
-        \\}}
-        \\
         \\#[doc(hidden)]
-        \\pub trait {s}: operation_sealed::Sealed + Send + Sync + 'static {{
+        \\pub(crate) trait {s}: Send + Sync + 'static {{
         \\    type OpSource: Send + 'static;
         \\    type OutputItem: Copy + Send + 'static;
         \\    const OP_CODE: u8;
@@ -397,9 +393,8 @@ fn emit_operations(
         const op_enum = @field(Operation, field.name);
         const op_name = stdx.to_case(field.name, .PascalCase);
 
-        try writer.print("pub struct {s};\n", .{op_name});
+        try writer.print("pub(crate) struct {s};\n", .{op_name});
         try writer.print(
-            \\impl operation_sealed::Sealed for {[op_name]s} {{}}
             \\impl {[rust_name]s} for {[op_name]s} {{
             \\    type OpSource = {[source_type]s};
             \\    type OutputItem = {[output_type]s};
