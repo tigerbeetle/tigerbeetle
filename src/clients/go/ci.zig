@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("go.mod"));
 
     const bad_formatting = try shell.exec_stdout("gofmt -l .", .{});
@@ -19,7 +21,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     // `go build`  won't compile the native library automatically, we need to do that ourselves.
     try shell.exec_zig("build clients:go -Drelease", .{});
-    try shell.exec_zig("build -Drelease", .{});
 
     // Although we have compiled the TigerBeetle client library, we still need `cgo` to link it with
     // our resulting Go binary. Strictly speaking, `CC` is controlled by the users of TigerBeetle,
@@ -38,6 +39,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         else => unreachable,
     }
 
+    try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
+
     try shell.exec("go test", .{});
 
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
@@ -46,8 +49,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -70,7 +74,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -84,7 +88,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         .release = options.release,
     });
 
-    try Shell.copy_path(
+    try shell.copy_path(
         shell.cwd,
         "src/clients/go/samples/basic/main.go",
         shell.cwd,

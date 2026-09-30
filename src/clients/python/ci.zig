@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
@@ -8,8 +7,10 @@ const Shell = stdx.Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 const wheel = @import("wheel.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
-    assert(shell.file_exists("pyproject.toml"));
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
+    var time: stdx.TimeOS = .{};
 
     // Integration tests.
 
@@ -17,7 +18,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec_zig("build clients:python -Drelease", .{});
 
     // Only to test the build process - the samples below run directly from the src/ directory.
-    try wheel.make(shell, "0.0.1", stdx.InstantUnix.now(), "tigerbeetle-0.0.1-py3-none-any.whl");
+    try wheel.make(shell, "0.0.1", time.realtime(), "tigerbeetle-0.0.1-py3-none-any.whl");
 
     const path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
         "src",
@@ -28,27 +29,24 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         "src",
     });
 
-    const python_path = try shell.project_root.realpathAlloc(
-        shell.arena.allocator(),
+    const python_path = try shell.project_root.realPathFileAlloc(
+        shell.io,
         python_path_relative,
+        shell.arena.allocator(),
     );
 
     try shell.env.put("PYTHONPATH", python_path);
 
     {
         log.info("running pytest", .{});
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
-        const tigerbeetle_exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
-        const tigerbeetle_path = try shell.project_root.realpathAlloc(
-            shell.arena.allocator(),
-            tigerbeetle_exe,
-        );
-        try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
+        try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("python3 -m pytest tests/", .{});
@@ -60,8 +58,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -71,7 +70,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 
     // We are checking type annotations of the entire package.
-    try shell.exec("python3 -m mypy . --strict", .{});
+    try shell.exec("python3 -m mypy . --strict --exclude samples/ --exclude tests/", .{});
 }
 
 pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: struct {
@@ -107,9 +106,10 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
         .{ .response_body_size_max = wheel_size_max },
     );
     const wheel_local = try shell.cwd.readFileAlloc(
-        gpa,
+        shell.io,
         try shell.fmt("zig-out/dist/python/{s}", .{wheel_filename}),
-        wheel_size_max,
+        gpa,
+        .limited(wheel_size_max),
     );
     defer gpa.free(wheel_local);
 
@@ -123,7 +123,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     tigerbeetle: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
 
     try shell.exec("python3 -m venv {tmp_dir}", .{ .tmp_dir = tmp_dir });
 
@@ -137,7 +137,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
             log.warn("waiting for 5 minutes for the {s} version to appear in PyPi", .{
                 options.release,
             });
-            std.time.sleep(5 * std.time.ns_per_min);
+            try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
         }
     } else {
         shell.exec("{tmp_dir}/bin/pip install tigerbeetle=={release}", .{
@@ -149,7 +149,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         };
     }
 
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -158,7 +158,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    try Shell.copy_path(
+    try shell.copy_path(
         shell.project_root,
         "src/clients/python/samples/basic/main.py",
         shell.cwd,

@@ -53,27 +53,27 @@ account_b = tb.Account(
 
 def test_range_check_u128_cannot_exceed(client):
     account = tb.Account(**{ **asdict(account_a), "id": 9999999999999999999999999999999999999999 })
-
-    try:
-        error = client.create_accounts([account])
-    except tb.IntegerOverflowError:
-        pass
+    with pytest.raises(tb.IntegerOverflowError):
+        client.create_accounts([account])
 
 def test_range_check_u128_cannot_be_negative(client):
     account = tb.Account(**{ **asdict(account_a), "id": -1 })
+    with pytest.raises(tb.IntegerOverflowError):
+        client.create_accounts([account])
 
-    try:
-        error = client.create_accounts([account])
-    except tb.IntegerOverflowError:
-        pass
+def test_range_check_u128_lookup_id_cannot_exceed(client):
+    with pytest.raises(tb.IntegerOverflowError):
+        client.lookup_accounts([2**128])
+
+def test_range_check_u128_lookup_id_cannot_be_negative(client):
+    with pytest.raises(tb.IntegerOverflowError):
+        client.lookup_transfers([-1])
 
 def test_range_check_code_on_account_to_be_u16(client):
-    account = tb.Account(**{ **asdict(account_a), "id": 0, "code": 65535 + 1 })
+    account = tb.Account(**{ **asdict(account_a), "id": tb.id(), "code": 65535 + 1 })
 
-    try:
-        code_error = client.create_accounts([account])
-    except tb.IntegerOverflowError:
-        pass
+    with pytest.raises(tb.IntegerOverflowError):
+        client.create_accounts([account])
 
     accounts = client.lookup_accounts([account.id])
     assert accounts == []
@@ -534,7 +534,7 @@ def test_get_account_transfers(client):
     assert len(transfers_results) == len(transfers_created)
     for result in transfers_results:
         assert result.timestamp > 0
-        assert result.status == tb.CreateAccountStatus.CREATED
+        assert result.status == tb.CreateTransferStatus.CREATED
 
     # Query all transfers for accountC:
     filter = tb.AccountFilter(
@@ -1055,8 +1055,8 @@ def test_query_transfers(client):
     )
     account_results = client.create_accounts([account])
     assert len(account_results) == 1
-    account_results[0].timestamp > 0
-    account_results[0].status == tb.CreateAccountStatus.CREATED
+    assert account_results[0].timestamp > 0
+    assert account_results[0].status == tb.CreateAccountStatus.CREATED
 
     transfers_created = []
     # Create transfers:
@@ -1313,7 +1313,7 @@ def test_query_with_invalid_filter(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=0,
+        limit=BATCH_MAX,
         flags=0xFFFF,
     )
     assert client.query_accounts(filter) == []

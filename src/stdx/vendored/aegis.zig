@@ -28,7 +28,7 @@ const State128L = struct {
         });
         const key_block = AesBlock.fromBytes(&key);
         const nonce_block = AesBlock.fromBytes(&nonce);
-        const blocks = [8]AesBlock{
+        var blocks = [8]AesBlock{
             key_block.xorBlocks(nonce_block),
             c1,
             c2,
@@ -38,19 +38,15 @@ const State128L = struct {
             key_block.xorBlocks(c1),
             key_block.xorBlocks(c2),
         };
-        var state = State128L{ .blocks = blocks };
-        var i: usize = 0;
-        while (i < 10) : (i += 1) {
-            state.update(nonce_block, key_block);
+        inline for (0..10) |_| {
+            update_blocks(&blocks, nonce_block, key_block);
         }
-        return state;
+        return State128L{ .blocks = blocks };
     }
 
-    inline fn update(state: *State128L, d1: AesBlock, d2: AesBlock) void {
-        comptime assert(state.blocks.len == 8);
+    inline fn update_blocks(blocks: *[8]AesBlock, d1: AesBlock, d2: AesBlock) void {
+        comptime assert(blocks.len == 8);
 
-        // Hoist lanes; this keeps the blocks in registers (see #3201).
-        var blocks: [8]AesBlock = state.blocks;
         const tmp = blocks[7];
 
         inline for ([_]usize{ 7, 6, 5, 4, 3, 2, 1 }) |i| {
@@ -60,8 +56,12 @@ const State128L = struct {
         blocks[0] = tmp.encrypt(blocks[0]);
         blocks[0] = blocks[0].xorBlocks(d1);
         blocks[4] = blocks[4].xorBlocks(d2);
+    }
 
-        // Single spill at the end.
+    inline fn update(state: *State128L, d1: AesBlock, d2: AesBlock) void {
+        // Hoist lanes; this keeps the blocks in registers (see #3201).
+        var blocks = state.blocks;
+        update_blocks(&blocks, d1, d2);
         state.blocks = blocks;
     }
 
@@ -69,6 +69,27 @@ const State128L = struct {
         const msg0 = AesBlock.fromBytes(src[0..16]);
         const msg1 = AesBlock.fromBytes(src[16..32]);
         state.update(msg0, msg1);
+    }
+
+    // Absorb as many complete blocks as possible, returning the number of bytes consumed.
+    //
+    // Keeping a copy of the complete state across the loop is important for code generation. If
+    // `absorb()` is called once per block, LLVM commits all eight lanes to memory after every
+    // iteration. Hoisting that commit out of the loop leaves the lanes in SIMD registers and
+    // exposes the eight independent AES rounds in each state transition to the CPU.
+    fn absorb_many(state: *State128L, src: []const u8) usize {
+        var blocks = state.blocks;
+        const end = src.len - src.len % 32;
+        var i: usize = 0;
+        while (i < end) : (i += 32) {
+            const input: *align(1) const [32]u8 = @ptrCast(src.ptr + i);
+            // Same as in `absorb()`.
+            const msg0 = AesBlock.fromBytes(input[0..16]);
+            const msg1 = AesBlock.fromBytes(input[16..32]);
+            update_blocks(&blocks, msg0, msg1);
+        }
+        state.blocks = blocks;
+        return end;
     }
 
     fn enc(state: *State128L, dst: *[32]u8, src: *const [32]u8) void {
@@ -96,15 +117,15 @@ const State128L = struct {
     }
 
     fn mac(state: *State128L, comptime tag_bits: u9, adlen: usize, mlen: usize) [tag_bits / 8]u8 {
-        const blocks = &state.blocks;
+        var blocks = state.blocks;
         var sizes: [16]u8 = undefined;
         mem.writeInt(u64, sizes[0..8], @as(u64, adlen) * 8, .little);
         mem.writeInt(u64, sizes[8..16], @as(u64, mlen) * 8, .little);
         const tmp = AesBlock.fromBytes(&sizes).xorBlocks(blocks[2]);
-        var i: usize = 0;
-        while (i < 7) : (i += 1) {
-            state.update(tmp, tmp);
+        inline for (0..7) |_| {
+            update_blocks(&blocks, tmp, tmp);
         }
+        state.blocks = blocks;
         return switch (tag_bits) {
             128 => blocks[0].xorBlocks(blocks[1]).xorBlocks(blocks[2]).xorBlocks(blocks[3])
                 .xorBlocks(blocks[4]).xorBlocks(blocks[5]).xorBlocks(blocks[6]).toBytes(),
@@ -163,10 +184,7 @@ fn Aegis128LGenericType(comptime tag_bits: u9) type {
             var state = State128L.init(key, npub);
             var src: [32]u8 align(16) = undefined;
             var dst: [32]u8 align(16) = undefined;
-            var i: usize = 0;
-            while (i + 32 <= ad.len) : (i += 32) {
-                state.absorb(ad[i..][0..32]);
-            }
+            var i = state.absorb_many(ad);
             if (ad.len % 32 != 0) {
                 @memset(src[0..], 0);
                 @memcpy(src[0 .. ad.len % 32], ad[i..][0 .. ad.len % 32]);
@@ -206,10 +224,7 @@ fn Aegis128LGenericType(comptime tag_bits: u9) type {
             var state = State128L.init(key, npub);
             var src: [32]u8 align(16) = undefined;
             var dst: [32]u8 align(16) = undefined;
-            var i: usize = 0;
-            while (i + 32 <= ad.len) : (i += 32) {
-                state.absorb(ad[i..][0..32]);
-            }
+            var i = state.absorb_many(ad);
             if (ad.len % 32 != 0) {
                 @memset(src[0..], 0);
                 @memcpy(src[0 .. ad.len % 32], ad[i..][0 .. ad.len % 32]);
@@ -230,9 +245,9 @@ fn Aegis128LGenericType(comptime tag_bits: u9) type {
                 blocks[4] = blocks[4].xorBlocks(AesBlock.fromBytes(dst[16..32]));
             }
             var computed_tag = state.mac(tag_bits, ad.len, m.len);
-            const verify = crypto.utils.timingSafeEql([tag_length]u8, computed_tag, tag);
+            const verify = crypto.timing_safe.eql([tag_length]u8, computed_tag, tag);
             if (!verify) {
-                crypto.utils.secureZero(u8, &computed_tag);
+                crypto.secureZero(u8, &computed_tag);
                 @memset(m, undefined);
                 return error.AuthenticationFailed;
             }
@@ -265,19 +280,18 @@ fn AegisMacType(comptime T: type) type {
         pub fn update(self: *AegisMac, b: []const u8) void {
             self.msg_len += b.len;
 
-            const len_partial = @min(b.len, block_length - self.off);
-            @memcpy(self.buf[self.off..][0..len_partial], b[0..len_partial]);
-            self.off += len_partial;
-            if (self.off < block_length) {
-                return;
+            var i: usize = 0;
+            if (self.off > 0) {
+                const len_partial = @min(b.len, block_length - self.off);
+                @memcpy(self.buf[self.off..][0..len_partial], b[0..len_partial]);
+                self.off += len_partial;
+                i = len_partial;
+                if (self.off < block_length) return;
+                self.state.absorb(&self.buf);
+                self.off = 0;
             }
-            self.state.absorb(&self.buf);
 
-            var i = len_partial;
-            self.off = 0;
-            while (i + block_length <= b.len) : (i += block_length) {
-                self.state.absorb(b[i..][0..block_length]);
-            }
+            i += self.state.absorb_many(b[i..]);
             if (i != b.len) {
                 self.off = b.len - i;
                 @memcpy(self.buf[0..self.off], b[i..]);

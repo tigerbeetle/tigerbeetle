@@ -4,13 +4,15 @@
 //! It should be logically identical though -- the same data (minus the client table), just in
 //! different places.
 const std = @import("std");
+const stdx = @import("stdx");
+
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 const tb = vsr.tigerbeetle;
 
-const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusType(vsr.io.IO);
@@ -145,13 +147,10 @@ pub fn AOFType(comptime IO: type) type {
         /// (except on Windows). This ensures everything (including the dir) is fsync'd
         /// appropriately. Closing dir_fd is the responsibility of the caller, which can be done
         /// immediately after .init() finishes.
-        pub fn init(
-            io: *IO,
-            path: []const u8,
-        ) !AOF {
-            stdx.maybe(std.fs.path.isAbsolute(path));
+        pub fn init(io: *IO, path: []const u8) !AOF {
             assert(std.mem.endsWith(u8, path, ".aof"));
 
+            maybe(std.fs.path.isAbsolute(path));
             return AOF{
                 .io = io,
                 .path = path,
@@ -302,7 +301,7 @@ pub fn AOFType(comptime IO: type) type {
                     try validation_checksums.put(header.parent, {});
                 } else {
                     // (Null due to state sync skipping commits.)
-                    stdx.maybe(validation_checksums.get(header.parent) == null);
+                    maybe(validation_checksums.get(header.parent) == null);
                 }
 
                 try validation_checksums.put(header.checksum, {});
@@ -336,7 +335,7 @@ pub fn AOFType(comptime IO: type) type {
             pub fn init(
                 io: *IO,
                 allocator: std.mem.Allocator,
-                time: vsr.time.Time,
+                time: stdx.Time,
                 cluster: u128,
                 addresses: []stdx.SocketAddress,
             ) !ReplayClient {
@@ -501,10 +500,14 @@ pub fn AOFType(comptime IO: type) type {
             last_checksum: ?u128 = null,
 
             pub fn init(io: *IO, path: []const u8) !Iterator {
-                const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
-                errdefer file.close();
+                const file = try std.Io.Dir.cwd().openFile(
+                    io.io_std,
+                    path,
+                    .{ .mode = .read_only },
+                );
+                errdefer file.close(io.io_std);
 
-                const size = (try file.stat()).size;
+                const size = (try file.stat(io.io_std)).size;
 
                 return Iterator{ .io = io, .file_descriptor = file.handle, .size = size };
             }
@@ -598,7 +601,8 @@ pub fn AOFType(comptime IO: type) type {
             input_paths: []const []const u8,
             output_path: []const u8,
         ) !void {
-            const stdout = std.io.getStdOut().writer();
+            var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
+            const stdout = &stdout_writer.interface;
 
             var aofs: [constants.members_max]Iterator = undefined;
             var aof_count: usize = 0;
@@ -623,8 +627,8 @@ pub fn AOFType(comptime IO: type) type {
             var target = try allocator.create(AOFEntry);
             defer allocator.destroy(target);
 
-            const dir_fd = try IO.open_dir(std.fs.path.dirname(output_path) orelse ".");
-            defer std.posix.close(dir_fd);
+            const dir_fd = try io.open_dir(std.fs.path.dirname(output_path) orelse ".");
+            defer stdx.posix.close(dir_fd);
 
             for (input_paths) |input_path| {
                 aofs[aof_count] = try Iterator.init(io, input_path);
@@ -790,23 +794,29 @@ pub fn AOFType(comptime IO: type) type {
 const testing = std.testing;
 
 test "aof write / read" {
+    const io_testing = std.testing.io;
     const IO = @import("io.zig").IO;
     const AOF = AOFType(IO);
     const AOFIterator = AOF.Iterator;
 
-    const aof_file = "test.aof";
-    std.fs.cwd().deleteFile(aof_file) catch {};
-    defer std.fs.cwd().deleteFile(aof_file) catch {};
-
     const allocator = std.testing.allocator;
 
-    var io = try IO.init(32, 0);
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const tmp_dir_realpath = try tmp_dir.dir.realPathFileAlloc(io_testing, ".", allocator);
+    defer allocator.free(tmp_dir_realpath);
+
+    const aof_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_realpath, "test.aof" });
+    defer allocator.free(aof_file_path);
+
+    var io = try IO.init(io_testing, 32, 0);
     defer io.deinit();
 
-    const dir_fd = try IO.open_dir(".");
-    defer std.posix.close(dir_fd);
+    const dir_fd = try io.open_dir(".");
+    defer stdx.posix.close(dir_fd);
 
-    var aof = try AOF.init(&io, aof_file);
+    var aof = try AOF.init(&io, aof_file_path);
 
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
@@ -844,7 +854,7 @@ test "aof write / read" {
     try aof.write(demo_message);
     aof.close();
 
-    var it = try AOFIterator.init(&io, aof_file);
+    var it = try AOFIterator.init(&io, aof_file_path);
     defer it.close();
 
     const read_entry = (try it.next(target)).?;
@@ -929,23 +939,23 @@ const CLIArgs = union(enum) {
     ;
 };
 
-pub fn main() !void {
-    var gpa_instance: std.heap.GeneralPurposeAllocator(.{}) = .{};
+pub fn main(init: std.process.Init) !void {
+    var gpa_instance: std.heap.DebugAllocator(.{}) = .{};
     const gpa = gpa_instance.allocator();
 
-    var time_os: vsr.time.TimeOS = .{};
-    const time = time_os.time();
+    var time_os: stdx.TimeOS = .{};
+    const time = time_os.interface();
 
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const args = flags.parse(CLIArgs);
+    const args = flags.parse(CLIArgs, init.minimal.args);
 
     const target = try gpa.create(AOFEntry);
     defer gpa.destroy(target);
 
     const IO = @import("io.zig").IO;
-    var io = try IO.init(32, 0);
+    var io = try IO.init(init.io, 32, 0);
     defer io.deinit();
 
     const AOF = AOFType(IO);
@@ -972,12 +982,13 @@ pub fn main() !void {
             var data_checksum: [32]u8 = undefined;
             var blake3 = std.crypto.hash.Blake3.init(.{});
 
-            const stdout = std.io.getStdOut().writer();
+            var stdout_writer = std.Io.File.stdout().writerStreaming(io.io_std, &.{});
+            const stdout = &stdout_writer.interface;
             while (try it.next(target)) |entry| {
                 const header = entry.header();
                 if (!AOFReplayClient.replay_message(header)) continue;
 
-                try stdout.print("{}\n", .{
+                try stdout.print("{f}\n", .{
                     header,
                 });
 

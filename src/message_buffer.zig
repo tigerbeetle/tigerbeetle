@@ -48,6 +48,7 @@ pub const MessageBuffer = struct {
         header_cluster,
         body_checksum,
         misdirected,
+        evicted,
     };
 
     fn invariants(buffer: *MessageBuffer) void {
@@ -137,11 +138,11 @@ pub const MessageBuffer = struct {
         comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
             @FieldType(Header, "command") == vsr.Command);
         const command_raw: u8 = header_bytes[@offsetOf(Header, "command")];
-        _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
+        _ = std.enums.fromInt(vsr.Command, command_raw) orelse {
             vsr.fatal(
                 .unknown_vsr_command,
                 "unknown VSR command, crashing for safety " ++
-                    "(command={d} protocol={d} replica={d} release={})",
+                    "(command={d} protocol={d} replica={d} release={f})",
                 .{
                     command_raw,
                     header.protocol,

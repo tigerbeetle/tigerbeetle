@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("package.json"));
 
     try shell.exec_zig("build clients:node -Drelease", .{});
@@ -19,8 +21,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     for ([_][]const u8{ "test", "benchmark" }) |tester| {
         log.info("testing {s}s", .{tester});
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -35,8 +38,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -50,11 +54,15 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     if (builtin.target.os.tag == .linux) {
         try shell.exec("npm pack --quiet", .{});
 
-        for ([_][]const u8{ "node:18", "node:18-alpine" }) |image| {
+        const image_tags = .{
+            // Not entirely clear if docker dependency is in scope for our CI...
+            "node:18", "node:18-alpine",
+        };
+        inline for (image_tags) |image| {
             log.info("testing docker image: '{s}'", .{image});
 
             try shell.exec(
-                \\docker run
+                \\podman run
                 \\--security-opt seccomp=unconfined
                 \\--volume ./:/host
                 \\{image}
@@ -77,7 +85,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     release: []const u8,
 }) !void {
     const tmp_dir = try shell.create_tmp_dir();
-    defer shell.cwd.deleteTree(tmp_dir) catch {};
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
 
     const published_url = try shell.fmt(
         "https://registry.npmjs.org/tigerbeetle-node/-/tigerbeetle-node-{s}.tgz",
@@ -85,7 +93,7 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     );
     const published_tgz = try shell.fmt("{s}/published.tgz", .{tmp_dir});
     const published_dir = try shell.fmt("{s}/published", .{tmp_dir});
-    try shell.cwd.makePath(published_dir);
+    try shell.cwd.createDirPath(shell.io, published_dir);
 
     log.info("validating node package {s}", .{published_url});
 
@@ -93,17 +101,14 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     const attempts_max = 5;
     for (0..attempts_max) |attempt_index| {
         // TODO(zig): use `shell.http_get` when there's no TLS error.
-        const result = try shell.exec_raw(
+        const status = try shell.exec_status(
             "wget --quiet --output-document={out} {url}",
             .{
                 .out = published_tgz,
                 .url = published_url,
             },
         );
-        switch (result.term) {
-            .Exited => |code| if (code == 0) break,
-            else => {},
-        }
+        if (status == 0) break;
 
         const attempt = attempt_index + 1;
         log.warn("node package download failed. Attempt={}", .{attempt});
@@ -111,19 +116,20 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
             return error.DownloadAttemptsExceeded;
         }
         // Wait before next attempt.
-        std.Thread.sleep(5 * std.time.ns_per_s);
+        try std.Io.sleep(shell.io, .fromSeconds(5), .awake);
     }
 
     const local_path_relative = try shell.fmt(
         "zig-out/dist/node/tigerbeetle-node-{s}.tgz",
         .{options.release},
     );
-    const local_tgz = try shell.cwd.realpathAlloc(
-        shell.arena.allocator(),
+    const local_tgz = try shell.cwd.realPathFileAlloc(
+        shell.io,
         local_path_relative,
+        shell.arena.allocator(),
     );
     const local_dir = try shell.fmt("{s}/local", .{tmp_dir});
-    try shell.cwd.makePath(local_dir);
+    try shell.cwd.createDirPath(shell.io, local_dir);
 
     // npm repacks the tarball on publish with a different compression, so we extract and diff.
     try shell.exec(
@@ -147,7 +153,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -160,7 +166,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         .release = options.release,
     });
 
-    try Shell.copy_path(
+    try shell.copy_path(
         shell.cwd,
         "src/clients/node/samples/basic/main.js",
         shell.cwd,
@@ -178,7 +184,12 @@ fn validate_npm_metadata(
     gpa: std.mem.Allocator,
     package_json_path: []const u8,
 ) !void {
-    const package_json = try shell.cwd.readFileAlloc(gpa, package_json_path, 4 * 1024);
+    const package_json = try shell.cwd.readFileAlloc(
+        shell.io,
+        package_json_path,
+        gpa,
+        .limited(4 * 1024),
+    );
     defer gpa.free(package_json);
 
     const parsed = try std.json.parseFromSlice(

@@ -17,18 +17,17 @@
 //! - It could be convenient to export types themselves, in addition to constructors, but we avoid
 //!   introducing two ways to import something.
 const std = @import("std");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const assert = std.debug.assert;
 
-const Time = @import("../time.zig").Time;
-const OffsetType = @import("./time.zig").OffsetType;
+const Time = stdx.Time;
+const TimeSim = stdx.TimeSim;
 const Tracer = @import("../trace.zig").Tracer;
 const Storage = @import("./storage.zig").Storage;
 const SuperBlock = vsr.SuperBlockType(Storage);
 const Grid = vsr.GridType(Storage);
-
-const TimeSim = @import("./time.zig").TimeSim;
 
 pub const cluster: u128 = 0;
 pub const replica: u8 = 0;
@@ -36,7 +35,7 @@ pub const replica_count: u8 = 6;
 
 pub fn init_time(options: struct {
     resolution: u64 = constants.tick_ms * std.time.ns_per_ms,
-    offset_type: OffsetType = .linear,
+    offset_type: TimeSim.OffsetType = .linear,
     offset_coefficient_A: i64 = 0,
     offset_coefficient_B: i64 = 0,
     offset_coefficient_C: u32 = 0,
@@ -52,7 +51,7 @@ pub fn init_time(options: struct {
 }
 
 pub fn init_tracer(gpa: std.mem.Allocator, init: Time, options: struct {
-    writer: ?std.io.AnyWriter = null,
+    writer: ?*std.Io.Writer = null,
     process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = cluster, .replica = replica } },
 }) !Tracer {
     return Tracer.init(gpa, init, options.process_id, .{ .writer = options.writer });

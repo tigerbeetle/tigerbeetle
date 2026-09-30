@@ -11,10 +11,6 @@ pub const tb_packet_status = tb.PacketStatus;
 pub const tb_client_t = extern struct {
     @"opaque": [4]u64,
 
-    pub inline fn cast(self: *tb_client_t) *tb.ClientInterface {
-        return @ptrCast(self);
-    }
-
     comptime {
         assert(@sizeOf(tb_client_t) == @sizeOf(tb.ClientInterface));
         assert(@bitSizeOf(tb_client_t) == @bitSizeOf(tb.ClientInterface));
@@ -33,8 +29,11 @@ pub const tb_init_status = enum(c_int) {
 };
 
 pub const tb_client_status = enum(c_int) {
-    ok = 0,
-    invalid,
+    success = 0,
+    /// The client was closed.
+    closed,
+    /// Client interface not initialized.
+    not_initialized,
 };
 
 pub const tb_register_log_callback_status = enum(c_int) {
@@ -108,38 +107,9 @@ pub fn init(
         break :blk cluster_id;
     };
 
-    tb.init(
+    tb.Context.init(
         std.heap.c_allocator,
-        tb_client_out.cast(),
-        cluster_id,
-        addresses,
-        completion_ctx,
-        completion_callback,
-    ) catch |err| return init_error_to_status(err);
-    return .success;
-}
-
-pub fn init_echo(
-    tb_client_out: *tb_client_t,
-    cluster_id_ptr: *const [16]u8,
-    addresses_ptr: [*:0]const u8,
-    addresses_len: u32,
-    completion_ctx: usize,
-    completion_callback: tb_completion_t,
-) callconv(.c) tb_init_status {
-    const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
-
-    // See explanation in init().
-    const cluster_id: u128 = blk: {
-        var cluster_id: u128 = undefined;
-        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&cluster_id), cluster_id_ptr);
-
-        break :blk cluster_id;
-    };
-
-    tb.init_echo(
-        std.heap.c_allocator,
-        tb_client_out.cast(),
+        @ptrCast(tb_client_out),
         cluster_id,
         addresses,
         completion_ctx,
@@ -149,41 +119,45 @@ pub fn init_echo(
 }
 
 pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    client.submit(packet) catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    client.submit(packet) catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn deinit(tb_client: ?*tb_client_t) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    client.deinit() catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    client.deinit() catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn init_parameters(
     tb_client: ?*tb_client_t,
     out_parameters: *tb_init_parameters,
 ) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    client.init_parameters(out_parameters) catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    client.init_parameters(out_parameters) catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn completion_context(
     tb_client: ?*tb_client_t,
     completion_ctx_out: *usize,
 ) callconv(.c) tb_client_status {
-    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
-    completion_ctx_out.* = client.completion_context() catch |err| switch (err) {
-        error.ClientInvalid => return .invalid,
+    const client: *tb.ClientInterface = @ptrCast(tb_client orelse return .not_initialized);
+    completion_ctx_out.* = client.completion_context() catch |err| return switch (err) {
+        tb.ClientError.NotInitialized => .not_initialized,
+        tb.ClientError.Closed => .closed,
     };
-    return .ok;
+    return .success;
 }
 
 pub fn register_log_callback(
@@ -226,14 +200,14 @@ pub const Logging = struct {
     var global: Logging = .{};
 
     callback: ?Callback = null,
-    mutex: std.Thread.Mutex = .{},
+    mutex: stdx.Mutex = .{},
     buffer: [log_line_max]u8 = undefined,
     debug: bool = false,
 
     /// A logger which defers to an application provided handler.
     pub fn application_logger(
         comptime message_level: std.log.Level,
-        comptime scope: @Type(.enum_literal),
+        comptime scope: @EnumLiteral(),
         comptime format: []const u8,
         args: anytype,
     ) void {

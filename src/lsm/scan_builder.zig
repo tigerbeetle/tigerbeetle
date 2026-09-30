@@ -119,7 +119,7 @@ pub fn ScanBuilderType(
             timestamp_range: TimestampRange,
             direction: Direction,
         ) *Scan {
-            const field = comptime std.enums.nameCast(std.meta.FieldEnum(Scan.Dispatcher), index);
+            const field = comptime @field(std.meta.FieldEnum(Scan.Dispatcher), @tagName(index));
             const scan = self.scan_add(field) catch unreachable;
             const scan_impl = &@field(scan.dispatcher, @tagName(field));
             scan_impl.init(
@@ -145,8 +145,8 @@ pub fn ScanBuilderType(
             direction: Direction,
         ) *Scan {
             comptime assert(is_unique_key(TableValueType(index)));
+            const field = comptime @field(std.meta.FieldEnum(Scan.Dispatcher), @tagName(index));
 
-            const field = comptime std.enums.nameCast(std.meta.FieldEnum(Scan.Dispatcher), index);
             const scan = self.scan_add(field) catch unreachable;
             const scan_impl = &@field(scan.dispatcher, @tagName(field));
             scan_impl.init(
@@ -434,7 +434,7 @@ pub fn ScanType(
                 merge_difference: ScanMergeDifferenceType(Storage, Forest, scan_config),
             });
 
-            for (std.enums.values(Indexes)) |index| {
+            for (std.meta.fields(Indexes)) |index| {
                 const Tree = TreeType(index);
                 const ScanTree = ScanTreeType(*Context, Tree, Storage);
                 type_info.@"union".fields = type_info.@"union".fields ++
@@ -446,26 +446,10 @@ pub fn ScanType(
             }
 
             // We need a tagged union for dynamic dispatching.
-            type_info.@"union".tag_type = blk: {
-                const union_fields = type_info.@"union".fields;
-                var tag_fields: [union_fields.len]std.builtin.Type.EnumField =
-                    undefined;
-                for (&tag_fields, union_fields, 0..) |*tag_field, union_field, i| {
-                    tag_field.* = .{
-                        .name = union_field.name,
-                        .value = i,
-                    };
-                }
+            const TagInt = std.math.IntFittingRange(0, names.len - 1);
+            const Tag = @Enum(TagInt, .exhaustive, names, &std.simd.iota(TagInt, names.len));
 
-                break :blk @Type(.{ .@"enum" = .{
-                    .tag_type = std.math.IntFittingRange(0, tag_fields.len - 1),
-                    .fields = &tag_fields,
-                    .decls = &.{},
-                    .is_exhaustive = true,
-                } });
-            };
-
-            break :T @Type(type_info);
+            break :T @Union(.auto, Tag, names, types[0..names.len], &@splat(.{}));
         };
 
         dispatcher: Dispatcher,

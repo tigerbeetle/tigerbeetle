@@ -94,11 +94,10 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn init(
             self: *StateMachine,
             allocator: std.mem.Allocator,
-            time: vsr.time.Time,
+            _: stdx.Time,
             grid: *Grid,
             options: Options,
         ) !void {
-            _ = time;
             self.* = .{
                 .options = options,
                 .forest = undefined,

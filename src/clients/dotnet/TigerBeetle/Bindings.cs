@@ -1178,9 +1178,11 @@ public enum InitializationStatus : uint
 
 internal enum ClientStatus : uint
 {
-    Ok = 0,
+    Success = 0,
 
-    Invalid = 1,
+    Closed = 1,
+
+    NotInitialized = 2,
 
 }
 
@@ -1196,7 +1198,7 @@ internal enum PacketStatus : byte
 
     ClientReleaseTooHigh = 4,
 
-    ClientShutdown = 5,
+    ClientClosed = 5,
 
     InvalidOperation = 6,
 
@@ -1333,18 +1335,6 @@ internal static class Native
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern InitializationStatus tb_client_init(
         TBClient* client_out,
-        UInt128Extensions.UnsafeU128* cluster_id,
-        byte* address_ptr,
-        uint address_len,
-        IntPtr completion_ctx,
-        delegate* unmanaged[Cdecl]<IntPtr,
-                                   TBPacket*, ulong,
-                                   byte*, uint, void> completion_callback
-    );
-
-    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern InitializationStatus tb_client_init_echo(
-        TBClient* out_client,
         UInt128Extensions.UnsafeU128* cluster_id,
         byte* address_ptr,
         uint address_len,

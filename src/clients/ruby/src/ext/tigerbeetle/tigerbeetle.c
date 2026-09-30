@@ -182,7 +182,7 @@ static VALUE rb_tb_client_initialize(
     TypedData_Get_Struct(self, tb_client_t, &rb_tb_client_type, client);
 
     uint8_t cluster_id_bytes[16] = {0};
-    rb_tb_pack_u128(cluster_id_rb, cluster_id_bytes);
+    rb_tb_pack_u128(cluster_id_rb, cluster_id_bytes, "cluster_id");
 
     const char *addr = StringValueCStr(addresses_rb);
     uint32_t addr_len = (uint32_t)RSTRING_LEN(addresses_rb);
@@ -277,14 +277,22 @@ static VALUE rb_tb_client_submit(VALUE self, VALUE operation_rb, VALUE items_rb)
     req->packet.operation = (uint8_t)operation;
     req->packet.user_data = req;
 
-    TB_CLIENT_STATUS cs = tb_client_submit(client, &req->packet);
-    if (cs == TB_CLIENT_INVALID) {
-        free(req->send_buf);
-        free(req);
-        rb_raise(rb_eClientClosedError, "client is closed");
+    TB_CLIENT_STATUS status = tb_client_submit(client, &req->packet);
+    switch(status) {
+        case TB_CLIENT_SUCCESS:
+            return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
+        case TB_CLIENT_CLOSED:
+            free(req->send_buf);
+            free(req);
+            rb_raise(rb_eClientClosedError, "client is closed");
+            break;
+        case TB_CLIENT_NOT_INITIALIZED:
+        default:
+            tb_assert(false);
+            break;
     }
 
-    return TypedData_Wrap_Struct(rb_cRequest, &rb_tb_request_type, req);
+    return Qnil;
 }
 
 static VALUE rb_tb_request_id(VALUE self) {
@@ -295,7 +303,7 @@ static VALUE rb_tb_request_id(VALUE self) {
 
 static void rb_tb_init_native_client(VALUE mTigerBeetle) {
     rb_define_const(mTigerBeetle, "PACKET_OK", RB_INT2NUM(TB_PACKET_OK));
-    rb_define_const(mTigerBeetle, "PACKET_CLIENT_SHUTDOWN", RB_INT2NUM(TB_PACKET_CLIENT_SHUTDOWN));
+    rb_define_const(mTigerBeetle, "PACKET_CLIENT_CLOSED", RB_INT2NUM(TB_PACKET_CLIENT_CLOSED));
 
     VALUE cNativeClient = rb_define_class_under(mTigerBeetle, "NativeClient", rb_cObject);
     rb_define_alloc_func(cNativeClient, rb_tb_client_alloc);

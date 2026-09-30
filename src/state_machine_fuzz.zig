@@ -14,7 +14,7 @@ const StateMachineType = @import("./state_machine.zig").StateMachineType;
 const MultiBatchDecoder = @import("./vsr/multi_batch.zig").MultiBatchDecoder;
 const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
 
-const TimeSim = @import("testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("testing/storage.zig").Storage;
 const Tracer = Storage.Tracer;
 const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
@@ -40,7 +40,7 @@ const TestContext = struct {
 
         ctx.time_sim = fixtures.init_time(.{});
 
-        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.time(), .{});
+        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.interface(), .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{
@@ -59,7 +59,7 @@ const TestContext = struct {
         assert(batch_size_limit <= constants.message_body_size_max);
         try ctx.state_machine.init(
             allocator,
-            ctx.time_sim.time(),
+            ctx.time_sim.interface(),
             &ctx.grid,
             .{
                 .batch_size_limit = batch_size_limit,
@@ -169,14 +169,14 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     const request_buffer = try allocator.alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         vsr.constants.message_body_size_max,
     );
     defer allocator.free(request_buffer);
 
     const reply_buffer = try allocator.alignedAlloc(
         u8,
-        constants.cache_line_size,
+        .fromByteUnits(constants.cache_line_size),
         vsr.constants.message_body_size_max,
     );
     defer allocator.free(reply_buffer);
@@ -402,10 +402,7 @@ test "int_edge_biased" {
         }
 
         inline for (1..129) |bits| {
-            const IntType = @Type(.{ .int = .{
-                .signedness = .unsigned,
-                .bits = bits,
-            } });
+            const IntType = @Int(.unsigned, bits);
             const max = std.math.maxInt(IntType);
             if (int == max) {
                 found_max_int[bits] = true;

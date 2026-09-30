@@ -77,7 +77,7 @@ pub fn CacheMapType(
             /// and must be removed on rollback.
             remove: Key,
         };
-        const RollbackLog = std.ArrayListUnmanaged(RollbackLogAction);
+        const RollbackLog = std.ArrayList(RollbackLogAction);
 
         // The hierarchy for lookups is cache (if present) -> stash -> immutable table -> lsm.
         // Lower levels _may_ have stale values, provided the correct value exists

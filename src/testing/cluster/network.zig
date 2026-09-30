@@ -44,9 +44,9 @@ pub const Network = struct {
     options: NetworkOptions,
     packet_simulator: PacketSimulator,
 
-    buses: std.ArrayListUnmanaged(*MessageBus),
-    buses_enabled: std.ArrayListUnmanaged(bool),
-    processes: std.ArrayListUnmanaged(u128),
+    buses: std.ArrayList(*MessageBus),
+    buses_enabled: std.ArrayList(bool),
+    processes: std.ArrayList(u128),
     /// A pool of messages that are in the network (sent, but not yet delivered).
     message_pool: MessagePool,
     message_summary: MessageSummary,
@@ -57,13 +57,13 @@ pub const Network = struct {
     ) !Network {
         const process_count = options.client_count + options.node_count;
 
-        var buses = try std.ArrayListUnmanaged(*MessageBus).initCapacity(allocator, process_count);
+        var buses = try std.ArrayList(*MessageBus).initCapacity(allocator, process_count);
         errdefer buses.deinit(allocator);
 
-        var buses_enabled = try std.ArrayListUnmanaged(bool).initCapacity(allocator, process_count);
+        var buses_enabled = try std.ArrayList(bool).initCapacity(allocator, process_count);
         errdefer buses_enabled.deinit(allocator);
 
-        var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
+        var processes = try std.ArrayList(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
 
         var packet_simulator = try PacketSimulator.init(allocator, options, .{
@@ -341,7 +341,9 @@ pub const Network = struct {
         target_bus.buffer.?.recv_advance(message.header.size);
         target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
         assert(target_bus.buffer != null);
-        assert(target_bus.buffer.?.invalid == null);
+        assert(target_bus.buffer.?.invalid == null or
+            (target_bus.process == .client and target_bus.buffer.?.invalid == .evicted));
+
         maybe(target_bus.buffer.?.receive_size > 0);
         maybe(target_bus.buffer.?.process_size > 0);
         if (target_bus.buffer.?.has_message()) {
@@ -371,15 +373,7 @@ pub const MessageSummary = struct {
         entry.size += header.size;
     }
 
-    pub fn format(
-        summary: MessageSummary,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
+    pub fn format(summary: MessageSummary, writer: *std.Io.Writer) !void {
         const slice = comptime std.enums.values(vsr.Command);
         var commands = slice[0..slice.len].*;
         std.mem.sort(vsr.Command, &commands, summary.map, greater_than);
@@ -392,17 +386,17 @@ pub const MessageSummary = struct {
             total_count += message_summary.count;
             total_size += message_summary.size;
             if (message_summary.count > 0) {
-                try writer.print("{s:<24} {d:>7} {:>10.2}\n", .{
+                try writer.print("{s:<24} {d:>7} {Bi:>10.2}\n", .{
                     @tagName(command),
                     message_summary.count,
-                    std.fmt.fmtIntSizeBin(message_summary.size),
+                    message_summary.size,
                 });
             }
         }
-        try writer.print("{s:<24} {d:>7} {:>10.2}\n", .{
+        try writer.print("{s:<24} {d:>7} {Bi:>10.2}\n", .{
             "total",
             total_count,
-            std.fmt.fmtIntSizeBin(total_size),
+            total_size,
         });
     }
 

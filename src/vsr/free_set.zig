@@ -985,12 +985,12 @@ test "FreeSet checkpoint" {
 
     const set_encoded_blocks_acquired = try gpa.alignedAlloc(
         u8,
-        @alignOf(FreeSet.Word),
+        .fromByteUnits(@alignOf(FreeSet.Word)),
         set.encode_size_max(),
     );
     const set_encoded_blocks_released = try gpa.alignedAlloc(
         u8,
-        @alignOf(FreeSet.Word),
+        .fromByteUnits(@alignOf(FreeSet.Word)),
         set.encode_size_max(),
     );
 
@@ -1048,16 +1048,16 @@ test "FreeSet encode, decode, encode" {
     });
 
     // Random.
-    const seed = std.crypto.random.int(u64);
+    const seed = std.testing.random_seed;
     var prng = stdx.PRNG.from_seed(seed);
 
     const fills = [_]TestPatternFill{ .uniform_ones, .uniform_zeros, .literal };
     for (0..10) |_| {
-        var patterns = std.ArrayList(TestPattern).init(gpa);
-        defer patterns.deinit();
+        var patterns: std.ArrayList(TestPattern) = .empty;
+        defer patterns.deinit(gpa);
 
         for (0..shard_bits) |_| {
-            try patterns.append(.{
+            try patterns.append(gpa, .{
                 .fill = fills[prng.index(fills)],
                 .words = 1,
             });
@@ -1075,7 +1075,7 @@ const TestPatternFill = enum { uniform_ones, uniform_zeros, literal };
 
 fn test_encode(patterns: []const TestPattern) !void {
     const gpa = std.testing.allocator;
-    const seed = std.crypto.random.int(u64);
+    const seed = std.testing.random_seed;
     var prng = stdx.PRNG.from_seed(seed);
 
     var blocks_count: usize = 0;
@@ -1111,7 +1111,7 @@ fn test_encode(patterns: []const TestPattern) !void {
 
     var encoded = try gpa.alignedAlloc(
         u8,
-        @alignOf(FreeSet.Word),
+        .fromByteUnits(@alignOf(FreeSet.Word)),
         decoded_expect.encode_size_max(),
     );
     defer gpa.free(encoded);
@@ -1169,7 +1169,7 @@ test "FreeSet decode small bitset into large bitset" {
 
     var small_buffer = try gpa.alignedAlloc(
         u8,
-        @alignOf(usize),
+        .fromByteUnits(@alignOf(usize)),
         small_set.encode_size_max(),
     );
     defer gpa.free(small_buffer);
@@ -1231,7 +1231,7 @@ test "FreeSet encode/decode manual" {
     // Test encode.
     const encoded_actual = try gpa.alignedAlloc(
         u8,
-        @alignOf(usize),
+        .fromByteUnits(@alignOf(usize)),
         decoded_actual.encode_size_max(),
     );
     defer gpa.free(encoded_actual);
@@ -1362,7 +1362,7 @@ test "FreeSet decode big bitset into small bitset" {
 
     var big_buffer = try gpa.alignedAlloc(
         u8,
-        @alignOf(usize),
+        .fromByteUnits(@alignOf(usize)),
         big_set.encode_size_max(),
     );
     defer gpa.free(big_buffer);

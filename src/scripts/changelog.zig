@@ -16,10 +16,12 @@ const changelog_bytes_max = 10 * MiB;
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;
 
-    const date_time = stdx.InstantUnix.now().date_time();
+    var time: stdx.TimeOS = .{};
+
+    const date_time = time.realtime().date_time();
     const today = try shell.fmt(
         "{:0>4}-{:0>2}-{:0>2}",
-        .{ date_time.year, date_time.month, date_time.day },
+        .{ date_time.year, @intFromEnum(date_time.month) + 1, date_time.day },
     );
 
     try shell.exec("git fetch origin --quiet", .{});
@@ -30,24 +32,28 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     , .{});
 
     const changelog_current = try shell.project_root.readFileAlloc(
-        shell.arena.allocator(),
+        shell.io,
         "./CHANGELOG.md",
-        changelog_bytes_max,
+        shell.arena.allocator(),
+        .limited(changelog_bytes_max),
     );
 
-    var changelog_new = std.ArrayList(u8).init(shell.arena.allocator());
-    try format_changelog(changelog_new.writer(), .{
+    var changelog_new: std.Io.Writer.Allocating = .init(shell.arena.allocator());
+    try format_changelog(&changelog_new.writer, .{
         .changelog_current = changelog_current,
         .merges = merges,
         .today = today,
     });
 
-    try shell.project_root.writeFile(.{ .sub_path = "CHANGELOG.md", .data = changelog_new.items });
+    try shell.project_root.writeFile(shell.io, .{
+        .sub_path = "CHANGELOG.md",
+        .data = changelog_new.written(),
+    });
 
     log.info("don't forget to update ./CHANGELOG.md", .{});
 }
 
-fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
+fn format_changelog(buffer: *std.Io.Writer, options: struct {
     changelog_current: []const u8,
     merges: []const u8,
     today: []const u8,
@@ -74,7 +80,7 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
             .minor = release.triple().minor,
             .patch = release.triple().patch + 1,
         });
-        try buffer.print("## TigerBeetle {}\n\n", .{release_next});
+        try buffer.print("## TigerBeetle {f}\n\n", .{release_next});
     } else {
         try buffer.print("## TigerBeetle (unreleased)\n\n", .{});
     }
@@ -286,16 +292,17 @@ test ChangelogIterator {
         .patch = 2,
     });
 
-    try std.testing.expectEqual(it.next_changelog(), null);
+    try std.testing.expect(it.next_changelog() == null);
 }
 
 test "current changelog" {
     const allocator = std.testing.allocator;
 
-    const changelog_text = try std.fs.cwd().readFileAlloc(
-        allocator,
+    const changelog_text = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
         "./CHANGELOG.md",
-        changelog_bytes_max,
+        allocator,
+        .limited(changelog_bytes_max),
     );
     defer allocator.free(changelog_text);
 

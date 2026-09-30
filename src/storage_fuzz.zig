@@ -23,8 +23,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const storage_size = sector_count * sector_size;
     const iterations = args.events_max orelse 10_000;
 
-    var time_os: vsr.time.TimeOS = .{};
-    const time = time_os.time();
+    var time_os: stdx.TimeOS = .{};
+    const time = time_os.interface();
 
     var prng = stdx.PRNG.from_seed(args.seed);
     for (0..iterations) |_| {

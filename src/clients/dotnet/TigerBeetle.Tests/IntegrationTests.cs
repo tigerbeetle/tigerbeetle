@@ -2339,12 +2339,6 @@ public class IntegrationTests
 
 internal class TBServer : IDisposable
 {
-    // Path relative from /TigerBeetle.Test/bin/<framework>/<release>/<platform> :
-    private const string PROJECT_ROOT = "../../../../..";
-    private const string TB_PATH = PROJECT_ROOT + "/../../../zig-out/bin";
-    private const string TB_EXE = "tigerbeetle";
-    private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
-
     private readonly Process process;
     private readonly string dataFile;
 
@@ -2353,10 +2347,15 @@ internal class TBServer : IDisposable
     public TBServer()
     {
         dataFile = Path.GetRandomFileName();
+        var tigerbeetleBinary = Environment.GetEnvironmentVariable("TIGERBEETLE_BINARY");
+        if (tigerbeetleBinary == null)
+        {
+            throw new InvalidOperationException("TIGERBEETLE_BINARY environmental variable is required");
+        }
 
         {
             using var format = new Process();
-            format.StartInfo.FileName = TB_SERVER;
+            format.StartInfo.FileName = tigerbeetleBinary;
             format.StartInfo.Arguments = $"format --cluster=0 --replica=0 --replica-count=1 --development ./{dataFile}";
             format.StartInfo.RedirectStandardError = true;
             format.Start();
@@ -2366,7 +2365,7 @@ internal class TBServer : IDisposable
         }
 
         process = new Process();
-        process.StartInfo.FileName = TB_SERVER;
+        process.StartInfo.FileName = tigerbeetleBinary;
         process.StartInfo.Arguments = $"start --addresses=0 --development ./{dataFile}";
         process.StartInfo.RedirectStandardInput = true;
         process.StartInfo.RedirectStandardOutput = true;

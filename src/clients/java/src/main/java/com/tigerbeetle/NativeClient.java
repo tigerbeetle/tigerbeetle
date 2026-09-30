@@ -51,13 +51,6 @@ final class NativeClient implements AutoCloseable {
         return new NativeClient(tb_client);
     }
 
-    public static NativeClient initEcho(final byte[] clusterID, final String addresses) {
-        assertArgs(clusterID, addresses);
-        final var tb_client = ByteBuffer.allocateDirect(TBClient.SIZE + TBClient.ALIGNMENT);
-        clientInitEcho(tb_client, clusterID, addresses);
-        return new NativeClient(tb_client);
-    }
-
     private static void assertArgs(final byte[] clusterID, final String addresses) {
         assertTrue(clusterID.length == 16, "ClusterID must be a UInt128");
         assertTrue(addresses != null, "Replica addresses cannot be null");
@@ -94,9 +87,6 @@ final class NativeClient implements AutoCloseable {
 
     private static native void clientInit(ByteBuffer tb_client, byte[] clusterID, String addresses)
             throws InitializationException;
-
-    private static native void clientInitEcho(ByteBuffer tb_client, byte[] clusterID,
-            String addresses) throws InitializationException;
 
     private static native void clientDeinit(ByteBuffer tb_client);
 }

@@ -300,7 +300,8 @@ pub fn GrooveType(
         comptime maybe(optional);
     }
 
-    comptime var index_fields: []const std.builtin.Type.StructField = &.{};
+    comptime var index_names: []const []const u8 = &.{};
+    comptime var index_types: []const type = &.{};
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -325,15 +326,8 @@ pub fn GrooveType(
         else
             IndexTreeType(Storage, field.type, table_value_count_max);
 
-        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = field.name,
-                .type = IndexTree,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(IndexTree),
-            },
-        };
+        index_names = index_names ++ .{field.name};
+        index_types = index_types ++ .{IndexTree};
     }
 
     // Generate IndexTrees for fields derived from the Value in groove_options.
@@ -377,27 +371,13 @@ pub fn GrooveType(
             UniqueKeyTreeType(Storage, DerivedType, table_value_count_max)
         else
             IndexTreeType(Storage, DerivedType, table_value_count_max);
-        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = field.name,
-                .type = IndexTree,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(IndexTree),
-            },
-        };
+        index_names = index_names ++ .{field.name};
+        index_types = index_types ++ .{IndexTree};
     }
 
-    comptime var index_options_fields: [index_fields.len]std.builtin.Type.StructField = undefined;
-    for (index_fields, 0..) |index_field, i| {
-        const IndexTree = index_field.type;
-        index_options_fields[i] = .{
-            .name = index_field.name,
-            .type = IndexTree.Options,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(IndexTree.Options),
-        };
+    comptime var index_options_types: [index_names.len]type = undefined;
+    for (index_types, 0..) |IndexTree, i| {
+        index_options_types[i] = IndexTree.Options;
     }
 
     const ObjectTreeHelper = ObjectTreeHelperType(Object);
@@ -418,22 +398,10 @@ pub fn GrooveType(
         break :T TreeType(Table, Storage);
     };
 
-    const _IndexTrees = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = index_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
-    const _IndexTreeOptions = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &index_options_fields,
-            .decls = &.{},
-            .is_tuple = false,
-        },
-    });
+    const _IndexTrees =
+        @Struct(.auto, null, index_names, index_types[0..index_names.len], &@splat(.{}));
+    const _IndexTreeOptions =
+        @Struct(.auto, null, index_names, &index_options_types, &@splat(.{}));
 
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
@@ -1520,7 +1488,7 @@ pub fn GrooveType(
             ) *PrefetchWorker {
                 const lookup: *LookupContext = @fieldParentPtr(@tagName(field), completion);
                 assert(lookup.* ==
-                    comptime std.enums.nameCast(std.meta.Tag(LookupContext), field));
+                    comptime @field(std.meta.Tag(LookupContext), @tagName(field)));
 
                 return @fieldParentPtr("lookup", lookup);
             }
@@ -1595,7 +1563,7 @@ pub fn GrooveType(
                         );
                         tree.lookup_from_levels_storage(.{
                             .callback = callback,
-                            .context = worker.lookup_context(comptime std.enums.nameCast(
+                            .context = worker.lookup_context(comptime @field(
                                 Field,
                                 @tagName(field),
                             )),
@@ -1617,12 +1585,12 @@ pub fn GrooveType(
                         result: ?*const Tree.Value,
                     ) void {
                         const worker: *PrefetchWorker = worker_from_completion(
-                            comptime std.enums.nameCast(Field, @tagName(field)),
+                            comptime @field(Field, @tagName(field)),
                             completion,
                         );
                         assert(worker.current != null);
                         assert(worker.lookup ==
-                            comptime std.enums.nameCast(std.meta.Tag(LookupContext), field));
+                            comptime @field(std.meta.Tag(LookupContext), @tagName(field)));
 
                         worker.lookup = .null;
 

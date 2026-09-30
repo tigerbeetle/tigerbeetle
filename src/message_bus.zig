@@ -15,7 +15,7 @@ const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
 const Tracer = vsr.trace.Tracer;
-const Time = vsr.time.Time;
+const Time = stdx.Time;
 
 pub fn MessageBusType(comptime IO: type) type {
     // Slice points to a subslice of send_queue_buffer.
@@ -905,7 +905,7 @@ pub fn MessageBusType(comptime IO: type) type {
             if (bus.replicas[replica]) |connection| {
                 bus.send_message(connection, message);
             } else {
-                log.debug("{}: send_message_to_replica: no connection to={} header={}", .{
+                log.debug("{}: send_message_to_replica: no connection to={} header={f}", .{
                     bus.id,
                     replica,
                     message.header,

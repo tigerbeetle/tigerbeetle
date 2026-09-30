@@ -24,7 +24,7 @@ const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
-const TimeOS = vsr.time.TimeOS;
+const TimeOS = stdx.TimeOS;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const messages_max = args.events_max orelse 200;
@@ -104,7 +104,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     defer gpa.free(nodes);
 
     var time_os: TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
 
     for (nodes[0..replica_count], 0..) |*node, i| {
         errdefer for (nodes[0..i]) |*n| n.message_bus.deinit(gpa);
@@ -160,9 +160,9 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     // Allocate extra for the pings and ping_clients, which are not counted by messages_max since we
     // don't track their delivery. (Pings/ping_clients are used to identify (or misidentify!) the
     // peer type of nodes).
-    var messages = try std.ArrayListAlignedUnmanaged(
+    var messages = try std.array_list.Aligned(
         [constants.message_size_max]u8,
-        constants.sector_size,
+        .fromByteUnits(constants.sector_size),
     ).initCapacity(gpa, messages_max + node_count);
     defer messages.deinit(gpa);
 
@@ -412,7 +412,7 @@ const IO = struct {
     /// message bus.
     fds_open: u32 = 0,
 
-    const posix = std.posix;
+    const posix = stdx.posix;
     // We can't specify io/linux.zig since it won't compile on windows, which means that we are
     // potentially using different error sets for different OS's, which means that fuzzer seeds are
     // only reproducible on the same OS.
@@ -447,7 +447,7 @@ const IO = struct {
     const SocketServer = struct {
         address: stdx.SocketAddress,
         /// Invariant: completion.operation == .connect
-        backlog: std.ArrayListUnmanaged(*Completion) = .empty,
+        backlog: std.ArrayList(*Completion) = .empty,
     };
 
     const SocketConnection = struct {
@@ -459,7 +459,7 @@ const IO = struct {
 
         closed: bool = false,
         remote: ?socket_t,
-        sending: std.ArrayListUnmanaged(u8) = .empty,
+        sending: std.ArrayList(u8) = .empty,
         sending_offset: u32 = 0,
     };
 
@@ -497,8 +497,8 @@ const IO = struct {
     };
 
     pub fn init(gpa: std.mem.Allocator, options: Options) !IO {
-        var events = EventQueue.init(gpa, {});
-        errdefer events.deinit();
+        var events = EventQueue.initContext({});
+        errdefer events.deinit(gpa);
 
         return .{
             .gpa = gpa,
@@ -518,7 +518,7 @@ const IO = struct {
             connection.sending.deinit(io.gpa);
         }
 
-        io.events.deinit();
+        io.events.deinit(io.gpa);
         io.connections.deinit(io.gpa);
         io.servers.deinit(io.gpa);
     }
@@ -531,7 +531,7 @@ const IO = struct {
     fn step(io: *IO) !bool {
         const event_peek = io.events.peek() orelse return false;
         if (event_peek.ready_at.ns <= io.tick_instant().ns) {
-            const event = io.events.remove();
+            const event = io.events.pop().?;
             switch (try io.complete(event.completion)) {
                 .retry => io.enqueue(event.completion),
                 .done => {},
@@ -925,7 +925,7 @@ const IO = struct {
 
         const jitter_mean = 1_000;
         const jitter = fuzz.random_int_exponential(&io.prng, u64, jitter_mean);
-        io.events.add(.{
+        io.events.push(io.gpa, .{
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = (nanoseconds -| jitter_mean) + jitter }),
         }) catch @panic("OOM");
@@ -947,7 +947,7 @@ const IO = struct {
             .callback = .{ .next_tick = callback },
             .operation = .next_tick,
         };
-        io.events.add(.{
+        io.events.push(io.gpa, .{
             .completion = completion,
             .ready_at = io.tick_instant(),
         }) catch @panic("OOM");
@@ -960,7 +960,7 @@ const IO = struct {
     fn enqueue(io: *IO, completion: *Completion) void {
         const tick_ns = constants.tick_ms * std.time.ns_per_ms;
         const delay_ns = fuzz.random_int_exponential(&io.prng, u64, 10 * tick_ns);
-        io.events.add(.{
+        io.events.push(io.gpa, .{
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = delay_ns }),
         }) catch @panic("OOM");

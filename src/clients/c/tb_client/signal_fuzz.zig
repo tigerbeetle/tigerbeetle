@@ -20,6 +20,7 @@ const Context = struct {
 
     main_thread_id: std.Thread.Id,
     signal: Signal,
+    io: std.Io,
     running_count: u32 = 0,
     stop_request: Atomic = Atomic.init(.none),
 };
@@ -29,12 +30,13 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const events_max = args.events_max orelse 100;
 
     for (0..events_max) |_| {
-        var io = try IO.init(32, 0);
+        var io = try IO.init(args.io, 32, 0);
         defer io.deinit();
 
         var context: Context = .{
             .main_thread_id = std.Thread.getCurrentId(),
             .signal = undefined,
+            .io = args.io,
         };
 
         try Signal.init(&context.signal, &io, on_signal);
@@ -75,7 +77,7 @@ fn notify(context: *Context) void {
     assert(std.Thread.getCurrentId() != context.main_thread_id);
     while (context.signal.status() != .shutdown_completed) {
         const delay_us = 1; // Shorter than `tick_us`.
-        std.time.sleep(delay_us * std.time.ns_per_us);
+        std.Io.sleep(context.io, .fromMicroseconds(delay_us), .awake) catch {};
 
         if (context.stop_request.load(.monotonic) == .user_thread) {
             // Stop can be called by multiple threads.

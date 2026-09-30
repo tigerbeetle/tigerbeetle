@@ -6,9 +6,9 @@ pub fn TabularOutputType(comptime row_types: []const type) type {
         const TabularOutput = @This();
         pub const Row = ConcatStructsType(row_types);
 
-        writer: std.io.AnyWriter,
+        writer: *std.Io.Writer,
 
-        pub fn init(writer: std.io.AnyWriter, options: struct {
+        pub fn init(writer: *std.Io.Writer, options: struct {
             header: bool = true,
         }) !TabularOutput {
             var output: TabularOutput = .{ .writer = writer };
@@ -82,7 +82,11 @@ fn ConcatStructsType(types: []const type) type {
         fields = fields ++ struct_type.fields;
     }
 
-    return @Type(.{
-        .@"struct" = .{ .layout = .auto, .fields = fields, .decls = &.{}, .is_tuple = false },
-    });
+    var names: [fields.len][]const u8 = undefined;
+    var fields_types: [fields.len]type = undefined;
+    for (fields, &names, &fields_types) |field, *name, *field_type| {
+        name.* = field.name;
+        field_type.* = field.type;
+    }
+    return @Struct(.auto, null, &names, &fields_types, &@splat(.{}));
 }

@@ -17,8 +17,10 @@ pub fn init(b: *std.Build, url_prefix: []const u8, pandoc_bin: LazyPath) Website
         .pandoc_bin = pandoc_bin,
         .page_writer_exe = b.addExecutable(.{
             .name = "page_writer",
-            .root_source_file = b.path("src/page_writer.zig"),
-            .target = b.graph.host,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/page_writer.zig"),
+                .target = b.graph.host,
+            }),
         }),
     };
 }
@@ -27,7 +29,6 @@ pub fn write_page(self: Website, options: struct {
     title: []const u8 = "TigerBeetle",
     author: []const u8 = "TigerBeetle Team",
     page_path: []const u8,
-    include_search: bool = true,
     nav: []const u8,
     content: LazyPath,
 }) LazyPath {
@@ -38,7 +39,6 @@ pub fn write_page(self: Website, options: struct {
         options.author,
         self.url_prefix,
         options.page_path,
-        if (options.include_search) "true" else "false",
         options.nav,
     });
     page_writer_run.addFileArg(options.content);

@@ -83,12 +83,12 @@ pub fn prepare_streams(
     streams_count: usize,
     stream_length: usize,
 ) !struct { KWayMergeContextType(Value), []Value } {
-    var streams = try arena.alignedAlloc(Value, 64, streams_count * stream_length);
+    var streams = try arena.alignedAlloc(Value, .fromByteUnits(64), streams_count * stream_length);
     var context: KWayMergeContextType(Value) = .{
         .streams = undefined,
         .streams_count = @intCast(streams_count),
     };
-    const output = try arena.alignedAlloc(Value, 64, streams_count * stream_length);
+    const output = try arena.alignedAlloc(Value, .fromByteUnits(64), streams_count * stream_length);
 
     for (0..streams_count) |stream_id| {
         const stream_begin = stream_id * stream_length;

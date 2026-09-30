@@ -20,27 +20,29 @@ pub fn build(
 ) !void {
     const arena = b.allocator;
 
-    var search_index = SearchIndex.init(arena);
+    var search_index: SearchIndex = .empty;
 
     var page_buffer: [1 << 16]u8 = undefined;
-    var base = try b.build_root.handle.openDir(base_path, .{});
-    defer base.close();
+    var base = try b.build_root.handle.openDir(b.graph.io, base_path, .{});
+    defer base.close(b.graph.io);
 
-    const root_page = try content.load(arena, base, &page_buffer);
+    const root_page = try content.load(arena, b.graph.io, base, &page_buffer);
 
     try tree_install(b, website, output, &search_index, root_page, root_page);
 
     const run_search_index_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "search_index_writer",
-        .root_source_file = b.path("src/search_index_writer.zig"),
-        .target = b.graph.host,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/search_index_writer.zig"),
+            .target = b.graph.host,
+        }),
     }));
     for (search_index.items) |entry| {
         run_search_index_writer.addArg(entry.page_path);
         run_search_index_writer.addFileArg(entry.html_path);
     }
     _ = output.addCopyFile(
-        run_search_index_writer.captureStdOut(),
+        run_search_index_writer.captureStdOut(.{}),
         "search-index.json",
     );
 
@@ -73,7 +75,7 @@ fn page_install(
 
     const page_path = page_url(b.allocator, page);
 
-    try search_index.append(.{
+    try search_index.append(b.allocator, .{
         .page_path = page_path,
         .html_path = page_html,
     });
@@ -174,6 +176,7 @@ fn run_pandoc(
     source: []const u8,
 ) std.Build.LazyPath {
     const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
+    pandoc_step.setCwd(b.path(".")); // edit-link-footer.lua relies on the cwd.
     pandoc_step.addFileArg(pandoc_bin);
     pandoc_step.addArgs(&.{ "--from", "gfm+smart-tex_math_dollars", "--to", "html5" });
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/markdown-links.lua"));
@@ -183,7 +186,9 @@ fn run_pandoc(
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/edit-link-footer.lua"));
     pandoc_step.addArg("--reference-location=section");
     const result = pandoc_step.addPrefixedOutputFileArg("--output=", "pandoc-out.html");
-    pandoc_step.addFileArg(b.path(base_path).path(b, source));
+    // Resolve `..` (which `b.path` no longer does), as edit-link-footer.lua relies on it.
+    const source_path = b.pathFromRoot(b.pathJoin(&.{ base_path, source }));
+    pandoc_step.addFileArg(.{ .cwd_relative = source_path });
     return result;
 }
 
@@ -196,8 +201,10 @@ fn write_single_page(
 ) !void {
     const run_single_page_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "single_page_writer",
-        .root_source_file = b.path("src/single_page_writer.zig"),
-        .target = b.graph.host,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/single_page_writer.zig"),
+            .target = b.graph.host,
+        }),
     }));
     for (search_index.items) |entry| {
         run_single_page_writer.addArg(entry.page_path);
@@ -205,12 +212,15 @@ fn write_single_page(
     }
     const nav_html = try Html.create(b.allocator);
     try nav_fill(website, nav_html, root, .{ .target = root, .single_page = true });
+    try nav_html.write(
+        @embedFile("html/multi-page-link.html"),
+        .{ .url_prefix = website.url_prefix },
+    );
 
     const single_page = website.write_page(.{
         .page_path = "single-page/",
-        .include_search = false,
         .nav = nav_html.string(),
-        .content = run_single_page_writer.captureStdOut(),
+        .content = run_single_page_writer.captureStdOut(.{}),
     });
 
     _ = docs.addCopyFile(single_page, "single-page/index.html");

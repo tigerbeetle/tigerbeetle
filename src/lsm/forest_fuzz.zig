@@ -12,7 +12,7 @@ const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.lsm_forest_fuzz);
 const tb = @import("../tigerbeetle.zig");
 
-const TimeSim = @import("../testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage);
 const Reservation = @import("../vsr/free_set.zig").Reservation;
@@ -60,7 +60,6 @@ const GrooveTransfers = @FieldType(
     @FieldType(Forest, "grooves"),
     "transfers",
 );
-const ObjectTable = GrooveTransfers.ObjectTree.Table;
 const UniqueKey = GrooveTransfers.UniqueKey;
 
 const ScanParams = struct {
@@ -123,7 +122,7 @@ const Environment = struct {
         env.storage = storage;
 
         env.time_sim = fixtures.init_time(.{});
-        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.interface(), .{});
 
         env.superblock = try fixtures.init_superblock(gpa, env.storage, .{});
 
@@ -363,6 +362,18 @@ const Environment = struct {
         };
     }
 
+    fn check_lookup(
+        env: *Environment,
+        key: UniqueKey,
+        snapshot: u64,
+        expected: ?tb.Transfer,
+    ) !?tb.Transfer {
+        try env.prefetch(key, snapshot);
+        const actual = env.get(key);
+        try std.testing.expectEqualDeep(expected, actual);
+        return actual;
+    }
+
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveTransfers.IndexTrees)) type {
         const Tree = @FieldType(GrooveTransfers.IndexTrees, @tagName(index));
         const Value = Tree.Table.Value;
@@ -470,130 +481,188 @@ const Environment = struct {
         }
     }
 
-    // The forest should behave like a simple key-value data-structure.
+    // The forest should behave like a simple persistent key-value data structure.
+    //
+    // The model maintains two sets of transfers and a log:
+    // 1. transfers_mutable: contains all transfers in their current state.
+    // 2. transfers_stashed: contains transfers as of the latest checkpoint.
+    // 3. log: records updates not yet covered by a checkpoint, since each checkpoint
+    //    persists only a prefix of the log.
+    //
+    // Each transfer set has two indexes: transfers_by_id stores transfers keyed by ID,
+    // and id_by_timestamp maps timestamp UniqueKeys to transfer IDs. On storage reset,
+    // transfers_mutable is restored from transfers_stashed and the log is discarded.
+    //
+    // The goal is to keep the model independent of the LSM / forest implementation.
     const Model = struct {
-        const ObjectsMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
+        const ObjectMap = std.hash_map.AutoHashMap(u128, tb.Transfer);
         const UniqueKeysMap = std.hash_map.AutoHashMap(UniqueKey, u128);
-        const LogEntry = struct { op: u64, transfer: tb.Transfer };
-        const Log = std.fifo.LinearFifo(LogEntry, .Dynamic);
+        const Indexes = struct {
+            transfers_by_id: ObjectMap,
+            id_by_timestamp: UniqueKeysMap,
 
-        // Represents persistent state:
-        checkpointed: struct {
-            objects: ObjectsMap,
-            unique_keys: UniqueKeysMap,
-        },
+            pub fn init(gpa: std.mem.Allocator) Indexes {
+                return .{
+                    .transfers_by_id = ObjectMap.init(gpa),
+                    .id_by_timestamp = UniqueKeysMap.init(gpa),
+                };
+            }
+            pub fn deinit(indexes: *Indexes) void {
+                indexes.transfers_by_id.deinit();
+                indexes.id_by_timestamp.deinit();
+            }
 
-        // Represents in-memory state:
+            pub fn clone(indexes: Indexes) !Indexes {
+                var transfers_by_id = try indexes.transfers_by_id.clone();
+                errdefer transfers_by_id.deinit();
+                return .{
+                    .transfers_by_id = transfers_by_id,
+                    .id_by_timestamp = try indexes.id_by_timestamp.clone(),
+                };
+            }
+
+            pub fn put(indexes: *Indexes, transfer: tb.Transfer) !void {
+                try indexes.id_by_timestamp.put(.{ .timestamp = transfer.timestamp }, transfer.id);
+                try indexes.transfers_by_id.put(transfer.id, transfer);
+            }
+
+            pub fn get(indexes: Indexes, key: UniqueKey) ?tb.Transfer {
+                switch (key) {
+                    .id => |id| return indexes.transfers_by_id.get(id),
+                    .timestamp => {
+                        const transfer_id = indexes.id_by_timestamp.get(key) orelse return null;
+                        return indexes.transfers_by_id.get(transfer_id);
+                    },
+                }
+            }
+
+            pub fn remove(indexes: *Indexes, transfer_id: u128) void {
+                const transfer = indexes.transfers_by_id.fetchRemove(transfer_id).?;
+                assert(indexes.id_by_timestamp.remove(.{ .timestamp = transfer.value.timestamp }));
+            }
+        };
+
+        const Operation = union(enum) { put: tb.Transfer, remove };
+        const LogEntry = struct { op: u64, id: u128, operation: Operation };
+        const Log = std.ArrayList(LogEntry);
+
+        transfers_mutable: Indexes,
+        transfers_stashed: Indexes,
         log: Log,
+
+        gpa: std.mem.Allocator,
 
         pub fn init(gpa: std.mem.Allocator) Model {
             return .{
-                .checkpointed = .{
-                    .objects = ObjectsMap.init(gpa),
-                    .unique_keys = UniqueKeysMap.init(gpa),
-                },
-                .log = Log.init(gpa),
+                .transfers_mutable = Indexes.init(gpa),
+                .transfers_stashed = Indexes.init(gpa),
+                .log = .empty,
+                .gpa = gpa,
             };
         }
 
         pub fn deinit(model: *Model) void {
-            model.checkpointed.objects.deinit();
-            model.checkpointed.unique_keys.deinit();
-            model.log.deinit();
+            model.transfers_mutable.deinit();
+            model.transfers_stashed.deinit();
+            model.log.deinit(model.gpa);
         }
 
         pub fn put(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
-            try model.log.writeItem(.{ .op = op, .transfer = transfer.* });
+            try model.mutate(.{ .op = op, .id = transfer.id, .operation = .{ .put = transfer.* } });
         }
 
-        pub fn remove(model: *Model, transfer: *const tb.Transfer, op: u64) !void {
-            var tombstone_object: tb.Transfer = ObjectTable.tombstone_from_key(transfer.timestamp);
-            tombstone_object.id = transfer.id;
-            tombstone_object.pending_id = transfer.pending_id;
-            try model.log.writeItem(.{
-                .op = op,
-                .transfer = tombstone_object,
-            });
+        pub fn remove(model: *Model, id: u128, op: u64) !void {
+            try model.mutate(.{ .op = op, .id = id, .operation = .remove });
+        }
+
+        fn mutate(model: *Model, entry: LogEntry) !void {
+            const log_count = model.log.items.len;
+            if (log_count > 0) assert(model.log.items[log_count - 1].op <= entry.op);
+
+            try model.log.append(model.gpa, entry);
+            try apply_entry(&model.transfers_mutable, entry);
+        }
+
+        fn apply_entry(indexes: *Indexes, entry: LogEntry) !void {
+            switch (entry.operation) {
+                .put => |transfer| {
+                    assert(transfer.id == entry.id);
+                    try indexes.put(transfer);
+                },
+                .remove => indexes.remove(entry.id),
+            }
         }
 
         pub fn get(model: *const Model, key: UniqueKey) ?tb.Transfer {
-            return switch (model.get_object_from_log(key)) {
-                .found => |object| object,
-                .tombstone => null,
-                .not_found => switch (key) {
-                    .id => model.checkpointed.objects.get(key.id),
-                    else => object: {
-                        const id = model.checkpointed.unique_keys.get(key) orelse
-                            break :object null;
-
-                        break :object model.checkpointed.objects.get(id);
-                    },
-                },
-            };
-        }
-
-        fn get_object_from_log(
-            model: *const Model,
-            key: UniqueKey,
-        ) union(enum) {
-            found: tb.Transfer,
-            not_found,
-            tombstone,
-        } {
-            var latest_op: ?u64 = null;
-            const log_size = model.log.readableLength();
-            var log_left = log_size;
-            while (log_left > 0) : (log_left -= 1) {
-                const entry = model.log.peekItem(log_left - 1); // most recent first
-                if (latest_op == null) {
-                    latest_op = entry.op;
-                }
-
-                assert(latest_op.? >= entry.op);
-
-                if (switch (key) {
-                    .id => |id| entry.transfer.id == id,
-                    .timestamp => |timestamp| ObjectTable.key_from_value(
-                        &entry.transfer,
-                    ) == timestamp,
-                }) {
-                    if (ObjectTable.tombstone(&entry.transfer)) return .tombstone;
-                    return .{ .found = entry.transfer };
-                }
-            }
-            return .not_found;
+            return model.transfers_mutable.get(key);
         }
 
         pub fn checkpoint(model: *Model, op: u64) !void {
             const checkpointable = op - (op % constants.lsm_compaction_ops) -| 1;
-            const log_size = model.log.readableLength();
+
             var log_index: usize = 0;
-            while (log_index < log_size) : (log_index += 1) {
-                const entry = model.log.peekItem(log_index);
+            while (log_index < model.log.items.len) : (log_index += 1) {
+                const entry = model.log.items[log_index];
                 if (entry.op > checkpointable) {
                     break;
                 }
-                if (ObjectTable.tombstone(&entry.transfer)) {
-                    const removed = model.checkpointed.objects.remove(entry.transfer.id);
-                    assert(removed);
-
-                    assert(model.checkpointed.unique_keys.remove(.{
-                        .timestamp = ObjectTable.key_from_value(&entry.transfer),
-                    }));
-                    continue;
-                }
-
-                try model.checkpointed.objects.put(entry.transfer.id, entry.transfer);
-                try model.checkpointed.unique_keys.put(
-                    .{ .timestamp = entry.transfer.timestamp },
-                    entry.transfer.id,
-                );
+                try apply_entry(&model.transfers_stashed, entry);
             }
-            model.log.discard(log_index);
+
+            model.log.replaceRangeAssumeCapacity(0, log_index, &.{});
         }
 
-        pub fn storage_reset(model: *Model) void {
-            model.log.discard(model.log.readableLength());
+        pub fn storage_reset(model: *Model) !void {
+            model.transfers_mutable.deinit();
+            model.transfers_mutable = try model.transfers_stashed.clone();
+            model.log.clearRetainingCapacity();
+        }
+
+        pub fn scan(model: *const Model, params: ScanParams) ![]tb.Transfer {
+            var matches: std.ArrayList(tb.Transfer) = .empty;
+            errdefer matches.deinit(model.gpa);
+
+            var iterator = model.transfers_mutable.transfers_by_id.valueIterator();
+            while (iterator.next()) |transfer| {
+                const key = scan_key(params.index, transfer) orelse continue;
+                if (key >= params.min and key <= params.max) {
+                    try matches.append(model.gpa, transfer.*);
+                }
+            }
+            std.mem.sort(tb.Transfer, matches.items, params, struct {
+                fn less_than(context: ScanParams, a: tb.Transfer, b: tb.Transfer) bool {
+                    const key_a = scan_key(context.index, &a).?;
+                    const key_b = scan_key(context.index, &b).?;
+                    const order = if (key_a == key_b)
+                        std.math.order(a.timestamp, b.timestamp)
+                    else
+                        std.math.order(key_a, key_b);
+                    return order == switch (context.direction) {
+                        .ascending => std.math.Order.lt,
+                        .descending => std.math.Order.gt,
+                    };
+                }
+            }.less_than);
+            return matches.toOwnedSlice(model.gpa);
+        }
+
+        fn scan_key(index: @FieldType(ScanParams, "index"), object: *const tb.Transfer) ?u128 {
+            return switch (index) {
+                .expires_at => if (object.flags.pending and object.timeout > 0)
+                    object.timestamp + object.timeout_ns()
+                else
+                    null,
+                .imported => if (object.flags.imported) 0 else null,
+                .closing => if (object.flags.closing_debit or object.flags.closing_credit)
+                    0
+                else
+                    null,
+                inline .pending_id, .user_data_128, .user_data_64, .user_data_32 => |field| key: {
+                    const value = @field(object, @tagName(field));
+                    break :key if (value == 0) null else value;
+                },
+                inline else => |field| @field(object, @tagName(field)),
+            };
         }
     };
 
@@ -612,18 +681,12 @@ const Environment = struct {
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-            const model_size = brk: {
-                const object_count = model.log.readableLength() +
-                    model.checkpointed.objects.count();
-                break :brk object_count * @sizeOf(tb.Transfer);
-            };
-            // NOTE: This isn't accurate anymore because the model can contain multiple copies of
-            // an object in the log
+            const model_size = model.transfers_mutable.transfers_by_id.count() *
+                @sizeOf(tb.Transfer);
             log.debug("space_amplification ~= {d:.2}", .{
                 @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
 
-            // Apply fuzz_op to the forest and the model.
             try env.apply_op(gpa, fuzz_op, &model);
         }
 
@@ -661,48 +724,46 @@ const Environment = struct {
 
                 try env.open(gpa);
 
-                // TODO: currently this checks that everything added to the LSM after checkpoint
-                // resets to the last checkpoint on crash by looking through what's been added
-                // afterwards. This won't work if we add account removal to the fuzzer though.
+                // Every ID changed after the checkpoint must return to its checkpointed state,
+                // including IDs that should no longer exist after recovery.
                 const snapshot = blk: {
                     if (vsr.Checkpoint.trigger_for_checkpoint(
                         env.superblock.working.vsr_state.checkpoint.header.op,
                     )) |trigger| {
                         break :blk trigger + 1;
-                    } else {
-                        break :blk 0;
-                    }
+                    } else break :blk 0;
                 };
-                const log_size = model.log.readableLength();
-                var log_index: usize = 0;
-                while (log_index < log_size) : (log_index += 1) {
-                    const entry = model.log.peekItem(log_index);
-                    const id = entry.transfer.id;
-                    if (model.checkpointed.objects.get(id)) |*checkpointed_object| {
-                        try env.prefetch(.{ .id = id }, snapshot);
-                        if (env.get(.{ .id = id })) |lsm_object| {
-                            assert(stdx.equal_bytes(tb.Transfer, &lsm_object, checkpointed_object));
-                        } else {
-                            std.debug.panic(
-                                "Object checkpointed but not in lsm after crash.\n {}\n",
-                                .{checkpointed_object},
-                            );
-                        }
 
-                        // There are strict limits around how many values can be prefetched by one
-                        // commit, see `stash_value_count_max` in groove.zig. Thus, we need to make
-                        // sure we manually call groove.objects_cache.compact() every
-                        // `stash_value_count_max` operations here.
-                        // This is specific to this fuzzing code.
-                        const groove_stash_value_count_max = env.forest.grooves
-                            .transfers.objects_cache.options.stash_value_count_max;
+                // Recovery checks can prefetch more objects than a single commit's stash.
+                // So we need to call `compact` in the loops below.
+                const groove_stash_value_count_max = env.forest.grooves
+                    .transfers.objects_cache.options.stash_value_count_max;
+                var index: u32 = 0;
 
-                        if (log_index % groove_stash_value_count_max == 0) {
-                            env.forest.grooves.transfers.objects_cache.compact();
-                        }
+                while (index < model.log.items.len) : (index += 1) {
+                    const entry = model.log.items[index];
+                    const id = entry.id;
+                    _ = try env.check_lookup(
+                        .{ .id = id },
+                        snapshot,
+                        model.transfers_stashed.get(.{ .id = id }),
+                    );
+
+                    if (index % groove_stash_value_count_max == 0) {
+                        env.forest.grooves.transfers.objects_cache.compact();
                     }
                 }
-                model.storage_reset();
+                // Here we check that we have not lost objects that should be in the checkpoint.
+                var iterator = model.transfers_stashed.transfers_by_id.valueIterator();
+                while (iterator.next()) |transfer| : (index += 1) {
+                    _ = try env.check_lookup(.{ .id = transfer.id }, snapshot, transfer.*);
+                    if (index % groove_stash_value_count_max == 0) {
+                        env.forest.grooves.transfers.objects_cache.compact();
+                    }
+                }
+                // This is required to reset the stash again otherwise it can overflow.
+                env.forest.grooves.transfers.objects_cache.compact();
+                try model.storage_reset();
             },
         }
     }
@@ -735,150 +796,45 @@ const Environment = struct {
                 // The forest requires prefetch before put.
                 assert(object.id != 0);
 
-                try env.prefetch(.{ .id = object.id }, snapshot);
-                const lsm_object = env.get(.{ .id = object.id });
+                const key: UniqueKey = .{ .id = object.id };
+                const lsm_object = try env.check_lookup(key, snapshot, model.get(key));
 
                 env.put(&object, lsm_object);
                 try model.put(&object, fuzz_op.op);
             },
             .remove => |id| {
-                try env.prefetch(.{ .id = id }, snapshot);
-                const lsm_object = env.get(.{ .id = id });
-
-                const model_object = model.get(.{ .id = id });
-                if (model_object == null) {
-                    // The non-checkpointed object
-                    // might have been be lost on `crash_after_ticks`.
-                    assert(lsm_object == null);
-                } else {
-                    assert(lsm_object != null);
-                    assert(stdx.equal_bytes(tb.Transfer, &model_object.?, &lsm_object.?));
-
-                    env.remove(&lsm_object.?);
-                    try model.remove(&lsm_object.?, fuzz_op.op);
+                const key: UniqueKey = .{ .id = id };
+                if (try env.check_lookup(key, snapshot, model.get(key))) |object| {
+                    env.remove(&object);
+                    try model.remove(id, fuzz_op.op);
                 }
             },
             inline .get_by_id,
             .get_by_timestamp,
             => |key, action| {
-                // Get object from lsm.
-                try env.prefetch(key, snapshot);
-                const lsm_object = lsm_object: {
-                    switch (action) {
-                        .get_by_id => {
-                            assert(key == .id);
-                            assert(key.id != 0);
-                            break :lsm_object env.get(key);
-                        },
-                        .get_by_timestamp => {
-                            assert(key == .timestamp);
-                            assert(TimestampRange.valid(key.timestamp));
-                            break :lsm_object env.get(key);
-                        },
-                        else => comptime unreachable,
-                    }
-                };
-
-                // Compare result to model.
-                const model_object = model.get(key);
-                if (model_object == null) {
-                    assert(lsm_object == null);
-                } else {
-                    assert(lsm_object != null);
-                    assert(stdx.equal_bytes(tb.Transfer, &model_object.?, &lsm_object.?));
+                switch (action) {
+                    .get_by_id => {
+                        assert(key == .id);
+                        assert(key.id != 0);
+                    },
+                    .get_by_timestamp => {
+                        assert(key == .timestamp);
+                        assert(TimestampRange.valid(key.timestamp));
+                    },
+                    else => comptime unreachable,
                 }
+                _ = try env.check_lookup(key, snapshot, model.get(key));
             },
             .scan => |params| {
+                // TODO: Test pagination.
                 const results = try env.scan(params, snapshot);
+                const expected = try model.scan(params);
+                defer model.gpa.free(expected);
 
-                var timestamp_last: ?u64 = null;
-                var prefix_last: ?u128 = null;
+                const count = @min(expected.len, env.scan_lookup_buffer.len);
+                assert((expected.len == 0) == (results.len == 0));
 
-                // Asserting the positive space:
-                // all objects found by the scan must exist in our model.
-                for (results) |*object| {
-                    const prefix_current: u128 = switch (params.index) {
-                        .expires_at => index: {
-                            assert(object.timeout != 0);
-                            const value = object.timestamp + object.timeout_ns();
-                            assert(value >= params.min and value <= params.max);
-                            break :index value;
-                        },
-                        .imported => index: {
-                            assert(params.min == 0);
-                            assert(params.max == 0);
-                            assert(prefix_last == null);
-                            assert(object.flags.imported);
-                            break :index undefined;
-                        },
-                        .closing => index: {
-                            assert(params.min == 0);
-                            assert(params.max == 0);
-                            assert(prefix_last == null);
-                            assert(object.flags.closing_debit or
-                                object.flags.closing_credit);
-                            break :index undefined;
-                        },
-                        inline else => |field| index: {
-                            const IndexHelper = GrooveTransfers.IndexHelperType(@tagName(field));
-                            comptime assert(IndexHelper.Type != void);
-
-                            const value = IndexHelper.get(object).?;
-                            assert(value >= params.min and value <= params.max);
-                            break :index value;
-                        },
-                    };
-
-                    const model_object = model.get(.{ .id = object.id }).?;
-                    assert(model_object.id == object.id);
-                    assert(model_object.debit_account_id == object.debit_account_id);
-                    assert(model_object.credit_account_id == object.credit_account_id);
-                    assert(model_object.user_data_128 == object.user_data_128);
-                    assert(model_object.user_data_64 == object.user_data_64);
-                    assert(model_object.user_data_32 == object.user_data_32);
-                    assert(model_object.timestamp == object.timestamp);
-                    assert(model_object.ledger == object.ledger);
-                    assert(model_object.code == object.code);
-                    assert(model_object.pending_id == object.pending_id);
-                    assert(model_object.timeout == object.timeout);
-                    assert(model_object.amount == object.amount);
-                    assert(model_object.flags == object.flags);
-
-                    if (params.min == params.max) {
-                        // If exact match (min == max), it's expected to be sorted by timestamp.
-                        if (timestamp_last) |timestamp| {
-                            switch (params.direction) {
-                                .ascending => assert(object.timestamp > timestamp),
-                                .descending => assert(object.timestamp < timestamp),
-                            }
-                        }
-                        timestamp_last = object.timestamp;
-                    } else {
-                        assert(params.index != .imported);
-
-                        // If not exact, it's expected to be sorted by prefix and then timestamp.
-                        if (prefix_last) |prefix| {
-                            // If range (between min .. max), it's expected to be sorted by prefix.
-                            switch (params.direction) {
-                                .ascending => assert(prefix_current >= prefix),
-                                .descending => assert(prefix_current <= prefix),
-                            }
-
-                            if (prefix_current == prefix) {
-                                if (timestamp_last) |timestamp| {
-                                    switch (params.direction) {
-                                        .ascending => assert(object.timestamp > timestamp),
-                                        .descending => assert(object.timestamp < timestamp),
-                                    }
-                                }
-                                timestamp_last = object.timestamp;
-                            } else {
-                                timestamp_last = null;
-                            }
-                        }
-                        prefix_last = prefix_current;
-                    }
-                }
+                try std.testing.expectEqualSlices(tb.Transfer, expected[0..count], results);
             },
         }
     }

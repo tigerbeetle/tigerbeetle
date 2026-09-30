@@ -137,7 +137,7 @@ class Client:
 
         # ctypes needs a reference to keep this alive through the FFI call. Having it as a temporary
         # within the call _does not_ work.
-        cluster_id_u128 = c_uint128.from_param(cluster_id)
+        cluster_id_u128 = c_uint128.from_param(cluster_id, name="cluster_id")
         init_status = bindings.tb_client_init(
             ctypes.byref(self._client),
             ctypes.cast(
@@ -219,7 +219,7 @@ class Client:
         elif packet[0].status == bindings.PacketStatus.CLIENT_RELEASE_TOO_HIGH.value:
             inflight_packet.response = ClientReleaseTooHighError()
 
-        elif packet[0].status == bindings.PacketStatus.CLIENT_SHUTDOWN.value:
+        elif packet[0].status == bindings.PacketStatus.CLIENT_CLOSED.value:
             inflight_packet.response = ClientClosedError()
 
         else:
@@ -244,13 +244,16 @@ class ClientSync(Client, bindings.StateMachineMixin):
         inflight_packet.on_completion_context = CompletionContextSync(event=threading.Event())
 
         client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_packet.packet))
-        if client_state == bindings.ClientStatus.OK:
+        if client_state == bindings.ClientStatus.SUCCESS:
             inflight_packet.on_completion_context.event.wait()
 
         del self._inflight_packets[inflight_packet.packet.user_data]
 
-        if client_state == bindings.ClientStatus.INVALID:
+        if client_state == bindings.ClientStatus.CLOSED:
             raise ClientClosedError()
+
+        if client_state == bindings.ClientStatus.NOT_INITIALIZED:
+            raise Exception("Client interface not initialized")
 
         if isinstance(inflight_packet.response, Exception):
             raise inflight_packet.response
@@ -302,13 +305,16 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         )
 
         client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_packet.packet))
-        if client_state == bindings.ClientStatus.OK:
+        if client_state == bindings.ClientStatus.SUCCESS:
             await inflight_packet.on_completion_context.event.wait()
 
         del self._inflight_packets[inflight_packet.packet.user_data]
 
-        if client_state == bindings.ClientStatus.INVALID:
+        if client_state == bindings.ClientStatus.CLOSED:
             raise ClientClosedError()
+
+        if client_state == bindings.ClientStatus.NOT_INITIALIZED:
+            raise Exception("Client interface not initialized")
 
         if isinstance(inflight_packet.response, Exception):
             raise inflight_packet.response

@@ -5,7 +5,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("pom.xml"));
 
     try shell.exec_zig("build clients:java -Drelease", .{});
@@ -26,8 +28,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -52,7 +55,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -61,7 +64,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    try shell.cwd.writeFile(.{ .sub_path = "pom.xml", .data = try shell.fmt(
+    try shell.cwd.writeFile(shell.io, .{ .sub_path = "pom.xml", .data = try shell.fmt(
         \\<project>
         \\  <modelVersion>4.0.0</modelVersion>
         \\  <groupId>com.tigerbeetle</groupId>
@@ -108,7 +111,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         \\</project>
     , .{options.release}) });
 
-    try Shell.copy_path(
+    try shell.copy_path(
         shell.cwd,
         "src/clients/java/samples/basic/src/main/java/Main.java",
         shell.cwd,
@@ -131,7 +134,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
             log.warn("waiting for 5 minutes for the {s} version to appear in maven cental", .{
                 options.release,
             });
-            std.time.sleep(5 * std.time.ns_per_min);
+            try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
         }
     } else {
         shell.exec("mvn package --update-snapshots", .{}) catch |err| {

@@ -7,7 +7,7 @@ const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
-const Time = vsr.time.Time;
+const Time = stdx.Time;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -84,7 +84,7 @@ pub fn ClientType(
 
         /// Measures the time elapsed between sending a request (in `raw_request`) and receiving the
         /// corresponding reply (in `on_reply`).
-        request_completion_timer: vsr.time.Timer,
+        request_completion_timer: stdx.Timer,
 
         /// The maximum body size for `command=request` messages.
         /// Set by the `register`'s reply.
@@ -204,6 +204,8 @@ pub fn ClientType(
 
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
+            assert(!self.evicted);
+
             while (buffer.next_header()) |header| {
                 const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);
@@ -212,8 +214,11 @@ pub fn ClientType(
                     buffer.invalidate(.header_cluster);
                     return;
                 }
-                if (!self.evicted) {
-                    self.on_message(message);
+
+                self.on_message(message);
+                if (self.evicted) {
+                    buffer.invalidate(.evicted);
+                    return;
                 }
             }
         }
@@ -224,7 +229,7 @@ pub fn ClientType(
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
-                    log.debug("{}: on_message: {}", .{ self.id, header });
+                    log.debug("{}: on_message: {f}", .{ self.id, header });
                 },
             }
 
@@ -260,7 +265,6 @@ pub fn ClientType(
             self.ticks += 1;
 
             self.message_bus.tick_client();
-            self.time.tick();
 
             self.ping_timeout.tick();
             self.request_timeout.tick();
@@ -445,34 +449,36 @@ pub fn ClientType(
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            if (self.on_eviction_callback) |callback| {
-                const eviction_specific_log = switch (eviction.header.reason) {
-                    .client_release_too_low => " - your client is too old; upgrade to a version " ++
-                        "compatible with your cluster",
-                    .client_release_too_high => " - your client is too new; downgrade to the " ++
-                        "same version as your cluster",
-                    else => "",
-                };
-                log.err(
-                    "{}: session evicted: reason={?s} (cluster_release={}, client_release={}){s}",
-                    .{
-                        self.id,
-                        std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
-                        eviction.header.release,
-                        self.release,
-                        eviction_specific_log,
-                    },
-                );
-
-                self.evicted = true;
-                self.on_eviction_callback = null;
-                callback(self, eviction);
-            } else {
-                std.debug.panic("session evicted: {?s} (cluster_release={})", .{
+            const eviction_specific_log = switch (eviction.header.reason) {
+                .client_release_too_low => " - your client is too old; upgrade to a version " ++
+                    "compatible with your cluster",
+                .client_release_too_high => " - your client is too new; downgrade to the " ++
+                    "same version as your cluster",
+                else => "",
+            };
+            log.err(
+                "{}: session evicted: reason={?s} (cluster_release={f}, client_release={f}){s}",
+                .{
+                    self.id,
                     std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
                     eviction.header.release,
-                });
-            }
+                    self.release,
+                    eviction_specific_log,
+                },
+            );
+
+            const callback = self.on_eviction_callback orelse std.debug.panic(
+                "session evicted: {?s} (cluster_release={f})",
+                .{
+                    std.enums.tagName(vsr.Header.Eviction.Reason, eviction.header.reason),
+                    eviction.header.release,
+                },
+            );
+
+            self.evicted = true;
+            self.on_eviction_callback = null;
+
+            callback(self, eviction);
         }
 
         fn on_pong_client(self: *Client, pong: *const Message.PongClient) void {
@@ -704,7 +710,7 @@ pub fn ClientType(
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
-                    log.debug("{}: sending {s} to replica {}: {}", .{
+                    log.debug("{}: sending {s} to replica {}: {f}", .{
                         self.id,
                         @tagName(message.header.command),
                         replica,

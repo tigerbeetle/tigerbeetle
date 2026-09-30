@@ -6,14 +6,17 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("TigerBeetle.sln"));
 
     try shell.exec_zig("build clients:dotnet -Drelease", .{});
-    try shell.exec_zig("build -Drelease", .{});
 
     try shell.exec("dotnet restore", .{});
     try shell.exec("dotnet format --no-restore --verify-no-changes", .{});
+
+    try shell.env.put("TIGERBEETLE_BINARY", options.tigerbeetle);
 
     // Unit tests.
     try shell.exec("dotnet build --no-restore  --configuration Release", .{});
@@ -39,8 +42,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -63,6 +67,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.exec("dotnet pack --configuration Release", .{});
 
         const image_tags = .{
+            // Not entirely clear if docker dependency is in scope for our CI...
             "8.0", "8.0-alpine",
         };
 
@@ -71,14 +76,14 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
             log.info("testing docker image: '{s}'", .{image});
 
             for (0..5) |attempt| {
-                if (attempt > 0) std.time.sleep(1 * std.time.ns_per_min);
-                if (shell.exec("docker image pull {image}", .{ .image = image })) {
+                if (attempt > 0) try std.Io.sleep(shell.io, .fromSeconds(60), .awake);
+                if (shell.exec("podman image pull {image}", .{ .image = image })) {
                     break;
                 } else |_| {}
             }
 
             try shell.exec(
-                \\docker run
+                \\podman run
                 \\--security-opt seccomp=unconfined
                 \\--volume ./TigerBeetle/bin/Release:/host
                 \\{image}
@@ -121,7 +126,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
     release: []const u8,
     tigerbeetle: []const u8,
 }) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, shell.io, &shell.env, .{
         .development = true,
         .prebuilt = options.tigerbeetle,
     });
@@ -130,11 +135,11 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
-    var tmp_dir = std.testing.tmpDir(.{});
-    defer tmp_dir.cleanup();
+    const tmp_dir = try shell.create_tmp_dir();
+    defer shell.cwd.deleteTree(shell.io, tmp_dir) catch {};
 
     const base_dir = shell.cwd;
-    try shell.pushd_dir(tmp_dir.dir);
+    try shell.pushd(tmp_dir);
     defer shell.popd();
 
     try shell.exec("dotnet new console", .{});
@@ -145,7 +150,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         log.warn("waiting for 5 minutes for the {s} version to appear in nuget.org", .{
             options.release,
         });
-        std.time.sleep(5 * std.time.ns_per_min);
+        try std.Io.sleep(shell.io, .fromSeconds(5 * std.time.s_per_min), .awake);
     } else {
         switch (try nuget_install(shell, .{ .version = options.release })) {
             .ok => {},
@@ -156,7 +161,7 @@ pub fn validate_release_sample(shell: *Shell, gpa: std.mem.Allocator, options: s
         }
     }
 
-    try Shell.copy_path(
+    try shell.copy_path(
         base_dir,
         "src/clients/dotnet/samples/basic/Program.cs",
         shell.cwd,
@@ -174,7 +179,7 @@ fn nuget_install(shell: *Shell, options: struct {
     } else |err| {
         const exec_result = try shell.exec_raw(command, options);
         switch (exec_result.term) {
-            .Exited => |code| if (code == 0) return .ok,
+            .exited => |code| if (code == 0) return .ok,
             else => {},
         }
 

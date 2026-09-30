@@ -2,7 +2,7 @@
 //! such as how many cycles were used, how many branch misses were incurred, and more.
 //! These only count cycles in the current process, and not, for exampole, sleep time.
 //! The closest matching clock implementation semantics are provided by CLOCK_MONOTONIC,
-//! which is what we use here. To distinguish towards vsr.time.Time.monotonic(),
+//! which is what we use here. To distinguish towards stdx.Time.monotonic(),
 //! we call this `benchmark_monotonic()`.
 const std = @import("std");
 const builtin = @import("builtin");
@@ -57,8 +57,8 @@ fn benchmark_monotonic_windows() u64 {
     //
     // https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data
     // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
-    const counter = os.windows.QueryPerformanceCounter();
-    const frequency = os.windows.QueryPerformanceFrequency();
+    const counter = stdx.windows.QueryPerformanceCounter();
+    const frequency = stdx.windows.QueryPerformanceFrequency();
 
     // 10Mhz (1 qpc tick every 100ns) is a common QPF on modern systems.
     // We can optimize towards this by converting to ns via a single multiply.
@@ -98,8 +98,8 @@ fn benchmark_monotonic_darwin() u64 {
 
 fn benchmark_monotonic_linux() u64 {
     assert(is_linux);
-    const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch {
-        @panic("CLOCK_MONOTONIC required");
-    };
+    var ts: posix.timespec = undefined;
+    const rc = system.clock_gettime(posix.CLOCK.MONOTONIC, &ts);
+    if (posix.errno(rc) != .SUCCESS) @panic("CLOCK_MONOTONIC required");
     return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
 }

@@ -354,8 +354,8 @@ fn TestContextType(comptime streams_max: u32) type {
 
             const gpa = std.testing.allocator;
 
-            var actual = std.ArrayList(Value).init(gpa);
-            defer actual.deinit();
+            var actual: std.ArrayList(Value) = .empty;
+            defer actual.deinit(gpa);
 
             var streams: [streams_max][]Value = undefined;
 
@@ -388,7 +388,7 @@ fn TestContextType(comptime streams_max: u32) type {
             var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
 
             while (try kway.pop()) |value| {
-                try actual.append(value);
+                try actual.append(gpa, value);
             }
 
             try testing.expectEqualSlices(Value, expect_naive, actual.items);
@@ -617,8 +617,8 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                 fuzz_stream_peek,
                 stream_pop,
             );
-            var actual = std.ArrayList(Value).init(gpa);
-            defer actual.deinit();
+            var actual: std.ArrayList(Value) = .empty;
+            defer actual.deinit(gpa);
 
             var streams: [streams_max][]Value = undefined;
 
@@ -648,7 +648,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
                     .pop => {
                         const maybe_value = kway.pop() catch continue;
                         const value = maybe_value orelse break;
-                        try actual.append(value);
+                        try actual.append(gpa, value);
                         values_popped += 1;
                     },
                     .reset => {

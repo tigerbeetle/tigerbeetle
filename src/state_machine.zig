@@ -242,7 +242,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         scan_lookup: ScanLookup = .null,
         scan_lookup_buffer: []align(constants.cache_line_size) u8,
         scan_lookup_buffer_index: u32 = 0,
-        scan_lookup_results: std.ArrayListUnmanaged(u32),
+        scan_lookup_results: std.ArrayList(u32),
         scan_lookup_next_tick: Grid.NextTick = undefined,
 
         pulse: Pulse = .{},
@@ -783,7 +783,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             compact: TimingSummary = .{},
             checkpoint: TimingSummary = .{},
 
-            timer: vsr.time.Timer,
+            timer: stdx.Timer,
 
             const TimingSummary = struct {
                 duration_min_us: ?u64 = null,
@@ -895,7 +895,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         pub fn init(
             self: *StateMachine,
             allocator: mem.Allocator,
-            time: vsr.time.Time,
+            time: stdx.Time, // Only for metrics.
             grid: *Grid,
             options: Options,
         ) !void {
@@ -995,12 +995,12 @@ pub fn StateMachineType(comptime Storage: type) type {
                 };
             self.scan_lookup_buffer = try allocator.alignedAlloc(
                 u8,
-                constants.cache_line_size,
+                .fromByteUnits(constants.cache_line_size),
                 scan_lookup_buffer_size,
             );
             errdefer allocator.free(self.scan_lookup_buffer);
 
-            self.scan_lookup_results = try std.ArrayListUnmanaged(u32).initCapacity(
+            self.scan_lookup_results = try std.ArrayList(u32).initCapacity(
                 allocator,
                 scan_lookup_result_max,
             );
@@ -2155,7 +2155,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                 const filter_value = @field(filter, @tagName(index));
                 if (filter_value != 0) {
                     scan_conditions.push(scan_builder.scan_prefix(
-                        std.enums.nameCast(std.meta.FieldEnum(ScanBuilder.Scan.Indexes), index),
+                        @field(std.meta.FieldEnum(ScanBuilder.Scan.Indexes), @tagName(index)),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         self.prefetch_snapshot.?,
                         filter_value,
@@ -3773,15 +3773,24 @@ pub fn StateMachineType(comptime Storage: type) type {
                 if (t.flags.imported) {
                     assert(t.timestamp != 0);
                     assert(t.timestamp <= timestamp_event);
+
                     // Allows past timestamp, but validates whether it regressed from the last
                     // inserted event.
                     // This validation must be called _after_ the idempotency checks so the user
                     // can still handle `exists` results when importing.
                     if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                        maybe(self.forest.grooves.account_events.objects.key_range == null);
                         if (t.timestamp <= key_range.key_max) {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
+                    if (self.forest.grooves.account_events.objects.key_range) |*key_range| {
+                        assert(self.forest.grooves.transfers.objects.key_range != null);
+                        if (t.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+
                     if (self.forest.grooves.accounts.indirect_lookup(.{
                         .timestamp = t.timestamp,
                     }) != null) {
@@ -4131,15 +4140,24 @@ pub fn StateMachineType(comptime Storage: type) type {
                 if (t.flags.imported) {
                     assert(t.timestamp != 0);
                     assert(t.timestamp <= timestamp_event);
+
                     // Allows past timestamp, but validates whether it regressed from the last
-                    // inserted transfer.
+                    // inserted event.
                     // This validation must be called _after_ the idempotency checks so the user
                     // can still handle `exists` results when importing.
                     if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                        maybe(self.forest.grooves.account_events.objects.key_range == null);
                         if (t.timestamp <= key_range.key_max) {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
+                    if (self.forest.grooves.account_events.objects.key_range) |*key_range| {
+                        assert(self.forest.grooves.transfers.objects.key_range != null);
+                        if (t.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+
                     if (self.forest.grooves.accounts.indirect_lookup(.{
                         .timestamp = t.timestamp,
                     }) != null) {

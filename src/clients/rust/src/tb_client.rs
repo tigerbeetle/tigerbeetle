@@ -3,7 +3,7 @@
  //              Do not manually modify.              //
  ///////////////////////////////////////////////////////
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct AccountFlags(pub u16);
@@ -43,7 +43,7 @@ pub struct tb_account_t {
     pub timestamp: u64,
 }
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct TransferFlags(pub u16);
@@ -456,7 +456,7 @@ pub struct AccountFilter {
     pub flags: AccountFilterFlags,
 }
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct AccountFilterFlags(pub u32);
@@ -501,7 +501,7 @@ pub struct QueryFilter {
     pub flags: QueryFilterFlags,
 }
 
-#[derive(Copy, Clone, Debug, Default)] 
+#[derive(Copy, Clone, Debug, Default)]
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct QueryFilterFlags(pub u32);
@@ -519,7 +519,7 @@ impl std::ops::BitOr for QueryFilterFlags {
 }
 
 // Opaque struct serving as a handle for the client instance.
-// This struct must be "pinned" (not copyable or movable), as its address 
+// This struct must be "pinned" (not copyable or movable), as its address
 // must remain stable throughout the lifetime of the client instance.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -528,7 +528,7 @@ pub struct tb_client_t {
 }
 
 // Struct containing the state of a request submitted through the client.
-// This struct must be "pinned" (not copyable or movable), as its address 
+// This struct must be "pinned" (not copyable or movable), as its address
 // must remain stable throughout the lifetime of the request.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -560,7 +560,7 @@ pub const TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA: TB_PACKET_STATUS = 1;
 pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED: TB_PACKET_STATUS = 2;
 pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW: TB_PACKET_STATUS = 3;
 pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH: TB_PACKET_STATUS = 4;
-pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_SHUTDOWN: TB_PACKET_STATUS = 5;
+pub const TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED: TB_PACKET_STATUS = 5;
 pub const TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION: TB_PACKET_STATUS = 6;
 pub const TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE: TB_PACKET_STATUS = 7;
 
@@ -574,8 +574,9 @@ pub const TB_INIT_STATUS_TB_INIT_SYSTEM_RESOURCES: TB_INIT_STATUS = 5;
 pub const TB_INIT_STATUS_TB_INIT_NETWORK_SUBSYSTEM: TB_INIT_STATUS = 6;
 
 pub type TB_CLIENT_STATUS = i32;
-pub const TB_CLIENT_STATUS_TB_CLIENT_OK: TB_CLIENT_STATUS = 0;
-pub const TB_CLIENT_STATUS_TB_CLIENT_INVALID: TB_CLIENT_STATUS = 1;
+pub const TB_CLIENT_STATUS_TB_CLIENT_SUCCESS: TB_CLIENT_STATUS = 0;
+pub const TB_CLIENT_STATUS_TB_CLIENT_CLOSED: TB_CLIENT_STATUS = 1;
+pub const TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED: TB_CLIENT_STATUS = 2;
 
 pub type TB_REGISTER_LOG_CALLBACK_STATUS = i32;
 pub const TB_REGISTER_LOG_CALLBACK_STATUS_TB_REGISTER_LOG_CALLBACK_SUCCESS: TB_REGISTER_LOG_CALLBACK_STATUS = 0;
@@ -619,27 +620,7 @@ extern "C" {
         >,
     ) -> TB_INIT_STATUS;
 
-    // Initialize a new TigerBeetle client which echos back any data submitted.
-    pub fn tb_client_init_echo(
-        client_out: *mut tb_client_t,
-        // 128-bit unsigned integer represented as a 16-byte little-endian array.
-        cluster_id: *const [u8; 16],
-        address_ptr: *const ::std::os::raw::c_char,
-        address_len: u32,
-        completion_ctx: usize,
-        completion_callback: ::std::option::Option<
-            unsafe extern "C" fn(
-                arg1: usize,
-                arg3: *mut tb_packet_t,
-                arg4: u64,
-                arg5: *const u8,
-                arg6: u32,
-            ),
-        >,
-    ) -> TB_INIT_STATUS;
-
-    // Retrieve the callback context initially passed into `tb_client_init` or
-    // `tb_client_init_echo`.
+    // Retrieve the callback context initially passed into `tb_client_init`.
     pub fn tb_client_completion_context(
         client: *mut tb_client_t,
         completion_ctx_out: *mut usize,
@@ -654,7 +635,7 @@ extern "C" {
     ) -> TB_CLIENT_STATUS;
 
     // Closes the client, causing any previously submitted packets to be completed with
-    // `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
+    // `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
     // It is undefined behavior to use any functions on the client once deinit is called.
     pub fn tb_client_deinit(
         client: *mut tb_client_t,

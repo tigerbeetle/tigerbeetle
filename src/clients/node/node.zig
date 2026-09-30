@@ -188,7 +188,7 @@ fn create(
     };
     errdefer global_allocator.destroy(client);
 
-    tb_client.init(
+    tb_client.Context.init(
         global_allocator,
         client,
         cluster_id,
@@ -229,12 +229,16 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
     );
     const client: *tb_client.ClientInterface = @ptrCast(@alignCast(client_ptr.?));
     defer {
-        client.deinit() catch unreachable;
+        client.deinit() catch |err| switch (err) {
+            error.Closed => {},
+            error.NotInitialized => unreachable,
+        };
         global_allocator.destroy(client);
     }
 
     const completion_ctx = client.completion_context() catch |err| switch (err) {
-        error.ClientInvalid => return request_error(env, .ERR_CLIENT_CLOSED),
+        error.Closed => return request_error(env, .ERR_CLIENT_CLOSED),
+        error.NotInitialized => unreachable,
     };
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
     if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_release) != c.napi_ok) {
@@ -314,7 +318,8 @@ fn request(
         .status = undefined,
     };
     client.submit(packet) catch |err| switch (err) {
-        error.ClientInvalid => return request_error(env, .ERR_CLIENT_CLOSED),
+        error.Closed => return request_error(env, .ERR_CLIENT_CLOSED),
+        error.NotInitialized => unreachable,
     };
 }
 
@@ -341,7 +346,7 @@ fn on_completion(
 
                     const packet = packet_extern.cast();
                     const request_buffer: []align(@alignOf(Event)) u8 =
-                        @constCast(@alignCast(packet.slice()));
+                        @alignCast(@constCast(packet.slice()));
                     // Trying to reallocate the request buffer instead of allocating a new one.
                     // This is optimal for create_* operations.
                     const reply_buffer: []align(@alignOf(Result)) u8 = global_allocator.realloc(
@@ -381,7 +386,7 @@ fn on_completion(
         .client_evicted,
         .client_release_too_low,
         .client_release_too_high,
-        .client_shutdown,
+        .client_closed,
         .too_much_data,
         => {}, // Handled on the JS side to throw exception.
         .invalid_operation => unreachable, // We check the operation during request().
@@ -437,7 +442,7 @@ fn on_completion_js(
                     );
                     break :blk encode_array(Result, env, results);
                 },
-                .client_shutdown => {
+                .client_closed => {
                     break :blk request_error(env, .ERR_CLIENT_CLOSED);
                 },
                 .client_evicted => {

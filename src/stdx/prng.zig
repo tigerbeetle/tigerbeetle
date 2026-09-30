@@ -39,14 +39,7 @@ pub const Ratio = struct {
         return .{ .numerator = 0, .denominator = 1 };
     }
 
-    pub fn format(
-        r: Ratio,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(r: Ratio, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         if (r.numerator == 0) return writer.print("0", .{});
         return writer.print("{d}/{d}", .{ r.numerator, r.denominator });
     }
@@ -163,7 +156,7 @@ test next {
     }
     try snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
-    ).diff_fmt("{d}", .{distribution});
+    ).diff_fmt("{any}", .{distribution});
 }
 
 pub fn fill(prng: *PRNG, target: []u8) void {
@@ -214,7 +207,7 @@ test fill {
 
     try snap(@src(),
         \\{ 3120, 3084, 3089, 3103, 3092, 3120, 3074, 3086 }
-    ).diff_fmt("{d}", .{distribution});
+    ).diff_fmt("{any}", .{distribution});
 }
 
 /// Generate an unbiased, uniformly distributed integer r such that 0 ≤ r ≤ max.
@@ -274,7 +267,7 @@ test int_inclusive {
     }
     try snap(@src(),
         \\{ 123, 127, 115, 125, 125, 139, 111, 135 }
-    ).diff_fmt("{d}", .{distribution});
+    ).diff_fmt("{any}", .{distribution});
 
     var large: u32 = 0;
     var small: u32 = 0;
@@ -312,7 +305,7 @@ test index {
     }
     try snap(@src(),
         \\{ 9, 13, 13, 11, 10, 16, 16, 12 }
-    ).diff_fmt("{d}", .{distribution});
+    ).diff_fmt("{any}", .{distribution});
 }
 
 /// Generates a uniform, unbiased integer r such that max ≤ r ≤ max.
@@ -344,9 +337,9 @@ pub fn int(prng: *PRNG, Int: type) Int {
     comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     if (Int == u64) return prng.next();
     if (@sizeOf(Int) < @sizeOf(u64)) return @truncate(prng.next());
-    var result: Int = undefined;
+    var result: std.meta.Int(.unsigned, @sizeOf(Int) * 8) = undefined;
     prng.fill(std.mem.asBytes(&result));
-    return result;
+    return @truncate(result);
 }
 
 test int {
@@ -367,7 +360,7 @@ fn test_bytes_int(Int: type, want: Snap) !void {
     for (0..1000) |_| {
         distribution[@intCast(prng.int(Int) % 8)] += 1;
     }
-    try want.diff_fmt("{d}", .{distribution});
+    try want.diff_fmt("{any}", .{distribution});
 }
 
 /// Returns true with probability 0.5.
@@ -676,7 +669,12 @@ test "no floating point please" {
     });
     defer std.testing.allocator.free(path);
 
-    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * KiB);
+    const file_text = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        std.testing.allocator,
+        .limited(64 * KiB),
+    );
     defer std.testing.allocator.free(file_text);
 
     assert(std.mem.indexOf(u8, file_text, "f" ++ "32") == null);
@@ -686,7 +684,8 @@ test "no floating point please" {
 // Automatically determine a reasonable amount of iterations for a unit fuzz-test, based on time.
 pub const FuzzIterations = struct {
     // Don't inject time for test-only code.
-    timer: ?std.time.Timer = null,
+    time_os: stdx.TimeOS = .{},
+    started: ?stdx.Instant = null,
     iteration: u32 = 0,
 
     iterations_min: u32 = 10,
@@ -694,12 +693,13 @@ pub const FuzzIterations = struct {
 
     pub fn more(clock: *FuzzIterations) bool {
         comptime assert(builtin.is_test);
-        if (clock.timer == null) {
-            clock.timer = std.time.Timer.start() catch @panic("timer failed");
+        const now = clock.time_os.monotonic();
+        if (clock.started == null) {
+            clock.started = now;
         }
 
         if (clock.iteration > clock.iterations_min and
-            clock.timer.?.read() > clock.duration_max.ns)
+            clock.started.?.elapsed(now).ns > clock.duration_max.ns)
         {
             return false;
         }

@@ -14,16 +14,16 @@ const std = @import("std");
 const stdx = @import("stdx");
 const Shell = stdx.Shell;
 
-const cfo = @import("./scripts/cfo.zig");
 const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
 const amqp = @import("./scripts/amqp.zig");
+const tb_client = @import("./scripts/tb_client.zig");
 
 pub fn log_fn(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -34,12 +34,12 @@ pub fn log_fn(
 pub const std_options: std.Options = .{ .logFn = log_fn };
 
 const CLIArgs = union(enum) {
-    cfo: cfo.CLIArgs,
     ci: ci.CLIArgs,
     release: release.CLIArgs,
     devhub: devhub.CLIArgs,
     changelog: void,
     amqp: amqp.CLIArgs,
+    tbclient: tb_client.CLIArgs,
 
     pub const help =
         \\Usage:
@@ -47,8 +47,6 @@ const CLIArgs = union(enum) {
         \\  zig build scripts -- [-h | --help]
         \\
         \\  zig build scripts -- changelog
-        \\
-        \\  zig build scripts -- cfo [--budget=<duration>] [--refresh=<duration>] [--concurrency=<n>]
         \\
         \\  zig build scripts -- ci [--language=<dotnet|go|rust|java|node|python>] [--validate-release]
         \\                          [--build-docs]
@@ -77,8 +75,8 @@ const CLIArgs = union(enum) {
     ;
 };
 
-pub fn main() !void {
-    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+pub fn main(init: std.process.Init) !void {
+    var gpa_allocator = std.heap.DebugAllocator(.{}){};
     defer switch (gpa_allocator.deinit()) {
         .ok => {},
         .leak => @panic("memory leak"),
@@ -86,20 +84,20 @@ pub fn main() !void {
 
     const gpa = gpa_allocator.allocator();
 
-    const shell = try Shell.create(gpa);
+    const shell = try Shell.create(gpa, init.io, init.environ_map);
     defer shell.destroy();
 
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const cli_args = flags.parse(CLIArgs);
+    const cli_args = flags.parse(CLIArgs, init.minimal.args);
 
     switch (cli_args) {
-        .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .changelog => try changelog.main(shell, gpa),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
+        .tbclient => |args_tb_client| try tb_client.main(shell, gpa, args_tb_client),
     }
 }

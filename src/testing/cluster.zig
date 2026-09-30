@@ -15,7 +15,7 @@ const Message = MessagePool.Message;
 const IO = @import("io.zig").IO;
 
 const AOF = @import("../aof.zig").AOFType(IO);
-const TimeSim = @import("time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Multiversion = vsr.multiversion.Multiversion;
 const IdPermutation = @import("id.zig").IdPermutation;
 
@@ -269,7 +269,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             for (replica_tracers, 0..) |*tracer, replica_index| {
                 errdefer for (replica_tracers[0..replica_index]) |*t| t.deinit(allocator);
-                const time = replica_times[replica_index].time();
+                const time = replica_times[replica_index].interface();
                 tracer.* = try Tracer.init(allocator, time, .{ .replica = .{
                     .cluster = options.cluster.cluster_id,
                     .replica = @intCast(replica_index),
@@ -324,7 +324,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (clients[0..i]) |*c| c.*.?.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
-                    client_times[i].time(),
+                    client_times[i].interface(),
                     &client_pools[i],
                     .{
                         .id = client_id_permutation.encode(i + client_id_permutation_shift),
@@ -394,7 +394,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             ) |*aof, *aof_io, *aof_io_file, i| {
                 const buffer = try allocator.alignedAlloc(
                     u8,
-                    constants.sector_size,
+                    .fromByteUnits(constants.sector_size),
                     // Arbitrary value.
                     32 * MiB,
                 );
@@ -407,11 +407,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 });
                 errdefer for (cluster.aof_ios[0..i]) |*io| io.deinit();
 
-                aof.* = AOF{
-                    .io = aof_io,
-                    .path = "test.aof",
-                    .fd = 0,
-                };
+                // NB: This path isn't used at all when AOF is passed a Test IO
+                // instance, so this *isn't* shared global state.
+                aof.* = try AOF.init(aof_io, "test.aof");
+
                 errdefer for (cluster.aofs[0..i]) |*aof_| aof_.deinit(allocator);
             }
 
@@ -562,7 +561,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.network.tick();
 
-            for (cluster.clients) |*client_maybe| {
+            for (cluster.clients, cluster.client_times) |*client_maybe, *time_sim| {
+                time_sim.tick();
                 if (client_maybe.*) |*client| client.tick();
             }
 
@@ -574,44 +574,33 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.replica_health,
                 0..,
             ) |*storage, *replica, *aof_io, *time_sim, *health, replica_index| {
-                const time = time_sim.time();
+                // Time keeps ticking even if a replica is down or paused.
+                time_sim.tick();
 
-                if (health.* == .up and health.*.up.paused) {
-                    // Tick the time even in a paused state, to simulate VM migration.
-                    time.tick();
-                } else {
-                    storage.tick();
-                    switch (health.*) {
-                        .reformatting => {
-                            cluster.tick_reformat(@intCast(replica_index));
-                            time.tick();
-                        },
-                        .up => |up| {
-                            assert(!up.paused);
+                storage.tick();
+                switch (health.*) {
+                    .reformatting => {
+                        cluster.tick_reformat(@intCast(replica_index));
+                    },
+                    .up => |up| if (!up.paused) {
+                        replica.tick();
+                        aof_io.run() catch |err| {
+                            std.debug.panic("{}: io.run() failed: error={}", .{
+                                replica.replica,
+                                err,
+                            });
+                        };
 
-                            replica.tick();
-                            aof_io.run() catch |err| {
-                                std.debug.panic("{}: io.run() failed: error={}", .{
-                                    replica.replica,
-                                    err,
-                                });
-                            };
+                        // For performance, don't run every tick.
+                        if (cluster.prng.chance(ratio(1, 100))) {
+                            JournalChecker.check(replica);
+                        }
 
-                            // For performance, don't run every tick.
-                            if (cluster.prng.chance(ratio(1, 100))) {
-                                JournalChecker.check(replica);
-                            }
-
-                            cluster.state_checker.check_state(replica.replica) catch |err| {
-                                fatal(.correctness, "state checker error: {}", .{err});
-                            };
-                        },
-                        .down => {
-                            // Keep ticking the time so that it won't have diverged too far to
-                            // synchronize when the replica restarts.
-                            time.tick();
-                        },
-                    }
+                        cluster.state_checker.check_state(replica.replica) catch |err| {
+                            fatal(.correctness, "state checker error: {}", .{err});
+                        };
+                    },
+                    .down => {},
                 }
             }
         }
@@ -716,7 +705,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.replica_tracers[replica_index].deinit(cluster.allocator);
             cluster.replica_tracers[replica_index] = try Tracer.init(
                 cluster.allocator,
-                cluster.replica_times[replica_index].time(),
+                cluster.replica_times[replica_index].interface(),
                 .{ .replica = .{
                     .cluster = cluster.replicas[replica_index].cluster,
                     .replica = @intCast(replica_index),
@@ -729,7 +718,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
-                cluster.replica_times[replica_index].time(),
+                cluster.replica_times[replica_index].interface(),
                 &cluster.storages[replica_index],
                 &cluster.replica_pools[replica_index],
                 .{
@@ -791,7 +780,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(replica.release.value != release.value);
             assert(cluster.replica_upgrades[replica.replica] == null);
 
-            log.debug("{}: release_execute_soon: release={}..{}", .{
+            log.debug("{}: release_execute_soon: release={f}..{f}", .{
                 replica.replica,
                 replica.release,
                 release,
@@ -821,7 +810,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const release = cluster.replica_upgrades[replica_index].?;
             defer cluster.replica_upgrades[replica_index] = null;
 
-            log.debug("{}: release_execute: release={}..{}", .{
+            log.debug("{}: release_execute: release={f}..{f}", .{
                 replica_index,
                 replica.release,
                 release,
@@ -993,8 +982,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.client_eviction_requests_cancelled +=
                 @intFromBool(client.request_inflight != null and
-                client.request_inflight.?.message.header.operation != .register and
-                client.request_inflight.?.message.header.operation != .noop);
+                    client.request_inflight.?.message.header.operation != .register and
+                    client.request_inflight.?.message.header.operation != .noop);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
@@ -1056,7 +1045,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Print an error message and then exit with an exit code.
         fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
             std.log.scoped(.state_checker).err(fmt_string, args);
-            std.posix.exit(@intFromEnum(failure));
+            std.process.exit(@intFromEnum(failure));
         }
 
         /// Print the current state of the cluster, intended for printf debugging.

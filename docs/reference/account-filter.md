@@ -98,6 +98,7 @@ A bitfield that specifies querying behavior.
 Constraints:
 
 - Type is 32-bit unsigned integer (4 bytes)
+- At least one of `flags.debits` or `flags.credits` must be set. Both may be set.
 
 #### `flags.debits`
 

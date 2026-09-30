@@ -101,7 +101,8 @@ const type_mappings = .{
         .docs_link = "reference/account-balances#",
     } },
     .{
-        tb.Transfer, TypeMapping{
+        tb.Transfer,
+        TypeMapping{
             .name = "TransferBatch",
             .private_fields = &.{"reserved"},
             .readonly_fields = &.{},
@@ -139,6 +140,11 @@ const type_mappings = .{
         .name = "QueryFilterBatch",
         .visibility = .internal,
         .private_fields = &.{"reserved"},
+    } },
+    .{ exports.tb_operation, TypeMapping{
+        .name = "TBOperation",
+        .visibility = .internal,
+        .private_fields = &.{"pulse"},
     } },
     .{ exports.tb_init_status, TypeMapping{
         .name = "InitializationStatus",
@@ -200,12 +206,12 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn emit_enum(
-    buffer: *std.ArrayList(u8),
+    buffer: *std.Io.Writer,
     comptime Type: type,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
 ) !void {
-    try buffer.writer().print(
+    try buffer.print(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
@@ -231,7 +237,7 @@ fn emit_enum(
 
     inline for (fields, 0..) |field, i| {
         if (mapping.docs_link) |docs_link| {
-            try buffer.writer().print(
+            try buffer.print(
                 \\
                 \\    /**
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
@@ -244,7 +250,7 @@ fn emit_enum(
         }
 
         const int_value = @intFromEnum(@field(Type, field.name));
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[enum_name]s}(({[int_type]s}) {[value]s}){[separator]c}
             \\
         , .{
@@ -258,7 +264,7 @@ fn emit_enum(
         });
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\
         \\    public final {[int_type]s} value;
         \\
@@ -276,11 +282,13 @@ fn emit_enum(
 
     inline for (fields) |field| {
         const int_value = @intFromEnum(@field(Type, field.name));
-        try buffer.writer().print(
-            \\            case {[value]s}: return {[enum_name]s};
+        try buffer.print(
+            \\            case {[int_cast]s}{[value]s}: return {[enum_name]s};
             \\
         , .{
             .enum_name = stdx.to_case(field.name, .PascalCase),
+            // Explicitly cast numeric literals to types other than `int`.
+            .int_cast = if (std.mem.eql(u8, int_type, "int")) "" else "(" ++ int_type ++ ")",
             .value = if (int_value == std.math.maxInt(@TypeOf(int_value)))
                 std.fmt.comptimePrint("0x{X}", .{int_value})
             else
@@ -288,7 +296,7 @@ fn emit_enum(
         });
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\            default: throw new IllegalArgumentException(
         \\                String.format("Invalid {[name]s} value=%d", value));
         \\        }}
@@ -302,12 +310,12 @@ fn emit_enum(
 }
 
 fn emit_packed_enum(
-    buffer: *std.ArrayList(u8),
+    buffer: *std.Io.Writer,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
 ) !void {
-    try buffer.writer().print(
+    try buffer.print(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
@@ -325,7 +333,7 @@ fn emit_packed_enum(
         if (comptime mapping.is_private(field.name)) continue;
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.writer().print(
+            try buffer.print(
                 \\
                 \\    /**
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
@@ -337,7 +345,7 @@ fn emit_packed_enum(
             });
         }
 
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[int_type]s} {[enum_name]s} = ({[int_type]s}) (1 << {[value]d});
             \\
         , .{
@@ -347,12 +355,12 @@ fn emit_packed_enum(
         });
     }
 
-    try buffer.writer().print("\n", .{});
+    try buffer.print("\n", .{});
 
     inline for (type_info.fields) |field| {
         if (comptime mapping.is_private(field.name)) continue;
 
-        try buffer.writer().print(
+        try buffer.print(
             \\    static boolean has{[flag_name]s}(final {[int_type]s} flags) {{
             \\        return (flags & {[enum_name]s}) == {[enum_name]s};
             \\    }}
@@ -365,7 +373,7 @@ fn emit_packed_enum(
         });
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\}}
         \\
     , .{});
@@ -394,12 +402,12 @@ fn batch_type(comptime Type: type) []const u8 {
 }
 
 fn emit_batch(
-    buffer: *std.ArrayList(u8),
+    buffer: *std.Io.Writer,
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime size: usize,
 ) !void {
-    try buffer.writer().print(
+    try buffer.print(
         \\{[notice]s}
         \\package com.tigerbeetle;
         \\
@@ -428,7 +436,7 @@ fn emit_batch(
     // Fields offset:
     var offset: usize = 0;
     inline for (type_info.fields) |field| {
-        try buffer.writer().print(
+        try buffer.print(
             \\        int {[field_name]s} = {[offset]d};
             \\
         , .{
@@ -440,7 +448,7 @@ fn emit_batch(
     }
 
     // Constructors:
-    try buffer.writer().print(
+    try buffer.print(
         \\    }}
         \\
         \\    /**
@@ -474,7 +482,7 @@ fn emit_batch(
         }
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\}}
         \\
         \\
@@ -482,7 +490,7 @@ fn emit_batch(
 }
 
 fn emit_batch_accessors(
-    buffer: *std.ArrayList(u8),
+    buffer: *std.Io.Writer,
     comptime mapping: TypeMapping,
     comptime field: anytype,
 ) !void {
@@ -491,14 +499,14 @@ fn emit_batch_accessors(
     const is_read_only = comptime mapping.is_read_only(field.name);
 
     // Get:
-    try buffer.writer().print(
+    try buffer.print(
         \\    /**
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
         \\
     , .{});
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.writer().print(
+        try buffer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -507,14 +515,14 @@ fn emit_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\     */
             \\
         , .{});
     }
 
     if (@typeInfo(field.type) == .array) {
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getArray(at(Struct.{[property]s}), {[array_len]d});
             \\    }}
@@ -526,7 +534,7 @@ fn emit_batch_accessors(
             .array_len = @typeInfo(field.type).array.len,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}{[java_type]s} get{[property]s}() {{
             \\        final var value = get{[batch_type]s}(at(Struct.{[property]s}));
             \\        return {[return_expression]s};
@@ -546,7 +554,7 @@ fn emit_batch_accessors(
     }
 
     // Set:
-    try buffer.writer().print(
+    try buffer.print(
         \\    /**
         \\     * @param {[param_name]s}
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
@@ -557,7 +565,7 @@ fn emit_batch_accessors(
     });
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.writer().print(
+        try buffer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -566,14 +574,14 @@ fn emit_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\     */
             \\
         , .{});
     }
 
     if (@typeInfo(field.type) == .array) {
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}void set{[property]s}(byte[] {[param_name]s}) {{
             \\        if ({[param_name]s} == null)
             \\            {[param_name]s} = new byte[{[array_len]d}];
@@ -590,7 +598,7 @@ fn emit_batch_accessors(
             .array_len = @typeInfo(field.type).array.len,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}void set{[property]s}(final {[java_type]s} {[param_name]s}) {{
             \\        put{[batch_type]s}(at(Struct.{[property]s}), {[param_name]s}{[value_expression]s});
             \\    }}
@@ -615,7 +623,7 @@ fn emit_batch_accessors(
 // - A BigInteger, heap-allocated, for balances and amounts;
 // - Two 64-bit integers (long), stack-allocated, for both cases;
 fn emit_u128_batch_accessors(
-    buffer: *std.ArrayList(u8),
+    buffer: *std.Io.Writer,
     comptime mapping: TypeMapping,
     comptime field: anytype,
 ) !void {
@@ -625,7 +633,7 @@ fn emit_u128_batch_accessors(
 
     if (big_integer.contains(field.name)) {
         // Get BigInteger:
-        try buffer.writer().print(
+        try buffer.print(
             \\    /**
             \\     * @return a {{@link java.math.BigInteger}} representing the 128-bit value.
             \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
@@ -633,7 +641,7 @@ fn emit_u128_batch_accessors(
         , .{});
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -642,13 +650,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     */
                 \\
             , .{});
         }
 
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}BigInteger get{[property]s}() {{
             \\        final var index = at(Struct.{[property]s});
             \\        return UInt128.asBigInteger(
@@ -663,7 +671,7 @@ fn emit_u128_batch_accessors(
         });
     } else {
         // Get array:
-        try buffer.writer().print(
+        try buffer.print(
             \\    /**
             \\     * @return an array of 16 bytes representing the 128-bit value.
             \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
@@ -671,7 +679,7 @@ fn emit_u128_batch_accessors(
         , .{});
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -680,13 +688,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     */
                 \\
             , .{});
         }
 
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getUInt128(at(Struct.{[property]s}));
             \\    }}
@@ -699,7 +707,7 @@ fn emit_u128_batch_accessors(
     }
 
     // Get long:
-    try buffer.writer().print(
+    try buffer.print(
         \\    /**
         \\     * @param part a {{@link UInt128}} enum indicating which part of the 128-bit value
         \\              is to be retrieved.
@@ -711,7 +719,7 @@ fn emit_u128_batch_accessors(
     , .{});
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.writer().print(
+        try buffer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -720,13 +728,13 @@ fn emit_u128_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\     */
             \\
         , .{});
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\    {[visibility]s}long get{[property]s}(final UInt128 part) {{
         \\        return getUInt128(at(Struct.{[property]s}), part);
         \\    }}
@@ -739,7 +747,7 @@ fn emit_u128_batch_accessors(
 
     if (big_integer.contains(field.name)) {
         // Set BigInteger:
-        try buffer.writer().print(
+        try buffer.print(
             \\    /**
             \\     * @param {[param_name]s} a {{@link java.math.BigInteger}} representing the 128-bit value.
             \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
@@ -750,7 +758,7 @@ fn emit_u128_batch_accessors(
         });
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -759,13 +767,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     */
                 \\
             , .{});
         }
 
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}void set{[property]s}(final BigInteger {[param_name]s}) {{
             \\        putUInt128(at(Struct.{[property]s}), UInt128.asBytes({[param_name]s}));
             \\    }}
@@ -778,7 +786,7 @@ fn emit_u128_batch_accessors(
         });
     } else {
         // Set array:
-        try buffer.writer().print(
+        try buffer.print(
             \\    /**
             \\     * @param {[param_name]s} an array of 16 bytes representing the 128-bit value.
             \\     * @throws IllegalArgumentException if {{@code {[param_name]s}}} is not 16 bytes long.
@@ -790,7 +798,7 @@ fn emit_u128_batch_accessors(
         });
 
         if (mapping.docs_link) |docs_link| {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
                 \\     */
                 \\
@@ -799,13 +807,13 @@ fn emit_u128_batch_accessors(
                 .field_name = field.name,
             });
         } else {
-            try buffer.writer().print(
+            try buffer.print(
                 \\     */
                 \\
             , .{});
         }
 
-        try buffer.writer().print(
+        try buffer.print(
             \\    {[visibility]s}void set{[property]s}(final byte[] {[param_name]s}) {{
             \\        putUInt128(at(Struct.{[property]s}), {[param_name]s});
             \\    }}
@@ -819,7 +827,7 @@ fn emit_u128_batch_accessors(
     }
 
     // Set long:
-    try buffer.writer().print(
+    try buffer.print(
         \\    /**
         \\     * @param leastSignificant a {{@code long}} representing the first 8 bytes of the 128-bit value.
         \\     * @param mostSignificant a {{@code long}} representing the last 8 bytes of the 128-bit value.
@@ -829,7 +837,7 @@ fn emit_u128_batch_accessors(
     , .{});
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.writer().print(
+        try buffer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -838,13 +846,13 @@ fn emit_u128_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\     */
             \\
         , .{});
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\    {[visibility]s}void set{[property]s}(final long leastSignificant, final long mostSignificant) {{
         \\        putUInt128(at(Struct.{[property]s}), leastSignificant, mostSignificant);
         \\    }}
@@ -856,7 +864,7 @@ fn emit_u128_batch_accessors(
     });
 
     // Set long without most significant bits
-    try buffer.writer().print(
+    try buffer.print(
         \\    /**
         \\     * @param leastSignificant a {{@code long}} representing the first 8 bytes of the 128-bit value.
         \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
@@ -865,7 +873,7 @@ fn emit_u128_batch_accessors(
     , .{});
 
     if (mapping.docs_link) |docs_link| {
-        try buffer.writer().print(
+        try buffer.print(
             \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
             \\     */
             \\
@@ -874,13 +882,13 @@ fn emit_u128_batch_accessors(
             .field_name = field.name,
         });
     } else {
-        try buffer.writer().print(
+        try buffer.print(
             \\     */
             \\
         , .{});
     }
 
-    try buffer.writer().print(
+    try buffer.print(
         \\    {[visibility]s}void set{[property]s}(final long leastSignificant) {{
         \\        putUInt128(at(Struct.{[property]s}), leastSignificant, 0);
         \\    }}
@@ -895,7 +903,7 @@ fn emit_u128_batch_accessors(
 pub fn generate_bindings(
     comptime ZigType: type,
     comptime mapping: TypeMapping,
-    buffer: *std.ArrayList(u8),
+    buffer: *std.Io.Writer,
 ) !void {
     @setEvalBranchQuota(100_000);
 
@@ -927,38 +935,38 @@ pub fn generate_bindings(
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
 
-    var args = try std.process.argsWithAllocator(allocator);
+    var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
     assert(args.skip());
     const target_dir_path = args.next().?;
     assert(args.next() == null);
 
-    var target_dir = try std.fs.cwd().openDir(target_dir_path, .{});
-    defer target_dir.close();
+    var target_dir = try std.Io.Dir.cwd().openDir(init.io, target_dir_path, .{});
+    defer target_dir.close(init.io);
 
     // Emit Java declarations.
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const mapping = type_mapping[1];
 
-        var buffer = std.ArrayList(u8).init(allocator);
-        try generate_bindings(ZigType, mapping, &buffer);
+        var buffer: std.Io.Writer.Allocating = .init(allocator);
+        try generate_bindings(ZigType, mapping, &buffer.writer);
 
-        try target_dir.writeFile(.{
+        try target_dir.writeFile(init.io, .{
             .sub_path = mapping.name ++ ".java",
-            .data = buffer.items,
+            .data = buffer.written(),
         });
     }
 
     {
-        var buffer = std.ArrayList(u8).init(allocator);
-        try buffer.writer().print(
+        var buffer: std.Io.Writer.Allocating = .init(allocator);
+        try buffer.writer.print(
             \\package com.tigerbeetle;
             \\
             \\interface TBClient {{
@@ -970,9 +978,9 @@ pub fn main() !void {
             @sizeOf(exports.tb_client_t),
             @alignOf(exports.tb_client_t),
         });
-        try target_dir.writeFile(.{
+        try target_dir.writeFile(init.io, .{
             .sub_path = "TBClient.java",
-            .data = buffer.items,
+            .data = buffer.written(),
         });
     }
 }

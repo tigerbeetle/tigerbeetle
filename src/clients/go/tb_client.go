@@ -172,40 +172,48 @@ func (c *c_client) doRequest(
 	}
 
 	client_status := C.tb_client_submit(c.tb_client, packet)
-	if client_status == C.TB_CLIENT_INVALID {
-		return nil, ErrClientClosed
-	}
+	switch client_status {
+	case C.TB_CLIENT_SUCCESS:
+		// Wait for the request to complete.
+		reply := <-req.ready
+		packet_status := C.TB_PACKET_STATUS(packet.status)
 
-	// Wait for the request to complete.
-	reply := <-req.ready
-	packet_status := C.TB_PACKET_STATUS(packet.status)
-
-	// Handle packet error
-	if packet_status != C.TB_PACKET_OK {
-		switch packet_status {
-		case C.TB_PACKET_TOO_MUCH_DATA:
-			return nil, ErrTooMuchData
-		case C.TB_PACKET_CLIENT_EVICTED:
-			return nil, ErrClientEvicted
-		case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
-			return nil, ErrClientReleaseTooLow
-		case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
-			return nil, ErrClientReleaseTooHigh
-		case C.TB_PACKET_CLIENT_SHUTDOWN:
-			return nil, ErrClientClosed
-		case C.TB_PACKET_INVALID_OPERATION:
-			// We control what C.TB_OPERATION is given
-			// but allow an invalid opcode to be passed to emulate a client nop.
-			return nil, ErrInvalidOperation
-		case C.TB_PACKET_INVALID_DATA_SIZE:
-			// We control what type of data is given.
-			panic("unreachable")
-		default:
-			panic("tb_client_submit(): returned packet with invalid status")
+		// Handle packet error
+		if packet_status != C.TB_PACKET_OK {
+			switch packet_status {
+			case C.TB_PACKET_TOO_MUCH_DATA:
+				return nil, ErrTooMuchData
+			case C.TB_PACKET_CLIENT_EVICTED:
+				return nil, ErrClientEvicted
+			case C.TB_PACKET_CLIENT_RELEASE_TOO_LOW:
+				return nil, ErrClientReleaseTooLow
+			case C.TB_PACKET_CLIENT_RELEASE_TOO_HIGH:
+				return nil, ErrClientReleaseTooHigh
+			case C.TB_PACKET_CLIENT_CLOSED:
+				return nil, ErrClientClosed
+			case C.TB_PACKET_INVALID_OPERATION:
+				// We control what C.TB_OPERATION is given
+				// but allow an invalid opcode to be passed to emulate a client nop.
+				return nil, ErrInvalidOperation
+			case C.TB_PACKET_INVALID_DATA_SIZE:
+				// We control what type of data is given.
+				panic("unreachable")
+			default:
+				panic("tb_client_submit(): returned packet with invalid status")
+			}
 		}
-	}
 
-	return reply, nil
+		return reply, nil
+
+	case C.TB_CLIENT_CLOSED:
+		return nil, ErrClientClosed
+
+	case C.TB_CLIENT_NOT_INITIALIZED:
+		panic("tb_client_submit(): client interface not initialized")
+
+	default:
+		panic("tb_client_submit(): invalid tb_client_status")
+	}
 }
 
 //export onGoPacketCompletion

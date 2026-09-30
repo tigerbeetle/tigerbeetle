@@ -1,14 +1,14 @@
 const std = @import("std");
-const posix = std.posix;
 const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
 const stdx = @import("stdx");
+const posix = stdx.posix;
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
-const TimeOS = @import("../time.zig").TimeOS;
+const TimeOS = stdx.TimeOS;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
@@ -21,6 +21,10 @@ pub const IO = struct {
     pub const dsync_all = false;
 
     kq: fd_t,
+
+    /// The `std.Io` used for blocking file system operations (e.g. `aof_blocking_*`).
+    io_std: std.Io,
+
     event_id: Event = 0,
     time: TimeOS = .{},
     io_inflight: usize = 0,
@@ -31,13 +35,13 @@ pub const IO = struct {
 
     stats: common.Stats = .{},
 
-    pub fn init(entries: u12, flags: u32) !IO {
+    pub fn init(io_std: std.Io, entries: u12, flags: u32) !IO {
         _ = entries;
         _ = flags;
 
         const kq = try posix.kqueue();
         assert(kq > -1);
-        return IO{ .kq = kq };
+        return IO{ .kq = kq, .io_std = io_std };
     }
 
     pub fn deinit(self: *IO) void {
@@ -227,7 +231,7 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: std.net.Address,
+            address: stdx.RawAddress,
             initiated: bool,
         },
         fsync: struct {
@@ -276,7 +280,7 @@ pub const IO = struct {
         comptime callback: anytype,
         completion: *Completion,
         comptime operation_tag: std.meta.Tag(Operation),
-        operation_data: std.meta.TagPayload(Operation, operation_tag),
+        operation_data: @FieldType(Operation, @tagName(operation_tag)),
         comptime OperationImpl: type,
     ) void {
         const on_complete_fn = struct {
@@ -439,7 +443,7 @@ pub const IO = struct {
             .connect,
             .{
                 .socket = socket,
-                .address = address.to_std(),
+                .address = address.to_raw(),
                 .initiated = false,
             },
             struct {
@@ -549,7 +553,7 @@ pub const IO = struct {
                             .PERM => error.AccessDenied,
                             .EXIST => error.PathAlreadyExists,
                             .BUSY => error.DeviceBusy,
-                            .OPNOTSUPP => error.FileLocksNotSupported,
+                            .OPNOTSUPP => error.FileLocksUnsupported,
                             .AGAIN => error.WouldBlock,
                             .TXTBSY => error.FileBusy,
                             else => |err| stdx.unexpected_errno("openat", err),
@@ -982,7 +986,7 @@ pub const IO = struct {
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !fd_t {
+    pub fn open_dir(_: *IO, dir_path: []const u8) !fd_t {
         return posix.open(dir_path, .{ .CLOEXEC = true, .ACCMODE = .RDONLY }, 0);
     }
 
@@ -1117,7 +1121,7 @@ pub const IO = struct {
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
     fn fs_allocate(fd: fd_t, size: u64) !void {
-        log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
+        log.info("allocating {Bi}...", .{size});
 
         // Darwin doesn't have fallocate() but we can simulate it using fcntl()s.
         //
@@ -1175,37 +1179,41 @@ pub const IO = struct {
         };
     }
 
-    pub const PReadError = posix.PReadError;
+    pub const PReadError = std.Io.File.ReadPositionalError;
 
-    pub fn aof_blocking_write_all(_: *IO, fd: fd_t, buffer: []const u8) posix.WriteError!void {
-        return common.aof_blocking_write_all(fd, buffer);
+    pub fn aof_blocking_write_all(
+        io: *IO,
+        fd: fd_t,
+        buffer: []const u8,
+    ) std.Io.File.Writer.Error!void {
+        return common.aof_blocking_write_all(io.io_std, fd, buffer);
     }
 
-    pub fn aof_blocking_pread_all(_: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
-        return common.aof_blocking_pread_all(fd, buffer, offset);
+    pub fn aof_blocking_pread_all(io: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
+        return common.aof_blocking_pread_all(io.io_std, fd, buffer, offset);
     }
 
-    pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
-        return common.aof_blocking_close(fd);
+    pub fn aof_blocking_close(io: *IO, fd: fd_t) void {
+        return common.aof_blocking_close(io.io_std, fd);
     }
 
-    pub fn aof_blocking_stat(_: *IO, path: []const u8) std.fs.Dir.StatFileError!std.fs.File.Stat {
-        return common.aof_blocking_stat(path);
+    pub fn aof_blocking_stat(io: *IO, path: []const u8) std.Io.Dir.StatFileError!std.Io.File.Stat {
+        return common.aof_blocking_stat(io.io_std, path);
     }
 
-    pub fn aof_blocking_fstat(_: *IO, fd: fd_t) std.fs.Dir.StatError!std.fs.File.Stat {
-        return common.aof_blocking_fstat(fd);
+    pub fn aof_blocking_fstat(io: *IO, fd: fd_t) std.Io.Dir.StatError!std.Io.File.Stat {
+        return common.aof_blocking_fstat(io.io_std, fd);
     }
 
     pub fn aof_blocking_open(io: *IO, path: []const u8) !fd_t {
         stdx.maybe(std.fs.path.isAbsolute(path));
 
         const dir_path = std.fs.path.dirname(path) orelse ".";
-        const dir_fd = try IO.open_dir(dir_path);
+        const dir_fd = try io.open_dir(dir_path);
         defer io.aof_blocking_close(dir_fd);
 
         const file_path = std.fs.path.basename(path);
 
-        return common.aof_blocking_open(dir_fd, file_path);
+        return common.aof_blocking_open(io.io_std, dir_fd, file_path);
     }
 };

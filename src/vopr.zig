@@ -91,13 +91,13 @@ const CLIArgs = struct {
     seed: ?[]const u8 = null,
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     comptime assert(constants.verify);
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
-    log_buffer.unbuffered_writer = std.io.getStdErr().writer();
+    log_buffer = std.Io.File.stderr().writerStreaming(init.io, &log_write_buffer);
     fuzz.limit_ram();
 
-    var gpa_instance: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa_instance: std.heap.DebugAllocator(.{}) = .{};
     defer {
         _ = gpa_instance.detectLeaks();
         switch (gpa_instance.deinit()) {
@@ -111,7 +111,7 @@ pub fn main() !void {
     var flags = stdx.Flags.init(gpa);
     defer flags.deinit(gpa);
 
-    const cli_args = flags.parse(CLIArgs);
+    const cli_args = flags.parse(CLIArgs, init.minimal.args);
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
@@ -124,7 +124,7 @@ pub fn main() !void {
 
     log_performance_mode = cli_args.performance;
 
-    const seed_random = std.crypto.random.int(u64);
+    const seed_random = stdx.crypto_random_int(init.io, u64);
     const seed = seed_from_arg: {
         const seed_argument = cli_args.seed orelse break :seed_from_arg seed_random;
         break :seed_from_arg vsr.testing.parse_seed(seed_argument);
@@ -178,31 +178,31 @@ pub fn main() !void {
         \\          replicas={}
         \\          standbys={}
         \\          clients={}
-        \\          request_probability={}
-        \\          idle_on_probability={}
-        \\          idle_off_probability={}
-        \\          one_way_delay_mean={}
-        \\          one_way_delay_min={}
-        \\          packet_loss_probability={}
+        \\          request_probability={f}
+        \\          idle_on_probability={f}
+        \\          idle_off_probability={f}
+        \\          one_way_delay_mean={f}
+        \\          one_way_delay_min={f}
+        \\          packet_loss_probability={f}
         \\          path_maximum_capacity={} messages
-        \\          path_clog_duration_mean={}
-        \\          path_clog_probability={}
-        \\          packet_replay_probability={}
+        \\          path_clog_duration_mean={f}
+        \\          path_clog_probability={f}
+        \\          packet_replay_probability={f}
         \\          partition_mode={s}
         \\          partition_symmetry={s}
-        \\          partition_probability={}
-        \\          unpartition_probability={}
+        \\          partition_probability={f}
+        \\          unpartition_probability={f}
         \\          partition_stability={} ticks
         \\          unpartition_stability={} ticks
-        \\          read_latency_min={}
-        \\          read_latency_mean={}
-        \\          write_latency_min={}
-        \\          write_latency_mean={}
-        \\          read_fault_probability={}
-        \\          write_fault_probability={}
-        \\          crash_probability={}
+        \\          read_latency_min={f}
+        \\          read_latency_mean={f}
+        \\          write_latency_min={f}
+        \\          write_latency_mean={f}
+        \\          read_fault_probability={f}
+        \\          write_fault_probability={f}
+        \\          crash_probability={f}
         \\          crash_stability={} ticks
-        \\          restart_probability={}
+        \\          restart_probability={f}
         \\          restart_stability={} ticks
     , .{
         seed,
@@ -363,9 +363,9 @@ pub fn main() !void {
     }
 
     if (cli_args.performance) {
-        log.info("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
+        log.info("\nMessages:\n{f}", .{simulator.cluster.network.message_summary});
     } else {
-        log.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
+        log.debug("\nMessages:\n{f}", .{simulator.cluster.network.message_summary});
     }
 
     log.info("\n          PASSED ({} ticks)", .{tick_total});
@@ -1176,11 +1176,11 @@ pub const Simulator = struct {
         assert(simulator.core.count() > 0);
 
         const FaultyReplicas = stdx.BitSetType(constants.members_max);
-        var blocks_missing = std.AutoArrayHashMap(
+        var blocks_missing: std.AutoArrayHashMapUnmanaged(
             struct { address: u64, checksum: u128 },
             FaultyReplicas,
-        ).init(gpa);
-        defer blocks_missing.deinit();
+        ) = .empty;
+        defer blocks_missing.deinit(gpa);
 
         // Find all blocks that any replica in the core is missing.
         for (simulator.cluster.replicas) |replica| {
@@ -1191,7 +1191,7 @@ pub const Simulator = struct {
 
             var fault_iterator = replica.grid.read_global_queue.iterate();
             while (fault_iterator.next()) |faulty_read| {
-                const v = try blocks_missing.getOrPut(.{
+                const v = try blocks_missing.getOrPut(gpa, .{
                     .address = faulty_read.address,
                     .checksum = faulty_read.checksum,
                 });
@@ -1210,7 +1210,7 @@ pub const Simulator = struct {
 
             var repair_iterator = replica.grid.blocks_missing.faulty_blocks.iterator();
             while (repair_iterator.next()) |fault| {
-                const v = try blocks_missing.getOrPut(.{
+                const v = try blocks_missing.getOrPut(gpa, .{
                     .address = fault.key_ptr.*,
                     .checksum = fault.value_ptr.checksum,
                 });
@@ -1556,7 +1556,7 @@ pub const Simulator = struct {
         var recoverable_count: usize = 0;
         for (simulator.cluster.replicas, 0..) |*r, i| {
             recoverable_count += @intFromBool(simulator.cluster.replica_health[i] == .up and
-                !simulator.replica_reformats.is_set(replica.replica) and
+                !simulator.replica_reformats.is_set(i) and
                 !r.standby() and
                 r.status != .recovering_head and
                 r.syncing == .idle);
@@ -1767,16 +1767,15 @@ fn full_core(replica_count: u8, standby_count: u8) Core {
     return core;
 }
 
-var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
-    // This is initialized in main(), as std.io.getStdErr() is not comptime known on e.g. Windows.
-    .unbuffered_writer = undefined,
-};
+var log_write_buffer: [4096]u8 = undefined;
+// This is initialized in main(), as stderr is not comptime known on e.g. Windows.
+var log_buffer: std.Io.File.Writer = undefined;
 
 var log_performance_mode: bool = false;
 
 fn log_override(
     comptime level: std.log.Level,
-    comptime scope: @TypeOf(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -1797,9 +1796,9 @@ fn log_override(
 
     // Print the message to stderr using a buffer to avoid many small write() syscalls when
     // providing many format arguments. Silently ignore failure.
-    log_buffer.writer().print(prefix ++ format ++ "\n", args) catch {};
+    log_buffer.interface.print(prefix ++ format ++ "\n", args) catch {};
 
     // Flush the buffer before returning to ensure, for example, that a log message
     // immediately before a failing assertion is fully printed.
-    log_buffer.flush() catch {};
+    log_buffer.interface.flush() catch {};
 }

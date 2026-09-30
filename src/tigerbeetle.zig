@@ -431,23 +431,17 @@ pub const CreateTransferStatus = enum(u32) {
     /// As a workaround we generate a new Ordered enum to be used in this case.
     pub const Ordered = type: {
         const values = std.enums.values(CreateTransferStatus);
-        var fields: [values.len]std.builtin.Type.EnumField = undefined;
+        var names: [values.len][]const u8 = undefined;
+        var tags: [values.len]std.meta.Tag(CreateTransferStatus) = undefined;
         for (0..values.len - 1) |index| {
             const result: CreateTransferStatus = @enumFromInt(index);
-            fields[index] = .{
-                .name = @tagName(result),
-                .value = index,
-            };
+            names[index] = @tagName(result);
+            tags[index] = index;
         }
-        fields[values.len - 1] = .{
-            .name = @tagName(CreateTransferStatus.created),
-            .value = @intFromEnum(CreateTransferStatus.created),
-        };
+        names[values.len - 1] = @tagName(CreateTransferStatus.created);
+        tags[values.len - 1] = @intFromEnum(CreateTransferStatus.created);
 
-        var type_info = @typeInfo(enum {});
-        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferStatus);
-        type_info.@"enum".fields = &fields;
-        break :type @Type(type_info);
+        break :type @Enum(std.meta.Tag(CreateTransferStatus), .exhaustive, &names, &tags);
     };
 
     pub fn to_ordered(value: CreateTransferStatus) Ordered {
