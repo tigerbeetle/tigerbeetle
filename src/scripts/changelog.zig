@@ -21,7 +21,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     const date_time = time.realtime().date_time();
     const today = try shell.fmt(
         "{:0>4}-{:0>2}-{:0>2}",
-        .{ date_time.year, date_time.month, date_time.day },
+        .{ date_time.year, @intFromEnum(date_time.month) + 1, date_time.day },
     );
 
     try shell.exec("git fetch origin --quiet", .{});
