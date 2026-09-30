@@ -66,11 +66,13 @@ In the default configuration, the maximum batch sizes for each request type are:
 | `query_accounts`        |                          1† |                       8189 |
 | `query_transfers`       |                          1† |                       8189 |
 
-- [Node.js](/src/clients/node/README.md#batching)
+- [.NET](/src/clients/dotnet/README.md#batching)
 - [Go](/src/clients/go/README.md#batching)
 - [Java](/src/clients/java/README.md#batching)
-- [.NET](/src/clients/dotnet/README.md#batching)
+- [Node.js](/src/clients/node/README.md#batching)
 - [Python](/src/clients/python/README.md#batching)
+- [Ruby](/src/clients/ruby/README.md#batching)
+- [Rust](/src/clients/rust/README.md#batching)
 
 ### Automatic Batching
 
