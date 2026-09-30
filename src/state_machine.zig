@@ -3788,15 +3788,24 @@ pub fn StateMachineType(comptime Storage: type) type {
                 if (t.flags.imported) {
                     assert(t.timestamp != 0);
                     assert(t.timestamp <= timestamp_event);
+
                     // Allows past timestamp, but validates whether it regressed from the last
                     // inserted event.
                     // This validation must be called _after_ the idempotency checks so the user
                     // can still handle `exists` results when importing.
                     if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                        maybe(self.forest.grooves.account_events.objects.key_range == null);
                         if (t.timestamp <= key_range.key_max) {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
+                    if (self.forest.grooves.account_events.objects.key_range) |*key_range| {
+                        assert(self.forest.grooves.transfers.objects.key_range != null);
+                        if (t.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+
                     if (self.forest.grooves.accounts.indirect_lookup(.{
                         .timestamp = t.timestamp,
                     }) != null) {
@@ -4146,15 +4155,24 @@ pub fn StateMachineType(comptime Storage: type) type {
                 if (t.flags.imported) {
                     assert(t.timestamp != 0);
                     assert(t.timestamp <= timestamp_event);
+
                     // Allows past timestamp, but validates whether it regressed from the last
-                    // inserted transfer.
+                    // inserted event.
                     // This validation must be called _after_ the idempotency checks so the user
                     // can still handle `exists` results when importing.
                     if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                        maybe(self.forest.grooves.account_events.objects.key_range == null);
                         if (t.timestamp <= key_range.key_max) {
                             return .imported_event_timestamp_must_not_regress;
                         }
                     }
+                    if (self.forest.grooves.account_events.objects.key_range) |*key_range| {
+                        assert(self.forest.grooves.transfers.objects.key_range != null);
+                        if (t.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+
                     if (self.forest.grooves.accounts.indirect_lookup(.{
                         .timestamp = t.timestamp,
                     }) != null) {

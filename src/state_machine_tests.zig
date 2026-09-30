@@ -134,7 +134,7 @@ const TestAction = union(enum) {
 
     const Tick = struct {
         value: i64,
-        unit: enum { nanoseconds, seconds },
+        unit: enum { nanoseconds, milliseconds, seconds },
     };
 
     const CreateAccount = struct {
@@ -614,6 +614,7 @@ fn RunnerType(comptime options: Options) type {
             const interval_ns: u64 = @abs(ticks.value) *
                 @as(u64, switch (ticks.unit) {
                     .nanoseconds => 1,
+                    .milliseconds => std.time.ns_per_ms,
                     .seconds => std.time.ns_per_s,
                 });
 
@@ -2563,6 +2564,34 @@ test "imported events: mixed multibatching" {
         \\ commit create_transfers
         \\ transfer   T1 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   7 created
         \\ transfer   T2 A3 A4    1   _  _  _  _    _ L1 C2   _   _   _   _   _   _  IMP _ _ _   8 imported_event_timestamp_must_not_advance
+        \\ commit create_transfers
+    );
+}
+
+test "imported events: timestamp must not regress after expiry" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
+        \\ commit create_accounts
+        \\
+        // T1 will expire in 1 second.
+        \\ transfer T1 A1 A2 10  _ _ _ _ 1 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+        \\ commit create_transfers
+        \\
+        \\ tick 900 milliseconds
+        \\
+        // T1 hasn't expired yet.
+        \\ transfer T2 A1 A2  20  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 10 created
+        \\ commit create_transfers
+        \\
+        \\ tick 100 milliseconds
+        \\
+        // T1's expiry timestamp is later than the imported timestamp.
+        \\ transfer T3 A1 A2  30  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 20 imported_event_timestamp_must_not_regress
+        \\ commit create_transfers
+        \\
+        // T1's expiry timestamp is earlier than the imported timestamp.
+        \\ transfer T4 A1 A2  40  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 1000000035 created
         \\ commit create_transfers
     );
 }

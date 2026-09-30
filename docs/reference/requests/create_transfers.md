@@ -528,7 +528,9 @@ already voided because its [timeout](../transfer.md#timeout) has passed.
 This result only applies when [`Transfer.flags.imported`](../transfer.md#flagsimported) is set.
 
 The transfer was not created. The user-defined [`Transfer.timestamp`](../transfer.md#timestamp)
-regressed, but it must be greater than the last timestamp assigned to any `Transfer` in the cluster and cannot be equal to the timestamp of any existing [`Account`](../account.md).
+regressed, but it must be greater than the last timestamp assigned to any `Transfer` commited or
+[automatically expired](../transfer.md#timeout) by the cluster, and cannot be equal to the
+timestamp of any existing [`Account`](../account.md).
 
 #### `imported_event_timestamp_must_postdate_debit_account`
 
