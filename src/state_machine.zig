@@ -237,7 +237,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         prefetch_input: ?[]const u8 = null,
         prefetch_callback: ?*const fn (*StateMachine) void = null,
         prefetch_context: PrefetchContext = .null,
-        scan_builder: ScanBuilders = .null,
+        scan_builder: ScanBuilder = .null,
 
         scan_lookup: ScanLookup = .null,
         scan_lookup_buffer: []align(constants.cache_line_size) u8,
@@ -653,11 +653,11 @@ pub fn StateMachineType(comptime Storage: type) type {
         /// Defines a `ScanBuilder` type for each type of query the StateMachine executes.
         /// Note: `get_change_events` does not use a `ScanBuilder`, since it iterates directly
         /// over the object tree without filtering by secondary indexes.
-        const ScanBuilders = union(enum) {
+        const ScanBuilder = union(enum) {
             null,
-            accounts: ScanBuilders.Accounts,
-            transfers: ScanBuilders.Transfers,
-            expire_pending_transfers: ScanBuilders.ExpirePendingTransfers,
+            accounts: ScanBuilder.Accounts,
+            transfers: ScanBuilder.Transfers,
+            expire_pending_transfers: ScanBuilder.ExpirePendingTransfers,
 
             const Tag = std.meta.Tag(@This());
 
@@ -680,10 +680,10 @@ pub fn StateMachineType(comptime Storage: type) type {
             );
 
             pub fn FieldType(comptime field: Tag) type {
-                return @FieldType(ScanBuilders, @tagName(field));
+                return @FieldType(ScanBuilder, @tagName(field));
             }
 
-            pub fn get(self: *ScanBuilders, comptime field: Tag) *FieldType(field) {
+            pub fn get(self: *ScanBuilder, comptime field: Tag) *FieldType(field) {
                 comptime assert(field != .null);
                 assert(self.* == .null);
 
@@ -691,7 +691,7 @@ pub fn StateMachineType(comptime Storage: type) type {
                     @fieldParentPtr("scan_builder", self),
                 );
                 self.* = @unionInit(
-                    ScanBuilders,
+                    ScanBuilder,
                     @tagName(field),
                     .init(&state_machine.forest),
                 );
@@ -716,21 +716,21 @@ pub fn StateMachineType(comptime Storage: type) type {
             /// Used by `query_accounts`.
             const Accounts = ScanLookupType(
                 AccountsGroove,
-                ScanBuilders.Accounts.Scan,
+                ScanBuilder.Accounts.Scan,
                 Storage,
             );
 
             /// Used by `query_transfers` and `get_account_transfers`.
             const Transfers = ScanLookupType(
                 TransfersGroove,
-                ScanBuilders.Transfers.Scan,
+                ScanBuilder.Transfers.Scan,
                 Storage,
             );
 
             /// Used by `get_account_balances`.
             const AccountBalances = ScanLookupType(
                 AccountEventsGroove,
-                ScanBuilders.Transfers.Scan,
+                ScanBuilder.Transfers.Scan,
                 Storage,
             );
 
@@ -740,7 +740,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             /// Used by `expire_pending_transfers`.
             const ExpirePendingTransfers = ScanLookupType(
                 TransfersGroove,
-                ScanBuilders.ExpirePendingTransfers.Scan,
+                ScanBuilder.ExpirePendingTransfers.Scan,
                 Storage,
             );
 
@@ -1802,7 +1802,7 @@ pub fn StateMachineType(comptime Storage: type) type {
         fn get_scan_from_account_filter(
             self: *StateMachine,
             filter: *const AccountFilter,
-        ) ?*ScanBuilders.Transfers.Scan {
+        ) ?*ScanBuilder.Transfers.Scan {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -1841,7 +1841,7 @@ pub fn StateMachineType(comptime Storage: type) type {
             //     user_data_32=? AND
             //     code=?
             // ```
-            const Scan = ScanBuilders.Transfers.Scan;
+            const Scan = ScanBuilder.Transfers.Scan;
             var scan_conditions: stdx.BoundedArrayType(*Scan, 5) = .{};
             const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
 
@@ -2109,9 +2109,9 @@ pub fn StateMachineType(comptime Storage: type) type {
 
         fn get_scan_from_query_filter(
             self: *StateMachine,
-            comptime target: std.meta.Tag(ScanBuilders),
+            comptime target: std.meta.Tag(ScanBuilder),
             filter: *const QueryFilter,
-        ) ?*ScanBuilders.FieldType(target).Scan {
+        ) ?*ScanBuilder.FieldType(target).Scan {
             comptime assert(target == .accounts or target == .transfers);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
@@ -2148,14 +2148,14 @@ pub fn StateMachineType(comptime Storage: type) type {
             };
             comptime assert(indexes.len < constants.lsm_scans_max);
 
-            const ScanBuilder = ScanBuilders.FieldType(target);
-            const scan_builder: *ScanBuilder = self.scan_builder.get(target);
-            var scan_conditions: stdx.BoundedArrayType(*ScanBuilder.Scan, indexes.len + 1) = .{};
+            const Scan = ScanBuilder.FieldType(target).Scan;
+            const scan_builder = self.scan_builder.get(target);
+            var scan_conditions: stdx.BoundedArrayType(*Scan, indexes.len + 1) = .{};
             inline for (indexes) |index| {
                 const filter_value = @field(filter, @tagName(index));
                 if (filter_value != 0) {
                     scan_conditions.push(scan_builder.scan_prefix(
-                        @field(std.meta.FieldEnum(ScanBuilder.Scan.Indexes), @tagName(index)),
+                        @field(std.meta.FieldEnum(Scan.Indexes), @tagName(index)),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         self.prefetch_snapshot.?,
                         filter_value,
@@ -5021,6 +5021,9 @@ fn ChangeEventsScanLookupType(
 }
 
 /// Expires pending transfers during the pulse operation.
+/// 1. Scan transfers by `expires_at` index.
+/// 2. Fetch the debit/credit accounts of each transfer from step 1.
+/// 3. Fetch the `TransfersPending` of each transfer from step 1.
 fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
     return struct {
         /// Determine "when" it needs to execute the expiration logic:
@@ -5033,7 +5036,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
         const ExpirePendingTransfersWorker = @This();
         const Operation = StateMachine.Operation;
         const ScanLookup = StateMachine.ScanLookup;
-        const ScanBuilders = StateMachine.ScanBuilders;
+        const ScanBuilder = StateMachine.ScanBuilder;
         const PrefetchContext = StateMachine.PrefetchContext;
 
         pub fn pulse_needed(worker: *const ExpirePendingTransfersWorker, timestamp: u64) bool {
@@ -5168,15 +5171,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             const result_count: u32 = state_machine.scan_lookup_results.items[0];
             assert(result_count > 0);
 
-            const result_max: u32 = @max(
-                Operation.create_transfers.event_max(state_machine.batch_size_limit),
-                Operation.deprecated_create_transfers_sparse.event_max(
-                    state_machine.batch_size_limit,
-                ),
-                Operation.deprecated_create_transfers_unbatched.event_max(
-                    state_machine.batch_size_limit,
-                ),
-            );
+            const result_max: u32 = create_transfers_result_max(state_machine.batch_size_limit);
             assert(result_count <= result_max);
             assert(state_machine.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
             const transfers: []const Transfer = stdx.bytes_as_slice(
@@ -5248,15 +5243,7 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
             if (result_count == 0) return;
             assert(result_count > 0);
 
-            const result_max: u32 = @max(
-                Operation.create_transfers.event_max(state_machine.batch_size_limit),
-                Operation.deprecated_create_transfers_sparse.event_max(
-                    state_machine.batch_size_limit,
-                ),
-                Operation.deprecated_create_transfers_unbatched.event_max(
-                    state_machine.batch_size_limit,
-                ),
-            );
+            const result_max: u32 = create_transfers_result_max(state_machine.batch_size_limit);
             assert(result_count <= result_max);
 
             assert(state_machine.scan_lookup_buffer_index > 0);
@@ -5281,14 +5268,10 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
                 const expires_at = p.timestamp + p.timeout_ns();
                 assert(expires_at <= timestamp_event);
 
-                const dr_account = state_machine.get_account(
-                    p.debit_account_id,
-                ).?;
+                const dr_account = state_machine.get_account(p.debit_account_id).?;
                 assert(dr_account.debits_pending >= p.amount);
 
-                const cr_account = state_machine.get_account(
-                    p.credit_account_id,
-                ).?;
+                const cr_account = state_machine.get_account(p.credit_account_id).?;
                 assert(cr_account.credits_pending >= p.amount);
 
                 var dr_account_new = dr_account;
@@ -5355,6 +5338,15 @@ fn ExpirePendingTransfersWorkerType(comptime StateMachine: type) type {
                     .amount = p.amount,
                 });
             }
+        }
+
+        /// Gets the maximum number of results for `create_transfer` and its deprecated versions.
+        fn create_transfers_result_max(batch_size_limit: u32) u32 {
+            return @max(
+                Operation.create_transfers.event_max(batch_size_limit),
+                Operation.deprecated_create_transfers_sparse.event_max(batch_size_limit),
+                Operation.deprecated_create_transfers_unbatched.event_max(batch_size_limit),
+            );
         }
 
         inline fn parent(worker: *ExpirePendingTransfersWorker) *StateMachine {

@@ -354,7 +354,7 @@ pub fn ScanType(
             callback: Callback,
         };
 
-        /// Maps the index name -> `Groove` relation.
+        /// Maps the "index name" -> "groove name" relation.
         const index_map: T: {
             const GrooveName = std.meta.FieldEnum(Forest.Grooves);
             // Timestamp from the ObjectTree:
