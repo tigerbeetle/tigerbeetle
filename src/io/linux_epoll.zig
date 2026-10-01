@@ -453,7 +453,7 @@ pub const IO = struct {
         _ = completion;
 
         const value: u64 = 1;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.write(event, @ptrCast(&value), @sizeOf(u64));
             switch (linux.errno(return_code)) {
                 .SUCCESS => {
@@ -467,7 +467,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("event_trigger: EINTR loop");
     }
 
     pub fn close_event(self: *IO, event: Event) void {
@@ -552,7 +552,7 @@ pub const IO = struct {
         assert(!completion.awaiting);
 
         const operation = &completion.operation.accept;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.accept4(
                 operation.socket,
                 @ptrCast(&operation.address),
@@ -576,7 +576,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("enqueue_accept: EINTR loop");
     }
 
     fn enqueue_close(self: *IO, completion: *Completion) void {
@@ -627,7 +627,7 @@ pub const IO = struct {
         assert(!completion.awaiting);
 
         const operation = completion.operation.eventfd_read;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.read(
                 operation.fd,
                 @ptrCast(&completion.eventfd_read_buffer),
@@ -650,7 +650,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("enqueue_eventfd_read: EINTR loop");
     }
 
     fn enqueue_recv(self: *IO, completion: *Completion) void {
@@ -659,7 +659,7 @@ pub const IO = struct {
         assert(!completion.awaiting);
 
         const operation = completion.operation.recv;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.recvfrom(
                 operation.socket,
                 operation.buffer.ptr,
@@ -685,7 +685,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("enqueue_recv: EINTR loop");
     }
 
     fn enqueue_send(self: *IO, completion: *Completion) void {
@@ -694,7 +694,7 @@ pub const IO = struct {
         assert(!completion.awaiting);
 
         const operation = completion.operation.send;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.sendto(
                 operation.socket,
                 operation.buffer.ptr,
@@ -720,7 +720,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("enqueue_send: EINTR loop");
     }
 
     fn enqueue_timeout(self: *IO, completion: *Completion) void {
@@ -857,7 +857,7 @@ pub const IO = struct {
         assert(!completion.awaiting);
 
         const operation = &completion.operation.accept;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.accept4(
                 operation.socket,
                 @ptrCast(&operation.address),
@@ -882,7 +882,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("process_accept: EINTR loop");
     }
 
     fn process_eventfd_read(self: *IO, completion: *Completion) void {
@@ -890,7 +890,7 @@ pub const IO = struct {
         assert(!completion.awaiting);
 
         const operation = completion.operation.eventfd_read;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.read(
                 operation.fd,
                 @ptrCast(&completion.eventfd_read_buffer),
@@ -913,14 +913,14 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("process_eventfd_read: EINTR loop");
     }
 
     fn process_recv(self: *IO, completion: *Completion) void {
         assert(!completion.awaiting);
 
         const operation = completion.operation.recv;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.recvfrom(
                 operation.socket,
                 operation.buffer.ptr,
@@ -946,14 +946,14 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("process_recv: EINTR loop");
     }
 
     fn process_send(self: *IO, completion: *Completion) void {
         assert(!completion.awaiting);
 
         const operation = completion.operation.send;
-        while (true) {
+        for (0..10_000) |_| {
             const return_code = linux.sendto(
                 operation.socket,
                 operation.buffer.ptr,
@@ -979,7 +979,7 @@ pub const IO = struct {
                     return;
                 },
             }
-        }
+        } else @panic("process_send: EINTR loop");
     }
 
     fn process_connect(self: *IO, completion: *Completion) void {
