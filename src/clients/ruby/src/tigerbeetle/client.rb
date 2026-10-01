@@ -34,10 +34,8 @@ module TigerBeetle
     end
 
     # Closes the client. This method waits for all in-flight requests to finish.
-    #
-    # @raise [TigerBeetle::ClientClosedError] if the client is already closed.
     def close
-      raise ClientClosedError, "client is already closed" if closed?
+      return if closed?
 
       @closed = true
       @native.close

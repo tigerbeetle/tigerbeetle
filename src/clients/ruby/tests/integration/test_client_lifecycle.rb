@@ -14,10 +14,11 @@ class TestClientLifecycle < Minitest::Test
     assert_predicate(client, :closed?)
   end
 
-  def test_double_close_raises
+  def test_double_close
     client = TigerBeetle::Client.new(cluster_id: 0, replica_addresses: @tb_address)
     client.close
-    assert_raises(TigerBeetle::ClientClosedError) { client.close }
+    client.close
+    assert_predicate(client, :closed?)
   end
 
   def test_native_submit_after_close_raises
