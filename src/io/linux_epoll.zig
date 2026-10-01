@@ -100,7 +100,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_callbacks.ns +=
-            timer.elapsed(self.time.monotonic()).ns;
+            timer.until(self.time.monotonic()).ns;
 
         self.run_callbacks();
     }
@@ -111,16 +111,16 @@ pub const IO = struct {
 
         const timer_run_for_ns = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
-            timer_run_for_ns.elapsed(self.time.monotonic()).ns;
+            timer_run_for_ns.until(self.time.monotonic()).ns;
 
         var now = self.time.monotonic();
         const deadline = now.add(.{ .ns = nanoseconds });
         while (now.ns < deadline.ns) : (now = self.time.monotonic()) {
-            try self.poll_epoll(now.elapsed(deadline));
+            try self.poll_epoll(now.until(deadline));
 
             const timer_callback = self.time.monotonic();
             defer self.stats.window.time_callbacks.ns +=
-                timer_callback.elapsed(self.time.monotonic()).ns;
+                timer_callback.until(self.time.monotonic()).ns;
 
             self.run_callbacks();
         }
