@@ -281,7 +281,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
     }
 
     const writer = tracer.options.writer orelse return;
-    const time_elapsed = tracer.time_start.elapsed(time_now);
+    const time_elapsed = tracer.time_start.until(time_now);
 
     var buffer_stream = std.Io.Writer.fixed(tracer.buffer);
 
@@ -328,7 +328,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 
     const event_start = tracer.events_started[stack].?;
     const event_end = tracer.time.monotonic();
-    const event_duration = event_start.elapsed(event_end);
+    const event_duration = event_start.until(event_end);
 
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
@@ -354,7 +354,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
         });
     }
 
-    tracer.write_stop(stack, tracer.time_start.elapsed(event_end));
+    tracer.write_stop(stack, tracer.time_start.until(event_end));
 }
 
 pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
@@ -367,7 +367,7 @@ pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
                 log.debug("{f}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
             }
 
-            const event_duration = tracer.time_start.elapsed(event_end);
+            const event_duration = tracer.time_start.until(event_end);
 
             tracer.events_started[stack] = null;
             tracer.write_stop(@intCast(stack), event_duration);

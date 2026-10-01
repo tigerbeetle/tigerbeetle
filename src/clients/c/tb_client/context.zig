@@ -734,7 +734,7 @@ pub fn ContextType(
 
             const current_timestamp = self.client.time.monotonic();
             self.request_latency =
-                self.request_timer.elapsed(current_timestamp);
+                self.request_timer.until(current_timestamp);
 
             // The client might have a smaller message size limit.
             maybe(constants.message_body_size_max < result.batch_size_limit);
@@ -784,7 +784,7 @@ pub fn ContextType(
 
             const current_timestamp = self.client.time.monotonic();
             self.request_latency =
-                self.request_timer.elapsed(current_timestamp);
+                self.request_timer.until(current_timestamp);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);

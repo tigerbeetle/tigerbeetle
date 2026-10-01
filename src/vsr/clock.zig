@@ -133,7 +133,7 @@ const Epoch = struct {
     /// A guard to prevent synchronizing too often without having learned any new samples.
     learned: bool = false,
 
-    fn elapsed(epoch: *Epoch, clock: *Clock) u64 {
+    fn until(epoch: *Epoch, clock: *Clock) u64 {
         return clock.monotonic().ns - epoch.monotonic;
     }
 
@@ -347,7 +347,7 @@ pub fn realtime_synchronized(self: *Clock) ?i64 {
     if (self.synchronization_disabled) {
         return self.realtime();
     } else if (self.epoch.synchronized) |interval| {
-        const elapsed = @as(i64, @intCast(self.epoch.elapsed(self)));
+        const elapsed = @as(i64, @intCast(self.epoch.until(self)));
         return std.math.clamp(
             self.realtime(),
             self.epoch.realtime + elapsed + interval.lower_bound,
@@ -384,7 +384,7 @@ pub fn tick(self: *Clock) void {
     self.synchronize();
     // Expire the current epoch if successive windows failed to synchronize:
     // Gradual clock drift prevents us from using an epoch for more than a few seconds.
-    if (self.epoch.elapsed(self) >= epoch_max) {
+    if (self.epoch.until(self) >= epoch_max) {
         log.err(
             "{}: no agreement on cluster time (partitioned or too many clock faults)",
             .{self.replica},
@@ -446,7 +446,7 @@ fn synchronize(self: *Clock) void {
     assert(self.window.synchronized == null);
 
     // Wait until the window has enough accurate samples:
-    const elapsed = self.window.elapsed(self);
+    const elapsed = self.window.until(self);
     if (elapsed < window_min) return;
     if (elapsed >= window_max) {
         // We took too long to synchronize the window, expire stale samples...
@@ -523,7 +523,7 @@ fn after_synchronization(self: *Clock) void {
         std.Io.Duration.fromNanoseconds(new_interval.upper_bound - new_interval.lower_bound),
     });
 
-    const elapsed: i64 = @intCast(self.epoch.elapsed(self));
+    const elapsed: i64 = @intCast(self.epoch.until(self));
     const system = self.realtime();
     const lower = self.epoch.realtime + elapsed + new_interval.lower_bound;
     const upper = self.epoch.realtime + elapsed + new_interval.upper_bound;

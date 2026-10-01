@@ -122,7 +122,7 @@ fn main_smoke(gpa: std.mem.Allocator, io: std.Io) !void {
             .seed = 123,
             .events_max = events_max,
         });
-        const fuzz_duration = timer_single.elapsed(time.monotonic());
+        const fuzz_duration = timer_single.until(time.monotonic());
         if (fuzz_duration.ns > 10 * std.time.ns_per_s) {
             log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {f}", .{
                 fuzz_duration,
@@ -130,7 +130,7 @@ fn main_smoke(gpa: std.mem.Allocator, io: std.Io) !void {
         }
     }
 
-    const elapsed = timer_all.elapsed(time.monotonic());
+    const elapsed = timer_all.until(time.monotonic());
     log.info("done in {f}", .{elapsed});
 }
 
@@ -155,6 +155,6 @@ fn main_single(gpa: std.mem.Allocator, io: std.Io, cli_args: CLIArgs) !void {
             .events_max = cli_args.events_max,
         }),
     }
-    const elapsed = timer.elapsed(time.monotonic());
+    const elapsed = timer.until(time.monotonic());
     log.info("done in {f}", .{elapsed});
 }

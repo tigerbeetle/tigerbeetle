@@ -104,7 +104,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
-            timer.elapsed(self.time.monotonic()).ns;
+            timer.until(self.time.monotonic()).ns;
 
         var now = self.time.monotonic();
         const deadline = now.add(.{ .ns = nanoseconds });
@@ -139,7 +139,7 @@ pub const IO = struct {
             // Doesn't account for flush_completions below; which indicates a bad assumption either
             // on our sizing of the loop, or a bug in the kernel.
             defer self.stats.window.time_kernel.ns +=
-                timer.elapsed(self.time.monotonic()).ns;
+                timer.until(self.time.monotonic()).ns;
 
             const submitted = submit_and_wait_timeout(
                 &self.ring,
@@ -203,7 +203,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_callbacks.ns +=
-            timer.elapsed(self.time.monotonic()).ns;
+            timer.until(self.time.monotonic()).ns;
 
         completion.complete();
     }

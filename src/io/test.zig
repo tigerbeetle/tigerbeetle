@@ -332,7 +332,7 @@ test "timeout" {
             try self.io.run();
             try testing.expectEqual(@as(u32, timeouts_total), self.timeouts_fired);
 
-            const elapsed = start.elapsed(self.stop.?);
+            const elapsed = start.until(self.stop.?);
             if (elapsed.ns < delay.ns) {
                 std.log.err("elapsed={f} < delay={f}", .{ elapsed, delay });
                 return error.TestUnexpectedResult;
@@ -396,7 +396,7 @@ test "event" {
             assert(self.count == events_count);
 
             // Make sure at least some time has passed.
-            const elapsed = timer.elapsed(time.monotonic());
+            const elapsed = timer.until(time.monotonic());
             assert(elapsed.ns >= delay);
         }
 

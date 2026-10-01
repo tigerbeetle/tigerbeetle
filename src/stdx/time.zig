@@ -181,8 +181,8 @@ test "TimeOS monotonic smoke" {
     const time = time_os.interface();
     const instant_1 = time.monotonic();
     const instant_2 = time.monotonic();
-    assert(instant_1.elapsed(instant_1).ns == 0);
-    assert(instant_1.elapsed(instant_2).ns >= 0);
+    assert(instant_1.until(instant_1).ns == 0);
+    assert(instant_1.until(instant_2).ns >= 0);
 }
 
 test "TimeOS realtime smoke" {
@@ -304,7 +304,7 @@ pub const Timer = struct {
     pub fn read(self: *Timer) stdx.Duration {
         const current = self.time.monotonic();
         assert(current.ns >= self.started.ns);
-        return self.started.elapsed(current);
+        return self.started.until(current);
     }
 
     /// Resets the timer.

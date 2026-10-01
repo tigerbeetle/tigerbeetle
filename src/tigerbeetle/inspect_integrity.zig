@@ -450,7 +450,7 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
 
         try integrity.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
-    const grid_duration = timer.elapsed(time.monotonic());
+    const grid_duration = timer.until(time.monotonic());
 
     assert(integrity.grid_scrubber.tour == .done and
         integrity.grid_scrubber.reads.executing() == 0);

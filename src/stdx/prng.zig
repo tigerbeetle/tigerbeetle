@@ -699,7 +699,7 @@ pub const FuzzIterations = struct {
         }
 
         if (clock.iteration > clock.iterations_min and
-            clock.started.?.elapsed(now).ns > clock.duration_max.ns)
+            clock.started.?.until(now).ns > clock.duration_max.ns)
         {
             return false;
         }

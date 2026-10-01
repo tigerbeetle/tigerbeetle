@@ -71,7 +71,7 @@ pub const IO = struct {
 
         const timer = self.time.monotonic();
         defer self.stats.window.time_run_for_ns.ns +=
-            timer.elapsed(self.time.monotonic()).ns;
+            timer.until(self.time.monotonic()).ns;
 
         var timed_out = false;
         var completion: Completion = undefined;
@@ -157,7 +157,7 @@ pub const IO = struct {
         while (self.completed.pop()) |completion| {
             (completion.callback)(self, completion);
         }
-        const elapsed = timer.elapsed(self.time.monotonic());
+        const elapsed = timer.until(self.time.monotonic());
         self.stats.window.time_callbacks.ns += elapsed.ns;
     }
 

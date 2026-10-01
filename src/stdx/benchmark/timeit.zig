@@ -32,7 +32,7 @@ const TimeIt = struct {
         const label_alignment = comptime " " ** (1 + (12 -| label.len));
 
         const now = self.time.benchmark_monotonic();
-        const elapsed = self.timer.elapsed(now);
+        const elapsed = self.timer.until(now);
         self.timer = now;
 
         std.debug.print(
@@ -64,7 +64,7 @@ const TimeIt = struct {
         backtrace: bool,
     ) void {
         const now = self.time.benchmark_monotonic();
-        const elapsed = self.timer.elapsed(now);
+        const elapsed = self.timer.until(now);
         self.timer = now;
 
         if (elapsed.ns > threshold_ms * std.time.ns_per_ms) {

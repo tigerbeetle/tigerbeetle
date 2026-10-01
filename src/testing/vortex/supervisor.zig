@@ -326,7 +326,7 @@ pub const Supervisor = struct {
     fn tick_check_liveness(supervisor: *Supervisor) !void {
         const workload = supervisor.workload orelse return;
         if (supervisor.acceptable_faults_start) |faults_start| {
-            const elapsed = faults_start.elapsed(supervisor.time.monotonic());
+            const elapsed = faults_start.until(supervisor.time.monotonic());
             // If we've been in a state with an acceptable number of faults for the required
             // amount of time, we should have seen finished requests.
             const no_finished_requests =
@@ -1131,7 +1131,7 @@ const Workload = struct {
                 "(accounts_created={d} transfers_created={d})",
             .{
                 @tagName(workload.command.?),
-                request_commence.elapsed(request_complete),
+                request_commence.until(request_complete),
                 workload.model.accounts.count(),
                 workload.model.transfers_created,
             },
