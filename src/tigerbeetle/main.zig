@@ -402,9 +402,7 @@ fn command_start(
 
     log.info("release={f}", .{config.process.release});
     log.info("release_client_min={f}", .{config.process.release_client_min});
-    log.info("releases_bundled={f}", .{
-        vsr.multiversion.fmt_releases(multiversion.releases_bundled().slice()),
-    });
+    log.info("releases_bundled={f}", .{multiversion.releases_bundled()});
     log.info("git_commit={?s}", .{config.process.git_commit});
 
     const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;

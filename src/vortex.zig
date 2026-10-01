@@ -7,7 +7,7 @@ const stdx = @import("stdx");
 const builtin = @import("builtin");
 const ratio = stdx.PRNG.ratio;
 
-const fmt_releases = @import("multiversion.zig").fmt_releases;
+const Release = @import("multiversion.zig").Release;
 const Supervisor = @import("testing/vortex/supervisor.zig").Supervisor;
 const Command = @import("testing/vortex/workload.zig").Command;
 const dependencies_count: u32 = @import("vortex_options").dependencies_count;
@@ -136,7 +136,7 @@ fn scenario_default(
 
     log.info("output_directory={s}", .{supervisor.output_directory});
     log.info("duration={f}", .{args.test_duration});
-    log.info("releases={f}", .{fmt_releases(&supervisor.releases)});
+    log.info("releases={f}", .{Release.format_slice(&supervisor.releases)});
 
     for (0..args.replica_count) |replica_index| {
         try supervisor.replica_install(@intCast(replica_index), release_min);

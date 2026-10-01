@@ -168,6 +168,10 @@ pub const ReleaseList = struct {
         assert(release_list.count > 0);
         return release_list.slice()[release_list.count - 1];
     }
+
+    pub fn format(release_list: ReleaseList, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        return try Release.format_slice(release_list.slice()).format(writer);
+    }
 };
 
 pub const Release = extern struct {
@@ -218,6 +222,19 @@ pub const Release = extern struct {
         });
     }
 
+    pub fn format_slice(releases: []const Release) std.fmt.Alt([]const Release, format_slice_fn) {
+        return .{ .data = releases };
+    }
+
+    fn format_slice_fn(releases: []const Release, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.writeAll("{ ");
+        for (releases, 0..) |release, index| {
+            if (index > 0) try writer.writeAll(", ");
+            try release.format(writer);
+        }
+        try writer.writeAll(" }");
+    }
+
     pub fn max(a: Release, b: Release) Release {
         if (a.value > b.value) {
             return a;
@@ -234,20 +251,6 @@ pub const Release = extern struct {
         };
     }
 };
-
-/// Zig 0.16's `{any}` no longer calls `Release.format` for the elements of a slice.
-pub fn fmt_releases(releases: []const Release) std.fmt.Alt([]const Release, format_releases) {
-    return .{ .data = releases };
-}
-
-fn format_releases(releases: []const Release, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try writer.writeAll("{ ");
-    for (releases, 0..) |release, index| {
-        if (index > 0) try writer.writeAll(", ");
-        try release.format(writer);
-    }
-    try writer.writeAll(" }");
-}
 
 pub const ReleaseTriple = extern struct {
     patch: u8,
@@ -1206,10 +1209,10 @@ pub const MultiversionOS = struct {
         // Log out the releases bundled; both old and new. Only if this was a change detection run
         // and not from startup.
         if (self.timeout_statx_previous != .none) {
-            log.info("releases_bundled old: {f}", .{fmt_releases(self.releases_bundled.slice())});
+            log.info("releases_bundled old: {f}", .{self.releases_bundled});
         }
         defer if (self.timeout_statx_previous != .none) {
-            log.info("releases_bundled new: {f}", .{fmt_releases(self.releases_bundled.slice())});
+            log.info("releases_bundled new: {f}", .{self.releases_bundled});
         };
 
         // The below flip needs to happen atomically:
@@ -2138,7 +2141,7 @@ pub fn print_information(
 
     try output.print(
         "multiversioning.releases_bundled={f}\n",
-        .{fmt_releases(multiversion.releases_bundled.slice())},
+        .{multiversion.releases_bundled},
     );
 
     inline for (
@@ -2189,7 +2192,7 @@ pub fn print_information(
 
                 try output.print("multiversioning.header.past.{s}={f}\n", .{
                     field_name,
-                    fmt_releases(release_list),
+                    Release.format_slice(release_list),
                 });
             },
             .git_commits => {
