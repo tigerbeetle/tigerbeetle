@@ -30,22 +30,11 @@ module TigerBeetle
     #   initialized.
     def initialize(cluster_id:, replica_addresses:)
       @native = NativeClient.new(cluster_id, replica_addresses, COMPLETION_DISPATCHER.write_fileno)
-      @closed = false
     end
 
     # Closes the client. This method waits for all in-flight requests to finish.
-    #
-    # @raise [TigerBeetle::ClientClosedError] if the client is already closed.
     def close
-      raise ClientClosedError, "client is already closed" if closed?
-
-      @closed = true
       @native.close
-    end
-
-    # Returns whether the client has been closed.
-    def closed?
-      @closed
     end
 
     # Submits a batch of new accounts to be created.
@@ -115,8 +104,6 @@ module TigerBeetle
     private
 
     def native_submit(operation, payload)
-      raise ClientClosedError if closed?
-
       req = COMPLETION_DISPATCHER.submit_and_wait_for(@native, operation, payload)
 
       status, result = req.result
