@@ -266,6 +266,21 @@ pub const Supervisor = struct {
         supervisor.allocator.destroy(supervisor);
     }
 
+    pub fn fatal(
+        supervisor: *Supervisor,
+        reason: FatalReason,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) noreturn {
+        // Clean up the output directory before exiting.
+        supervisor.destroy();
+
+        log.err(fmt, args);
+        const status = reason.exit_status();
+        assert(status != 0);
+        std.process.exit(status);
+    }
+
     pub fn tick(supervisor: *Supervisor) !void {
         supervisor.network.tick();
         try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
@@ -290,7 +305,7 @@ pub const Supervisor = struct {
                         // success or failure.
                         std.process.exit(@intCast(128 + @intFromEnum(term.signal)));
                     } else {
-                        fatal(.replica_exit_result, "replica exited with: {}", .{term});
+                        supervisor.fatal(.replica_exit_result, "replica exited with: {}", .{term});
                     }
                 }
             }
@@ -303,7 +318,7 @@ pub const Supervisor = struct {
                 assert(result.pid == workload.driver.id);
 
                 const term = stdx.term_from_status(result.status);
-                fatal(.workload_exit_early, "workload exited with: {}", .{term});
+                supervisor.fatal(.workload_exit_early, "workload exited with: {}", .{term});
             }
         }
     }
@@ -322,13 +337,13 @@ pub const Supervisor = struct {
             const too_slow_request = workload.find_slow_request_since(faults_start);
 
             if (no_finished_requests) {
-                fatal(.liveness, "liveness check: no finished requests after {f} ", .{
+                supervisor.fatal(.liveness, "liveness check: no finished requests after {f} ", .{
                     constants.vortex.liveness_requirement,
                 });
             }
 
             if (too_slow_request) |_| {
-                fatal(.request_slow, "liveness check: too slow request", .{});
+                supervisor.fatal(.request_slow, "liveness check: too slow request", .{});
             }
         }
 
@@ -694,6 +709,7 @@ pub const Supervisor = struct {
             supervisor.allocator,
             supervisor.io,
             supervisor.time.interface(),
+            supervisor,
             proxy_ports,
             workload_driver,
             workload_driver_release,
@@ -841,6 +857,7 @@ const Workload = struct {
 
     io: *IO,
     time: Time,
+    supervisor: *Supervisor,
     model: Model,
     generator: Generator,
     driver: std.process.Child,
@@ -867,6 +884,7 @@ const Workload = struct {
         allocator: std.mem.Allocator,
         io: *IO,
         time: Time,
+        supervisor: *Supervisor,
         proxy_ports: []const u16,
         driver_command: []const u8,
         driver_release: Release,
@@ -913,6 +931,7 @@ const Workload = struct {
         workload.* = .{
             .io = io,
             .time = time,
+            .supervisor = supervisor,
             .model = model,
             .generator = Generator.init(options.seed, driver_release),
             .driver = driver,
@@ -925,15 +944,23 @@ const Workload = struct {
 
     pub fn destroy(workload: *Workload, allocator: std.mem.Allocator) void {
         std.posix.kill(workload.driver.id.?, std.posix.SIG.TERM) catch |err| {
-            fatal(.workload_exit_result, "workload: error killing driver: {any}", .{err});
+            workload.fatal(.workload_exit_result, "workload: error killing driver: {any}", .{err});
         };
         const workload_result = workload.driver.wait(workload.io.io_std) catch |err| {
-            fatal(.workload_exit_result, "workload: error waiting for driver: {any}", .{err});
+            workload.fatal(
+                .workload_exit_result,
+                "workload: error waiting for driver: {any}",
+                .{err},
+            );
         };
         if (!std.meta.eql(workload_result, .{ .signal = std.posix.SIG.TERM }) and
             !std.meta.eql(workload_result, .{ .exited = 128 + @intFromEnum(std.posix.SIG.TERM) }))
         {
-            fatal(.workload_exit_result, "workload: unexpected term: {any}", .{workload_result});
+            workload.fatal(
+                .workload_exit_result,
+                "workload: unexpected term: {any}",
+                .{workload_result},
+            );
         }
 
         workload.requests_finished.deinit(allocator);
@@ -941,6 +968,15 @@ const Workload = struct {
         allocator.free(workload.request_buffer);
         workload.model.deinit(allocator);
         allocator.destroy(workload);
+    }
+
+    fn fatal(
+        workload: *Workload,
+        reason: FatalReason,
+        comptime fmt: []const u8,
+        args: anytype,
+    ) noreturn {
+        workload.supervisor.fatal(reason, fmt, args);
     }
 
     pub fn done(workload: *Workload) bool {
@@ -1016,7 +1052,7 @@ const Workload = struct {
         assert(workload.request_written.? < workload.request_size.?);
 
         const bytes_written = result catch |err| {
-            fatal(.driver_request_error, "error sending to driver: {}", .{err});
+            workload.fatal(.driver_request_error, "error sending to driver: {}", .{err});
         };
         workload.request_written.? += @intCast(bytes_written);
 
@@ -1054,7 +1090,7 @@ const Workload = struct {
         assert(&workload.completion == completion);
 
         const read_size = result catch |err| {
-            fatal(.driver_response_error, "error receiving from driver: {}", .{err});
+            workload.fatal(.driver_response_error, "error receiving from driver: {}", .{err});
         };
         workload.read_progress += read_size;
 
@@ -1075,7 +1111,7 @@ const Workload = struct {
             workload.request_buffer[(@sizeOf(u8) + @sizeOf(u32))..workload.request_size.?],
             results_buffer,
         ) catch |err| {
-            fatal(.workload_reconcile, "model reconcile error: {}", .{err});
+            workload.fatal(.workload_reconcile, "model reconcile error: {}", .{err});
         };
 
         const request_commence = workload.request_start.?;
@@ -1145,10 +1181,3 @@ const FatalReason = enum(u8) {
         return @intFromEnum(reason);
     }
 };
-
-fn fatal(reason: FatalReason, comptime fmt: []const u8, args: anytype) noreturn {
-    log.err(fmt, args);
-    const status = reason.exit_status();
-    assert(status != 0);
-    std.process.exit(status);
-}
