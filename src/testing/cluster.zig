@@ -148,6 +148,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// (Which may be some time after the client is actually evicted by the cluster.)
         client_eviction_reasons: []?vsr.Header.Eviction.Reason,
         client_eviction_requests_cancelled: u32 = 0,
+        /// Set when the client's process is killed (see `client_kill()`).
+        client_killed: []bool,
 
         client_id_permutation: IdPermutation,
 
@@ -307,6 +309,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(client_eviction_reasons);
             @memset(client_eviction_reasons, null);
 
+            const client_killed = try allocator.alloc(bool, client_count_total);
+            errdefer allocator.free(client_killed);
+            @memset(client_killed, false);
+
             const client_times = try allocator.alloc(TimeSim, client_count_total);
             errdefer allocator.free(client_times);
             @memset(client_times, .{
@@ -441,6 +447,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .client_pools = client_pools,
                 .client_times = client_times,
                 .client_eviction_reasons = client_eviction_reasons,
+                .client_killed = client_killed,
                 .client_id_permutation = client_id_permutation,
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
@@ -511,6 +518,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_times);
+            cluster.allocator.free(cluster.client_killed);
             cluster.allocator.free(cluster.client_eviction_reasons);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
@@ -874,6 +882,48 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 },
             );
             cluster.replica_reformats[replica_index].?.start();
+        }
+
+        /// Simulates the client's process dying without closing its session (e.g. SIGKILL): the
+        /// client stops sending requests and pings, but its session remains in the client table
+        /// until the cluster evicts it.
+        pub fn client_kill(cluster: *Cluster, client_index: usize) void {
+            assert(cluster.client_active(client_index));
+
+            const client = &cluster.clients[client_index].?;
+            // A client is killed only between requests. Unlike an eviction, a kill therefore does
+            // not turn off the StateChecker's exhaustive checking of every committed request
+            // against the originating client's inflight request. This is also the accounting
+            // guarantee for the VOPR: with no request inflight, the client holds no slot in
+            // `requests_sent` nor in the `ReplySequence` reservation, which only counts
+            // registering clients and inflight requests. (`ReplySequence` does not track pending
+            // entries per client, so this assertion is the guarantee.)
+            assert(client.request_inflight == null);
+            // The client is either registered, or has never sent anything (a register inflight is
+            // excluded above).
+            assert(client.session > 0 or client.request_number == 0);
+
+            // Like `client_on_eviction()`: messages still in flight to the client are dropped,
+            // since its MessageBus no longer exists.
+            cluster.network.process_disable(.{ .client = client.id });
+            cluster.state_checker.on_client_kill(client.id);
+
+            client.deinit(cluster.allocator);
+            cluster.clients[client_index] = null;
+            cluster.client_killed[client_index] = true;
+            assert(!cluster.client_active(client_index));
+        }
+
+        /// Whether the client can still send requests: it was neither evicted nor killed.
+        pub fn client_active(cluster: *const Cluster, client_index: usize) bool {
+            if (cluster.client_killed[client_index]) {
+                assert(cluster.clients[client_index] == null);
+                assert(cluster.client_eviction_reasons[client_index] == null);
+                return false;
+            }
+            if (cluster.client_eviction_reasons[client_index] != null) return false;
+            assert(cluster.clients[client_index] != null);
+            return true;
         }
 
         pub fn register(cluster: *Cluster, client_index: usize) void {

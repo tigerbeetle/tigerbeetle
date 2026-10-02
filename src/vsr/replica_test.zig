@@ -1784,6 +1784,35 @@ test "Cluster: eviction: session_too_low" {
     try expectEqual(c0.eviction_reason(), .session_too_low);
 }
 
+test "Cluster: client kill: late messages to a killed client are dropped" {
+    // A killed client's MessageBus no longer exists, so the network must not deliver the replies
+    // and pongs that are still in flight to it (or replayed).
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+
+    t.replica(.R_).record(.C0, .outgoing, .reply);
+    t.replica(.R_).record(.C0, .outgoing, .pong_client);
+    try c0.request(2, 2);
+
+    // Let the client ping at least once more (a full ping interval), so that pongs are recorded
+    // too.
+    const ping_interval_ticks = t.cluster.clients[0].?.ping_timeout.after;
+    for (0..ping_interval_ticks) |_| _ = t.tick();
+    try expectEqual(c0.eviction_reason(), null);
+
+    c0.kill();
+    try expectEqual(t.cluster.client_active(0), false);
+
+    t.replica(.R_).replay_recorded();
+    t.run();
+    try expectEqual(c0.eviction_reason(), null);
+}
+
 test "Cluster: view_change: JV header doesn't match current header in journal" {
     // It could be the case that a replica's JV headers don't match the journal's current state.
     // For example, a header could be blank in the JV but present in the journal (could happen if
@@ -2384,8 +2413,9 @@ const TestContext = struct {
                     }
                 }
                 if (selector == .__ or selector == .C_) {
-                    for (t.cluster.clients) |*client| {
-                        array.push(.{ .client = client.*.?.id });
+                    for (t.cluster.clients) |*client_maybe| {
+                        // Evicted (or killed) clients no longer exist.
+                        if (client_maybe.*) |*client| array.push(.{ .client = client.id });
                     }
                 }
             },
@@ -2849,6 +2879,12 @@ const TestClients = struct {
             }
         }
         try std.testing.expectEqual(t.replies(), expect_replies);
+    }
+
+    /// Simulates the clients' processes dying without closing their sessions (e.g. SIGKILL):
+    /// they stop sending requests and pings, but their sessions remain in the client table.
+    pub fn kill(t: *TestClients) void {
+        for (t.clients.const_slice()) |c| t.cluster.client_kill(c);
     }
 
     pub fn replies(t: *const TestClients) usize {

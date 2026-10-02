@@ -38,6 +38,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         clients: []const ?Client,
         /// Tracks the latest reply for every non-evicted client.
         client_replies: std.AutoArrayHashMapUnmanaged(u128, vsr.Header.Reply),
+        /// The clients that are gone for good: their processes were killed. (Bounded by the number
+        /// of clients.)
+        clients_gone: std.AutoArrayHashMapUnmanaged(u128, void),
         clients_exhaustive: bool = true,
         clients_register_op_latest: u64 = 0,
 
@@ -70,6 +73,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             try client_replies.ensureTotalCapacity(allocator, constants.clients_max);
             errdefer client_replies.deinit(allocator);
 
+            var clients_gone: std.AutoArrayHashMapUnmanaged(u128, void) = .{};
+            try clients_gone.ensureTotalCapacity(allocator, options.clients.len);
+            errdefer clients_gone.deinit(allocator);
+
             const replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
@@ -81,6 +88,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .replicas = options.replicas,
                 .clients = options.clients,
                 .client_replies = client_replies,
+                .clients_gone = clients_gone,
                 .replica_head_max = replica_head_max,
             };
         }
@@ -89,6 +97,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             const allocator = state_checker.commits.allocator;
 
             allocator.free(state_checker.replica_head_max);
+            state_checker.clients_gone.deinit(allocator);
             state_checker.client_replies.deinit(allocator);
             state_checker.commits.deinit();
         }
@@ -107,6 +116,17 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             //    is not actually in-flight, despite being committed for the "first time" by a
             //    replica.
             state_checker.clients_exhaustive = false;
+        }
+
+        /// Unlike an eviction, a kill doesn't disable checking of `Client.request_inflight`: the
+        /// client is killed between requests, so the cluster can commit an op for it afterwards
+        /// only if the network replays its (zombie) register, which `check_state()` allows.
+        /// Today a session only ends by eviction, and an eviction turns exhaustive checking off,
+        /// so this allowance is for sessions that end some other way.
+        pub fn on_client_kill(state_checker: *StateChecker, client_id: u128) void {
+            assert(client_id != 0);
+            assert(state_checker.clients_gone.count() < state_checker.clients.len);
+            state_checker.clients_gone.putAssumeCapacityNoClobber(client_id, {});
         }
 
         pub fn on_message(state_checker: *StateChecker, message: *const Message) void {
@@ -251,13 +271,25 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 assert(header_b.?.operation == .upgrade or
                     header_b.?.operation == .pulse);
             } else {
-                if (state_checker.clients_exhaustive) {
+                if (state_checker.clients_exhaustive) check_client: {
                     // The replica has transitioned to state `b` that is not yet in the commit
                     // history. Check if this is a valid new state based on the originating client's
                     // inflight request.
-                    const client: *const Client = for (state_checker.clients) |*client| {
-                        if (client.*.?.id == header_b.?.client) break &client.*.?;
-                    } else unreachable;
+                    const client: *const Client = for (state_checker.clients) |*client_maybe| {
+                        if (client_maybe.*) |*client| {
+                            if (client.id == header_b.?.client) break client;
+                        }
+                    } else {
+                        // The client is gone (and deinitialized), but the network replayed its
+                        // register, which committed again and created a new session.
+                        if (!state_checker.clients_gone.contains(header_b.?.client)) {
+                            return error.ReplicaTransitionedToInvalidState;
+                        }
+                        if (header_b.?.operation != .register) {
+                            return error.ReplicaTransitionedToInvalidState;
+                        }
+                        break :check_client;
+                    };
 
                     if (client.request_inflight == null) {
                         return error.ReplicaTransitionedToInvalidState;
