@@ -207,7 +207,7 @@ id = (timestamp << 80) | random
 ```
 
 When creating multiple objects during the same millisecond, we increment the random bytes rather
-than generating new random bytes. These details ensure that a sequence of objects have strictly
+than generating new random bytes. These details ensure that a sequence of objects has strictly
 increasing IDs according to the server, which improves database optimization.
 
 Similar to ULIDs and UUIDv7s, these IDs have the following benefits:
@@ -232,11 +232,11 @@ To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 The `code` identifier represents the "why" for an Account or Transfer.
 
 On an [`Account`](../reference/account.md#code), the `code` indicates the account type, such as
-assets, liabilities, equity, income, or expenses, and subcategories within those classification.
+assets, liabilities, equity, income, or expenses, and subcategories within those classifications.
 
 On a [`Transfer`](../reference/transfer.md#code), the `code` indicates why a given transfer is
 happening, such as a purchase, refund, currency exchange, etc.
 
 When you start building out your application on top of TigerBeetle, you may find it helpful to list
-out all of the known types of accounts and movements of funds and mapping each of these to `code`
+out all of the known types of accounts and movements of funds and map each of these to `code`
 numbers or ranges.

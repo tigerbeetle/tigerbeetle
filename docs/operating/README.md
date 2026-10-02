@@ -3,11 +3,11 @@
 This section is for anyone managing their own TigerBeetle cluster. While tiger beetles thrive even
 in the harshest conditions, there's certainly a preferred way to handle one!
 
-- [Installing](./installing.md) lists all the various way to get the freshest TigerBeetle
+- [Installing](./installing.md) lists all the various ways to get the freshest TigerBeetle
   binary.
 - [Hardware](./hardware.md) specifies the host requirements.
 - [Cluster](./cluster.md) specifies the overall cluster requirements and recommendations.
-- [Deploying](./deploying/) spells out deployment process and its variations.
+- [Deploying](./deploying/) spells out the deployment process and its variations.
 - [Monitoring](./monitoring.md) details how to monitor a TigerBeetle cluster.
 - [Upgrading](./upgrading.md) explains how to move to a newer TigerBeetle version with a few seconds of downtime.
 - [Recovering](./recovering.md) explains how to repair the cluster when a replica is permanently
