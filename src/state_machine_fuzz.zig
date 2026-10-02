@@ -21,51 +21,141 @@ const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
 const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
 const Grid = @import("vsr/grid.zig").GridType(Storage);
 const fixtures = @import("testing/fixtures.zig");
+const StateMachineReferenceType = @import("./state_machine/reference_model.zig").StateMachineReferenceType;
+const MiB = stdx.MiB;
 
-const TestContext = struct {
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
+    var context: TestContext = undefined;
+    try context.init(gpa);
+    defer context.deinit(gpa);
+
+    const request_buffer = try gpa.alignedAlloc(
+        u8,
+        .fromByteUnits(constants.cache_line_size),
+        vsr.constants.message_body_size_max,
+    );
+    defer gpa.free(request_buffer);
+
+    const reply_buffer = try gpa.alignedAlloc(
+        u8,
+        .fromByteUnits(constants.cache_line_size),
+        vsr.constants.message_body_size_max,
+    );
+    defer gpa.free(reply_buffer);
+
+    var prng = stdx.PRNG.from_seed(args.seed);
+
+    for (0..args.events_max orelse 50_000) |_| {
+        var operation = prng.enum_uniform(TestContext.StateMachine.Operation);
+        operation = .create_accounts;
+        const size: usize = size: {
+            if (!operation.is_multi_batch()) {
+                break :size build_batch(&prng, operation, request_buffer);
+            }
+            assert(operation.is_multi_batch());
+
+            var body_encoder: MultiBatchEncoder = .init(request_buffer, .{
+                .element_size = operation.event_size(),
+            });
+
+            const batch_count = prng.enum_uniform(enum { one, random, max });
+            while (body_encoder.writable()) |writable| {
+                if (writable.len == 0) break;
+                const bytes_written: u32 = build_batch(&prng, operation, writable);
+                body_encoder.add(bytes_written);
+                switch (batch_count) {
+                    .one => {
+                        if (body_encoder.batch_count == 1) break;
+                    },
+                    .random => if (prng.chance(.{ .numerator = 30, .denominator = 100 })) {
+                        break;
+                    },
+                    .max => {},
+                }
+            }
+
+            break :size body_encoder.finish();
+        };
+
+        if (context.state_machine.input_valid(operation, request_buffer[0..size])) {
+            context.prepare(operation, request_buffer[0..size]);
+            const reply_size = context.execute(
+                context.op,
+                operation,
+                request_buffer[0..size],
+                @ptrCast(reply_buffer),
+            );
+            stdx.maybe(reply_size == 0);
+            if (operation.is_multi_batch()) {
+                assert(reply_size > 0);
+                _ = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
+                    .element_size = operation.result_size(),
+                }) catch |err| switch (err) {
+                    error.MultiBatchInvalid => unreachable,
+                };
+            }
+        }
+        context.op += 1;
+        context.state_machine_compact();
+        if (vsr.Checkpoint.valid(context.op)) {
+            context.state_machine_checkpoint();
+        }
+    }
+}
+
+const TestContext = struct { // TODO: rename to WORLD
     storage: Storage,
     time_sim: TimeSim,
     trace: Tracer,
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
+    reference: StateMachineReference = .{},
     op: u64,
     busy: bool,
 
+    const StateMachineReference = StateMachineReferenceType(1000, 1000);
     const StateMachine = vsr.state_machine.StateMachineType(Storage);
 
-    fn init(ctx: *TestContext, allocator: std.mem.Allocator) !void {
-        ctx.storage = try fixtures.init_storage(allocator, .{ .size = 4096 });
-        errdefer ctx.storage.deinit(allocator);
+    fn init(ctx: *TestContext, gpa: std.mem.Allocator) !void {
+        ctx.storage = try fixtures.init_storage(gpa, .{ .size = 512 * MiB });
+        errdefer ctx.storage.deinit(gpa);
+
+        try fixtures.storage_format(gpa, &ctx.storage, .{
+            .replica_count = 1,
+        });
 
         ctx.time_sim = fixtures.init_time(.{});
 
-        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.interface(), .{});
-        errdefer ctx.trace.deinit(allocator);
+        ctx.trace = try fixtures.init_tracer(gpa, ctx.time_sim.interface(), .{});
+        errdefer ctx.trace.deinit(gpa);
 
-        ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{
-            .storage_size_limit = data_file_size_min,
+        ctx.superblock = try fixtures.init_superblock(gpa, &ctx.storage, .{
+            .storage_size_limit = 256 * MiB,
         });
-        errdefer ctx.superblock.deinit(allocator);
+        errdefer ctx.superblock.deinit(gpa);
 
-        // Pretend that the superblock is open so that the Forest can initialize.
-        ctx.superblock.opened = true;
-        ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
+        fixtures.open_superblock(&ctx.superblock);
 
-        ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
-        errdefer ctx.grid.deinit(allocator);
+        ctx.grid = try fixtures.init_grid(gpa, &ctx.trace, &ctx.superblock, .{
+            .blocks_released_prior_checkpoint_durability_max = StateMachine.Forest
+                .compaction_blocks_released_per_pipeline_max(),
+        });
+        errdefer ctx.grid.deinit(gpa);
+
+        fixtures.open_grid(&ctx.grid);
 
         const batch_size_limit = 30 * @max(@sizeOf(tb.Account), @sizeOf(tb.Transfer));
         assert(batch_size_limit <= constants.message_body_size_max);
         try ctx.state_machine.init(
-            allocator,
+            gpa,
             ctx.time_sim.interface(),
             &ctx.grid,
             .{
                 .batch_size_limit = batch_size_limit,
                 .lsm_forest_compaction_block_count = StateMachine.Forest.Options
                     .compaction_block_count_min,
-                .lsm_forest_node_count = 1,
+                .lsm_forest_node_count = 128,
                 .cache_entries_accounts = 0,
                 .cache_entries_transfers = 0,
                 .cache_entries_transfers_pending = 0,
@@ -73,10 +163,9 @@ const TestContext = struct {
                 .aof_recovery = false,
             },
         );
-        errdefer ctx.state_machine.deinit(allocator);
+        errdefer ctx.state_machine.deinit(gpa);
 
-        ctx.op = 1;
-        ctx.busy = false;
+        ctx.state_machine_open();
     }
 
     pub fn deinit(ctx: *TestContext, allocator: std.mem.Allocator) void {
@@ -86,6 +175,60 @@ const TestContext = struct {
         ctx.trace.deinit(allocator);
         ctx.storage.deinit(allocator);
         ctx.* = undefined;
+    }
+
+    fn state_machine_open(context: *TestContext) void {
+        context.busy = true;
+        context.op = 1;
+        context.state_machine.open(state_machine_open_callback);
+
+        while (context.busy) context.storage.run();
+    }
+
+    fn state_machine_open_callback(state_machine: *StateMachine) void {
+        const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
+        assert(context.busy);
+        context.busy = false;
+        context.grid.free_set.mark_checkpoint_durable();
+    }
+
+    fn state_machine_compact(context: *TestContext) void {
+        context.busy = true;
+        context.state_machine.compact(state_machine_compact_callback, context.op);
+        while (context.busy) context.storage.run();
+    }
+
+    fn state_machine_compact_callback(state_machine: *StateMachine) void {
+        const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
+        assert(context.busy);
+        context.busy = false;
+    }
+
+    fn state_machine_checkpoint(context: *TestContext) void {
+        context.busy = true;
+        context.state_machine.checkpoint(state_machine_checkpoint_callback);
+        while (context.busy) context.storage.run();
+    }
+
+    fn state_machine_checkpoint_callback(state_machine: *StateMachine) void {
+        const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
+        assert(context.busy);
+        context.busy = false;
+        context.grid_checkpoint();
+    }
+
+    fn grid_checkpoint(context: *TestContext) void {
+        context.busy = true;
+        context.grid.checkpoint(grid_checkpoint_callback);
+        while (context.busy) context.storage.run();
+    }
+
+    fn grid_checkpoint_callback(grid: *Grid) void {
+        const context: *TestContext = @alignCast(@fieldParentPtr("grid", grid));
+        assert(context.busy);
+        context.busy = false;
+        grid.mark_checkpoint_not_durable();
+        grid.free_set.mark_checkpoint_durable();
     }
 
     fn prepare(
@@ -162,81 +305,6 @@ pub fn int_edge_biased(prng: *stdx.PRNG, T: anytype) T {
     }
 }
 
-pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
-    var context: TestContext = undefined;
-    try context.init(allocator);
-    defer context.deinit(allocator);
-
-    const request_buffer = try allocator.alignedAlloc(
-        u8,
-        .fromByteUnits(constants.cache_line_size),
-        vsr.constants.message_body_size_max,
-    );
-    defer allocator.free(request_buffer);
-
-    const reply_buffer = try allocator.alignedAlloc(
-        u8,
-        .fromByteUnits(constants.cache_line_size),
-        vsr.constants.message_body_size_max,
-    );
-    defer allocator.free(reply_buffer);
-
-    var prng = stdx.PRNG.from_seed(args.seed);
-
-    var op: u64 = 1;
-
-    for (0..args.events_max orelse 50_000) |_| {
-        const operation = prng.enum_uniform(TestContext.StateMachine.Operation);
-        const size: usize = size: {
-            if (!operation.is_multi_batch()) {
-                break :size build_batch(&prng, operation, request_buffer);
-            }
-            assert(operation.is_multi_batch());
-
-            var body_encoder: MultiBatchEncoder = .init(request_buffer, .{
-                .element_size = operation.event_size(),
-            });
-
-            const batch_count = prng.enum_uniform(enum { one, random, max });
-            while (body_encoder.writable()) |writable| {
-                const bytes_written: u32 = build_batch(&prng, operation, writable);
-                body_encoder.add(bytes_written);
-                switch (batch_count) {
-                    .one => {
-                        if (body_encoder.batch_count == 1) break;
-                    },
-                    .random => if (prng.chance(.{ .numerator = 30, .denominator = 100 })) {
-                        break;
-                    },
-                    .max => {},
-                }
-            }
-
-            break :size body_encoder.finish();
-        };
-
-        if (context.state_machine.input_valid(operation, request_buffer[0..size])) {
-            context.prepare(operation, request_buffer[0..size]);
-            const reply_size = context.execute(
-                op,
-                operation,
-                request_buffer[0..size],
-                @ptrCast(reply_buffer),
-            );
-            stdx.maybe(reply_size == 0);
-            if (operation.is_multi_batch()) {
-                assert(reply_size > 0);
-                _ = MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
-                    .element_size = operation.result_size(),
-                }) catch |err| switch (err) {
-                    error.MultiBatchInvalid => unreachable,
-                };
-            }
-        }
-        op += 1;
-    }
-}
-
 fn build_batch(
     prng: *stdx.PRNG,
     operation: TestContext.StateMachine.Operation,
@@ -247,9 +315,28 @@ fn build_batch(
         .pulse => 0,
 
         // No payload, `create_*` require compaction to be hooked up.
-        .create_accounts,
         .create_transfers,
         => 0,
+        .create_accounts => {
+            const account: tb.Account = .{
+                .id = prng.int(u128),
+                .debits_pending = 0,
+                .debits_posted = 0,
+                .credits_pending = 0,
+                .credits_posted = 0,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .reserved = 0,
+                .ledger = 1,
+                .code = 1,
+                .flags = .{},
+                .timestamp = 0,
+            };
+            stdx.copy_disjoint(.inexact, u8, buffer, std.mem.asBytes(&account));
+            return @sizeOf(tb.Account);
+        },
+
         .deprecated_create_accounts_sparse,
         .deprecated_create_transfers_sparse,
         => 0,

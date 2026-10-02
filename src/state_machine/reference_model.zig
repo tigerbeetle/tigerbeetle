@@ -52,16 +52,16 @@ pub fn StateMachineReferenceType(comptime account_count_max: usize, comptime tra
         };
 
         // TODO: revisit data structures
-        accounts: [account_count_max]tb.Account,
+        accounts: [account_count_max]tb.Account = undefined,
         accounts_count: usize = 0,
-        transfers: [transfer_count_max]TransferEntry,
+        transfers: [transfer_count_max]TransferEntry = undefined,
         transfers_count: usize = 0,
-        retired_ids: [transfer_count_max]u128,
+        retired_ids: [transfer_count_max]u128 = undefined,
         retired_ids_count: usize = 0,
         journal: [transfer_count_max * 2]ChangeEvent = undefined, // TODO: revise limit
         journal_count: usize = 0,
 
-        now: u64,
+        now: u64 = 0,
 
         pub const TransferFilter = struct {
             account_id: ?u128 = null,
