@@ -29,6 +29,8 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     };
 }
 
+const ClientVariant = enum { synchronous, asynchronous };
+
 fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
     try printer.write(
         \\############################################################
@@ -36,6 +38,9 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\##               Do not manually modify.                  ##
         \\############################################################
         \\
+        \\import asyncio
+        \\import functools
+        \\import inspect
         \\import os
         \\import sys
         \\import threading
@@ -50,50 +55,90 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\    print("error: missing TB_ADDRESS environment variable")
         \\    sys.exit(1)
         \\
-        \\
-        \\@pytest.fixture
-        \\def client():
-        \\    client = tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses)
-        \\    yield client
-        \\    # Cases that close the client leave nothing for the teardown to close.
-        \\    if client._client_key in tb.ClientSync._clients:
-        \\        client.close()
-        \\
     );
-    for (tests.suites) |suite| {
+    for (std.enums.values(ClientVariant)) |variant| {
         try printer.write_empty_line();
-        try printer.print_indented("# Suite: {s}", .{suite.name});
-        for (suite.cases) |case| {
-            const case_memory = printer.mark();
-            defer printer.release(case_memory);
-
+        try printer.write(switch (variant) {
+            .synchronous =>
+            \\#################
+            \\## Sync client ##
+            \\#################
+            \\
+            \\@pytest.fixture
+            \\def client():
+            \\    client = tb.ClientSync(cluster_id=0, replica_addresses=replica_addresses)
+            \\    yield client
+            \\    # Workaround until #3943 has been merged.
+            \\    if client._client_key in tb.ClientSync._clients:
+            \\        client.close()
+            \\
+            ,
+            .asynchronous =>
+            \\##################
+            \\## Async client ##
+            \\##################
+            \\
+            \\def async_test(case):
+            \\    @functools.wraps(case)
+            \\    def test():
+            \\        async def run():
+            \\            client = tb.ClientAsync(cluster_id=0, replica_addresses=replica_addresses)
+            \\            try:
+            \\                await case(client)
+            \\            finally:
+            \\                # Workaround until #3943 has been merged.
+            \\                if client._client_key in tb.ClientAsync._clients:
+            \\                    await client.close()
+            \\        asyncio.run(run())
+            \\    # PEP 362: Stop pytest from treating the test's `client` parameter as a fixture.
+            \\    test.__signature__ = inspect.Signature()
+            \\    return test
+            \\
+            ,
+        });
+        for (tests.suites) |suite| {
             try printer.write_empty_line();
-            if (case.requirement) |requirement| {
-                if (!satisfies(requirement)) {
-                    try printer.write_omission(case);
-                    continue;
+            try printer.print_indented("# Suite: {s}", .{suite.name});
+            for (suite.cases) |case| {
+                const case_memory = printer.mark();
+                defer printer.release(case_memory);
+
+                try printer.write_empty_line();
+                if (case.requirement) |requirement| {
+                    if (!satisfies(requirement)) {
+                        try printer.write_omission(case);
+                        continue;
+                    }
                 }
+                const case_name = try printer.to_case_alloc(.snake_case, case.description);
+                switch (variant) {
+                    .synchronous => try printer.print_indented("def test_{s}_{s}(client):", .{
+                        suite.name, case_name,
+                    }),
+                    .asynchronous => {
+                        try printer.write_indented("@async_test");
+                        try printer.print_indented("async def test_{s}_{s}_async(client):", .{
+                            suite.name, case_name,
+                        });
+                    },
+                }
+                printer.indent();
+                for (case.steps) |step| try emit_step(printer, step, variant);
+                printer.dedent();
             }
-            try printer.print_indented("def test_{s}_{s}(client):", .{
-                suite.name,
-                try printer.to_case_alloc(.snake_case, case.description),
-            });
-            printer.indent();
-            for (case.steps) |step| try emit_step(printer, step);
-            printer.dedent();
         }
     }
 }
 
-fn emit_step(printer: *Printer, step: ast.Step) !void {
+fn emit_step(printer: *Printer, step: ast.Step, variant: ClientVariant) !void {
     switch (step) {
-        .binding => |binding| try emit_binding(printer, binding),
-        .call => |call| try emit_call(printer, call, .{}),
-        .assertion => |assertion| try emit_assertion(printer, assertion),
+        .binding => |binding| try emit_binding(printer, binding, variant),
+        .call => |call| try emit_call(printer, call, variant, .{}),
+        .assertion => |assertion| try emit_assertion(printer, assertion, variant),
     }
 }
 
-fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
+fn emit_binding(printer: *Printer, binding: ast.Binding, variant: ClientVariant) !void {
     switch (binding.value) {
         .generate_id, .index, .field_access => {
             const rendered = try render_expression(printer, binding.value);
@@ -105,7 +150,10 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
             printer.indent();
             try printer.print_indented("if index % {d} == 0:", .{ast.ids_between_sleeps});
             printer.indent();
-            try printer.write_indented("time.sleep(0.001)");
+            try printer.write_indented(switch (variant) {
+                .synchronous => "time.sleep(0.001)",
+                .asynchronous => "await asyncio.sleep(0.001)",
+            });
             printer.dedent();
             try printer.print_indented("{s}.append(tb.id())", .{binding.name});
             printer.dedent();
@@ -132,7 +180,7 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
         },
         .call => |call| {
             const prefix = try printer.string_alloc("{s} = ", .{binding.name});
-            try emit_call(printer, call, .{ .prefix = prefix });
+            try emit_call(printer, call, variant, .{ .prefix = prefix });
         },
         .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
     }
@@ -141,60 +189,85 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
 fn emit_call(
     printer: *Printer,
     call: ast.Call,
+    variant: ClientVariant,
     options: struct {
         prefix: []const u8 = "",
     },
 ) !void {
     if (call.concurrency > 1) {
         assert(options.prefix.len == 0);
-        try printer.write_indented("def operation():");
+        try printer.write_indented(switch (variant) {
+            .synchronous => "def operation():",
+            .asynchronous => "async def operation():",
+        });
         printer.indent();
-        try emit_invocation(printer, call, .{});
+        try emit_invocation(printer, call, variant, .{});
         printer.dedent();
         try printer.write_empty_line();
-        try printer.print_indented(
-            "threads = [threading.Thread(target=operation) for _ in range({d})]",
-            .{call.concurrency},
-        );
-        try printer.write_indented("for thread in threads:");
-        printer.indent();
-        try printer.write_indented("thread.start()");
-        printer.dedent();
-        try printer.write_indented("for thread in threads:");
-        printer.indent();
-        try printer.write_indented("thread.join()");
-        printer.dedent();
+        switch (variant) {
+            .synchronous => {
+                try printer.print_indented(
+                    "threads = [threading.Thread(target=operation) for _ in range({d})]",
+                    .{call.concurrency},
+                );
+                try printer.write_indented("for thread in threads:");
+                printer.indent();
+                try printer.write_indented("thread.start()");
+                printer.dedent();
+                try printer.write_indented("for thread in threads:");
+                printer.indent();
+                try printer.write_indented("thread.join()");
+                printer.dedent();
+            },
+            .asynchronous => try printer.print_indented(
+                "await asyncio.gather(*(operation() for _ in range({d})))",
+                .{call.concurrency},
+            ),
+        }
     } else {
-        try emit_invocation(printer, call, .{ .prefix = options.prefix });
+        try emit_invocation(printer, call, variant, .{ .prefix = options.prefix });
     }
 }
 
 fn emit_invocation(
     printer: *Printer,
     call: ast.Call,
+    variant: ClientVariant,
     options: struct {
         prefix: []const u8 = "",
     },
 ) !void {
+    const await_keyword = switch (variant) {
+        .synchronous => "",
+        .asynchronous => "await ",
+    };
     switch (call.name) {
         .close_client => {
             assert(options.prefix.len == 0);
-            try printer.write_indented("client.close()");
+            try printer.print_indented("{s}client.close()", .{await_keyword});
         },
         .sleep_ms => {
             assert(options.prefix.len == 0);
             assert(call.arguments.len == 1);
             const ms = try render_expression(printer, call.arguments[0]);
-            try printer.print_indented("time.sleep({s} / 1000)", .{ms});
+            switch (variant) {
+                .synchronous => try printer.print_indented("time.sleep({s} / 1000)", .{ms}),
+                .asynchronous => try printer.print_indented(
+                    "await asyncio.sleep({s} / 1000)",
+                    .{ms},
+                ),
+            }
         },
         .create_accounts, .create_transfers => {
             if (call.arguments.len == 0) {
-                try printer.print_indented("{s}client.{s}([])", .{
-                    options.prefix, @tagName(call.name),
+                try printer.print_indented("{s}{s}client.{s}([])", .{
+                    options.prefix, await_keyword, @tagName(call.name),
                 });
                 return;
             }
-            try printer.print_indented("{s}client.{s}(", .{ options.prefix, @tagName(call.name) });
+            try printer.print_indented("{s}{s}client.{s}(", .{
+                options.prefix, await_keyword, @tagName(call.name),
+            });
             printer.indent();
             try printer.write_indented("[");
             printer.indent();
@@ -210,7 +283,9 @@ fn emit_invocation(
         },
         .lookup_accounts, .lookup_transfers => {
             try printer.write_indent();
-            try printer.print("{s}client.{s}([", .{ options.prefix, @tagName(call.name) });
+            try printer.print("{s}{s}client.{s}([", .{
+                options.prefix, await_keyword, @tagName(call.name),
+            });
             for (call.arguments, 0..) |argument, index| {
                 if (index > 0) try printer.write(", ");
                 try printer.print("{s}", .{try render_expression(printer, argument)});
@@ -219,7 +294,9 @@ fn emit_invocation(
         },
         .get_account_transfers, .get_account_balances, .query_accounts, .query_transfers => {
             assert(call.arguments.len == 1);
-            try printer.print_indented("{s}client.{s}(", .{ options.prefix, @tagName(call.name) });
+            try printer.print_indented("{s}{s}client.{s}(", .{
+                options.prefix, await_keyword, @tagName(call.name),
+            });
             printer.indent();
             try emit_record(printer, call.arguments[0].record, .{});
             printer.dedent();
@@ -266,6 +343,7 @@ fn emit_record(
 fn emit_assertion(
     printer: *Printer,
     assertion: ast.Assertion,
+    variant: ClientVariant,
 ) !void {
     switch (assertion) {
         .equal => |equal| {
@@ -322,7 +400,7 @@ fn emit_assertion(
                 try printer.write_indented("with pytest.raises(Exception):");
             }
             printer.indent();
-            try emit_invocation(printer, failure.call, .{});
+            try emit_invocation(printer, failure.call, variant, .{});
             printer.dedent();
         },
     }
