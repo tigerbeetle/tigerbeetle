@@ -1395,24 +1395,53 @@ fn client_evicted() -> Result<()> {
     let server = TestDb::new_development("client_evicted")?;
     let address = server.address();
 
+    // This is a test of how the client surfaces an eviction, not of which session the cluster
+    // evicts (the replica tests cover that). The cluster prefers to evict the session whose client
+    // has been silent the longest. A client pings the cluster when it registers, but the replicas
+    // ignore that ping (it precedes the session), and its next ping is 30 seconds later. So
+    // `client_evict`'s latest sign of life is its lookup, which precedes every other session's,
+    // as long as the fill completes before `client_evict` pings.
+    let fill_start = std::time::Instant::now();
     let client_evict = tb::Client::new(0, &address)?;
 
     let accounts = block_on(client_evict.lookup_accounts(&[tb::id()])?)?;
     assert_eq!(accounts.len(), 0);
 
+    // Fill the client table. Closing a client does not end its session, so the sessions stay
+    // behind, like those of processes that exit. With bounded parallelism, to stay within the
+    // connection limit of the development configuration (8): `client_evict` holds one connection,
+    // and one is left spare for connections that are still closing.
+    const FILL_THREADS: usize = 6;
     let mut handles = Vec::new();
-    for _ in 0..CLIENTS_MAX {
+    for thread in 0..FILL_THREADS {
         let address = address.clone();
-        handles.push(std::thread::spawn(move || {
-            let client = tb::Client::new(0, &address).unwrap();
-            let accounts = block_on(client.lookup_accounts(&[tb::id()]).unwrap()).unwrap();
-            assert_eq!(accounts.len(), 0);
-        }));
+        handles.push(std::thread::spawn(
+            move || -> std::result::Result<(), String> {
+                for _ in (thread..CLIENTS_MAX).step_by(FILL_THREADS) {
+                    let client = tb::Client::new(0, &address).map_err(|e| e.to_string())?;
+                    let accounts = block_on(
+                        client
+                            .lookup_accounts(&[tb::id()])
+                            .map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    assert_eq!(accounts.len(), 0);
+                    block_on(client.close()).map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            },
+        ));
+    }
+    for handle in handles {
+        handle.join().expect("fill thread panicked")?;
     }
 
-    for handle in handles {
-        let _ = handle.join();
-    }
+    let fill_elapsed = fill_start.elapsed();
+    assert!(
+        fill_elapsed < std::time::Duration::from_secs(20),
+        "filling the client table took {fill_elapsed:?}, so `client_evict` may have pinged in the \
+         meantime, which would protect its session from eviction",
+    );
 
     // The original client should now be evicted.
     let result = block_on(client_evict.lookup_accounts(&[tb::id()])?);

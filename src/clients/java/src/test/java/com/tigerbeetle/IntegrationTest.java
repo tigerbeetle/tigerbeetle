@@ -6,11 +6,13 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -983,33 +985,53 @@ public class IntegrationTest {
     public void testClientEvicted() throws Throwable {
         final int CLIENTS_MAX = 64;
 
-        final var barrier = new CountDownLatch(CLIENTS_MAX);
-        final var executor = Executors.newFixedThreadPool(CLIENTS_MAX);
-
         // Use a separate server to avoid evicting the test's shared client.
         try (final var server = new Server("testClientEvicted")) {
 
+            // This is a test of how the client surfaces an eviction, not of which session the
+            // cluster evicts (the replica tests cover that). The cluster prefers to evict the
+            // session whose client has been silent the longest. A client pings the cluster when it
+            // registers, but the replicas ignore that ping (it precedes the session), and its next
+            // ping is 30 seconds later. So client_evict's latest sign of life is its lookup, which
+            // precedes every other session's, as long as the fill completes before it pings.
+            final long fillStart = System.nanoTime();
             try (final var client_evict =
                     new Client(clusterId, new String[] {server.getAddress()})) {
                 var accounts_first = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
                 assertTrue(accounts_first.getLength() == 0);
 
-                for (int i = 0; i < CLIENTS_MAX; i++) {
-                    executor.submit(() -> {
-                        try (final var client =
-                                new Client(clusterId, new String[] {server.getAddress()})) {
-                            var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
-                            assertTrue(accounts.getLength() == 0);
-                        } catch (InterruptedException e) {
-                            return;
-                        } finally {
-                            barrier.countDown();
-                        }
-                    });
+                // Fill the client table. Closing a client does not end its session, so the
+                // sessions stay behind, like those of processes that exit. With bounded
+                // parallelism, to stay within the connection limit of the development
+                // configuration (8): client_evict holds one connection, and one is left spare for
+                // connections that are still closing.
+                final int FILL_THREADS = 6;
+                final var executor = Executors.newFixedThreadPool(FILL_THREADS);
+                try {
+                    final var fills = new ArrayList<Future<?>>();
+                    for (int i = 0; i < CLIENTS_MAX; i++) {
+                        fills.add(executor.submit(() -> {
+                            try (final var client =
+                                    new Client(clusterId, new String[] {server.getAddress()})) {
+                                var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
+                                assertTrue(accounts.getLength() == 0);
+                            }
+                            return null;
+                        }));
+                    }
+                    for (final var fill : fills) {
+                        fill.get();
+                    }
+                } finally {
+                    executor.shutdown();
                 }
 
-                barrier.await();
-                executor.shutdown();
+                final long fillElapsedMs = (System.nanoTime() - fillStart) / 1_000_000;
+                assertTrue("filling the client table took " + fillElapsedMs
+                        + "ms, so client_evict may have pinged in the meantime, "
+                        + "which would protect its session from eviction",
+                        fillElapsedMs < 20_000);
+
                 assertThrows(ClientEvictedException.class,
                         () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
 
