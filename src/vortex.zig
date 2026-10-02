@@ -77,7 +77,7 @@ pub fn main(init: std.process.Init) !void {
         defer log_file.close(init.io);
 
         // Redirect stderr to the file.
-        switch (std.os.linux.errnoFromSyscall(
+        switch (std.os.linux.errno(
             std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO),
         )) {
             .SUCCESS => {},
