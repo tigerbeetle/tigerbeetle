@@ -53,6 +53,14 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         clients_exhaustive: bool = true,
         clients_register_op_latest: u64 = 0,
 
+        /// Counts every eviction once (per op), for coverage.
+        evictions: struct {
+            by_path: std.EnumArray(vsr.ClientSessions.EvictionPath, u64) = .initFill(0),
+            /// Evictions of the sessions of clients that are gone (killed).
+            of_gone: u64 = 0,
+            of_active: u64 = 0,
+        } = .{},
+
         /// The number of times the canonical state has been advanced.
         requests_committed: u64 = 0,
 
@@ -165,6 +173,13 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 assert(eviction_first.path == eviction.path);
             } else {
                 commit.eviction = .{ .client = eviction.client, .path = eviction.path };
+
+                state_checker.evictions.by_path.getPtr(eviction.path).* += 1;
+                if (state_checker.clients_gone.contains(eviction.client)) {
+                    state_checker.evictions.of_gone += 1;
+                } else {
+                    state_checker.evictions.of_active += 1;
+                }
             }
             commit.eviction.?.replicas.set(replica_index);
         }

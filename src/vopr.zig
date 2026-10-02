@@ -83,6 +83,7 @@ const CLIArgs = struct {
     ticks_max_requests: u32 = 40_000_000,
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
+    client_kill_probability: ?Ratio = null,
     replica_missing: ?u8 = null,
     replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
@@ -161,6 +162,9 @@ pub fn main() !void {
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
     }
+    if (cli_args.client_kill_probability) |client_kill_probability| {
+        options.client_kill_probability = client_kill_probability;
+    }
     if (cli_args.requests_max) |requests_max| {
         options.requests_max = requests_max;
     }
@@ -204,6 +208,7 @@ pub fn main() !void {
         \\          crash_stability={} ticks
         \\          restart_probability={}
         \\          restart_stability={} ticks
+        \\          client_kill_probability={}
     , .{
         seed,
         options.cluster.replica_count,
@@ -235,6 +240,7 @@ pub fn main() !void {
         options.replica_crash_stability,
         options.replica_restart_probability,
         options.replica_restart_stability,
+        options.client_kill_probability,
     });
 
     var simulator = try Simulator.init(gpa, &prng, options);
@@ -368,6 +374,20 @@ pub fn main() !void {
         log.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
     }
 
+    const evictions = &simulator.cluster.state_checker.evictions;
+    log.info(
+        \\
+        \\          clients_killed={}
+        \\          evictions: hint={} fallback_no_hint={} fallback_hint_gone={}
+        \\          evictions: killed={} active={}
+    , .{
+        simulator.clients_killed,
+        evictions.by_path.get(.hint),
+        evictions.by_path.get(.fallback_no_hint),
+        evictions.by_path.get(.fallback_hint_gone),
+        evictions.of_gone,
+        evictions.of_active,
+    });
     log.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
@@ -518,11 +538,14 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .request_probability = ratio(prng.range_inclusive(u8, 1, 100), 100),
         .request_idle_on_probability = ratio(prng.range_inclusive(u8, 0, 20), 100),
         .request_idle_off_probability = ratio(prng.range_inclusive(u8, 10, 20), 100),
+
+        .client_kill_probability = ratio(prng.int_inclusive(u8, 2), 100),
     };
 }
 
 fn options_lite(prng: *stdx.PRNG) Simulator.Options {
     var base = options_swarm(prng);
+    base.client_kill_probability = Ratio.zero();
     base.cluster.replica_count = 3;
     base.cluster.standby_count = 0;
     base.network.node_count = 3;
@@ -634,6 +657,8 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .request_probability = ratio(100, 100),
         .request_idle_on_probability = Ratio.zero(),
         .request_idle_off_probability = ratio(100, 100),
+
+        .client_kill_probability = Ratio.zero(),
     };
 }
 
@@ -682,6 +707,10 @@ pub const Simulator = struct {
         request_probability: Ratio,
         request_idle_on_probability: Ratio,
         request_idle_off_probability: Ratio,
+
+        /// Probability per client selection (in `tick_requests()`) that the client, if it has no
+        /// request inflight, is killed instead: its process dies without closing its session.
+        client_kill_probability: Ratio,
     };
 
     prng: *stdx.PRNG,
@@ -714,6 +743,8 @@ pub const Simulator = struct {
     /// Does not include `register` messages.
     requests_replied: usize = 0,
     requests_idle: bool = false,
+    /// The number of clients killed (see `client_kill_probability`).
+    clients_killed: u32 = 0,
 
     pub fn init(
         gpa: std.mem.Allocator,
@@ -1432,20 +1463,36 @@ pub const Simulator = struct {
                 simulator.prng.int_inclusive(usize, client_count - 1);
             for (0..client_count) |offset| {
                 const client_index = (client_index_base + offset) % client_count;
-                if (simulator.cluster.client_eviction_reasons[client_index] == null) {
+                if (simulator.cluster.client_active(client_index)) {
                     break :index client_index;
                 }
             } else {
+                // Every client is either killed or evicted. Kills leave clients active (see
+                // `client_retire_allowed()`), but the remaining clients may be evicted afterwards.
                 for (0..client_count) |index| {
-                    assert(simulator.cluster.client_eviction_reasons[index] != null);
-                    assert(simulator.cluster.client_eviction_reasons[index] == .no_session or
-                        simulator.cluster.client_eviction_reasons[index] == .session_too_low);
+                    const killed = simulator.cluster.client_killed[index];
+                    const eviction_reason = simulator.cluster.client_eviction_reasons[index];
+                    assert(killed or eviction_reason != null);
+                    if (!killed) {
+                        assert(eviction_reason.? == .no_session or
+                            eviction_reason.? == .session_too_low);
+                    }
                 }
-                unimplemented("client replacement; all clients were evicted");
+                unimplemented("client replacement; all clients were evicted or killed");
             }
         };
 
         var client = &simulator.cluster.clients[client_index].?;
+
+        if (client.request_inflight == null and
+            simulator.client_retire_allowed() and
+            simulator.prng.chance(simulator.options.client_kill_probability))
+        {
+            log.debug("tick_requests: kill client={}", .{client.id});
+            simulator.cluster.client_kill(client_index);
+            simulator.clients_killed += 1;
+            return;
+        }
 
         // Messages aren't added to the ReplySequence until a reply arrives.
         // Before sending a new message, make sure there will definitely be room for it.
@@ -1491,6 +1538,19 @@ pub const Simulator = struct {
         simulator.requests_sent += 1;
         assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled <=
             simulator.options.requests_max);
+    }
+
+    /// Whether a client may retire (be killed) now: retirements keep more than half of the clients
+    /// active, so that the remaining clients can still complete the workload.
+    fn client_retire_allowed(simulator: *const Simulator) bool {
+        const client_count = simulator.options.cluster.client_count;
+        const active_floor = @max(1, stdx.div_ceil(client_count, 2));
+
+        var active: usize = 0;
+        for (0..client_count) |client_index| {
+            active += @intFromBool(simulator.cluster.client_active(client_index));
+        }
+        return active > active_floor;
     }
 
     fn tick_upgrade(simulator: *Simulator) void {
