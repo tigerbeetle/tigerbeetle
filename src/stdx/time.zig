@@ -135,8 +135,8 @@ pub const TimeOS = struct {
         // For more detail and why CLOCK_MONOTONIC_RAW is even worse than CLOCK_MONOTONIC, see
         // https://github.com/ziglang/zig/pull/933#discussion_r656021295.
         var ts: posix.timespec = undefined;
-        const rc = system.clock_gettime(posix.CLOCK.BOOTTIME, &ts);
-        if (posix.errno(rc) != .SUCCESS) @panic("CLOCK_BOOTTIME required");
+        const rc = std.os.linux.clock_gettime(posix.CLOCK.BOOTTIME, &ts);
+        if (std.os.linux.errnoFromSyscall(rc) != .SUCCESS) @panic("CLOCK_BOOTTIME required");
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
