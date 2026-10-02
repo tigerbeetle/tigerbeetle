@@ -17,7 +17,32 @@ const Commits = std.ArrayList(struct {
     // null for operation=root and operation=upgrade
     release: ?vsr.Release,
     replicas: ReplicaSet = .{},
+    /// For operation=deregister: the first report of a replica that committed the op (outside of
+    /// WAL replay). Every later report must match it.
+    deregister: ?struct { client: u128, session_removed: bool } = null,
 });
+
+/// Coverage counters for client session churn, reported by the VOPR.
+/// Each op is counted once, when the first replica commits it.
+pub const DeregisterStats = struct {
+    /// Deregisters that removed the session.
+    session_removed: u32 = 0,
+    /// Deregisters that found no session (for example, a register ahead in the pipeline evicted
+    /// it).
+    session_missing: u32 = 0,
+    /// Deregisters committed while the session's previous reply was still being written to its
+    /// reply slot. (The swarm seldom produces this, if ever. The interleaving is safe by
+    /// construction: `ClientReplies.write_reply_callback()` only updates `writing`/`writes`, the
+    /// read callbacks re-resolve the slot with `get_slot_for_header()`, so a late read cannot mark
+    /// a free slot faulty, and `remove_reply()` only clears `faulty`.)
+    reply_write_inflight: u32 = 0,
+    /// Registers that took a free slot below an occupied one, without evicting. Slots are taken
+    /// lowest first, and an eviction reuses the slot that it frees, so only a deregister leaves
+    /// such a slot. (Slots freed at the top of the table are not counted.)
+    register_into_freed_slot: u32 = 0,
+    /// Registers and deregisters less than one prepare queue apart.
+    register_near_deregister: u32 = 0,
+};
 
 const ReplicaHead = struct {
     view: u32,
@@ -42,6 +67,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         /// (operation=deregister). A gone client never sends another request, so the only op
         /// that the cluster may still commit for it is a replayed (zombie) register.
         clients_gone: std.AutoArrayHashMapUnmanaged(u128, void),
+        /// The op of each gone client's deregister. There is one per client: a deregistered client
+        /// is deinitialized, so it never deregisters again (and a zombie session never sends one).
+        clients_deregister_op: std.AutoArrayHashMapUnmanaged(u128, u64),
+        deregister_stats: DeregisterStats = .{},
         clients_exhaustive: bool = true,
         clients_register_op_latest: u64 = 0,
 
@@ -78,6 +107,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             try clients_gone.ensureTotalCapacity(allocator, options.clients.len);
             errdefer clients_gone.deinit(allocator);
 
+            var clients_deregister_op: std.AutoArrayHashMapUnmanaged(u128, u64) = .{};
+            try clients_deregister_op.ensureTotalCapacity(allocator, options.clients.len);
+            errdefer clients_deregister_op.deinit(allocator);
+
             const replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
@@ -90,6 +123,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .clients = options.clients,
                 .client_replies = client_replies,
                 .clients_gone = clients_gone,
+                .clients_deregister_op = clients_deregister_op,
                 .replica_head_max = replica_head_max,
             };
         }
@@ -98,6 +132,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             const allocator = state_checker.commits.allocator;
 
             allocator.free(state_checker.replica_head_max);
+            state_checker.clients_deregister_op.deinit(allocator);
             state_checker.clients_gone.deinit(allocator);
             state_checker.client_replies.deinit(allocator);
             state_checker.commits.deinit();
@@ -124,11 +159,123 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         /// and `check_state()` accounts for the one way in which the cluster can still commit an
         /// op for the client afterwards: a replayed (zombie) register.
         ///
-        /// Called whether or not the session still existed (it may have been evicted while the
-        /// deregister was being prepared).
-        pub fn on_client_deregistration(state_checker: *StateChecker, client_id: u128) void {
-            assert(client_id != 0);
-            state_checker.clients_gone.putAssumeCapacity(client_id, {});
+        /// Called by every replica that commits the deregister (outside of WAL replay), whether or
+        /// not the session still existed (it may have been evicted while the deregister was being
+        /// prepared). The replicas must agree on the outcome.
+        pub fn on_client_deregistration(
+            state_checker: *StateChecker,
+            deregistration: struct { op: u64, client: u128, session_removed: bool },
+        ) void {
+            assert(deregistration.op > 0);
+            assert(deregistration.client != 0);
+
+            // The replica reports `.committed` (so `check_state()` has recorded the op) before it
+            // updates its client table.
+            assert(deregistration.op < state_checker.commits.items.len);
+            const commit = &state_checker.commits.items[deregistration.op];
+            assert(commit.header.op == deregistration.op);
+            assert(commit.header.operation == .deregister);
+            assert(commit.header.client == deregistration.client);
+
+            // This catches a replica that removes a different session, or that disagrees about
+            // whether the session existed. It cannot catch a replica that never reports (for
+            // example, because it state-synced past the op): such a divergence surfaces at the
+            // next checkpoint instead, since the client table is part of it.
+            if (commit.deregister) |deregister| {
+                assert(deregister.client == deregistration.client);
+                assert(deregister.session_removed == deregistration.session_removed);
+            } else {
+                commit.deregister = .{
+                    .client = deregistration.client,
+                    .session_removed = deregistration.session_removed,
+                };
+                if (deregistration.session_removed) {
+                    state_checker.deregister_stats.session_removed += 1;
+                } else {
+                    state_checker.deregister_stats.session_missing += 1;
+                }
+            }
+
+            const op_gop =
+                state_checker.clients_deregister_op.getOrPutAssumeCapacity(deregistration.client);
+            if (op_gop.found_existing) {
+                assert(op_gop.value_ptr.* == deregistration.op);
+            } else {
+                op_gop.value_ptr.* = deregistration.op;
+            }
+            state_checker.clients_gone.putAssumeCapacity(deregistration.client, {});
+        }
+
+        /// A deregistered session never comes back, except as a newer (zombie) session that a
+        /// replayed register created. This is checked only on replicas that are not syncing, and
+        /// that have executed the deregister and its client table update: `check_state()` runs
+        /// before the client table update of `commit_min`, hence `commit_min > op`.
+        /// - A replica that lags behind the deregister still has the session.
+        /// - A replica that restarted from a checkpoint below the deregister replays it without
+        ///   updating its client table, but that table reflects the checkpoint's trigger, which is
+        ///   at or above the deregister. The same holds for a replica that state-synced.
+        fn check_deregistered(state_checker: *const StateChecker, replica_index: u8) void {
+            const replica = &state_checker.replicas[replica_index];
+            assert(replica.syncing == .idle);
+
+            for (
+                state_checker.clients_deregister_op.keys(),
+                state_checker.clients_deregister_op.values(),
+            ) |client, op| {
+                if (replica.commit_min > op) {
+                    const sessions = &replica.client_sessions;
+                    if (sessions.entries_by_client.get(client)) |slot_index| {
+                        assert(sessions.entries[slot_index].session > op);
+                    }
+                }
+            }
+        }
+
+        fn count_deregister_stats(
+            state_checker: *StateChecker,
+            replica_index: u8,
+            header: *const vsr.Header.Prepare,
+        ) void {
+            assert(header.operation == .register or header.operation == .deregister);
+            assert(header.client != 0);
+            // The op is about to be appended to the commit history.
+            assert(header.op == state_checker.commits.items.len);
+
+            const replica = &state_checker.replicas[replica_index];
+            const sessions = &replica.client_sessions;
+            const stats = &state_checker.deregister_stats;
+
+            const operation_near: vsr.Operation = switch (header.operation) {
+                .register => .deregister,
+                .deregister => .register,
+                else => unreachable,
+            };
+            const ops_near = @min(header.op, constants.pipeline_prepare_queue_max);
+            for (state_checker.commits.items[header.op - ops_near .. header.op]) |*commit| {
+                if (commit.header.operation == operation_near) {
+                    stats.register_near_deregister += 1;
+                    break;
+                }
+            }
+
+            if (header.operation == .register) {
+                assert(sessions.entries_by_client.get(header.client) == null);
+                if (sessions.count() < sessions.capacity()) {
+                    const slot_free = sessions.entries_present.first_unset().?;
+                    for (slot_free + 1..constants.clients_max) |slot_index| {
+                        if (sessions.entries_present.is_set(slot_index)) {
+                            stats.register_into_freed_slot += 1;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                if (sessions.entries_by_client.get(header.client)) |slot_index| {
+                    if (replica.client_replies.writing.is_set(slot_index)) {
+                        stats.reply_write_inflight += 1;
+                    }
+                }
+            }
         }
 
         pub fn on_message(state_checker: *StateChecker, message: *const Message) void {
@@ -214,6 +361,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
 
             assert(replica.view >= state_checker.replica_head_max[replica_index].view);
+
+            if (replica.syncing == .idle) state_checker.check_deregistered(replica_index);
 
             const commit_root_op = replica.superblock.working.vsr_state.checkpoint.header.op;
             const commit_root = replica.superblock.working.vsr_state.checkpoint.header.checksum;
@@ -325,6 +474,15 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             state_checker.requests_committed += 1;
             assert(state_checker.requests_committed == header_b.?.op);
+
+            // The replica has not yet updated its client table for this op.
+            switch (header_b.?.operation) {
+                .register, .deregister => state_checker.count_deregister_stats(
+                    replica_index,
+                    header_b.?,
+                ),
+                else => {},
+            }
 
             const release = release: {
                 if (header_b.?.operation == .root or

@@ -83,6 +83,7 @@ const CLIArgs = struct {
     ticks_max_requests: u32 = 40_000_000,
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
+    client_deregister_probability: ?Ratio = null,
     replica_missing: ?u8 = null,
     replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
@@ -161,6 +162,9 @@ pub fn main() !void {
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
     }
+    if (cli_args.client_deregister_probability) |client_deregister_probability| {
+        options.client_deregister_probability = client_deregister_probability;
+    }
     if (cli_args.requests_max) |requests_max| {
         options.requests_max = requests_max;
     }
@@ -179,6 +183,7 @@ pub fn main() !void {
         \\          standbys={}
         \\          clients={}
         \\          request_probability={}
+        \\          deregister_probability={}
         \\          idle_on_probability={}
         \\          idle_off_probability={}
         \\          one_way_delay_mean={}
@@ -210,6 +215,7 @@ pub fn main() !void {
         options.cluster.standby_count,
         options.cluster.client_count,
         options.request_probability,
+        options.client_deregister_probability,
         options.request_idle_on_probability,
         options.request_idle_off_probability,
         options.network.one_way_delay_mean,
@@ -368,6 +374,19 @@ pub fn main() !void {
         log.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
     }
 
+    const deregister_stats = simulator.cluster.state_checker.deregister_stats;
+    log.info(
+        \\
+        \\          deregisters: session_removed={} session_missing={} reply_write_inflight={}
+        \\          registers: into_freed_slot={} near_deregister={}
+    , .{
+        deregister_stats.session_removed,
+        deregister_stats.session_missing,
+        deregister_stats.reply_write_inflight,
+        deregister_stats.register_into_freed_slot,
+        deregister_stats.register_near_deregister,
+    });
+
     log.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
@@ -518,6 +537,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .request_probability = ratio(prng.range_inclusive(u8, 1, 100), 100),
         .request_idle_on_probability = ratio(prng.range_inclusive(u8, 0, 20), 100),
         .request_idle_off_probability = ratio(prng.range_inclusive(u8, 10, 20), 100),
+        .client_deregister_probability = ratio(prng.int_inclusive(u8, 5), 100),
     };
 }
 
@@ -634,6 +654,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .request_probability = ratio(100, 100),
         .request_idle_on_probability = Ratio.zero(),
         .request_idle_off_probability = ratio(100, 100),
+        .client_deregister_probability = Ratio.zero(),
     };
 }
 
@@ -682,6 +703,10 @@ pub const Simulator = struct {
         request_probability: Ratio,
         request_idle_on_probability: Ratio,
         request_idle_off_probability: Ratio,
+        /// Probability that a client, when chosen to send a request, instead ends its session
+        /// (operation=deregister). A deregistered client sends no further requests, so clients
+        /// only deregister while more than `client_retire_floor()` of them stay active.
+        client_deregister_probability: Ratio,
     };
 
     prng: *stdx.PRNG,
@@ -1296,6 +1321,34 @@ pub const Simulator = struct {
         return null;
     }
 
+    /// Clients only retire (end their session) while more than this many clients stay active, so
+    /// that some clients remain to send the remaining requests: half of the clients, at least one.
+    fn client_retire_floor(simulator: *const Simulator) usize {
+        const client_count = simulator.options.cluster.client_count;
+        assert(client_count > 0);
+        return @max(1, stdx.div_ceil(client_count, 2));
+    }
+
+    /// The number of clients that are active (see `Cluster.client_active()`), and not retiring:
+    /// a client whose deregister is in flight counts as retired.
+    fn clients_staying(simulator: *const Simulator) usize {
+        var count: usize = 0;
+        for (0..simulator.options.cluster.client_count) |index| {
+            if (simulator.cluster.client_active(index)) {
+                const inflight = simulator.cluster.clients[index].?.request_inflight;
+                count += @intFromBool(inflight == null or
+                    inflight.?.message.header.operation != .deregister);
+            }
+        }
+        return count;
+    }
+
+    /// Whether another client may retire. Evictions are not retirements: they may still bring
+    /// the number of active clients below the floor.
+    fn client_retire_allowed(simulator: *const Simulator) bool {
+        return simulator.clients_staying() > simulator.client_retire_floor();
+    }
+
     /// The cluster was unable to upgrade because one or more of its reformat clients were evicted.
     /// This is not strictly related to the core -- an upgrade requires all (non-standby) replicas.
     pub fn core_reformat_evicted(simulator: *const Simulator) bool {
@@ -1432,16 +1485,23 @@ pub const Simulator = struct {
                 simulator.prng.int_inclusive(usize, client_count - 1);
             for (0..client_count) |offset| {
                 const client_index = (client_index_base + offset) % client_count;
-                if (simulator.cluster.client_eviction_reasons[client_index] == null) {
+                if (simulator.cluster.client_active(client_index)) {
                     break :index client_index;
                 }
             } else {
+                var clients_evicted: usize = 0;
                 for (0..client_count) |index| {
-                    assert(simulator.cluster.client_eviction_reasons[index] != null);
-                    assert(simulator.cluster.client_eviction_reasons[index] == .no_session or
-                        simulator.cluster.client_eviction_reasons[index] == .session_too_low);
+                    if (simulator.cluster.client_eviction_reasons[index]) |reason| {
+                        assert(reason == .no_session or reason == .session_too_low);
+                        clients_evicted += 1;
+                    } else {
+                        // Deregistered (and maybe deinitialized already).
+                        assert(simulator.cluster.client_deregistered[index]);
+                    }
                 }
-                unimplemented("client replacement; all clients were evicted");
+                // The retire floor keeps some clients active, so at least one was evicted.
+                assert(clients_evicted > 0);
+                unimplemented("client replacement; all clients were evicted or deregistered");
             }
         };
 
@@ -1466,6 +1526,18 @@ pub const Simulator = struct {
 
         // Make sure that the client is ready to send a new request.
         if (client.request_inflight != null) return;
+
+        if (client.session > 0 and
+            simulator.prng.chance(simulator.options.client_deregister_probability))
+        {
+            if (simulator.client_retire_allowed()) {
+                simulator.cluster.deregister(client_index);
+                assert(client.request_inflight.?.message.header.operation == .deregister);
+                assert(simulator.clients_staying() >= simulator.client_retire_floor());
+                return;
+            }
+        }
+
         const request_message = client.get_message();
         errdefer client.release_message(request_message);
 

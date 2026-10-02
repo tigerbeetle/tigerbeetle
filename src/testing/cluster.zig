@@ -1103,7 +1103,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 },
                 .client_evicted => |client_id| cluster.cluster_on_eviction(client_id),
                 .client_deregistered => |deregistered| {
-                    cluster.state_checker.on_client_deregistration(deregistered.client);
+                    cluster.state_checker.on_client_deregistration(.{
+                        .op = deregistered.op,
+                        .client = deregistered.client,
+                        .session_removed = deregistered.session_removed,
+                    });
                 },
             }
         }
