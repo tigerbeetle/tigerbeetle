@@ -6014,10 +6014,8 @@ class TestConformance < Minitest::Test
     end
   end
 
-  def test_close_client_fails_a_second_close
+  def test_close_client_ignores_a_second_close
     @client.close
-    assert_raises(TigerBeetle::ClientClosedError) do
-      @client.close
-    end
+    @client.close
   end
 end

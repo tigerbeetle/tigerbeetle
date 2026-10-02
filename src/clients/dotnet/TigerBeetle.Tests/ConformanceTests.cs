@@ -6042,8 +6042,12 @@ public class ConformanceTests
         Assert.ThrowsException<ClientClosedException>(() => client.LookupAccounts(new UInt128[] { ID.Create() }));
     }
 
-    // Omitted: "fails a second close"
-    // Reason: requires raise on double close
+    [TestMethod]
+    public void CloseClientIgnoresASecondClose()
+    {
+        client.Close();
+        client.Close();
+    }
 
     private class TBConformanceServer : IDisposable
     {

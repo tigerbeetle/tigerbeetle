@@ -5857,8 +5857,10 @@ test('close_client_fails_operations_after_close', async (client) => {
   })
 })
 
-// Omitted: "fails a second close"
-// Reason: requires raise on double close
+test('close_client_ignores_a_second_close', async (client) => {
+  client.destroy()
+  client.destroy()
+})
 
 async function main () {
   const start = new Date().getTime()

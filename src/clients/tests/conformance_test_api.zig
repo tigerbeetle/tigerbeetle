@@ -120,12 +120,6 @@ pub fn requires_fractional_amounts() void {
     @panic(ct_compile_error);
 }
 
-/// Restricts the case to clients that raise when an already closed client is
-/// closed again, rather than ignoring the second call.
-pub fn requires_raise_on_double_close() void {
-    @panic(ct_compile_error);
-}
-
 /// Compares only the fields listed in `expected`.
 pub fn assert_equal(actual: anytype, expected: anytype) void {
     _ = actual;

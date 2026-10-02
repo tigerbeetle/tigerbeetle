@@ -6426,5 +6426,6 @@ def test_close_client_fails_operations_after_close(client):
     with pytest.raises(tb.ClientClosedError):
         client.lookup_accounts([tb.id()])
 
-# Omitted: "fails a second close"
-# Reason: requires raise on double close
+def test_close_client_ignores_a_second_close(client):
+    client.close()
+    client.close()
