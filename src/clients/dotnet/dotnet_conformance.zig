@@ -29,6 +29,8 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     };
 }
 
+const ClientVariant = enum { synchronous, asynchronous };
+
 fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
     try printer.write(
         \\////////////////////////////////////////////////////////////
@@ -76,45 +78,74 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\    }
         \\
     );
-    for (tests.suites) |suite| {
+    for (std.enums.values(ClientVariant)) |variant| {
         try printer.write_empty_line();
-        try printer.print_indented("// Suite: {s}", .{suite.name});
-        for (suite.cases) |case| {
-            const case_memory = printer.mark();
-            defer printer.release(case_memory);
-
+        try printer.write(switch (variant) {
+            .synchronous =>
+            \\    /////////////////
+            \\    // Sync client
+            \\    /////////////////
+            \\
+            ,
+            .asynchronous =>
+            \\    //////////////////
+            \\    // Async client
+            \\    //////////////////
+            \\
+            \\    // Cases without a request have nothing to await.
+            \\#pragma warning disable CS1998
+            \\
+            ,
+        });
+        for (tests.suites) |suite| {
             try printer.write_empty_line();
-            if (case.requirement) |requirement| {
-                if (!satisfies(requirement)) {
-                    try printer.write_omission(case);
-                    continue;
+            try printer.print_indented("// Suite: {s}", .{suite.name});
+            for (suite.cases) |case| {
+                const case_memory = printer.mark();
+                defer printer.release(case_memory);
+
+                try printer.write_empty_line();
+                if (case.requirement) |requirement| {
+                    if (!satisfies(requirement)) {
+                        try printer.write_omission(case);
+                        continue;
+                    }
                 }
+                try printer.write_indented("[TestMethod]");
+                try printer.print_indented("public {s} {s}{s}{s}()", .{
+                    switch (variant) {
+                        .synchronous => "void",
+                        .asynchronous => "async Task",
+                    },
+                    try printer.to_case_alloc(.PascalCase, suite.name),
+                    try printer.to_case_alloc(.PascalCase, case.description),
+                    switch (variant) {
+                        .synchronous => "",
+                        .asynchronous => "Async",
+                    },
+                });
+                try printer.write_indented("{");
+                printer.indent();
+                for (case.steps) |step| try emit_step(printer, step, variant);
+                printer.dedent();
+                try printer.write_indented("}");
             }
-            try printer.write_indented("[TestMethod]");
-            try printer.print_indented("public void {s}{s}()", .{
-                try printer.to_case_alloc(.PascalCase, suite.name),
-                try printer.to_case_alloc(.PascalCase, case.description),
-            });
-            try printer.write_indented("{");
-            printer.indent();
-            for (case.steps) |step| try emit_step(printer, step);
-            printer.dedent();
-            try printer.write_indented("}");
         }
     }
+    try printer.write("#pragma warning restore CS1998\n");
     try emit_server(printer);
     try printer.write("}\n");
 }
 
-fn emit_step(printer: *Printer, step: ast.Step) !void {
+fn emit_step(printer: *Printer, step: ast.Step, variant: ClientVariant) !void {
     switch (step) {
-        .binding => |binding| try emit_binding(printer, binding),
-        .call => |call| try emit_call(printer, call, .{}),
-        .assertion => |assertion| try emit_assertion(printer, assertion),
+        .binding => |binding| try emit_binding(printer, binding, variant),
+        .call => |call| try emit_call(printer, call, variant, .{}),
+        .assertion => |assertion| try emit_assertion(printer, assertion, variant),
     }
 }
 
-fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
+fn emit_binding(printer: *Printer, binding: ast.Binding, variant: ClientVariant) !void {
     const name = try printer.to_case_alloc(.camelCase, binding.name);
     switch (binding.value) {
         .generate_id => try printer.print_indented("var {s} = ID.Create();", .{name}),
@@ -175,7 +206,7 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
         },
         .call => |call| {
             const prefix = try printer.string_alloc("var {s} = ", .{name});
-            try emit_call(printer, call, .{ .prefix = prefix });
+            try emit_call(printer, call, variant, .{ .prefix = prefix });
         },
         .integer, .boolean, .enum_literal, .reference, .increment, .decrement => unreachable,
     }
@@ -184,9 +215,11 @@ fn emit_binding(printer: *Printer, binding: ast.Binding) !void {
 fn emit_call(
     printer: *Printer,
     call: ast.Call,
+    variant: ClientVariant,
     options: struct {
         prefix: []const u8 = "",
         suffix: []const u8 = ";",
+        awaited: bool = true,
     },
 ) !void {
     if (call.concurrency > 1) {
@@ -195,26 +228,51 @@ fn emit_call(
         try printer.write_indented("for (var index = 0; index < tasks.Length; index++)");
         try printer.write_indented("{");
         printer.indent();
-        try emit_invocation(printer, call, .{
-            .prefix = "tasks[index] = Task.Run(() => ",
-            .suffix = ");",
-        });
+        switch (variant) {
+            .synchronous => try emit_invocation(printer, call, variant, .{
+                .prefix = "tasks[index] = Task.Run(() => ",
+                .suffix = ");",
+                .awaited = false,
+            }),
+            .asynchronous => try emit_invocation(printer, call, variant, .{
+                .prefix = "tasks[index] = ",
+                .suffix = ";",
+                .awaited = false,
+            }),
+        }
         printer.dedent();
         try printer.write_indented("}");
-        try printer.write_indented("Task.WhenAll(tasks).Wait();");
+        try printer.write_indented(switch (variant) {
+            .synchronous => "Task.WhenAll(tasks).Wait();",
+            .asynchronous => "await Task.WhenAll(tasks);",
+        });
         return;
     }
-    try emit_invocation(printer, call, .{ .prefix = options.prefix, .suffix = options.suffix });
+    try emit_invocation(printer, call, variant, .{
+        .prefix = options.prefix,
+        .suffix = options.suffix,
+        .awaited = options.awaited,
+    });
 }
 
 fn emit_invocation(
     printer: *Printer,
     call: ast.Call,
+    variant: ClientVariant,
     options: struct {
         prefix: []const u8,
         suffix: []const u8,
+        awaited: bool,
     },
 ) !void {
+    const await_keyword = switch (variant) {
+        .synchronous => "",
+        .asynchronous => if (options.awaited) "await " else "",
+    };
+    const method_suffix = switch (variant) {
+        .synchronous => "",
+        .asynchronous => "Async",
+    };
     switch (call.name) {
         .close_client => {
             try printer.print_indented("{s}client.Close(){s}", .{ options.prefix, options.suffix });
@@ -230,9 +288,11 @@ fn emit_invocation(
         .create_accounts, .create_transfers => {
             const record_type = if (call.name == .create_accounts) "Account" else "Transfer";
             try printer.write_indent();
-            try printer.print("{s}client.{s}(", .{
+            try printer.print("{s}{s}client.{s}{s}(", .{
                 options.prefix,
+                await_keyword,
                 dotnet_operation_name(call.name),
+                method_suffix,
             });
             if (call.arguments.len == 0) {
                 try printer.print("Array.Empty<{s}>()){s}\n", .{ record_type, options.suffix });
@@ -258,9 +318,11 @@ fn emit_invocation(
         },
         .lookup_accounts, .lookup_transfers => {
             try printer.write_indent();
-            try printer.print("{s}client.{s}(", .{
+            try printer.print("{s}{s}client.{s}{s}(", .{
                 options.prefix,
+                await_keyword,
                 dotnet_operation_name(call.name),
+                method_suffix,
             });
             if (call.arguments.len == 0) {
                 try printer.print("Array.Empty<UInt128>()){s}\n", .{options.suffix});
@@ -277,9 +339,11 @@ fn emit_invocation(
             assert(call.arguments.len == 1);
             const filter = call.arguments[0].record;
             try printer.write_indent();
-            try printer.print("{s}client.{s}(new {s}", .{
+            try printer.print("{s}{s}client.{s}{s}(new {s}", .{
                 options.prefix,
+                await_keyword,
                 dotnet_operation_name(call.name),
+                method_suffix,
                 @tagName(filter.type),
             });
             if (filter.fields.len == 0) {
@@ -307,7 +371,7 @@ fn emit_record_fields(printer: *Printer, record: ast.Record) !void {
     try printer.write("}");
 }
 
-fn emit_assertion(printer: *Printer, assertion: ast.Assertion) !void {
+fn emit_assertion(printer: *Printer, assertion: ast.Assertion, variant: ClientVariant) !void {
     switch (assertion) {
         .equal => |equal| {
             const actual = try printer.to_case_alloc(.camelCase, equal.actual);
@@ -376,10 +440,18 @@ fn emit_assertion(printer: *Printer, assertion: ast.Assertion) !void {
         },
         .fail => |failure| {
             const client_error = failure.client_error orelse unreachable;
-            const prefix = try printer.string_alloc("Assert.ThrowsException<{s}>(() => ", .{
+            const prefix = try printer.string_alloc("{s}<{s}>(() => ", .{
+                switch (variant) {
+                    .synchronous => "Assert.ThrowsException",
+                    .asynchronous => "await Assert.ThrowsExceptionAsync",
+                },
                 dotnet_exception_name(client_error),
             });
-            try emit_call(printer, failure.call, .{ .prefix = prefix, .suffix = ");" });
+            try emit_call(printer, failure.call, variant, .{
+                .prefix = prefix,
+                .suffix = ");",
+                .awaited = false,
+            });
         },
     }
 }
@@ -515,16 +587,6 @@ fn emit_server(printer: *Printer) !void {
     try printer.write_indented("private class TBConformanceServer : IDisposable");
     try printer.write_indented("{");
     printer.indent();
-    try printer.write_indented(
-        "// Path relative from /TigerBeetle.Test/bin/<framework>/<release>/<platform> :",
-    );
-    try printer.write_indented("private const string PROJECT_ROOT = \"../../../../..\";");
-    try printer.write_indented(
-        "private const string TB_PATH = PROJECT_ROOT + \"/../../../zig-out/bin\";",
-    );
-    try printer.write_indented("private const string TB_EXE = \"tigerbeetle\";");
-    try printer.write_indented("private const string TB_SERVER = TB_PATH + \"/\" + TB_EXE;");
-    try printer.write_empty_line();
     try printer.write_indented("private readonly Process process;");
     try printer.write_indented("private readonly string dataFile;");
     try printer.write_empty_line();
@@ -534,11 +596,24 @@ fn emit_server(printer: *Printer) !void {
     try printer.write_indented("{");
     printer.indent();
     try printer.write_indented("dataFile = Path.GetRandomFileName();");
+    try printer.write_indented(
+        "var tigerbeetleBinary = Environment.GetEnvironmentVariable(\"TIGERBEETLE_BINARY\");",
+    );
+    try printer.write_indented("if (tigerbeetleBinary == null)");
+    try printer.write_indented("{");
+    printer.indent();
+    try printer.write_indented("throw new InvalidOperationException(");
+    printer.indent();
+    try printer.write_indented("\"TIGERBEETLE_BINARY environmental variable is required\"");
+    printer.dedent();
+    try printer.write_indented(");");
+    printer.dedent();
+    try printer.write_indented("}");
     try printer.write_empty_line();
     try printer.write_indented("{");
     printer.indent();
     try printer.write_indented("using var format = new Process();");
-    try printer.write_indented("format.StartInfo.FileName = TB_SERVER;");
+    try printer.write_indented("format.StartInfo.FileName = tigerbeetleBinary;");
     try printer.write_indented("format.StartInfo.Arguments =");
     printer.indent();
     try printer.write_indented(
@@ -565,7 +640,7 @@ fn emit_server(printer: *Printer) !void {
     try printer.write_indented("}");
     try printer.write_empty_line();
     try printer.write_indented("process = new Process();");
-    try printer.write_indented("process.StartInfo.FileName = TB_SERVER;");
+    try printer.write_indented("process.StartInfo.FileName = tigerbeetleBinary;");
     try printer.write_indented(
         "process.StartInfo.Arguments = $\"start --addresses=0 --development ./{dataFile}\";",
     );
