@@ -866,7 +866,7 @@ pub const IO = struct {
                 .accept = .{
                     .socket = socket,
                     .address = undefined,
-                    .address_size = @sizeOf(linux.sockaddr),
+                    .address_size = @sizeOf(common.PosixAddress),
                 },
             },
         };

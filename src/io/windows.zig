@@ -514,7 +514,7 @@ pub const IO = struct {
                         posix.bind(
                             op.socket,
                             &bind_addr.any,
-                            @sizeOf(common.PosixAddress),
+                            @sizeOf(@FieldType(common.PosixAddress, "in")),
                         ) catch |err| switch (err) {
                             error.AccessDenied => unreachable,
                             error.SymLinkLoop => unreachable,
