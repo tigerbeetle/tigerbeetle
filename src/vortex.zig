@@ -77,7 +77,9 @@ pub fn main(init: std.process.Init) !void {
         defer log_file.close(init.io);
 
         // Redirect stderr to the file.
-        switch (std.posix.errno(std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO))) {
+        switch (std.os.linux.errnoFromSyscall(
+            std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO),
+        )) {
             .SUCCESS => {},
             else => |err| return stdx.unexpected_errno("dup2", err),
         }
