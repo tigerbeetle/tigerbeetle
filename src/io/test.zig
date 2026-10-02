@@ -168,7 +168,7 @@ test "open/write/read/close/statx" {
 }
 
 test "accept/connect/send/receive" {
-    try struct {
+    const T = struct {
         const Context = @This();
 
         io: *IO,
@@ -184,11 +184,11 @@ test "accept/connect/send/receive" {
         sent: usize = 0,
         received: usize = 0,
 
-        fn run_test() !void {
+        fn run_test(loopback: stdx.IPAddress) !void {
             var io = try IO.init(std.testing.io, 32, 0);
             defer io.deinit();
 
-            const address: stdx.SocketAddress = .{ .ip = .@"127.0.0.1", .port = 0 };
+            const address: stdx.SocketAddress = .{ .ip = loopback, .port = 0 };
             const kernel_backlog = 1;
 
             const server = try io.open_socket_tcp(address.ip.family(), tcp_options);
@@ -281,7 +281,10 @@ test "accept/connect/send/receive" {
             self.received = result catch @panic("recv error");
             self.done = true;
         }
-    }.run_test();
+    };
+
+    try T.run_test(.@"127.0.0.1");
+    try T.run_test(.@"::1");
 }
 
 test "timeout" {

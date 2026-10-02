@@ -44,6 +44,7 @@ pub const IPAddress = extern struct {
         @as([16]u8, @bitCast(std.mem.nativeToBig(u128, IPv4_prefix)))[0..12].*;
 
     pub const @"127.0.0.1": IPAddress = .ip("127.0.0.1");
+    pub const @"::1": IPAddress = .ip("::1");
 
     comptime {
         // The code is endianness-clean, aspirationally. Audit before running on your PowerPC!
