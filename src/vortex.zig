@@ -72,18 +72,7 @@ pub fn main(init: std.process.Init) !void {
 
     const args = flags.parse(CLIArgs, init.minimal.args);
 
-    if (args.log) |log_path| {
-        const log_file = try std.Io.Dir.cwd().createFile(init.io, log_path, .{});
-        defer log_file.close(init.io);
-
-        // Redirect stderr to the file.
-        switch (std.os.linux.errno(
-            std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO),
-        )) {
-            .SUCCESS => {},
-            else => |err| return stdx.unexpected_errno("dup2", err),
-        }
-    }
+    if (args.log) |log_path| try setup_log(init.io, log_path);
 
     if (builtin.os.tag == .linux) {
         // Relaunch in fresh pid / network namespaces.
@@ -111,6 +100,17 @@ pub fn main(init: std.process.Init) !void {
     }
 
     log.info("done", .{});
+}
+
+fn setup_log(io: std.Io, log_path: []const u8) !void {
+    const log_file = try std.Io.Dir.cwd().createFile(io, log_path, .{});
+    defer log_file.close(io);
+
+    // Redirect stderr to the file.
+    switch (std.posix.errno(std.os.linux.dup2(log_file.handle, std.posix.STDERR_FILENO))) {
+        .SUCCESS => {},
+        else => |err| return stdx.unexpected_errno("dup2", err),
+    }
 }
 
 fn scenario_default(
