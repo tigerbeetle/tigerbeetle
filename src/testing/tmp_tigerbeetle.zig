@@ -35,7 +35,7 @@ pub fn init(
     gpa: std.mem.Allocator,
     options: struct {
         development: bool,
-        prebuilt: ?[]const u8 = null,
+        prebuilt: ?[]const u8,
     },
 ) !TmpTigerBeetle {
     const shell = try Shell.create(gpa);

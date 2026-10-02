@@ -686,8 +686,6 @@ pub fn GridType(comptime Storage: type) type {
         ///
         /// This does not remove the blocks from the cache — the blocks can be read until the next
         /// checkpoint.
-        ///
-        /// Asserts that the addresses are not currently being read from or written to.
         pub fn release(grid: *Grid, addresses: []const u64) void {
             assert(grid.callback == .none);
             for (addresses) |address| {

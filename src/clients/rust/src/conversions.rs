@@ -45,7 +45,7 @@ impl From<u8> for PacketError {
             TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED => ClientEvicted,
             TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW => ClientReleaseTooLow,
             TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH => ClientReleaseTooHigh,
-            TB_PACKET_STATUS_TB_PACKET_CLIENT_SHUTDOWN => ClientShutdown,
+            TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED => ClientClosed,
             TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION => InvalidOperation,
             TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE => InvalidDataSize,
             v => panic!("Unknown PacketError: {v}"),
@@ -63,7 +63,7 @@ impl From<PacketError> for u8 {
             ClientEvicted => TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED,
             ClientReleaseTooLow => TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW,
             ClientReleaseTooHigh => TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH,
-            ClientShutdown => TB_PACKET_STATUS_TB_PACKET_CLIENT_SHUTDOWN,
+            ClientClosed => TB_PACKET_STATUS_TB_PACKET_CLIENT_CLOSED,
             InvalidOperation => TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION,
             InvalidDataSize => TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE,
         }

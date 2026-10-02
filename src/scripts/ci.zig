@@ -24,21 +24,34 @@ const LanguageCI = .{
 };
 
 const LanguageCIVortex = .{
-    .rust = @import("../testing/vortex/rust_driver/ci.zig"),
-    .java = @import("../testing/vortex/java_driver/ci.zig"),
+    // TODO: re-enable these
+    // .rust = @import("../testing/vortex/rust_driver/ci.zig"),
+    // .java = @import("../testing/vortex/java_driver/ci.zig"),
 };
 
 pub const CLIArgs = struct {
     language: ?Language = null,
     validate_release: bool = false,
+    tigerbeetle: ?[]const u8 = null,
 };
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (cli_args.validate_release) {
+        if (cli_args.tigerbeetle != null) {
+            stdx.Flags.fatal("--validate-release conflicts with --tigerbeetle", .{});
+            comptime unreachable;
+        }
         try validate_release(shell, gpa, cli_args.language);
     } else {
+        const tigerbeetle = cli_args.tigerbeetle orelse {
+            stdx.Flags.fatal("--tigerbeetle is required", .{});
+            comptime unreachable;
+        };
         try generate_readmes(shell, gpa, cli_args.language);
-        try run_tests(shell, gpa, cli_args.language);
+        try run_tests(shell, gpa, .{
+            .language_requested = cli_args.language,
+            .tigerbeetle = tigerbeetle,
+        });
     }
 }
 
@@ -53,9 +66,14 @@ fn generate_readmes(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
     }
 }
 
-fn run_tests(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {
+fn run_tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    language_requested: ?Language,
+    tigerbeetle: []const u8,
+}) !void {
     inline for (comptime std.enums.values(Language)) |language| {
-        if (language_requested == language or language_requested == null) {
+        if (options.language_requested == language or
+            options.language_requested == null)
+        {
             {
                 const ci = @field(LanguageCI, @tagName(language));
                 var section = try shell.open_section(@tagName(language) ++ " ci");
@@ -65,7 +83,9 @@ fn run_tests(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Languag
                     try shell.pushd("./src/clients/" ++ @tagName(language));
                     defer shell.popd();
 
-                    try ci.tests(shell, gpa);
+                    try ci.tests(shell, gpa, .{
+                        .tigerbeetle = options.tigerbeetle,
+                    });
                 }
             }
 

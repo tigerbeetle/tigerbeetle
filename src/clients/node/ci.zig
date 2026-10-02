@@ -6,7 +6,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("package.json"));
 
     try shell.exec_zig("build clients:node -Drelease", .{});
@@ -21,6 +23,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -37,6 +40,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
@@ -50,11 +54,15 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     if (builtin.target.os.tag == .linux) {
         try shell.exec("npm pack --quiet", .{});
 
-        for ([_][]const u8{ "node:18", "node:18-alpine" }) |image| {
+        const image_tags = .{
+            // Not entirely clear if docker dependency is in scope for our CI...
+            "node:18", "node:18-alpine",
+        };
+        inline for (image_tags) |image| {
             log.info("testing docker image: '{s}'", .{image});
 
             try shell.exec(
-                \\docker run
+                \\podman run
                 \\--security-opt seccomp=unconfined
                 \\--volume ./:/host
                 \\{image}
@@ -93,17 +101,14 @@ pub fn validate_release_package(shell: *Shell, gpa: std.mem.Allocator, options: 
     const attempts_max = 5;
     for (0..attempts_max) |attempt_index| {
         // TODO(zig): use `shell.http_get` when there's no TLS error.
-        const result = try shell.exec_raw(
+        const status = try shell.exec_status(
             "wget --quiet --output-document={out} {url}",
             .{
                 .out = published_tgz,
                 .url = published_url,
             },
         );
-        switch (result.term) {
-            .Exited => |code| if (code == 0) break,
-            else => {},
-        }
+        if (status == 0) break;
 
         const attempt = attempt_index + 1;
         log.warn("node package download failed. Attempt={}", .{attempt});

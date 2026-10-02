@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const constants = @import("./constants.zig");
 const fuzz = @import("./testing/fuzz.zig");
-const TimeOS = @import("./time.zig").TimeOS;
+const TimeOS = stdx.TimeOS;
 
 const log = std.log.scoped(.fuzz);
 

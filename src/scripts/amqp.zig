@@ -77,7 +77,7 @@ fn run_protocol_test(gpa: std.mem.Allocator, options: struct { host: stdx.Socket
 
     const default_exchange = "";
     const testing_queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     defer gpa.free(testing_queue);
 
@@ -193,7 +193,7 @@ fn run_protocol_test(gpa: std.mem.Allocator, options: struct { host: stdx.Socket
     // Asserting the progress queue "drop head" behavior,
     // where only the last published message must remain.
     const progress_queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     defer gpa.free(progress_queue);
 
@@ -278,7 +278,7 @@ fn run_serialization_test(
     try context.connect(options.host);
     const default_exchange = "";
     const queue = try std.fmt.allocPrint(gpa, "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     defer gpa.free(queue);
 
@@ -384,10 +384,10 @@ fn run_cdc_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
-    var time_os: vsr.time.TimeOS = .{};
+    var time_os: stdx.TimeOS = .{};
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     amqp_context.queue_declare(.{
         .queue = queue,
@@ -400,6 +400,7 @@ fn run_cdc_test(
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .development = false,
+        .prebuilt = null,
     });
     defer tmp_beetle.deinit(gpa);
 
@@ -451,7 +452,7 @@ fn run_cdc_test(
     //   at most one batch is duplicated.
     // - Start multiple CDC jobs to stress the lock queue.
     var vsr_context: VSRContext = undefined;
-    try vsr_context.init(gpa, time_os.time(), tmp_beetle.port);
+    try vsr_context.init(gpa, time_os.interface(), tmp_beetle.port);
     defer vsr_context.deinit(gpa);
 
     var count: u32 = 0;
@@ -550,11 +551,11 @@ fn run_timeout_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
-    var time_os: vsr.time.TimeOS = .{};
-    const time = &time_os.time();
+    var time_os: stdx.TimeOS = .{};
+    const time = &time_os.interface();
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
-        stdx.unique_u128(),
+        stdx.crypto_u128(),
     });
     amqp_context.queue_declare(.{
         .queue = queue,
@@ -567,6 +568,7 @@ fn run_timeout_test(
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .development = false,
+        .prebuilt = null,
     });
 
     const shell = try Shell.create(gpa);
@@ -781,7 +783,7 @@ const VSRContext = struct {
     event_buffer: []tb.ChangeEvent,
     event_count: ?u32,
 
-    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
+    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: stdx.Time, port: u16) !void {
         self.io = try vsr.io.IO.init(32, 0);
         errdefer self.io.deinit();
 
@@ -794,7 +796,7 @@ const VSRContext = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.unique_u128(),
+                .id = stdx.crypto_u128(),
                 .cluster = 0,
                 .replica_count = 1,
                 .aof_recovery = false,
@@ -922,7 +924,7 @@ const TmpRabbitMQ = struct {
         const shell = try Shell.create(gpa);
         defer shell.destroy();
 
-        const id = stdx.unique_u128();
+        const id = stdx.crypto_u128();
 
         // Spawning a RabbitMQ server as a Docker container.
         _ = try try_execute(shell, "docker image pull {image}", .{ .image = options.image });

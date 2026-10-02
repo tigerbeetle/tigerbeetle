@@ -205,10 +205,13 @@ fn write_single_page(
     }
     const nav_html = try Html.create(b.allocator);
     try nav_fill(website, nav_html, root, .{ .target = root, .single_page = true });
+    try nav_html.write(
+        @embedFile("html/multi-page-link.html"),
+        .{ .url_prefix = website.url_prefix },
+    );
 
     const single_page = website.write_page(.{
         .page_path = "single-page/",
-        .include_search = false,
         .nav = nav_html.string(),
         .content = run_single_page_writer.captureStdOut(),
     });

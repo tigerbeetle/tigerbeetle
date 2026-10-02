@@ -10,8 +10,8 @@ const MiB = stdx.MiB;
 const Instant = stdx.Instant;
 const Duration = stdx.Duration;
 
-const TimeOS = @import("../time.zig").TimeOS;
-const Time = @import("../time.zig").Time;
+const TimeOS = stdx.TimeOS;
+const Time = stdx.Time;
 const IO = @import("../io.zig").IO;
 
 pub const tcp_options: IO.TCPOptions = .{
@@ -310,7 +310,7 @@ test "timeout" {
         fn run_test() !void {
             var time_os: TimeOS = .{};
             var self: Context = .{
-                .time = time_os.time(),
+                .time = time_os.interface(),
                 .io = try IO.init(32, 0),
             };
             defer self.io.deinit();

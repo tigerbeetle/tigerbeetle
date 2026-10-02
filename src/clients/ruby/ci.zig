@@ -1,12 +1,13 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     assert(shell.file_exists("tigerbeetle.gemspec"));
 
     // Integration tests.
@@ -20,16 +21,10 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         log.info("running tests", .{});
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
-
-        const tigerbeetle_exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
-        const tigerbeetle_path = try shell.project_root.realpathAlloc(
-            shell.arena.allocator(),
-            tigerbeetle_exe,
-        );
-        try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("rake test:unit", .{});
@@ -44,6 +39,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();

@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -26,11 +25,9 @@ const (
 )
 
 func WithClient(t testing.TB, withClient func(Client)) {
-	var tigerbeetlePath string
-	if runtime.GOOS == "windows" {
-		tigerbeetlePath = "../../../tigerbeetle.exe"
-	} else {
-		tigerbeetlePath = "../../../tigerbeetle"
+	tigerbeetlePath := os.Getenv("TIGERBEETLE_BINARY")
+	if tigerbeetlePath == "" {
+		t.Fatalf("TIGERBEETLE_BINARY environmental variable is required")
 	}
 
 	replicaArg := fmt.Sprintf("--replica=%d", TIGERBEETLE_REPLICA_ID)

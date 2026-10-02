@@ -162,7 +162,7 @@ abstract class Request<TResponse extends Batch> {
                     break;
                 }
 
-                case ClientShutdown: {
+                case ClientClosed: {
                     exception = new ClientClosedException();
                     break;
                 }

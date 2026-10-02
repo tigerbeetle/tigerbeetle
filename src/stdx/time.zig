@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const stdx = @import("stdx");
+const stdx = @import("./stdx.zig");
 
 const os = std.os;
 const posix = std.posix;
@@ -11,17 +11,15 @@ const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
-
-pub const TimeSim = @import("testing/time.zig").TimeSim;
+const InstantUnix = stdx.InstantUnix;
 
 pub const Time = struct {
     context: *anyopaque,
     vtable: *const VTable,
 
     const VTable = struct {
-        monotonic: *const fn (*anyopaque) u64,
-        realtime: *const fn (*anyopaque) i64,
-        tick: *const fn (*anyopaque) void,
+        monotonic: *const fn (*anyopaque) Instant,
+        realtime: *const fn (*anyopaque) InstantUnix,
     };
 
     /// A timestamp to measure elapsed time, meaningful only on the same system, not across reboots.
@@ -29,20 +27,17 @@ pub const Time = struct {
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
     pub fn monotonic(self: Time) Instant {
-        return .{ .ns = self.vtable.monotonic(self.context) };
+        return self.vtable.monotonic(self.context);
     }
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
-    pub fn realtime(self: Time) i64 {
+    pub fn realtime(self: Time) InstantUnix {
         return self.vtable.realtime(self.context);
-    }
-
-    pub fn tick(self: Time) void {
-        self.vtable.tick(self.context);
     }
 };
 
+/// Real Time backed by the operating system.
 pub const TimeOS = struct {
     /// Hardware and/or software bugs can mean that the monotonic clock may regress.
     /// One example (of many): https://bugzilla.redhat.com/show_bug.cgi?id=448449
@@ -50,20 +45,19 @@ pub const TimeOS = struct {
     /// It's better to crash and come back with a valid monotonic clock than get stuck forever.
     monotonic_guard: u64 = 0,
 
-    pub fn time(self: *TimeOS) Time {
+    pub fn interface(self: *TimeOS) Time {
         return .{
             .context = self,
             .vtable = &.{
                 .monotonic = vtable_monotonic,
-                .realtime = realtime,
-                .tick = tick,
+                .realtime = vtable_realtime,
             },
         };
     }
 
-    fn vtable_monotonic(context: *anyopaque) u64 {
+    fn vtable_monotonic(context: *anyopaque) Instant {
         const self: *TimeOS = @ptrCast(@alignCast(context));
-        return self.monotonic().ns;
+        return self.monotonic();
     }
 
     pub fn monotonic(self: *TimeOS) Instant {
@@ -146,11 +140,16 @@ pub const TimeOS = struct {
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
-    fn realtime(_: *anyopaque) i64 {
-        if (is_windows) return realtime_windows();
+    fn vtable_realtime(context: *anyopaque) InstantUnix {
+        const self: *TimeOS = @ptrCast(@alignCast(context));
+        return self.realtime();
+    }
+
+    pub fn realtime(_: *TimeOS) InstantUnix {
+        if (is_windows) return .{ .ns = @intCast(realtime_windows()) };
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
-        if (is_darwin or is_linux) return realtime_unix();
+        if (is_darwin or is_linux) return .{ .ns = @intCast(realtime_unix()) };
         @compileError("unsupported OS");
     }
 
@@ -173,21 +172,121 @@ pub const TimeOS = struct {
         const ts: posix.timespec = posix.clock_gettime(posix.CLOCK.REALTIME) catch unreachable;
         return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
     }
-
-    fn tick(_: *anyopaque) void {}
 };
 
-test "Time monotonic smoke" {
+test "TimeOS monotonic smoke" {
     var time_os: TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
     const instant_1 = time.monotonic();
     const instant_2 = time.monotonic();
     assert(instant_1.elapsed(instant_1).ns == 0);
     assert(instant_1.elapsed(instant_2).ns >= 0);
 }
 
+test "TimeOS realtime smoke" {
+    var time_os: TimeOS = .{};
+    const time = time_os.interface();
+    const instant = time.realtime();
+    assert(instant.date_time().year > 2000);
+    assert(instant.date_time().year < 2100);
+}
+
+/// Simulated Time for testing.
+pub const TimeSim = struct {
+    /// The duration of a single tick in nanoseconds.
+    resolution: u64,
+
+    offset_type: OffsetType,
+
+    /// Co-efficients to scale the offset according to the `offset_type`.
+    /// Linear offset is described as A * x + B: A is the drift per tick and B the initial offset.
+    /// Periodic is described as A * sin(x * pi / B): A controls the amplitude and B the period in
+    /// terms of ticks.
+    /// Step function represents a discontinuous jump in the wall-clock time. B is the period in
+    /// which the jumps occur. A is the amplitude of the step.
+    /// Non-ideal is similar to periodic except the phase is adjusted using a random number taken
+    /// from a normal distribution with mean=0, stddev=10. Finally, a random offset (up to
+    /// offset_coefficient_C) is added to the result.
+    offset_coefficient_A: i64,
+    offset_coefficient_B: i64,
+    offset_coefficient_C: u32 = 0,
+
+    prng: stdx.PRNG = stdx.PRNG.from_seed(0),
+
+    /// The number of ticks elapsed since initialization.
+    ticks: u64 = 0,
+
+    /// The instant in time chosen as the origin of this time source.
+    epoch: i64 = 0,
+
+    pub const OffsetType = enum {
+        linear,
+        periodic,
+        step,
+        non_ideal,
+    };
+
+    pub fn interface(self: *TimeSim) Time {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .monotonic = monotonic,
+                .realtime = realtime,
+            },
+        };
+    }
+
+    fn monotonic(context: *anyopaque) Instant {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
+        return .{ .ns = self.ticks * self.resolution };
+    }
+
+    fn realtime(context: *anyopaque) InstantUnix {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
+        const realtime_true = self.epoch + @as(i64, @intCast(monotonic(context).ns));
+        return .{ .ns = @intCast(realtime_true - self.offset(self.ticks)) };
+    }
+
+    pub fn offset(self: *TimeSim, ticks: u64) i64 {
+        switch (self.offset_type) {
+            .linear => {
+                const drift_per_tick = self.offset_coefficient_A;
+                return @as(i64, @intCast(ticks)) * drift_per_tick + @as(
+                    i64,
+                    @intCast(self.offset_coefficient_B),
+                );
+            },
+            .periodic => {
+                const unscaled = std.math.sin(@as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
+                    @as(f64, @floatFromInt(self.offset_coefficient_B)));
+                const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
+                return @as(i64, @intFromFloat(std.math.floor(scaled)));
+            },
+            .step => {
+                return if (ticks > self.offset_coefficient_B) self.offset_coefficient_A else 0;
+            },
+            .non_ideal => {
+                const phase: f64 = @as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
+                    (@as(f64, @floatFromInt(self.offset_coefficient_B)) +
+                        std.Random.init(&self.prng, stdx.PRNG.fill).floatNorm(f64) * 10);
+                const unscaled = std.math.sin(phase);
+                const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
+                const offset_random: i64 = -@as(i64, @intCast(self.offset_coefficient_C)) +
+                    @as(i64, @intCast(self.prng.int_inclusive(u64, 2 * self.offset_coefficient_C)));
+                return @as(i64, @intFromFloat(std.math.floor(scaled))) + offset_random;
+            },
+        }
+    }
+
+    pub fn tick(self: *TimeSim) void {
+        self.ticks += 1;
+    }
+};
+
 /// Equivalent to `std.time.Timer`,
-/// but using the `vsr.Time` interface as the source of time.
+/// but using the `Time` interface as the source of time.
 pub const Timer = struct {
     time: Time,
     started: Instant,
@@ -214,27 +313,32 @@ pub const Timer = struct {
     }
 };
 
-const fixtures = @import("testing/fixtures.zig");
 const testing = std.testing;
 
 test Timer {
-    var time_sim = fixtures.init_time(.{ .resolution = 1 });
-    const time = time_sim.time();
+    var time_sim: TimeSim = (.{
+        .resolution = 1,
+        .offset_type = .linear,
+        .offset_coefficient_A = 0,
+        .offset_coefficient_B = 0,
+        .offset_coefficient_C = 0,
+    });
+    const time = time_sim.interface();
 
     var timer = Timer.init(time);
     // Repeat the cycle read/reset multiple times:
     for (0..3) |_| {
         const time_0 = timer.read();
         try testing.expectEqual(@as(u64, 0), time_0.ns);
-        time.tick();
+        time_sim.tick();
 
         const time_1 = timer.read();
         try testing.expectEqual(@as(u64, 1), time_1.ns);
-        time.tick();
+        time_sim.tick();
 
         const time_2 = timer.read();
         try testing.expectEqual(@as(u64, 2), time_2.ns);
-        time.tick();
+        time_sim.tick();
 
         timer.reset();
     }

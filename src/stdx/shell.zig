@@ -64,11 +64,20 @@ ci: bool,
 zig_exe: ?[]const u8,
 
 pub fn create(gpa: std.mem.Allocator) !*Shell {
+    var project_root = try discover_project_root();
+    defer project_root.close();
+
+    return try create_with_project_root(gpa, project_root);
+}
+
+pub fn create_with_project_root(gpa: std.mem.Allocator, project_root: std.fs.Dir) !*Shell {
+    errdefer {
+        var project_root_mutable = project_root;
+        project_root_mutable.close();
+    }
+
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
-
-    var project_root = try discover_project_root();
-    errdefer project_root.close();
 
     var cwd = try project_root.openDir(".", .{});
     errdefer cwd.close();
@@ -84,7 +93,7 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
     result.* = Shell{
         .gpa = gpa,
         .arena = arena,
-        .project_root = project_root,
+        .project_root = try project_root.openDir(".", .{}),
         .cwd = cwd,
         .cwd_stack = undefined,
         .cwd_stack_count = 0,
@@ -466,6 +475,35 @@ pub fn exec_stdout_options(
     return captured_stdout;
 }
 
+/// Run the given command and return its status code if it returned normally via an exit syscall.
+/// Returns an error if the program failed to spawn or was killed by a signal.
+pub fn exec_status(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !u32 {
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
+    defer argv.deinit();
+
+    errdefer |err| {
+        const argv_formatted = std.mem.join(shell.gpa, " ", argv.slice()) catch @panic("OOM");
+        defer shell.gpa.free(argv_formatted);
+
+        log.err("process failed with {s}: {s}", .{ @errorName(err), argv_formatted });
+    }
+    const cwd = try shell.cwd.realpath(".", &shell.cwd_path_buffer);
+
+    var child = std.process.Child.init(argv.slice(), shell.gpa);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Ignore;
+    child.stderr_behavior = .Ignore;
+    child.cwd = cwd;
+    child.env_map = &shell.env;
+    const term = try child.spawnAndWait();
+    errdefer log.err("term={}", .{term});
+
+    switch (term) {
+        .Exited => |status| return status,
+        else => return error.ExecFailed,
+    }
+}
+
 /// Runs the zig compiler.
 pub fn exec_zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     return shell.exec_zig_options(.{}, cmd, cmd_args);
@@ -703,7 +741,7 @@ pub fn git_commit_timestamp(shell: *Shell, sha: []const u8) !stdx.InstantUnix {
     assert(sha.len == 40);
 
     const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = sha });
-    return stdx.InstantUnix.from_timestamp_s(
+    return stdx.InstantUnix.from_seconds(
         try stdx.parse_int(u64, timestamp_s, .{}),
     );
 }
@@ -951,18 +989,39 @@ fn detect_project_root(dir: std.fs.Dir) !void {
 }
 
 pub const HttpOptions = struct {
-    pub const ContentType = enum {
+    pub const ContentType = union(enum) {
         json,
+        multipart: struct { boundary: []const u8 },
 
-        fn string(content_type: ContentType) []const u8 {
-            return switch (content_type) {
-                .json => "application/json",
+        pub fn format(
+            self: @This(),
+            comptime _: []const u8,
+            _: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            return switch (self) {
+                .json => writer.print("application/json", .{}),
+                .multipart => |multipart| writer.print(
+                    "multipart/form-data; boundary={s}",
+                    .{multipart.boundary},
+                ),
             };
         }
     };
 
+    pub const MultipartField = struct {
+        name: []const u8,
+        value: []const u8,
+        content_type: ?[]const u8 = null,
+        filename: ?[]const u8 = null,
+    };
+
     content_type: ?ContentType = null,
-    authorization: ?[]const u8 = null,
+    authorization: ?union(enum) {
+        basic: struct { username: []const u8, password: []const u8 },
+        raw: []const u8,
+    } = null,
+    extra_headers: ?[]const std.http.Header = null,
 
     response_body_size_max: u32 = 512 * stdx.KiB,
     expected_response_code: std.http.Status = .ok,
@@ -982,13 +1041,70 @@ pub fn http_post(
     return shell.http_request(.{ .post = body }, url, options);
 }
 
+pub fn http_put(
+    shell: *Shell,
+    url: []const u8,
+    body: []const u8,
+    options: HttpOptions,
+) ![]const u8 {
+    return shell.http_request(.{ .put = body }, url, options);
+}
+
+pub fn http_post_multipart(
+    shell: *Shell,
+    url: []const u8,
+    fields: []const HttpOptions.MultipartField,
+    options: HttpOptions,
+) ![]const u8 {
+    assert(options.content_type.? == .multipart);
+    const boundary = options.content_type.?.multipart.boundary;
+
+    const capacity = b: {
+        var capacity: u64 = 0;
+        for (fields) |field| {
+            capacity += field.name.len;
+            capacity += field.value.len;
+            if (field.filename) |filename| capacity += filename.len;
+
+            capacity += 256;
+        }
+        break :b capacity;
+    };
+
+    var body_multipart = try std.ArrayListUnmanaged(u8).initCapacity(
+        shell.arena.allocator(),
+        capacity,
+    );
+    const body_writer = body_multipart.fixedWriter();
+
+    for (fields) |field| {
+        assert(std.mem.indexOf(u8, field.value, boundary) == null);
+
+        try body_writer.print("--{s}\r\n", .{boundary});
+        try body_writer.print("Content-Disposition: form-data; name=\"{s}\"", .{field.name});
+        if (field.filename) |filename| try body_writer.print("; filename=\"{s}\"", .{filename});
+        try body_writer.writeAll("\r\n");
+        try body_writer.print("Content-Type: {s}\r\n\r\n", .{
+            field.content_type orelse "text/plain",
+        });
+        body_multipart.appendSliceAssumeCapacity(field.value);
+        body_multipart.appendSliceAssumeCapacity("\r\n");
+    }
+    body_multipart.appendSliceAssumeCapacity("--");
+    body_multipart.appendSliceAssumeCapacity(boundary);
+    body_multipart.appendSliceAssumeCapacity("--");
+    body_multipart.appendSliceAssumeCapacity("\r\n");
+
+    return shell.http_request(.{ .post = body_multipart.items }, url, options);
+}
+
 /// Issues an HTTP request to the given `url` and returns the response.
 ///
 /// The returned body is owned by the shell arena and doesn't need to be freed.
 /// If the response is not 200 OK, the response body is logged and an error is returned.
 fn http_request(
     shell: *Shell,
-    method: union(enum) { get, post: []const u8 },
+    method: union(enum) { get, post: []const u8, put: []const u8 },
     url: []const u8,
     options: HttpOptions,
 ) ![]const u8 {
@@ -1004,8 +1120,9 @@ fn http_request(
     var header_buffer: [4 * stdx.KiB]u8 = undefined;
     var request = try client.open(
         switch (method) {
-            .post => .POST,
             .get => .GET,
+            .post => .POST,
+            .put => .PUT,
         },
         uri,
         .{ .server_header_buffer = &header_buffer },
@@ -1013,21 +1130,48 @@ fn http_request(
     defer request.deinit();
 
     if (options.content_type) |content_type| {
-        request.headers.content_type = .{ .override = content_type.string() };
+        request.headers.content_type = .{ .override = try shell.fmt("{s}", .{content_type}) };
     }
 
     if (options.authorization) |authorization| {
-        request.headers.authorization = .{ .override = authorization };
+        switch (authorization) {
+            .raw => |raw| {
+                request.headers.authorization = .{ .override = raw };
+            },
+            .basic => |basic| {
+                var authorization_buffer: [1024]u8 = undefined;
+
+                const authorization_contents = std.base64.url_safe.Encoder.encode(
+                    &authorization_buffer,
+                    try shell.fmt("{s}:{s}", .{ basic.username, basic.password }),
+                );
+                request.headers.authorization = .{ .override = try shell.fmt(
+                    "Basic {s}",
+                    .{authorization_contents},
+                ) };
+            },
+        }
     }
 
-    if (method == .post) {
-        request.transfer_encoding = .{ .content_length = method.post.len };
+    if (options.extra_headers) |extra_headers| {
+        request.extra_headers = extra_headers;
+    }
+
+    switch (method) {
+        .get => {},
+        .post, .put => |payload| {
+            request.transfer_encoding = .{ .content_length = payload.len };
+        },
     }
 
     try request.send();
-    if (method == .post) {
-        try request.writeAll(method.post);
+    switch (method) {
+        .get => {},
+        .post, .put => |payload| {
+            try request.writeAll(payload);
+        },
     }
+
     try request.finish();
     try request.wait();
 

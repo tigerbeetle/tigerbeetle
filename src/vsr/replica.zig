@@ -22,7 +22,7 @@ const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
-const Time = @import("../time.zig").Time;
+const Time = stdx.Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
 const Multiversion = @import("../multiversion.zig").Multiversion;
@@ -3372,6 +3372,7 @@ pub fn ReplicaType(
                     }
                 }
 
+                // The contract here is that we ensure fairness on the sender-side.
                 const read = self.grid_reads.acquire() orelse {
                     log.debug("{}: on_get_blocks: ignoring remaining blocks; busy " ++
                         "(replica={} ignored={}/{})", .{
@@ -11314,9 +11315,12 @@ pub fn ReplicaType(
 
             const now = self.clock.monotonic();
 
-            var grid_faults = self.grid.read_global_queue.iterate();
-            while (grid_faults.next()) |read_fault| {
+            for (0..self.grid.read_global_queue.count()) |_| {
                 if (requests_count >= request_faults_count_max) break;
+
+                // Rotate the queue to avoid starvation.
+                const read_fault = self.grid.read_global_queue.pop().?;
+                self.grid.read_global_queue.push(read_fault);
 
                 const block_identifier = vsr.BlockReference{
                     .address = read_fault.address,

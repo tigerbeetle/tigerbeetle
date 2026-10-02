@@ -57,7 +57,7 @@ public class RequestTests
             new(PacketStatus.ClientEvicted, typeof(ClientEvictedException)),
             new(PacketStatus.ClientReleaseTooHigh, typeof(ClientReleaseException)),
             new(PacketStatus.ClientReleaseTooLow, typeof(ClientReleaseException)),
-            new(PacketStatus.ClientShutdown, typeof(ClientClosedException)),
+            new(PacketStatus.ClientClosed, typeof(ClientClosedException)),
         };
         foreach (var expected in expectedResults)
         {

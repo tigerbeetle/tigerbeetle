@@ -38,7 +38,7 @@ def test_init_parameters():
                 ctypes.byref(init_parameters_out),
             )
 
-            assert status == tb.ClientStatus.OK
+            assert status == tb.ClientStatus.SUCCESS
 
             addresses_out_slice = ctypes.cast(init_parameters_out.addresses_ptr,
                 ctypes.POINTER(ctypes.c_char * init_parameters_out.addresses_len))

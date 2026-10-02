@@ -39,6 +39,8 @@ const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
+const Time = stdx.Time;
+const TimeOS = stdx.TimeOS;
 const RingBufferType = stdx.RingBufferType;
 const Network = @import("./faulty_network.zig").Network;
 const constants = @import("constants.zig");
@@ -113,6 +115,7 @@ pub const Supervisor = struct {
     allocator: std.mem.Allocator,
     prng: stdx.PRNG,
     io: *IO,
+    time: TimeOS,
     shell: *Shell,
     network: *Network,
     workload: ?*Workload = null,
@@ -131,7 +134,7 @@ pub const Supervisor = struct {
     /// process faults, such that we require liveness (that requests are finished within a
     /// certain time period). If null, it means we're in a period of too many faults, thus
     /// enforcing no such requirement.
-    acceptable_faults_start_ns: ?u64 = null,
+    acceptable_faults_start: ?stdx.Instant = null,
 
     const Options = struct {
         seed: u64,
@@ -213,6 +216,7 @@ pub const Supervisor = struct {
             .allocator = allocator,
             .prng = prng,
             .io = io,
+            .time = .{},
             .shell = shell,
             .network = network,
             .options = options,
@@ -298,21 +302,20 @@ pub const Supervisor = struct {
 
     fn tick_check_liveness(supervisor: *Supervisor) !void {
         const workload = supervisor.workload orelse return;
-        if (supervisor.acceptable_faults_start_ns) |start_ns| {
-            const now: u64 = @intCast(std.time.nanoTimestamp());
-            const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
-                std.time.ns_per_s;
+        if (supervisor.acceptable_faults_start) |faults_start| {
+            const elapsed = faults_start.elapsed(supervisor.time.monotonic());
             // If we've been in a state with an acceptable number of faults for the required
             // amount of time, we should have seen finished requests.
             const no_finished_requests =
-                now > deadline and workload.requests_finished.empty();
+                elapsed.ns > constants.vortex.liveness_requirement.ns and
+                workload.requests_finished.empty();
             // Also, those that do finish should not have too long durations, counting from the
             // start of the acceptably-faulty period.
-            const too_slow_request = workload.find_slow_request_since(start_ns);
+            const too_slow_request = workload.find_slow_request_since(faults_start);
 
             if (no_finished_requests) {
-                fatal(.liveness, "liveness check: no finished requests after {d} seconds", .{
-                    constants.vortex.liveness_requirement_seconds,
+                fatal(.liveness, "liveness check: no finished requests after {} ", .{
+                    constants.vortex.liveness_requirement,
                 });
             }
 
@@ -339,14 +342,14 @@ pub const Supervisor = struct {
             supervisor.network.faults.is_healed())
         {
             // We have an acceptable number of faults, so we require liveness (after some time).
-            if (supervisor.acceptable_faults_start_ns == null) {
-                supervisor.acceptable_faults_start_ns = @intCast(std.time.nanoTimestamp());
+            if (supervisor.acceptable_faults_start == null) {
+                supervisor.acceptable_faults_start = supervisor.time.monotonic();
                 workload.requests_finished.clear();
             }
         } else {
             // We have too many faults to require liveness.
-            if (supervisor.acceptable_faults_start_ns) |_| {
-                supervisor.acceptable_faults_start_ns = null;
+            if (supervisor.acceptable_faults_start) |_| {
+                supervisor.acceptable_faults_start = null;
                 workload.requests_finished.clear();
             }
         }
@@ -679,6 +682,7 @@ pub const Supervisor = struct {
         const workload = try Workload.create(
             supervisor.allocator,
             supervisor.io,
+            supervisor.time.interface(),
             proxy_ports,
             workload_driver,
             workload_driver_release,
@@ -807,13 +811,14 @@ const Workload = struct {
     const Command = @import("./workload.zig").Command;
 
     const RequestInfo = struct {
-        timestamp_start_micros: u64,
-        timestamp_end_micros: u64,
+        start: stdx.Instant,
+        end: stdx.Instant,
     };
 
     const RequestsFinished = RingBufferType(RequestInfo, .slice);
 
     io: *IO,
+    time: Time,
     model: Model,
     generator: Generator,
     driver: std.process.Child,
@@ -827,7 +832,7 @@ const Workload = struct {
     request_buffer: []u8,
     request_size: ?u32 = null,
     request_written: ?u32 = null,
-    request_start: ?stdx.InstantUnix = null,
+    request_start: ?stdx.Instant = null,
     reply_buffer: []u8,
 
     completion: IO.Completion = undefined,
@@ -839,6 +844,7 @@ const Workload = struct {
     pub fn create(
         allocator: std.mem.Allocator,
         io: *IO,
+        time: Time,
         proxy_ports: []const u16,
         driver_command: []const u8,
         driver_release: Release,
@@ -883,6 +889,7 @@ const Workload = struct {
 
         workload.* = .{
             .io = io,
+            .time = time,
             .model = model,
             .generator = Generator.init(options.seed, driver_release),
             .driver = driver,
@@ -950,7 +957,7 @@ const Workload = struct {
         workload.command = command;
         workload.request_written = 0;
         workload.request_size = @intCast(stream.pos + request_body_size);
-        workload.request_start = stdx.InstantUnix.now();
+        workload.request_start = workload.time.monotonic();
         workload.driver_request_write();
     }
 
@@ -1045,11 +1052,11 @@ const Workload = struct {
             fatal(.workload_reconcile, "model reconcile error: {}", .{err});
         };
 
-        const request_commence_us = workload.request_start.?.ns / std.time.ns_per_us;
-        const request_complete_us = stdx.InstantUnix.now().ns / std.time.ns_per_us;
+        const request_commence = workload.request_start.?;
+        const request_complete = workload.time.monotonic();
         workload.requests_finished.push(.{
-            .timestamp_start_micros = request_commence_us,
-            .timestamp_end_micros = request_complete_us,
+            .start = request_commence,
+            .end = request_complete,
         }) catch log.warn("requests_finished is full", .{});
 
         workload.requests_finished_count.put(
@@ -1058,11 +1065,11 @@ const Workload = struct {
         );
 
         log.info(
-            "workload: request done: command={s} duration={}us " ++
+            "workload: request done: command={s} duration={} " ++
                 "(accounts_created={d} transfers_created={d})",
             .{
                 @tagName(workload.command.?),
-                request_complete_us -| request_commence_us,
+                request_commence.elapsed(request_complete),
                 workload.model.accounts.count(),
                 workload.model.transfers_created,
             },
@@ -1079,15 +1086,17 @@ const Workload = struct {
         }
     }
 
-    fn find_slow_request_since(workload: *const Workload, start_ns: u64) ?RequestInfo {
+    fn find_slow_request_since(workload: *const Workload, faults_start: stdx.Instant) ?RequestInfo {
         var it = workload.requests_finished.iterator();
         while (it.next()) |request| {
-            assert(request.timestamp_start_micros < request.timestamp_end_micros);
+            assert(request.start.ns < request.end.ns);
             // If a request started before the acceptably-faulty period,
             // we ignore that part of its duration.
-            const duration_adjusted_micros = request.timestamp_end_micros -|
-                @max(request.timestamp_start_micros, @divFloor(start_ns, 1000));
-            if (duration_adjusted_micros > constants.vortex.liveness_requirement_micros) {
+            const duration_adjusted: stdx.Duration = .{
+                .ns = request.end.ns -| @max(request.start.ns, faults_start.ns),
+            };
+
+            if (duration_adjusted.ns > constants.vortex.liveness_requirement.ns) {
                 return request;
             }
         }

@@ -1902,8 +1902,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 offset + constants.sector_size,
             });
             // Memory must not be owned by journal.headers as these may be modified concurrently:
-            assert(@intFromPtr(buffer.ptr) < @intFromPtr(journal.headers.ptr) or
-                @intFromPtr(buffer.ptr) > @intFromPtr(journal.headers.ptr) + headers_size);
+            assert(stdx.disjoint_slices(u8, vsr.Header.Prepare, buffer, journal.headers));
 
             journal.write_sectors(write_prepare_on_write_header, write, buffer, .headers, offset);
         }

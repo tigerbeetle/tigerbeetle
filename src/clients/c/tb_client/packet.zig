@@ -44,7 +44,7 @@ pub const Packet = extern struct {
         client_evicted,
         client_release_too_low,
         client_release_too_high,
-        client_shutdown,
+        client_closed,
         invalid_operation,
         invalid_data_size,
     };
@@ -208,7 +208,7 @@ pub const Packet = extern struct {
         options: struct {
             target: *Packet.Queue,
             batch_size_limit: u32,
-            time: vsr.time.Time,
+            time: stdx.Time,
         },
     ) Error!void {
         packet.assert_phase(.submitted);
@@ -848,7 +848,7 @@ test "batch_enqueue: multibatch event_count" {
         .{
             .target = &queue,
             .batch_size_limit = batch_size_limit,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.pending, packet_1.phase);
@@ -875,7 +875,7 @@ test "batch_enqueue: multibatch event_count" {
         .{
             .target = &queue,
             .batch_size_limit = batch_size_limit,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.batched, packet_2.phase);
@@ -909,7 +909,7 @@ test "batch_enqueue: multibatch event_count" {
         .{
             .target = &queue,
             .batch_size_limit = batch_size_limit,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.pending, packet_3.phase);
@@ -936,7 +936,7 @@ test "batch_enqueue: multibatch event_count" {
         .{
             .target = &queue,
             .batch_size_limit = batch_size_limit,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.batched, packet_4.phase);
@@ -987,7 +987,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.pending, packet_1.phase);
@@ -1014,7 +1014,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.batched, packet_2.phase);
@@ -1048,7 +1048,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.pending, packet_3.phase);
@@ -1075,7 +1075,7 @@ test "batch_enqueue: multibatch result_expected_count" {
         .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.batched, packet_4.phase);
@@ -1122,7 +1122,7 @@ test "batch_enqueue: no multibatch" {
         .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.pending, packet_1.phase);
@@ -1150,7 +1150,7 @@ test "batch_enqueue: no multibatch" {
         .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         },
     );
     try testing.expectEqual(Packet.Phase.pending, packet_2.phase);
@@ -1187,7 +1187,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = TestOperation.create.event_size() * 9,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1216,7 +1216,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1240,7 +1240,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1264,7 +1264,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1289,7 +1289,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1314,7 +1314,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1338,7 +1338,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1362,7 +1362,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1386,7 +1386,7 @@ test "batch_enqueue: batch_validate" {
             .{
                 .target = &queue,
                 .batch_size_limit = constants.message_body_size_max,
-                .time = time_sim.time(),
+                .time = time_sim.interface(),
             },
         ));
         try testing.expect(queue.empty());
@@ -1428,7 +1428,7 @@ test "batch_write: multibatch" {
         try packet.batch_enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         });
 
         const result = packet.batch_write(TestOperation, operations_allowed, .{
@@ -1467,7 +1467,7 @@ test "batch_write: multibatch" {
         try packet_1.batch_enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         });
         try testing.expectEqual(Packet.Phase.pending, packet_1.phase);
 
@@ -1484,7 +1484,7 @@ test "batch_write: multibatch" {
         try packet_2.batch_enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         });
         try testing.expectEqual(Packet.Phase.batched, packet_2.phase);
 
@@ -1523,7 +1523,7 @@ test "batch_write: multibatch" {
         try packet.batch_enqueue(TestOperation, operations_allowed, .{
             .target = &queue,
             .batch_size_limit = constants.message_body_size_max,
-            .time = time_sim.time(),
+            .time = time_sim.interface(),
         });
 
         const result = packet.batch_write(TestOperation, operations_allowed, .{
@@ -1567,7 +1567,7 @@ test "batch_write: no multibatch" {
     try packet.batch_enqueue(TestOperation, operations_allowed, .{
         .target = &queue,
         .batch_size_limit = constants.message_body_size_max,
-        .time = time_sim.time(),
+        .time = time_sim.interface(),
     });
 
     var buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8 =
