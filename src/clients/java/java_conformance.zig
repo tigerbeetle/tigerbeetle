@@ -36,7 +36,6 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
-        .requires_raise_on_double_close => false,
     };
 }
 

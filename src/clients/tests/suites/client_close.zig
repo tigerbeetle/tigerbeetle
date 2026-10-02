@@ -6,10 +6,10 @@ test "fails operations after close" {
     ct.assert_fail_with(ct.lookup_accounts(.{ct.generate_id()}), .client_closed);
 }
 
-test "fails a second close" {
-    ct.requires_raise_on_double_close();
-
+// Closing the client also doubles as cancellation. To avoid any manual synchronization in
+// concurrent code, we are forgiving when closing an already closed client.
+test "ignores a second close" {
     ct.close_client();
 
-    ct.assert_fail_with(ct.close_client(), .client_closed);
+    ct.close_client();
 }

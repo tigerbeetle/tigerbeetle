@@ -5990,8 +5990,12 @@ public class ConformanceTest {
         }
     }
 
-    // Omitted: "fails a second close"
-    // Reason: requires raise on double close
+    @Test
+    public void testCloseClientIgnoresASecondClose()
+            throws Exception {
+        client.close();
+        client.close();
+    }
 
     private static class Server implements AutoCloseable {
         public static final String TB_SERVER = "../../../zig-out/bin/tigerbeetle";

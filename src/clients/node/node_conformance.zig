@@ -26,7 +26,6 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
         // Amounts are `bigint`s: arbitrary precision, but integral only.
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => false,
-        .requires_raise_on_double_close => false,
     };
 }
 

@@ -26,8 +26,6 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => false,
         .requires_fractional_amounts => false,
-        // `NativeClient.Dispose` discards the status of a second `tb_client_deinit`.
-        .requires_raise_on_double_close => false,
     };
 }
 

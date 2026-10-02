@@ -22,13 +22,10 @@ pub fn main(init: std.process.Init) !void {
     try stdout_writer.flush();
 }
 
-// TODO: This produces failing tests until the following PR gets merged:
-// https://github.com/tigerbeetle/tigerbeetle/pull/3917
 fn satisfies(requirement: ast.Case.Requirement) bool {
     return switch (requirement) {
         .requires_unbounded_integers => true,
         .requires_fractional_amounts => true,
-        .requires_raise_on_double_close => false,
     };
 }
 
