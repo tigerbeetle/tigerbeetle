@@ -78,6 +78,10 @@ pub const ReplicaEvent = union(enum) {
     checkpoint_completed,
     sync_stage_changed,
     client_evicted: u128,
+    /// A deregister committed (outside of WAL replay, which skips client table updates).
+    /// `session_removed` is false if the session no longer existed, for example because a
+    /// register ahead in the pipeline evicted it.
+    client_deregistered: struct { op: u64, client: u128, session_removed: bool },
 };
 
 pub const CommitStage = union(enum) {
@@ -2384,7 +2388,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            log.debug("{}: on_reply: repairing reply (client={} request={})", .{
+            log.mark.debug("{}: on_reply: repairing reply (client={} request={})", .{
                 self.log_prefix(),
                 message.header.client,
                 message.header.request,
@@ -5380,6 +5384,28 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.writes.available() > 0);
             assert(self.upgrade_release == null or prepare.header.operation == .upgrade);
+            // Release gating: an op whose operation (or prepare body) is new in release R is only
+            // executed by replicas whose checkpoint release is at least R. Operations and request
+            // bodies that are added later rely on this, instead of repeating the argument:
+            // - A replica executes ops with the release of its checkpoint (asserted below):
+            //   `Replica.open()` first transitions to the checkpoint's release
+            //   (`release_transition()`).
+            // - A primary evicts requests from clients whose release is newer than its own
+            //   (`client_release_too_high` in `ignore_request_message()`). So an op that is new in
+            //   R is only prepared by a primary that runs (and has checkpointed with) R or later.
+            // - The release only advances at a checkpoint C whose last bar, (C, trigger(C)], is
+            //   all operation=upgrade (`release_for_next_checkpoint()`; while upgrading, a primary
+            //   prepares nothing else: `ignore_request_message_upgrade()`). A primary that runs R
+            //   has checkpointed C, so it only prepares ops above trigger(C). A replica that runs
+            //   an older release executes ops up to trigger(C), checkpoints C, and restarts into R
+            //   before it executes anything above trigger(C). It may journal ops above trigger(C)
+            //   (up to `prepare_max_for_checkpoint()`), but it does not execute them.
+            // - So the ops that both releases execute, (C, trigger(C)], are upgrades, and they
+            //   behave identically when they are replayed by R.
+            // `prepare.header.release` is the release of the client that sent the request (or of
+            // the primary, for ops without a client). It is not a gate by itself.
+            // This does not support two different builds with the same release number, and it
+            // does not support downgrading a checkpoint that has advanced to a newer release.
             assert(
                 self.superblock.working.vsr_state.checkpoint.release.value == self.release.value,
             );
@@ -5464,6 +5490,7 @@ pub fn ReplicaType(
                 ),
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
                 .noop => 0,
+                .deregister => self.execute_op_deregister(prepare),
                 else => self.state_machine.commit(
                     prepare.header.client,
                     prepare.header.op,
@@ -5531,12 +5558,17 @@ pub fn ReplicaType(
                 if (self.client_sessions.get(prepare.header.client)) |entry| {
                     assert(entry.header.command == .reply);
                     assert(entry.header.op >= prepare.header.op);
+                    // A deregister removes the session, so this must be a later session
+                    // (e.g. a replayed register) of the same client.
+                    if (prepare.header.operation == .deregister) {
+                        assert(entry.session > prepare.header.op);
+                    }
                 } else {
                     if (prepare.header.client == 0) {
                         assert(prepare.header.operation == .pulse or
                             prepare.header.operation == .upgrade);
                     } else {
-                        assert(self.client_sessions.count() == self.client_sessions.capacity());
+                        self.execute_op_replay_session_missing(prepare);
                     }
                 }
 
@@ -5548,6 +5580,7 @@ pub fn ReplicaType(
                 switch (reply.header.operation) {
                     .root => unreachable,
                     .register => self.client_table_entry_create(reply),
+                    .deregister => self.client_table_entry_delete(reply),
                     .pulse, .upgrade => assert(reply.header.client == 0),
                     else => self.client_table_entry_update(reply),
                 }
@@ -5582,6 +5615,72 @@ pub fn ReplicaType(
                     }
                 }
             }
+        }
+
+        /// Called when replaying an op of the checkpoint's last bar, (checkpoint, trigger], whose
+        /// client has no session. Client table updates are skipped there, because the
+        /// checkpointed client table already reflects the trigger. Asserts that the session's
+        /// absence is explained by an eviction or by a deregister.
+        ///
+        /// Let o be the prepare's op. Its request was accepted by a primary while the client had
+        /// a committed session, at that primary's commit_min m (`on_request()` asserts that
+        /// `commit_min == commit_max` and `commit_max + prepare_queue.count == op` right after
+        /// the `ignore_request_message*()` checks). The request then waited in the prepare queue
+        /// or in the request queue. A request popped from the request queue is prepared without
+        /// checking the session again (`commit_execute()`, `primary_pipeline_prepare()`). Ops are
+        /// assigned in queue order, so o ≤ m + depth, with depth the capacity of both queues.
+        /// View changes drop the request queue and keep prepares with their ops, so the bound
+        /// holds across them. The session's removal op b is above m, so b ≥ o - depth + 1, and
+        /// b ≤ trigger, since the session is missing at the trigger.
+        /// - If the session was evicted at b, then the client table was full right after b.
+        /// - If the session was deregistered, then that deregister is at b.
+        /// Only a deregister lowers the number of sessions. So if the client table is not full at
+        /// the trigger, then some deregister lies in [o - depth + 1, trigger]. The converse does
+        /// not hold (a deregister may be a no-op), which keeps the assertion sound.
+        /// Likewise, a stale journal header below the checkpoint (for example, after state sync)
+        /// can only hide a missing deregister: it weakens the check, but never falsifies it.
+        fn execute_op_replay_session_missing(
+            self: *Replica,
+            prepare: *const Message.Prepare,
+        ) void {
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.client != 0);
+            assert(prepare.header.op > self.op_checkpoint());
+            assert(self.superblock.working.vsr_state.op_compacted(prepare.header.op));
+            assert(self.client_sessions.get(prepare.header.client) == null);
+
+            if (self.client_sessions.count() == self.client_sessions.capacity()) {
+                // The session was evicted (and the client table stayed full until the trigger),
+                // or it was deregistered and then the slot was taken by another register.
+                return;
+            }
+
+            const depth = constants.pipeline_prepare_queue_max +
+                constants.pipeline_request_queue_max;
+            comptime assert(depth <= constants.clients_max + 1);
+
+            const op_trigger = vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            const op_min = @max(1, (prepare.header.op + 1) -| depth);
+            assert(op_min <= prepare.header.op);
+            assert(prepare.header.op <= op_trigger);
+            assert(op_trigger + 1 - op_min <= constants.lsm_compaction_ops + depth);
+
+            var header_missing: bool = false;
+            for (op_min..op_trigger + 1) |op| {
+                if (self.journal.header_with_op(op)) |header| {
+                    if (header.operation == .deregister) {
+                        // The session was deregistered, or it was evicted and then this
+                        // deregister (maybe of another client) freed a slot.
+                        return;
+                    }
+                } else {
+                    // Unknown: this op may have been a deregister. (The headers of ops below the
+                    // checkpoint may have been overwritten in the WAL.)
+                    header_missing = true;
+                }
+            }
+            // Otherwise, the session vanished without an eviction or a deregister.
+            assert(header_missing);
         }
 
         fn execute_op_register(
@@ -5717,6 +5816,35 @@ pub fn ReplicaType(
             return 0;
         }
 
+        /// The session is removed from the client table by `client_table_entry_delete()`, which
+        /// (like any client table update) is skipped when replaying the last bar of a checkpoint.
+        /// The reply has no body: it only tells the client that its session has ended.
+        ///
+        /// Upgrades: operation=deregister is new, and a release that does not know it would crash
+        /// executing it (`tag_name()`, `cast()`). The release gating in `execute_op()` ensures
+        /// that only replicas whose checkpoint release knows the operation execute it: a
+        /// deregister is only prepared by a primary that knows it, above the trigger of the
+        /// upgrade checkpoint (`release_for_next_checkpoint()`), and an older replica journals
+        /// such ops at most up to `prepare_max_for_checkpoint()` before it restarts into the new
+        /// release. An older replica drops a deregister *request* in
+        /// `Header.Request.invalid_header()` ("operation is reserved").
+        fn execute_op_deregister(self: *Replica, prepare: *const Message.Prepare) usize {
+            assert(self.commit_stage == .execute);
+            assert(self.commit_prepare.? == prepare);
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation == .deregister);
+            assert(prepare.header.size == @sizeOf(vsr.Header));
+            assert(prepare.header.op == self.commit_min + 1);
+            assert(prepare.header.op <= self.op);
+            assert(prepare.header.client != 0);
+            assert(prepare.header.request > 0);
+            // The pair of the `client_release_too_high` check, see the release gating comment in
+            // `execute_op()`.
+            assert(prepare.header.release.value <= self.release.value);
+
+            return 0;
+        }
+
         /// Creates an entry in the client table when registering a new client session.
         /// Asserts that the new session does not yet exist.
         /// Evicts another entry deterministically, if necessary, to make space for the insert.
@@ -5781,6 +5909,7 @@ pub fn ReplicaType(
         fn client_table_entry_update(self: *Replica, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.operation != .register);
+            assert(reply.header.operation != .deregister);
             assert(reply.header.client > 0);
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.commit > 0);
@@ -5818,6 +5947,71 @@ pub fn ReplicaType(
             } else {
                 // If no entry exists, then the session must have been evicted while being prepared.
                 // We can still send the reply, the next request will receive an eviction message.
+            }
+        }
+
+        /// Removes the entry from the client table when a client deregisters (ends) its session,
+        /// so that a subsequent register finds a free slot instead of evicting another session.
+        fn client_table_entry_delete(self: *Replica, reply: *const Message.Reply) void {
+            assert(reply.header.command == .reply);
+            assert(reply.header.operation == .deregister);
+            assert(reply.header.size == @sizeOf(Header));
+            assert(reply.header.client > 0);
+            assert(reply.header.op == reply.header.commit);
+            assert(reply.header.commit > 0);
+            assert(reply.header.request > 0);
+
+            const entry = self.client_sessions.get(reply.header.client) orelse {
+                // The session was evicted while the deregister was being prepared, e.g. by a
+                // register ahead of it in the pipeline. Either way, the session is gone.
+                // We still send the reply, so that the client knows that its session has ended.
+                log.mark.debug("{}: client_table_entry_delete: no session (client={})", .{
+                    self.log_prefix(),
+                    reply.header.client,
+                });
+
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .client_deregistered = .{
+                        .op = reply.header.op,
+                        .client = reply.header.client,
+                        .session_removed = false,
+                    } });
+                }
+                return;
+            };
+            assert(entry.header.command == .reply);
+            assert(entry.header.op == entry.header.commit);
+            assert(entry.header.commit >= entry.session);
+
+            assert(entry.header.client == reply.header.client);
+            assert(entry.header.request + 1 == reply.header.request);
+            assert(entry.header.op < reply.header.op);
+            assert(entry.header.commit < reply.header.commit);
+            assert(entry.header.release.value == reply.header.release.value);
+
+            log.debug("{}: client_table_entry_delete: client={} session={} request={}", .{
+                self.log_prefix(),
+                reply.header.client,
+                entry.session,
+                reply.header.request,
+            });
+
+            // The reply has no body, so there is nothing to write to ClientReplies. The slot keeps
+            // the bytes of the session's previous reply until a later session takes the slot, but
+            // nothing refers to them: the slot must not be repaired, so clear its fault (if any).
+            const reply_slot = self.client_sessions.get_slot_for_client(reply.header.client).?;
+            self.client_replies.remove_reply(reply_slot);
+            self.client_sessions.remove(reply.header.client);
+            assert(self.client_sessions.get(reply.header.client) == null);
+            assert(!self.client_sessions.entries_present.is_set(reply_slot.index));
+            assert(!self.client_replies.faulty.is_set(reply_slot.index));
+
+            if (self.event_callback) |hook| {
+                hook(self, .{ .client_deregistered = .{
+                    .op = reply.header.op,
+                    .client = reply.header.client,
+                    .session_removed = true,
+                } });
             }
         }
 
@@ -7387,7 +7581,7 @@ pub fn ReplicaType(
                         assert(op_checkpoint_trigger > self.op + 1);
                     }
                 },
-                .noop => {},
+                .noop, .deregister => {},
                 else => {
                     self.state_machine.prepare(
                         request.message.header.operation.cast(StateMachine.Operation),

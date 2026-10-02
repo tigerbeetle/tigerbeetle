@@ -36,13 +36,17 @@ pub fn ClientType(
                 result: *const vsr.RegisterResult,
             ) void;
 
+            pub const DeregisterCallback = *const fn (client: *Client, user_data: u128) void;
+
             message: *Message.Request,
             user_data: u128,
             callback: union(enum) {
-                /// When message.header.operation ≠ .register
+                /// When message.header.operation ∉ {.register, .deregister}
                 request: Callback,
                 /// When message.header.operation = .register
                 register: RegisterCallback,
+                /// When message.header.operation = .deregister
+                deregister: DeregisterCallback,
             },
         };
 
@@ -122,6 +126,11 @@ pub fn ClientType(
         ) void = null,
 
         evicted: bool = false,
+
+        /// Set when the client's session has ended through `deregister()`.
+        /// Thereafter, the client must not send any requests, and it ignores evictions.
+        deregistered: bool = false,
+
         on_eviction_callback: ?*const fn (
             client: *Client,
             eviction: *const Message.Eviction,
@@ -276,6 +285,7 @@ pub fn ClientType(
         /// Registers a session with the cluster for the client, if this has not yet been done.
         pub fn register(self: *Client, callback: Request.RegisterCallback, user_data: u128) void {
             assert(!self.evicted);
+            assert(!self.deregistered);
             assert(self.request_inflight == null);
             assert(self.request_number == 0);
 
@@ -325,6 +335,61 @@ pub fn ClientType(
             self.on_ping_timeout();
         }
 
+        /// Ends the client's session, so that the cluster frees the session's slot in its client
+        /// table immediately, rather than waiting until the session is evicted to make space for
+        /// another client. The session must be registered, and there must be no other request
+        /// message currently inflight.
+        ///
+        /// The callback is invoked once the session has ended: either the deregister committed,
+        /// or the cluster no longer has the session (eviction reason `no_session`: for example,
+        /// it was evicted concurrently, or the deregister committed but its reply was lost), or a
+        /// newer session of the same client id superseded it (eviction reason `session_too_low`:
+        /// the network replayed the client's register). Like any request, a deregister is
+        /// retried until then, so callers that need to bound the wait must do so themselves.
+        pub fn deregister(
+            self: *Client,
+            callback: Request.DeregisterCallback,
+            user_data: u128,
+        ) void {
+            assert(!self.evicted);
+            assert(!self.deregistered);
+            assert(!self.aof_recovery);
+            assert(self.request_inflight == null);
+            assert(self.request_number > 0);
+            assert(self.session > 0);
+            assert(self.batch_size_limit != null);
+
+            const message = self.get_message().build(.request);
+            errdefer self.release_message(message.base());
+
+            message.header.* = .{
+                .size = @sizeOf(Header),
+                .client = self.id,
+                .request = self.request_number,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = .deregister,
+                .release = self.release,
+                .previous_request_latency = 0,
+            };
+            self.request_number += 1;
+            self.request_completion_timer.reset();
+
+            log.debug("{}: deregister: ending session={} request={} user_data={}", .{
+                self.id,
+                self.session,
+                message.header.request,
+                user_data,
+            });
+
+            self.request_inflight = .{
+                .message = message,
+                .user_data = user_data,
+                .callback = .{ .deregister = callback },
+            };
+            self.send_request_for_the_first_time(message);
+        }
+
         /// Sends a request message with the operation and events payload to the replica.
         /// There must be no other request message currently inflight.
         pub fn request(
@@ -369,6 +434,7 @@ pub fn ClientType(
             user_data: u128,
             message: *Message.Request,
         ) void {
+            assert(!self.deregistered);
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
             assert(message.header.client == self.id);
@@ -448,6 +514,37 @@ pub fn ClientType(
 
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
+
+            if (self.deregistered) {
+                // For example, the reply to a ping that was sent before the session ended.
+                log.debug("{}: on_eviction: ignoring (deregistered)", .{self.id});
+                return;
+            }
+
+            if (self.request_inflight) |inflight| {
+                if (inflight.message.header.operation == .deregister) {
+                    const session_ended = switch (eviction.header.reason) {
+                        // The deregister has committed (and we missed the reply), or the session
+                        // was evicted. Either way, the session has ended, as requested.
+                        .no_session => true,
+                        // A replayed (zombie) register of this client id has created a newer
+                        // session, which superseded ours, so our session has ended too.
+                        // The zombie session remains in the client table until it is evicted.
+                        .session_too_low => true,
+                        else => false,
+                    };
+                    if (session_ended) {
+                        log.debug("{}: on_eviction: session ended (deregister, reason={s})", .{
+                            self.id,
+                            @tagName(eviction.header.reason),
+                        });
+                        self.request_inflight = null;
+                        self.release_message(inflight.message.base());
+                        self.deregister_done(inflight.callback.deregister, inflight.user_data);
+                        return;
+                    }
+                }
+            }
 
             const eviction_specific_log = switch (eviction.header.reason) {
                 .client_release_too_low => " - your client is too old; upgrade to a version " ++
@@ -629,6 +726,12 @@ pub fn ClientType(
                 self.session = reply.header.commit; // The commit number becomes the session number.
                 self.batch_size_limit = result.batch_size_limit;
                 inflight.callback.register(inflight.user_data, result);
+            } else if (inflight_vsr_operation == .deregister) {
+                assert(inflight_request > 0);
+                assert(self.session > 0);
+                assert(reply.header.size == @sizeOf(Header));
+
+                self.deregister_done(inflight.callback.deregister, inflight.user_data);
             } else {
                 // The message is the result of raw_request(), so invoke the user callback.
                 // NOTE: the callback is allowed to mutate `reply.body_used()` here.
@@ -639,6 +742,25 @@ pub fn ClientType(
                     reply.body_used(),
                 );
             }
+        }
+
+        fn deregister_done(
+            self: *Client,
+            callback: Request.DeregisterCallback,
+            user_data: u128,
+        ) void {
+            assert(!self.evicted);
+            assert(!self.deregistered);
+            assert(self.request_inflight == null);
+            assert(self.session > 0);
+
+            self.deregistered = true;
+            // The cluster would reply to further pings with an eviction (no_session).
+            self.ping_timeout.stop();
+            self.request_timeout.stop();
+
+            log.debug("{}: deregister: session={} ended", .{ self.id, self.session });
+            callback(self, user_data);
         }
 
         fn on_ping_timeout(self: *Client) void {

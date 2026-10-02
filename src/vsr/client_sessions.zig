@@ -336,3 +336,85 @@ pub const ClientSessions = struct {
         return .{ .client_sessions = client_sessions };
     }
 };
+
+// A deregistered session leaves a free slot in the middle of the table, until a register takes
+// the slot. Check that such holes are handled the same way by every replica: the next session
+// takes the lowest free slot, and holes survive a checkpoint (encode/decode) unchanged.
+test "ClientSessions: remove frees the slot for the next session" {
+    const allocator = std.testing.allocator;
+
+    var client_sessions = try ClientSessions.init(allocator);
+    defer client_sessions.deinit(allocator);
+
+    const reply_header = struct {
+        fn reply_header(client: u128, commit: u64) vsr.Header.Reply {
+            var header: vsr.Header.Reply = .{
+                .command = .reply,
+                .operation = .register,
+                .cluster = 0,
+                .view = 0,
+                .release = vsr.Release.minimum,
+                .replica = 0,
+                .request_checksum = 0,
+                .client = client,
+                .op = commit,
+                .commit = commit,
+                .timestamp = commit,
+                .request = 0,
+            };
+            header.set_checksum();
+            return header;
+        }
+    }.reply_header;
+
+    // Fill the table: client i registers with session (and commit) i.
+    for (1..constants.clients_max + 1) |client| {
+        const header = reply_header(client, client);
+        const slot = client_sessions.put(client, &header);
+        try std.testing.expectEqual(client - 1, slot.index);
+    }
+    try std.testing.expect(client_sessions.entries_present.full());
+    try std.testing.expectEqual(1, client_sessions.evictee());
+
+    // Remove a session from the middle of the table (as a deregister does).
+    const client_removed: u128 = @divFloor(constants.clients_max, 2) + 1;
+    const slot_removed = client_sessions.get_slot_for_client(client_removed).?;
+    client_sessions.remove(client_removed);
+    try std.testing.expectEqual(constants.clients_max - 1, client_sessions.count());
+    try std.testing.expect(client_sessions.get(client_removed) == null);
+    try std.testing.expect(!client_sessions.entries_present.is_set(slot_removed.index));
+    const entry_removed = &client_sessions.entries[slot_removed.index];
+    try std.testing.expectEqual(0, entry_removed.session);
+    try std.testing.expect(stdx.zeroed(std.mem.asBytes(&entry_removed.header)));
+
+    // The hole survives a checkpoint.
+    const buffer = try allocator.alignedAlloc(
+        u8,
+        @alignOf(vsr.Header),
+        ClientSessions.encode_size,
+    );
+    defer allocator.free(buffer);
+
+    try std.testing.expectEqual(ClientSessions.encode_size, client_sessions.encode(buffer));
+
+    var client_sessions_decoded = try ClientSessions.init(allocator);
+    defer client_sessions_decoded.deinit(allocator);
+
+    client_sessions_decoded.decode(buffer);
+    try std.testing.expectEqual(client_sessions.count(), client_sessions_decoded.count());
+    try std.testing.expect(client_sessions_decoded.get(client_removed) == null);
+    for (client_sessions.entries, client_sessions_decoded.entries) |*expect, *actual| {
+        try std.testing.expectEqual(expect.session, actual.session);
+        try std.testing.expectEqual(expect.header.checksum, actual.header.checksum);
+    }
+
+    // A new session takes the free slot, without evicting anyone.
+    const client_new: u128 = constants.clients_max + 1;
+    const header_new = reply_header(client_new, client_new);
+    const slot_new = client_sessions.put(client_new, &header_new);
+    try std.testing.expectEqual(slot_removed.index, slot_new.index);
+    try std.testing.expectEqual(constants.clients_max, client_sessions.count());
+    for (1..constants.clients_max + 2) |client| {
+        try std.testing.expectEqual(client != client_removed, client_sessions.get(client) != null);
+    }
+}

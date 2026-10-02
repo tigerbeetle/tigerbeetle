@@ -36,8 +36,12 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         replicas: []const Replica,
         clients: []const ?Client,
-        /// Tracks the latest reply for every non-evicted client.
+        /// Tracks the latest reply for every non-evicted, non-deregistered client.
         client_replies: std.AutoArrayHashMapUnmanaged(u128, vsr.Header.Reply),
+        /// The clients that are gone: some replica has ended their session at their request
+        /// (operation=deregister). A gone client never sends another request, so the only op
+        /// that the cluster may still commit for it is a replayed (zombie) register.
+        clients_gone: std.AutoArrayHashMapUnmanaged(u128, void),
         clients_exhaustive: bool = true,
         clients_register_op_latest: u64 = 0,
 
@@ -70,6 +74,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             try client_replies.ensureTotalCapacity(allocator, constants.clients_max);
             errdefer client_replies.deinit(allocator);
 
+            var clients_gone: std.AutoArrayHashMapUnmanaged(u128, void) = .{};
+            try clients_gone.ensureTotalCapacity(allocator, options.clients.len);
+            errdefer clients_gone.deinit(allocator);
+
             const replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
@@ -81,6 +89,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .replicas = options.replicas,
                 .clients = options.clients,
                 .client_replies = client_replies,
+                .clients_gone = clients_gone,
                 .replica_head_max = replica_head_max,
             };
         }
@@ -89,6 +98,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             const allocator = state_checker.commits.allocator;
 
             allocator.free(state_checker.replica_head_max);
+            state_checker.clients_gone.deinit(allocator);
             state_checker.client_replies.deinit(allocator);
             state_checker.commits.deinit();
         }
@@ -109,6 +119,18 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             state_checker.clients_exhaustive = false;
         }
 
+        /// Unlike an eviction, a deregistration doesn't disable checking of
+        /// `Client.request_inflight`: the client asked for it, so its session can only end once,
+        /// and `check_state()` accounts for the one way in which the cluster can still commit an
+        /// op for the client afterwards: a replayed (zombie) register.
+        ///
+        /// Called whether or not the session still existed (it may have been evicted while the
+        /// deregister was being prepared).
+        pub fn on_client_deregistration(state_checker: *StateChecker, client_id: u128) void {
+            assert(client_id != 0);
+            state_checker.clients_gone.putAssumeCapacity(client_id, {});
+        }
+
         pub fn on_message(state_checker: *StateChecker, message: *const Message) void {
             switch (message.header.into_any()) {
                 .prepare_ok => |header| {
@@ -121,7 +143,17 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     }
                 },
                 .reply => |header| {
-                    if (header.operation == .register and
+                    if (header.operation == .deregister) {
+                        if (state_checker.client_replies.getEntry(header.client)) |entry| {
+                            if (entry.value_ptr.op < header.op) {
+                                _ = state_checker.client_replies.swapRemove(header.client);
+                            } else {
+                                // An old message is replayed (the client registered again).
+                            }
+                        } else {
+                            // Client was evicted, or an old message is replayed.
+                        }
+                    } else if (header.operation == .register and
                         header.op > state_checker.clients_register_op_latest)
                     {
                         state_checker.client_replies
@@ -255,23 +287,34 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     // The replica has transitioned to state `b` that is not yet in the commit
                     // history. Check if this is a valid new state based on the originating client's
                     // inflight request.
-                    const client: *const Client = for (state_checker.clients) |*client| {
-                        if (client.*.?.id == header_b.?.client) break &client.*.?;
-                    } else unreachable;
+                    if (header_b.?.operation == .register and
+                        state_checker.clients_gone.contains(header_b.?.client))
+                    {
+                        // The client's session has ended at its request (and the client may have
+                        // been deinitialized already, or may still be waiting for the deregister
+                        // to complete), but the network replayed its register, which created a
+                        // new (zombie) session.
+                    } else {
+                        const client: *const Client = for (state_checker.clients) |*client| {
+                            if (client.*) |*client_open| {
+                                if (client_open.id == header_b.?.client) break client_open;
+                            }
+                        } else return error.ReplicaTransitionedToInvalidState;
 
-                    if (client.request_inflight == null) {
-                        return error.ReplicaTransitionedToInvalidState;
+                        if (client.request_inflight == null) {
+                            return error.ReplicaTransitionedToInvalidState;
+                        }
+
+                        const request = client.request_inflight.?.message;
+                        assert(request.header.client == header_b.?.client);
+                        assert(request.header.checksum == header_b.?.request_checksum);
+                        assert(request.header.request == header_b.?.request);
+                        assert(request.header.command == .request);
+                        assert(request.header.operation == header_b.?.operation);
+                        assert(request.header.size == header_b.?.size);
+                        // `checksum_body` will not match; the leader's StateMachine updated the
+                        // timestamps in the prepare body's accounts/transfers.
                     }
-
-                    const request = client.request_inflight.?.message;
-                    assert(request.header.client == header_b.?.client);
-                    assert(request.header.checksum == header_b.?.request_checksum);
-                    assert(request.header.request == header_b.?.request);
-                    assert(request.header.command == .request);
-                    assert(request.header.operation == header_b.?.operation);
-                    assert(request.header.size == header_b.?.size);
-                    // `checksum_body` will not match; the leader's StateMachine updated the
-                    // timestamps in the prepare body's accounts/transfers.
                 } else {
                     // Either:
                     // - The cluster is running with one or more raw MessageBus "clients", so there

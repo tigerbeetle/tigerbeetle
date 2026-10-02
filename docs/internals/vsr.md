@@ -239,6 +239,12 @@ In response to a `get_reply`:
    1. Send `command=request` to cluster.
    2. If the client has been evicted, receive `command=eviction` from the cluster. (The client must re-register before sending more requests.)
    3. If the client has not been evicted, receive `command=reply` from cluster.
+4. Optionally, end the session: send `command=request operation=deregister` (with no body) as the
+   session's next request. The cluster removes the session from its client table when the request
+   commits, freeing the session's slot, and replies with `command=reply operation=deregister`. If
+   the reply is lost, the retried request receives `command=eviction` instead (`no_session`, or
+   `session_too_low` if a replayed register created a newer session for the same client id), which
+   also confirms that the session has ended.
 
 See also:
 

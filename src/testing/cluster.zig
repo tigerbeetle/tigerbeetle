@@ -148,6 +148,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// (Which may be some time after the client is actually evicted by the cluster.)
         client_eviction_reasons: []?vsr.Header.Eviction.Reason,
         client_eviction_requests_cancelled: u32 = 0,
+        /// Updated when the *client* is informed that its session ended at its request
+        /// (`deregister_callback()`). Like an evicted client, it is then deinitialized.
+        client_deregistered: []bool,
 
         client_id_permutation: IdPermutation,
 
@@ -307,6 +310,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(client_eviction_reasons);
             @memset(client_eviction_reasons, null);
 
+            const client_deregistered = try allocator.alloc(bool, client_count_total);
+            errdefer allocator.free(client_deregistered);
+            @memset(client_deregistered, false);
+
             const client_times = try allocator.alloc(TimeSim, client_count_total);
             errdefer allocator.free(client_times);
             @memset(client_times, .{
@@ -441,6 +448,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .client_pools = client_pools,
                 .client_times = client_times,
                 .client_eviction_reasons = client_eviction_reasons,
+                .client_deregistered = client_deregistered,
                 .client_id_permutation = client_id_permutation,
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
@@ -512,6 +520,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_times);
             cluster.allocator.free(cluster.client_eviction_reasons);
+            cluster.allocator.free(cluster.client_deregistered);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
             cluster.allocator.free(cluster.replica_reformats);
@@ -535,8 +544,24 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var advanced = false;
                 advanced = cluster.network.step() or advanced;
 
-                for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
+                for (
+                    cluster.clients,
+                    cluster.client_eviction_reasons,
+                    cluster.client_deregistered,
+                ) |*client, eviction_reason, deregistered| {
                     if (client.* != null and eviction_reason != null) {
+                        assert(!deregistered);
+                        client.*.?.deinit(cluster.allocator);
+                        client.* = null;
+                    }
+                    if (client.* != null and deregistered) {
+                        assert(eviction_reason == null);
+                        assert(client.*.?.deregistered);
+                        // Some replica has reported the end of the session (see
+                        // `on_replica_event()`), unless the session was evicted.
+                        assert(cluster.state_checker.clients_gone.contains(client.*.?.id) or
+                            !cluster.state_checker.clients_exhaustive);
+                        cluster.network.process_disable(.{ .client = client.*.?.id });
                         client.*.?.deinit(cluster.allocator);
                         client.* = null;
                     }
@@ -878,7 +903,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn register(cluster: *Cluster, client_index: usize) void {
             const client = &cluster.clients[client_index].?;
-            client.register(register_callback, undefined);
+            client.register(register_callback, client_index);
         }
 
         /// See request_callback().
@@ -888,6 +913,42 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             _ = user_data;
             _ = result;
+        }
+
+        /// Ends the client's session. Once the session has ended, the client is deinitialized
+        /// (see `tick()`), like an evicted client.
+        pub fn deregister(cluster: *Cluster, client_index: usize) void {
+            assert(cluster.client_eviction_reasons[client_index] == null);
+            assert(!cluster.client_deregistered[client_index]);
+
+            const client = &cluster.clients[client_index].?;
+            assert(!client.deregistered);
+            client.deregister(deregister_callback, client_index);
+        }
+
+        fn deregister_callback(client: *Client, user_data: u128) void {
+            const cluster: *Cluster = @ptrCast(@alignCast(client.on_reply_context.?));
+            assert(client.deregistered);
+            assert(client.request_inflight == null);
+
+            const client_index =
+                cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
+            assert(client_index == user_data);
+            assert(&cluster.clients[client_index].? == client);
+            assert(cluster.client_eviction_reasons[client_index] == null);
+            // The session ends exactly once.
+            assert(!cluster.client_deregistered[client_index]);
+
+            cluster.client_deregistered[client_index] = true;
+        }
+
+        /// Whether the client may send a request: it is neither evicted nor deregistered.
+        pub fn client_active(cluster: *const Cluster, client_index: usize) bool {
+            if (cluster.client_eviction_reasons[client_index] != null) return false;
+            if (cluster.client_deregistered[client_index]) return false;
+            const client = &(cluster.clients[client_index] orelse return false);
+            assert(!client.deregistered);
+            return true;
         }
 
         pub fn request(
@@ -984,6 +1045,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.client_eviction_requests_cancelled +=
                 @intFromBool(client.request_inflight != null and
                 client.request_inflight.?.message.header.operation != .register and
+                client.request_inflight.?.message.header.operation != .deregister and
                 client.request_inflight.?.message.header.operation != .noop);
         }
 
@@ -1040,6 +1102,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     else => {},
                 },
                 .client_evicted => |client_id| cluster.cluster_on_eviction(client_id),
+                .client_deregistered => |deregistered| {
+                    cluster.state_checker.on_client_deregistration(deregistered.client);
+                },
             }
         }
 

@@ -317,6 +317,8 @@ pub const Operation = enum(u8) {
     upgrade = 5,
     /// The value 6 is reserved for noop requests.
     noop = 6,
+    /// The value 7 is reserved for a client to end its session with the cluster.
+    deregister = 7,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.

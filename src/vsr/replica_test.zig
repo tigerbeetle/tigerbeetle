@@ -1784,6 +1784,593 @@ test "Cluster: eviction: session_too_low" {
     try expectEqual(c0.eviction_reason(), .session_too_low);
 }
 
+// Deregistering a session frees its slot: a subsequent register finds space without evicting
+// another session, so the oldest session (C0) survives.
+test "Cluster: deregister: frees the session's slot" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c_old = t.clients(.{ .index = 0, .count = constants.clients_max - 1 });
+    var c_close = t.clients(.{ .index = constants.clients_max - 1, .count = 1 });
+    var c_new = t.clients(.{ .index = constants.clients_max, .count = 1 });
+    const c_close_id = t.cluster.clients[constants.clients_max - 1].?.id;
+
+    // Fill the client table. C0 has the oldest session, so it would be the evictee.
+    try c_old.request(constants.clients_max - 1, constants.clients_max - 1);
+    try c_close.request(2, 2);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max);
+
+    try c_close.deregister();
+    try expectEqual(c_close.replies(), 3); // register, request, deregister
+    try expectEqual(c_close.eviction_reason(), null);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+    for (t.cluster.replicas) |*replica| {
+        try expect(replica.client_sessions.get(c_close_id) == null);
+    }
+
+    // Register another client: the table is full again, but nobody was evicted.
+    try c_new.request(1, 1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max);
+    try expect(t.cluster.state_checker.clients_exhaustive); // No client_evicted event.
+    try expectEqual(c_old.eviction_reason(), null);
+    try expectEqual(c_new.eviction_reason(), null);
+
+    // All of the old sessions are still usable.
+    try c_old.request(2 * (constants.clients_max - 1), 2 * (constants.clients_max - 1));
+    try expectEqual(c_old.eviction_reason(), null);
+}
+
+// Retries and duplicates of a deregister whose session is gone get an eviction (no_session):
+// the client treats it as success, and the cluster does nothing else.
+test "Cluster: deregister: lost reply, duplicate request" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = 2 });
+    try c0.request(2, 2);
+    try c.request(2, 2);
+    try t.replica(.R_).expect_client_sessions(3);
+
+    // The client never receives the reply to its deregister, so it retries until the primary
+    // replies that the session does not exist.
+    t.replica(.R_).drop(.C0, .outgoing, .reply);
+    t.replica(.R_).record(.C0, .incoming, .request);
+    const mark = marks.check("on_request: no session");
+    try c0.deregister();
+    try mark.expect_hit();
+    try expectEqual(c0.replies(), 2); // The deregister reply was lost.
+    try expectEqual(c0.eviction_reason(), null);
+    try t.replica(.R_).expect_client_sessions(2);
+
+    // A duplicate deregister (replayed by the network) has no effect.
+    const commit_before = t.replica(.R_).commit();
+    t.replica(.R_).replay_recorded();
+    t.run();
+    try expectEqual(t.replica(.R_).commit(), commit_before);
+    try t.replica(.R_).expect_client_sessions(2);
+
+    try c.request(4, 4);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+// A register ahead in the pipeline evicts C0, so C0's deregister commits without a session.
+test "Cluster: deregister: races an eviction" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = constants.clients_max - 1 });
+    var c_new = t.clients(.{ .index = constants.clients_max, .count = 1 });
+    const c0_id = t.cluster.clients[0].?.id;
+
+    // Fill the client table. C0 has the oldest session, so it is the evictee.
+    try c0.request(1, 1);
+    try c.request(constants.clients_max - 1, constants.clients_max - 1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max);
+
+    // Prepare (but do not commit) the register, then the deregister.
+    // (Tick for less than primary_abdicate_timeout, to avoid a view change.)
+    t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
+    t.cluster.register(constants.clients_max);
+    for (0..300) |_| _ = t.tick();
+    t.cluster.deregister(0);
+    for (0..300) |_| _ = t.tick();
+    try expect(t.cluster.clients[0].?.request_inflight != null);
+    try expectEqual(t.replica(.A0).op_head(), t.replica(.A0).commit() + 2);
+
+    const mark = marks.check("client_table_entry_delete: no session");
+    t.replica(.R_).pass(.R_, .incoming, .prepare_ok);
+    t.run();
+    try mark.expect_hit();
+
+    // C0's session ended through the eviction, but C0 asked for that: no error.
+    try expect(t.cluster.clients[0] == null);
+    try expect(t.cluster.client_deregistered[0]);
+    try expectEqual(c0.eviction_reason(), null);
+    // The replicas reported the deregister even though it found no session.
+    try expect(t.cluster.state_checker.clients_gone.contains(c0_id));
+    try expectEqual(c_new.replies(), 1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max);
+}
+
+// A deregistered session is gone for good: a request in that session is rejected.
+test "Cluster: deregister: no requests after deregister" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    try c0.request(2, 2);
+
+    const client = &t.cluster.clients[0].?;
+    const client_id = client.id;
+    const session = client.session;
+    const request = client.request_number;
+    const parent = client.parent;
+
+    try c0.deregister();
+    try t.replica(.R_).expect_client_sessions(0);
+
+    // Impersonate the client, continuing the deregistered session.
+    t.cluster.network.process_enable(.{ .client = client_id });
+    var client_bus = try TestClientBus.init(t, client_id);
+    defer client_bus.deinit();
+
+    var request_header = vsr.Header.Request{
+        .cluster = t.cluster.options.cluster_id,
+        .size = @sizeOf(vsr.Header),
+        .client = client_id,
+        .session = session,
+        .request = request + 1,
+        .parent = parent,
+        .command = .request,
+        .operation = Cluster.StateMachine.Operation.echo.to_vsr(),
+        .release = releases[0].release,
+        .previous_request_latency = 0,
+    };
+    request_header.set_checksum_body(&.{});
+    request_header.set_checksum();
+
+    const commit_before = t.replica(.R_).commit();
+    const mark = marks.check("on_request: no session");
+    client_bus.request(t.replica(.A0).index(), &request_header, &.{});
+    t.run();
+    try mark.expect_hit();
+
+    const reply = std.mem.bytesAsValue(
+        vsr.Header.Eviction,
+        client_bus.reply.?.buffer[0..@sizeOf(vsr.Header.Eviction)],
+    );
+    try expectEqual(reply.command, .eviction);
+    try expectEqual(reply.reason, .no_session);
+    try expectEqual(t.replica(.R_).commit(), commit_before);
+}
+
+// Deregister in the last bar before a checkpoint (op_checkpoint < op ≤ trigger), then restart.
+// The checkpointed client table already reflects the deregister, so replaying the bar must not
+// expect to find the session.
+test "Cluster: deregister: restart replays deregister within checkpoint's last bar" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{ .index = 0, .count = constants.clients_max - 1 });
+    var c_close = t.clients(.{ .index = constants.clients_max - 1, .count = 1 });
+
+    // Commit up to (and including) op=checkpoint_1.
+    try c.request(constants.clients_max - 1, constants.clients_max - 1);
+    try c_close.request(2, 2);
+    const requests = checkpoint_1 - (constants.clients_max + 1);
+    try c.request(constants.clients_max - 1 + requests, constants.clients_max - 1 + requests);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1);
+
+    // Only the deregister is within (checkpoint_1, checkpoint_1_trigger].
+    try c_close.deregister();
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1 + 1);
+    comptime assert(checkpoint_1 + 1 <= checkpoint_1_trigger);
+
+    // Reach the trigger, so that checkpoint_1 (and its client table) is durable.
+    const requests_trigger = checkpoint_1_trigger - (checkpoint_1 + 1);
+    try c.request(c.requests + requests_trigger, c.replies() + requests_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    t.replica(.R_).stop();
+    try t.replica(.R_).open();
+    t.run();
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    try c.request(c.requests + 3, c.replies() + 3);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+// A request in the last bar, from a client that deregisters later in the same bar. Replaying the
+// request finds no session, although the client table is not full.
+test "Cluster: deregister: restart replays a request, then its client deregisters in the bar" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{ .index = 0, .count = constants.clients_max - 1 });
+    var c_close = t.clients(.{ .index = constants.clients_max - 1, .count = 1 });
+
+    // Commit up to (and including) op=checkpoint_1.
+    try c.request(constants.clients_max - 1, constants.clients_max - 1);
+    try c_close.request(1, 1);
+    const requests = checkpoint_1 - constants.clients_max;
+    try c.request(constants.clients_max - 1 + requests, constants.clients_max - 1 + requests);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1);
+
+    // Within (checkpoint_1, checkpoint_1_trigger]: C_close's request, another client's request,
+    // then C_close's deregister.
+    try c_close.request(2, 2);
+    try c.request(c.requests + 1, c.replies() + 1);
+    try c_close.deregister();
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1 + 3);
+    comptime assert(checkpoint_1 + 3 <= checkpoint_1_trigger);
+
+    const requests_trigger = checkpoint_1_trigger - (checkpoint_1 + 3);
+    try c.request(c.requests + requests_trigger, c.replies() + requests_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    t.replica(.R_).stop();
+    try t.replica(.R_).open();
+    t.run();
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    try c.request(c.requests + 3, c.replies() + 3);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+// A request of X in the last bar commits after a register evicted X (both were in the pipeline),
+// and then another client (Y) deregisters, so the client table is not full at the trigger, and
+// X never deregistered. Replaying X's request finds no session.
+test "Cluster: deregister: restart replays a request of an evicted client, then a deregister" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var x = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = constants.clients_max - 2 });
+    var y = t.clients(.{ .index = constants.clients_max - 1, .count = 1 });
+    const g_index = constants.clients_max;
+
+    // Fill the client table. X has the oldest session, so it is the evictee.
+    try x.request(1, 1);
+    try c.request(constants.clients_max - 2, constants.clients_max - 2);
+    try y.request(1, 1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max);
+
+    // Commit up to (and including) op=checkpoint_1.
+    const requests = checkpoint_1 - constants.clients_max;
+    try c.request(c.requests + requests, c.replies() + requests);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1);
+
+    // Prepare (but do not commit) G's register, then X's request.
+    // (Tick for less than primary_abdicate_timeout, to avoid a view change.)
+    t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
+    t.cluster.register(g_index);
+    for (0..100) |_| _ = t.tick();
+    request_echo(t, 0);
+    for (0..100) |_| _ = t.tick();
+    try expectEqual(t.replica(.A0).op_head(), checkpoint_1 + 2);
+
+    t.replica(.R_).pass(.R_, .incoming, .prepare_ok);
+    t.run();
+    try expectEqual(x.eviction_reason(), .no_session);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1 + 2);
+
+    try y.deregister();
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1 + 3);
+    comptime assert(checkpoint_1 + 3 < checkpoint_1_trigger);
+
+    const requests_trigger = checkpoint_1_trigger - (checkpoint_1 + 3);
+    try c.request(c.requests + requests_trigger, c.replies() + requests_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    t.replica(.R_).stop();
+    try t.replica(.R_).open();
+    t.run();
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    try c.request(c.requests + 3, c.replies() + 3);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+// A request that waits in the primary's request queue is prepared later, without checking its
+// session again. So the register that evicts X, and the deregister (of Y) that leaves the client
+// table not full, can both be ahead of X's request by up to the depth of both queues.
+test "Cluster: deregister: restart replays a request queued behind an evicting register" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    comptime assert(constants.pipeline_prepare_queue_max == 4);
+    comptime assert(constants.pipeline_request_queue_max >= 2);
+    comptime assert(constants.clients_max == 7);
+
+    const x_index = 0;
+    const y_index = 1;
+    const others_index = 2; // pipeline_prepare_queue_max - 1 clients.
+    const g_index = constants.clients_max;
+    var x = t.clients(.{ .index = x_index, .count = 1 });
+    var y = t.clients(.{ .index = y_index, .count = 1 });
+    var others = t.clients(.{
+        .index = others_index,
+        .count = constants.pipeline_prepare_queue_max - 1,
+    });
+    var fillers = t.clients(.{
+        .index = others_index + constants.pipeline_prepare_queue_max - 1,
+        .count = constants.clients_max - constants.pipeline_prepare_queue_max - 1,
+    });
+
+    // Fill the client table. X has the oldest session, so it is the evictee.
+    try x.request(1, 1);
+    try y.request(1, 1);
+    try others.request(others.requests + 3, others.replies() + 3);
+    try fillers.request(fillers.requests + 2, fillers.replies() + 2);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max);
+
+    // G's register at op b, such that X's request lands at op b+5 in the checkpoint's last bar.
+    const op_b = checkpoint_1 - 2;
+    const op_x = op_b + constants.pipeline_prepare_queue_max + 1;
+    comptime assert(op_x > checkpoint_1);
+    comptime assert(op_x < checkpoint_1_trigger);
+    try fillers.request(
+        fillers.requests + (op_b - 1 - constants.clients_max),
+        fillers.replies() + (op_b - 1 - constants.clients_max),
+    );
+    try expectEqual(t.replica(.R_).commit(), op_b - 1);
+
+    // Queue, in order: register(G) at b, which evicts X; deregister(Y) at b+1; the others'
+    // requests, which fill the prepare queue (and one more, in the request queue); then X's
+    // request, which lands in the request queue while X still has a committed session.
+    // (Tick for less than primary_abdicate_timeout, to avoid a view change.)
+    t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
+    t.cluster.register(g_index);
+    for (0..50) |_| _ = t.tick();
+    t.cluster.deregister(y_index);
+    for (0..50) |_| _ = t.tick();
+    for (others.clients.const_slice()) |other_index| {
+        request_echo(t, other_index);
+        for (0..50) |_| _ = t.tick();
+    }
+    request_echo(t, x_index);
+    for (0..50) |_| _ = t.tick();
+
+    const primary = &t.cluster.replicas[t.replica(.A0).index()];
+    try expect(primary.pipeline.queue.prepare_queue.full());
+    try expectEqual(primary.pipeline.queue.request_queue.count, 2);
+    try expectEqual(primary.op, op_b + constants.pipeline_prepare_queue_max - 1);
+
+    t.replica(.R_).pass(.R_, .incoming, .prepare_ok);
+    t.run();
+    try expectEqual(x.eviction_reason(), .no_session);
+    try expect(t.cluster.client_deregistered[y_index]);
+    try expectEqual(t.replica(.R_).commit(), op_x);
+
+    // Reach the trigger, so that checkpoint_1 (and its client table) is durable.
+    const requests_trigger = checkpoint_1_trigger - op_x;
+    try fillers.request(
+        fillers.requests + requests_trigger,
+        fillers.replies() + requests_trigger,
+    );
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    t.replica(.R_).stop();
+    try t.replica(.R_).open();
+    t.run();
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+    try t.replica(.R_).expect_client_sessions(constants.clients_max - 1);
+
+    try fillers.request(fillers.requests + 2, fillers.replies() + 2);
+    try expectEqual(fillers.eviction_reason(), null);
+}
+
+// The deregister commits, but its reply is lost. Before the client retries, the network replays
+// the client's original register, which creates a new (zombie) session for the same client id.
+// The retry then finds a newer session (session_too_low): the client's session has ended anyway.
+test "Cluster: deregister: lost reply, zombie register, retry" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = 1 });
+    const c0_id = t.cluster.clients[0].?.id;
+
+    t.replica(.A0).record(.C0, .incoming, .request);
+    try c0.request(1, 1); // The register is recorded.
+    try c.request(1, 1);
+
+    // Pings without a session would get an eviction (no_session), which ends the deregister.
+    t.replica(.R_).drop(.__, .incoming, .ping_client);
+    t.replica(.R_).drop(.C0, .outgoing, .reply);
+    t.replica(.R_).drop(.C0, .outgoing, .eviction);
+
+    // The deregister commits on every replica, but C0 does not learn about it.
+    t.cluster.deregister(0);
+    for (0..1_000) |_| {
+        _ = t.tick();
+        for (t.cluster.replicas) |*replica| {
+            if (replica.client_sessions.get(c0_id) != null) break;
+        } else break;
+    }
+    try t.replica(.R_).expect_client_sessions(1);
+    try expect(t.cluster.clients[0].?.request_inflight != null);
+    try expect(t.cluster.state_checker.clients_gone.contains(c0_id));
+
+    // The zombie register creates a new session for C0's id.
+    t.replica(.R_).replay_recorded();
+    for (0..1_000) |_| {
+        _ = t.tick();
+        for (t.cluster.replicas) |*replica| {
+            if (replica.client_sessions.get(c0_id) == null) break;
+        } else break;
+    }
+    try t.replica(.R_).expect_client_sessions(2);
+    for (t.cluster.replicas) |*replica| {
+        try expect(replica.client_sessions.get(c0_id).?.session > t.cluster.clients[0].?.session);
+    }
+
+    // C0's retry finds the newer session.
+    const mark = marks.check("on_request: ignoring older session");
+    t.replica(.R_).pass(.C0, .outgoing, .reply);
+    t.replica(.R_).pass(.C0, .outgoing, .eviction);
+    t.run();
+    try mark.expect_hit();
+
+    // The session ended exactly once (asserted by Cluster.deregister_callback()), without an
+    // eviction. The zombie session remains, and occupies capacity.
+    try expect(t.cluster.clients[0] == null);
+    try expect(t.cluster.client_deregistered[0]);
+    try expectEqual(c0.eviction_reason(), null);
+    try t.replica(.R_).expect_client_sessions(2);
+
+    try c.request(2, 2);
+    try expectEqual(c.eviction_reason(), null);
+}
+
+// A deregister clears the fault bit of the session's reply slot. The next session that takes
+// the slot then has its own reply there, and nothing repairs the old reply into the slot.
+test "Cluster: deregister: faulty reply slot is cleared and reused" {
+    const t = try TestContext.init(.{ .replica_count = 3, .client_count = 3 });
+    defer t.deinit();
+
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c1 = t.clients(.{ .index = 1, .count = 1 });
+    var c2 = t.clients(.{ .index = 2, .count = 1 });
+    const c0_id = t.cluster.clients[0].?.id;
+    const c2_id = t.cluster.clients[2].?.id;
+
+    try c0.request(1, 1);
+    try c1.request(1, 1);
+    t.replica(.A0).record(.C0, .incoming, .request);
+    try c0.request(2, 2); // C0's latest request (with a reply body) is recorded.
+
+    const slot = t.cluster.replicas[0].client_sessions.get_slot_for_client(c0_id).?;
+    for (t.cluster.replicas) |*replica| {
+        try expectEqual(replica.client_sessions.get_slot_for_client(c0_id).?.index, slot.index);
+        try expect(replica.client_replies.reply_durable(slot));
+    }
+
+    // Corrupt C0's reply on every replica, so that it cannot be repaired. Then a duplicate of
+    // C0's latest request makes the primary read the reply, and find it faulty.
+    const fault_offset = vsr.Zone.client_replies.offset(slot.index * constants.message_size_max);
+    // Flip a byte of the reply's header directly, rather than with a sector fault:
+    // that may only hit the sector's padding, which no checksum covers.
+    for (t.cluster.storages) |*storage| storage.memory[fault_offset] +%= 1;
+    t.replica(.R_).replay_recorded();
+    t.run();
+    const primary = &t.cluster.replicas[t.replica(.A0).index()];
+    try expect(primary.client_replies.faulty.is_set(slot.index));
+
+    try c0.deregister();
+    try t.replica(.R_).expect_client_sessions(1);
+    for (t.cluster.replicas) |*replica| {
+        try expect(!replica.client_replies.faulty.is_set(slot.index));
+    }
+
+    // C2 takes the free slot (the lowest one). Its first reply is lost, and the retry must get
+    // C2's own reply from the slot. (C1 is idle, so dropping replies to every client only
+    // affects C2.)
+    const mark = marks.check("on_reply: repairing reply");
+    try c2.request(1, 1);
+    for (t.cluster.replicas) |*replica| {
+        try expectEqual(replica.client_sessions.get_slot_for_client(c2_id).?.index, slot.index);
+    }
+    t.replica(.R_).drop(.C_, .outgoing, .reply);
+    try c2.request(2, 1);
+    t.replica(.R_).pass(.C_, .outgoing, .reply);
+    t.run();
+    try expectEqual(c2.replies(), 2);
+    try mark.expect_not_hit();
+    for (t.cluster.replicas) |*replica| {
+        try expect(!replica.client_replies.faulty.is_set(slot.index));
+    }
+
+    try c1.request(2, 2);
+    try expectEqual(c1.eviction_reason(), null);
+}
+
+// A lagging replica state-syncs to a checkpoint whose client table has a free slot in the middle,
+// left by a deregister. The next register takes that slot on every replica, including the
+// synced one.
+test "Cluster: deregister: state sync into a checkpoint with a free slot in the middle" {
+    const t = try TestContext.init(.{ .replica_count = 3, .client_count = 4 });
+    defer t.deinit();
+
+    var c_a = t.clients(.{ .index = 0, .count = 1 });
+    var c_hole = t.clients(.{ .index = 1, .count = 1 });
+    var c_b = t.clients(.{ .index = 2, .count = 1 });
+    var c_new = t.clients(.{ .index = 3, .count = 1 });
+    const c_hole_id = t.cluster.clients[1].?.id;
+    const c_new_id = t.cluster.clients[3].?.id;
+
+    // R2 learns about all of this only through state sync.
+    t.replica(.R2).drop_all(.R_, .bidirectional);
+
+    try c_a.request(1, 1);
+    try c_hole.request(1, 1);
+    try c_b.request(1, 1);
+    const slot_hole = t.cluster.replicas[0].client_sessions.get_slot_for_client(c_hole_id).?;
+    try expectEqual(slot_hole.index, 1);
+    try c_hole.deregister();
+
+    const cluster_commit_max = checkpoint_2_prepare_max + 1;
+    try c_a.request(cluster_commit_max - 3, cluster_commit_max - 3);
+    try expectEqual(t.replica(.R0).commit(), cluster_commit_max);
+
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.run();
+    try expectEqual(t.replica(.R_).commit(), cluster_commit_max);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
+    // R2 never committed the first op: it caught up through state sync.
+    try expect(!t.cluster.state_checker.commits.items[1].replicas.is_set(2));
+
+    const r2 = &t.cluster.replicas[2];
+    try expectEqual(r2.client_sessions.count(), 2);
+    try expect(!r2.client_sessions.entries_present.is_set(slot_hole.index));
+
+    try c_new.request(1, 1);
+    for (t.cluster.replicas) |*replica| {
+        try expectEqual(
+            replica.client_sessions.get_slot_for_client(c_new_id).?.index,
+            slot_hole.index,
+        );
+    }
+    for (t.cluster.replicas[1..]) |*replica| {
+        for (t.cluster.replicas[0].client_sessions.entries, replica.client_sessions.entries) |
+            *expect_entry,
+            *actual_entry,
+        | {
+            try expectEqual(expect_entry.session, actual_entry.session);
+            try expectEqual(expect_entry.header.checksum, actual_entry.header.checksum);
+        }
+    }
+
+    try c_b.request(2, 2);
+    try expectEqual(c_b.eviction_reason(), null);
+}
+
 test "Cluster: view_change: JV header doesn't match current header in journal" {
     // It could be the case that a replica's JV headers don't match the journal's current state.
     // For example, a header could be blank in the JV but present in the journal (could happen if
@@ -2384,8 +2971,9 @@ const TestContext = struct {
                     }
                 }
                 if (selector == .__ or selector == .C_) {
-                    for (t.cluster.clients) |*client| {
-                        array.push(.{ .client = client.*.?.id });
+                    for (t.cluster.clients) |*client_maybe| {
+                        // Evicted and deregistered clients are deinitialized.
+                        if (client_maybe.*) |*client| array.push(.{ .client = client.id });
                     }
                 }
             },
@@ -2763,6 +3351,15 @@ const TestReplicas = struct {
         return paths;
     }
 
+    fn expect_client_sessions(t: TestReplicas, count: usize) !void {
+        assert(t.replicas.count() > 0);
+
+        for (t.replicas.const_slice()) |replica_index| {
+            const replica: *const Cluster.Replica = &t.cluster.replicas[replica_index];
+            try expectEqual(replica.client_sessions.count(), count);
+        }
+    }
+
     fn expect_sync_done(t: TestReplicas) !void {
         assert(t.replicas.count() > 0);
 
@@ -2851,6 +3448,27 @@ const TestClients = struct {
         try std.testing.expectEqual(t.replies(), expect_replies);
     }
 
+    /// Ends the session of every client, and waits until every client knows.
+    pub fn deregister(t: *TestClients) !void {
+        for (t.clients.const_slice()) |c| {
+            const client = &t.cluster.clients[c].?;
+            assert(client.request_inflight == null);
+            assert(client.session > 0);
+            t.cluster.deregister(c);
+        }
+
+        const tick_max = 3_000;
+        var tick: usize = 0;
+        while (tick < tick_max) : (tick += 1) {
+            if (t.context.tick()) tick = 0;
+        }
+
+        for (t.clients.const_slice()) |c| {
+            // The Cluster deinitializes deregistered clients.
+            try expect(t.cluster.clients[c] == null);
+        }
+    }
+
     pub fn replies(t: *const TestClients) usize {
         var replies_total: usize = 0;
         for (t.clients.const_slice()) |c| replies_total += t.context.client_replies[c];
@@ -2874,6 +3492,19 @@ const TestClients = struct {
 
 /// TestClientBus supports tests which require fine-grained control of the client protocol.
 /// Note that in particular, TestClientBus does *not* implement message retries.
+/// Sends a request from the client without waiting for its reply (see `TestClients.request()`).
+fn request_echo(t: *TestContext, client_index: usize) void {
+    const client = &t.cluster.clients[client_index].?;
+    assert(client.request_inflight == null);
+    assert(client.request_number > 0);
+
+    t.client_requests[client_index] += 1;
+    const message = client.get_message();
+    const body_size = 123;
+    @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
+    t.cluster.request(client_index, .echo, message, body_size);
+}
+
 const TestClientBus = struct {
     const MessagePool = @import("../message_pool.zig").MessagePool;
     const MessageBus = Cluster.MessageBus;

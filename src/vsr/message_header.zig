@@ -676,6 +676,10 @@ pub const Header = extern struct {
                         }
                     } else if (self.operation == .noop) {
                         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+                    } else if (self.operation == .deregister) {
+                        if (self.size != @sizeOf(Header)) {
+                            return "deregister: size != @sizeOf(Header)";
+                        }
                     } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                         return "operation is reserved";
                     }
@@ -817,6 +821,11 @@ pub const Header = extern struct {
                         if (self.request != 0) return "request != 0";
                     } else {
                         if (self.request == 0) return "request == 0";
+                    }
+                    if (self.operation == .deregister) {
+                        if (self.size != @sizeOf(Header)) {
+                            return "deregister: size != @sizeOf(Header)";
+                        }
                     }
                 },
             }
@@ -1033,6 +1042,9 @@ pub const Header = extern struct {
             } else {
                 if (self.commit == 0) return "commit == 0";
                 if (self.request == 0) return "request == 0";
+            }
+            if (self.operation == .deregister) {
+                if (self.size != @sizeOf(Header)) return "deregister: size != @sizeOf(Header)";
             }
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
