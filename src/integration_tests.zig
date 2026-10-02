@@ -252,19 +252,22 @@ test "repl integration" {
 }
 
 test "benchmark/inspect smoke" {
-    const data_file = data_file: {
-        var random_bytes: [4]u8 = undefined;
-        std.testing.io.random(&random_bytes);
-        const random_suffix: [8]u8 = std.fmt.bytesToHex(random_bytes, .lower);
-        break :data_file "0_0-" ++ random_suffix ++ ".tigerbeetle.benchmark";
-    };
-    defer std.Io.Dir.cwd().deleteFile(std.testing.io, data_file) catch {};
+    const gpa = std.testing.allocator;
 
-    const trace_file = data_file ++ ".json";
-    defer std.Io.Dir.cwd().deleteFile(std.testing.io, trace_file) catch {};
-
-    const shell = try Shell.create_testing(std.testing.allocator);
+    const shell = try Shell.create_testing(gpa);
     defer shell.destroy();
+
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+
+    const tmp_dir_realpath = try tmp_dir.dir.realPathFileAlloc(std.testing.io, ".", gpa);
+    defer gpa.free(tmp_dir_realpath);
+
+    const data_file = try std.fs.path.join(gpa, &.{ tmp_dir_realpath, "benchmark.tigerbeetle" });
+    defer gpa.free(data_file);
+
+    const trace_file = try std.fs.path.join(gpa, &.{ tmp_dir_realpath, "benchmark.json" });
+    defer gpa.free(trace_file);
 
     try shell.exec(
         \\{tigerbeetle} benchmark
