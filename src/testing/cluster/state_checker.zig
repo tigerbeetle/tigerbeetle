@@ -17,7 +17,16 @@ const Commits = std.ArrayList(struct {
     // null for operation=root and operation=upgrade
     release: ?vsr.Release,
     replicas: ReplicaSet = .{},
+    /// The session that committing this op (a register) evicted, if any.
+    eviction: ?Eviction = null,
 });
+
+pub const Eviction = struct {
+    client: u128,
+    path: vsr.ClientSessions.EvictionPath,
+    /// The replicas that reported the eviction.
+    replicas: ReplicaSet = .{},
+};
 
 const ReplicaHead = struct {
     view: u32,
@@ -127,6 +136,37 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(client_id != 0);
             assert(state_checker.clients_gone.count() < state_checker.clients.len);
             state_checker.clients_gone.putAssumeCapacityNoClobber(client_id, {});
+        }
+
+        /// Called when committing the register at `op` evicts a session.
+        /// The commit hook runs `check_state()` before the client table is updated, so the op's
+        /// commit record exists already.
+        ///
+        /// Every replica must evict the same session, in the same way. The first report is
+        /// stored, and the others must equal it. That cannot detect a replica that skips an
+        /// eviction that the others made, or that is the only one to evict, but such an asymmetry
+        /// diverges the client table, which is part of the checkpoint.
+        pub fn on_client_eviction_committed(
+            state_checker: *StateChecker,
+            replica_index: u8,
+            op: u64,
+            eviction: struct { client: u128, path: vsr.ClientSessions.EvictionPath },
+        ) void {
+            assert(op > 0);
+            assert(eviction.client != 0);
+
+            const commit = &state_checker.commits.items[op];
+            assert(commit.header.op == op);
+            assert(commit.header.operation == .register);
+            assert(commit.header.client != eviction.client);
+
+            if (commit.eviction) |*eviction_first| {
+                assert(eviction_first.client == eviction.client);
+                assert(eviction_first.path == eviction.path);
+            } else {
+                commit.eviction = .{ .client = eviction.client, .path = eviction.path };
+            }
+            commit.eviction.?.replicas.set(replica_index);
         }
 
         pub fn on_message(state_checker: *StateChecker, message: *const Message) void {

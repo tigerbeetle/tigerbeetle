@@ -319,6 +319,276 @@ pub const ClientSessions = struct {
         return evictee_.?.client;
     }
 
+    pub const EvictionPath = enum {
+        /// The register's recorded evictee (see `RegisterRequest.evictee`).
+        hint,
+        /// The register has no recorded evictee: `evictee()`.
+        fallback_no_hint,
+        /// The register's recorded evictee no longer has a session: `evictee()`.
+        fallback_hint_gone,
+    };
+
+    pub const Eviction = struct {
+        client: u128,
+        path: EvictionPath,
+    };
+
+    /// Returns the session that a register evicts from the full client table, at commit.
+    /// This depends only on the prepare (`hint` is its `RegisterRequest.evictee`) and on
+    /// replicated state, so every replica makes the same choice.
+    pub fn evictee_for_register(client_sessions: *const ClientSessions, hint: u128) Eviction {
+        assert(client_sessions.entries_present.full());
+        assert(client_sessions.count() == constants.clients_max);
+
+        if (hint == 0) {
+            return .{ .client = client_sessions.evictee(), .path = .fallback_no_hint };
+        }
+        if (client_sessions.entries_by_client.contains(hint)) {
+            return .{ .client = hint, .path = .hint };
+        }
+        return .{ .client = client_sessions.evictee(), .path = .fallback_hint_gone };
+    }
+
+    /// Returns the client whose session the primary should record as the evictee of a register
+    /// that it is preparing, or null to leave the choice to `evictee()` at commit.
+    ///
+    /// Unlike `evictee()`, this uses replica-local information, so it must only be called by the
+    /// primary when preparing, and its result must reach other replicas through the prepare.
+    ///
+    /// The candidates are the sessions that will still exist when the register commits, after the
+    /// prepares ahead of it in the pipeline (`projection`). The candidate whose client has been
+    /// silent the longest (`ClientLiveness.silence()`) is chosen: a client that is alive keeps
+    /// pinging every replica, while a client that has died without closing its session falls
+    /// silent forever. Ties are broken by the oldest commit, like `evictee()`. Commits are unique,
+    /// so the choice does not depend on the iteration order.
+    ///
+    /// Returns null if no candidate has a liveness sample (for example, a primary that has just
+    /// restarted): then every candidate is silent since the epoch, the tie-break decides, and
+    /// that is the choice that `evictee()` makes at commit anyway.
+    pub fn evictee_by_liveness(
+        client_sessions: *const ClientSessions,
+        client_liveness: *const ClientLiveness,
+        options: struct {
+            projection: *const Projection,
+            /// The local monotonic time, comparable with `ClientLiveness` samples.
+            now: stdx.Instant,
+        },
+    ) ?u128 {
+        const projection = options.projection;
+        assert(projection.client_sessions == client_sessions);
+        assert(projection.count() == constants.clients_max);
+
+        var evictee_index: ?usize = null;
+        var evictee_silence_ns: u64 = 0;
+        var sampled_any: bool = false;
+        for (client_sessions.entries, 0..) |*entry, index| {
+            if (!projection.present.is_set(index)) continue;
+            assert(client_sessions.entries_present.is_set(index));
+            assert(entry.session != 0);
+            assert(entry.header.command == .reply);
+
+            const client = entry.header.client;
+            assert(client != 0);
+            // Clients that registers ahead add have no session yet, so they have no liveness
+            // sample: if they were candidates, they would read as silent since the epoch, and the
+            // newest registration would be chosen first.
+            assert(!projection.added_contains(client));
+
+            const silence = client_liveness.silence(.{ .index = index }, client, options.now);
+            sampled_any = sampled_any or silence.sampled;
+
+            const commit = projection.commits[index];
+            if (evictee_index) |evictee_index_| {
+                const evictee_commit = projection.commits[evictee_index_];
+                assert(evictee_commit != commit);
+
+                if (silence.ns > evictee_silence_ns or
+                    (silence.ns == evictee_silence_ns and commit < evictee_commit))
+                {
+                    evictee_index = index;
+                    evictee_silence_ns = silence.ns;
+                }
+            } else {
+                evictee_index = index;
+                evictee_silence_ns = silence.ns;
+            }
+        }
+
+        if (!sampled_any) return null;
+        const evictee_entry = &client_sessions.entries[evictee_index.?];
+        assert(projection.present.is_set(evictee_index.?));
+        return evictee_entry.header.client;
+    }
+
+    /// The client table as it will be once the prepares in the primary's pipeline have
+    /// committed, in op order. It tracks occupancy and membership, and the commit order that
+    /// `evictee()` uses, so that the primary only chooses an evictee for a register that will
+    /// evict, and never one that a register ahead already evicts.
+    ///
+    /// `apply()` mirrors the client table updates of `commit_op()` prong for prong, so the
+    /// projection is exact, given the same prepares.
+    pub const Projection = struct {
+        client_sessions: *const ClientSessions,
+        /// The entries of `client_sessions` that are still present.
+        present: EntriesPresent,
+        /// The commit of the latest request of each entry, indexed like `entries`.
+        commits: [constants.clients_max]u64,
+        /// The clients that registers ahead add. They have no slot (nor a session) yet.
+        added: stdx.BoundedArrayType(Added, constants.pipeline_prepare_queue_max) = .{},
+
+        const Added = struct { client: u128, commit: u64 };
+
+        pub fn init(client_sessions: *const ClientSessions) Projection {
+            var commits: [constants.clients_max]u64 = @splat(0);
+            for (client_sessions.entries, 0..) |*entry, index| {
+                if (client_sessions.entries_present.is_set(index)) {
+                    assert(entry.session != 0);
+                    assert(entry.header.commit >= entry.session);
+                    commits[index] = entry.header.commit;
+                } else {
+                    assert(entry.session == 0);
+                }
+            }
+            return .{
+                .client_sessions = client_sessions,
+                .present = client_sessions.entries_present,
+                .commits = commits,
+            };
+        }
+
+        pub fn count(projection: *const Projection) usize {
+            const result = projection.present.count() + projection.added.count();
+            assert(result <= constants.clients_max);
+            return result;
+        }
+
+        pub fn contains(projection: *const Projection, client: u128) bool {
+            assert(client != 0);
+            return projection.present_index(client) != null or projection.added_contains(client);
+        }
+
+        /// Applies the prepare of the next op. `register_request` is the prepare's body if it is
+        /// a register, and null otherwise.
+        pub fn apply(
+            projection: *Projection,
+            header: *const vsr.Header.Prepare,
+            register_request: ?*const vsr.RegisterRequest,
+        ) void {
+            assert(header.command == .prepare);
+            assert(header.op > 0);
+            assert((header.operation == .register) == (register_request != null));
+
+            // Every named operation is listed (and there is no `else`), so that a new one fails to
+            // compile until it is projected. Mirrors the client table switch in `commit_op()`.
+            switch (header.operation) {
+                .reserved, .root => unreachable,
+                .register => projection.apply_register(header, register_request.?),
+                .pulse, .upgrade => assert(header.client == 0),
+                .reconfigure => projection.apply_request(header),
+                .noop => projection.apply_request(header),
+                _ => projection.apply_request(header),
+            }
+        }
+
+        fn apply_register(
+            projection: *Projection,
+            header: *const vsr.Header.Prepare,
+            register_request: *const vsr.RegisterRequest,
+        ) void {
+            assert(header.operation == .register);
+            assert(header.client != 0);
+            assert(register_request.evictee != header.client);
+            // The primary never prepares a register for a client with a session (it resends the
+            // reply instead), and drops duplicates of the requests that are being prepared. After
+            // a view change, the pipeline is a suffix of the log, so any eviction of this client
+            // that an older primary relied on is in the pipeline too, and is projected first.
+            assert(!projection.contains(header.client));
+
+            // Like `client_table_entry_create()`, with `evictee_for_register()`.
+            if (projection.count() == constants.clients_max) {
+                const hint = register_request.evictee;
+                const victim = if (hint != 0 and projection.contains(hint))
+                    hint
+                else
+                    projection.fallback();
+                projection.remove(victim);
+            }
+            assert(projection.count() < constants.clients_max);
+
+            projection.added.push(.{ .client = header.client, .commit = header.op });
+        }
+
+        fn apply_request(projection: *Projection, header: *const vsr.Header.Prepare) void {
+            assert(header.operation != .register);
+            assert(header.client != 0);
+
+            // Like `client_table_entry_update()`.
+            if (projection.present_index(header.client)) |index| {
+                assert(projection.commits[index] < header.op);
+                projection.commits[index] = header.op;
+                return;
+            }
+            for (projection.added.slice()) |*added| {
+                if (added.client == header.client) {
+                    assert(added.commit < header.op);
+                    added.commit = header.op;
+                    return;
+                }
+            }
+            // The session was evicted (by a register ahead) while this request was prepared.
+        }
+
+        /// The session with the oldest commit, like `evictee()`.
+        fn fallback(projection: *const Projection) u128 {
+            assert(projection.count() == constants.clients_max);
+
+            var victim: ?Added = null;
+            for (projection.client_sessions.entries, 0..) |*entry, index| {
+                if (!projection.present.is_set(index)) continue;
+                const candidate: Added = .{
+                    .client = entry.header.client,
+                    .commit = projection.commits[index],
+                };
+                if (victim == null or candidate.commit < victim.?.commit) victim = candidate;
+            }
+            for (projection.added.const_slice()) |candidate| {
+                assert(victim == null or candidate.commit != victim.?.commit);
+                if (victim == null or candidate.commit < victim.?.commit) victim = candidate;
+            }
+            return victim.?.client;
+        }
+
+        fn remove(projection: *Projection, client: u128) void {
+            assert(projection.contains(client));
+
+            if (projection.present_index(client)) |index| {
+                projection.present.unset(index);
+            } else {
+                for (projection.added.const_slice(), 0..) |added, index| {
+                    if (added.client == client) {
+                        _ = projection.added.swap_remove(index);
+                        break;
+                    }
+                } else unreachable;
+            }
+            assert(!projection.contains(client));
+        }
+
+        fn present_index(projection: *const Projection, client: u128) ?usize {
+            const index = projection.client_sessions.entries_by_client.get(client) orelse
+                return null;
+            if (!projection.present.is_set(index)) return null;
+            return index;
+        }
+
+        fn added_contains(projection: *const Projection, client: u128) bool {
+            for (projection.added.const_slice()) |added| {
+                if (added.client == client) return true;
+            }
+            return false;
+        }
+    };
+
     pub fn remove(client_sessions: *ClientSessions, client: u128) void {
         const entry_index = client_sessions.entries_by_client.fetchRemove(client).?.value;
 
@@ -536,7 +806,284 @@ const TestSessions = struct {
     fn silence(t: *const TestSessions, client: u128, since_epoch_s: u64) ClientLiveness.Silence {
         return t.client_liveness.silence(t.slot(client), client, instant(since_epoch_s));
     }
+
+    /// Fills the rest of the table with live clients (client = commit, from `client_first`), which
+    /// were heard at `since_epoch_s`.
+    fn fill(t: *TestSessions, options: struct { client_first: u128, heard_s: u64 }) void {
+        var client = options.client_first;
+        while (t.client_sessions.count() < constants.clients_max) : (client += 1) {
+            t.session(client, @intCast(client));
+            t.heard(client, options.heard_s);
+        }
+        assert(t.client_sessions.entries_present.full());
+    }
+
+    fn evictee(t: *const TestSessions, projection: *const ClientSessions.Projection) ?u128 {
+        return t.client_sessions.evictee_by_liveness(&t.client_liveness, .{
+            .projection = projection,
+            .now = instant(now_s),
+        });
+    }
+
+    fn evictee_now(t: *const TestSessions) ?u128 {
+        const projection = ClientSessions.Projection.init(&t.client_sessions);
+        return t.evictee(&projection);
+    }
+
+    const now_s = 60;
 };
+
+fn test_prepare(options: struct {
+    op: u64,
+    operation: vsr.Operation,
+    client: u128,
+}) vsr.Header.Prepare {
+    return .{
+        .cluster = 0,
+        .view = 0,
+        .release = .{ .value = 1 },
+        .command = .prepare,
+        .parent = 0,
+        .request_checksum = 0,
+        .checkpoint_id = 0,
+        .client = options.client,
+        .op = options.op,
+        .commit = options.op - 1,
+        .timestamp = options.op,
+        .request = if (options.operation == .register) 0 else 1,
+        .operation = options.operation,
+    };
+}
+
+fn test_apply_register(
+    projection: *ClientSessions.Projection,
+    options: struct { op: u64, client: u128, evictee: u128 },
+) void {
+    const header = test_prepare(.{
+        .op = options.op,
+        .operation = .register,
+        .client = options.client,
+    });
+    const register_request: vsr.RegisterRequest = .{
+        .batch_size_limit = 1,
+        .evictee = options.evictee,
+    };
+    projection.apply(&header, &register_request);
+}
+
+fn test_apply_request(
+    projection: *ClientSessions.Projection,
+    options: struct { op: u64, operation: vsr.Operation, client: u128 },
+) void {
+    assert(options.operation != .register);
+    const header = test_prepare(.{
+        .op = options.op,
+        .operation = options.operation,
+        .client = options.client,
+    });
+    projection.apply(&header, null);
+}
+
+test "ClientSessions.evictee_by_liveness: live idle client survives dead sessions" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    // Client 1 is alive but idle: it committed first, but it is still pinging.
+    t.session(1, 1);
+    t.heard(1, 40);
+    // Clients 2 and 3 died without closing their sessions, after committing more recently.
+    t.session(2, 2);
+    t.heard(2, 10);
+    t.session(3, 3);
+    t.heard(3, 20);
+    t.fill(.{ .client_first = 4, .heard_s = 59 });
+
+    // `evictee()` would choose client 1 (the oldest commit), but client 2 is silent the longest.
+    try std.testing.expectEqual(1, t.client_sessions.evictee());
+    try std.testing.expectEqual(2, t.evictee_now());
+}
+
+test "ClientSessions.evictee_by_liveness: fresh register protected by its commit sample" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    // Client 1 was heard 50s ago.
+    t.session(1, 1);
+    t.heard(1, 10);
+    // Client 2 has just registered (committed live, 10s ago), and has not pinged yet.
+    t.session(2, 2);
+    t.committed(2, 2, 50);
+    t.fill(.{ .client_first = 3, .heard_s = 59 });
+
+    try std.testing.expectEqual(1, t.evictee_now());
+}
+
+test "ClientSessions.evictee_by_liveness: WAL replay does not stamp" {
+    var t = try TestSessions.init(.{ .op_replay_max = 100 });
+    defer t.deinit();
+
+    // Client 1 is alive: it pinged after the replica opened.
+    t.session(1, 1);
+    t.heard(1, 5);
+    // Client 2 died long ago, but its last request was replayed from the WAL after open.
+    t.session(2, 2);
+    t.committed(2, 2, 8);
+    t.fill(.{ .client_first = 3, .heard_s = 59 });
+
+    try std.testing.expectEqual(2, t.evictee_now());
+}
+
+test "ClientSessions.evictee_by_liveness: nothing sampled returns null" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    for (1..constants.clients_max + 1) |client| t.session(client, client);
+    // Every candidate is silent since the epoch: leave the choice to `evictee()` at commit.
+    try std.testing.expectEqual(null, t.evictee_now());
+
+    // A sample of a different client in the same slot (the slot was reused) does not count.
+    t.client_liveness.heard(t.slot(1), constants.clients_max + 1, TestSessions.instant(59));
+    try std.testing.expectEqual(null, t.evictee_now());
+
+    t.heard(3, 59);
+    try std.testing.expectEqual(1, t.evictee_now());
+}
+
+test "ClientSessions.evictee_by_liveness: ties break by the oldest commit" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    // Add the sessions in descending commit order, so that slot order and commit order disagree.
+    var commit: u64 = constants.clients_max;
+    while (commit > 0) : (commit -= 1) {
+        const client: u128 = 100 + commit;
+        t.session(client, commit);
+        t.heard(client, 30);
+    }
+    try std.testing.expectEqual(101, t.evictee_now());
+}
+
+test "ClientSessions.evictee_by_liveness: a reused slot does not inherit liveness" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    // Every client is alive, apart from the one in the middle.
+    const client_dead: u128 = @divFloor(constants.clients_max, 2) + 1;
+    for (1..constants.clients_max + 1) |client| {
+        t.session(client, client);
+        if (client != client_dead) t.heard(client, 50);
+    }
+    try std.testing.expectEqual(client_dead, t.evictee_now());
+
+    // Once the dead session is evicted, its slot is reused by a new client, which must not
+    // inherit the liveness of the dead one. (Nor does the new client have a sample yet.)
+    t.client_sessions.remove(client_dead);
+    t.session(constants.clients_max + 1, constants.clients_max + 1);
+    try std.testing.expectEqual(t.slot(constants.clients_max + 1).index, client_dead - 1);
+    try std.testing.expectEqual(constants.clients_max + 1, t.evictee_now());
+}
+
+test "ClientSessions.evictee_for_register: hint gone falls back" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    for (1..constants.clients_max + 1) |client| t.session(client, client);
+
+    try std.testing.expectEqual(
+        ClientSessions.Eviction{ .client = 3, .path = .hint },
+        t.client_sessions.evictee_for_register(3),
+    );
+    try std.testing.expectEqual(
+        ClientSessions.Eviction{ .client = 1, .path = .fallback_no_hint },
+        t.client_sessions.evictee_for_register(0),
+    );
+    try std.testing.expectEqual(
+        ClientSessions.Eviction{ .client = 1, .path = .fallback_hint_gone },
+        t.client_sessions.evictee_for_register(constants.clients_max + 1),
+    );
+}
+
+test "Projection: fallback victim of a hint-less register ahead is excluded" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    // Client 1 has the oldest commit, and is also silent the longest.
+    t.session(1, 1);
+    t.heard(1, 1);
+    t.session(2, 2);
+    t.heard(2, 2);
+    t.fill(.{ .client_first = 3, .heard_s = 59 });
+
+    var projection = ClientSessions.Projection.init(&t.client_sessions);
+    try std.testing.expectEqual(1, t.evictee(&projection));
+
+    // A register ahead (for which this replica recorded no evictee) evicts client 1 at commit.
+    test_apply_register(&projection, .{ .op = 100, .client = 1000, .evictee = 0 });
+    try std.testing.expectEqual(constants.clients_max, projection.count());
+    try std.testing.expect(!projection.contains(1));
+    try std.testing.expect(projection.contains(1000));
+    try std.testing.expectEqual(2, t.evictee(&projection));
+}
+
+test "Projection: requests ahead reorder the projected fallback" {
+    // Every operation that `commit_op()` passes to `client_table_entry_update()`.
+    const operations = [_]vsr.Operation{ @enumFromInt(200), .noop, .reconfigure };
+    for (operations) |operation| {
+        var t = try TestSessions.init(.{});
+        defer t.deinit();
+
+        for (1..constants.clients_max + 1) |client| t.session(client, client);
+
+        var projection = ClientSessions.Projection.init(&t.client_sessions);
+        // Client 1 (the oldest commit) commits a request ahead, so client 2 is the oldest.
+        test_apply_request(&projection, .{ .op = 100, .operation = operation, .client = 1 });
+        test_apply_register(&projection, .{ .op = 101, .client = 1000, .evictee = 0 });
+        try std.testing.expect(projection.contains(1));
+        try std.testing.expect(!projection.contains(2));
+        try std.testing.expectEqual(constants.clients_max, projection.count());
+    }
+}
+
+test "Projection: request of a client evicted ahead is a no-op" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    for (1..constants.clients_max + 1) |client| t.session(client, client);
+
+    var projection = ClientSessions.Projection.init(&t.client_sessions);
+    test_apply_register(&projection, .{ .op = 100, .client = 1000, .evictee = 3 });
+    try std.testing.expect(!projection.contains(3));
+    // The session of client 3 was evicted while its request was being prepared.
+    test_apply_request(&projection, .{ .op = 101, .operation = @enumFromInt(200), .client = 3 });
+    try std.testing.expect(!projection.contains(3));
+    try std.testing.expectEqual(constants.clients_max, projection.count());
+
+    test_apply_register(&projection, .{ .op = 102, .client = 1001, .evictee = 0 });
+    try std.testing.expect(!projection.contains(1));
+    try std.testing.expect(projection.contains(2));
+    try std.testing.expectEqual(constants.clients_max, projection.count());
+}
+
+test "Projection: added clients are never candidates" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    // Every session is alive, so any session without a sample would be chosen first.
+    for (1..constants.clients_max + 1) |client| {
+        t.session(client, client);
+        t.heard(client, 50 + @as(u64, @intCast(client)));
+    }
+
+    var projection = ClientSessions.Projection.init(&t.client_sessions);
+    test_apply_register(&projection, .{ .op = 100, .client = 1000, .evictee = 1 });
+    try std.testing.expect(projection.contains(1000));
+    try std.testing.expect(!projection.contains(1));
+    // Client 1000 is not a candidate, but it is part of the fallback.
+    try std.testing.expectEqual(2, t.evictee(&projection));
+    test_apply_register(&projection, .{ .op = 101, .client = 1001, .evictee = 0 });
+    try std.testing.expect(!projection.contains(2));
+    try std.testing.expect(projection.contains(1000));
+}
 
 test "ClientLiveness: silence" {
     var t = try TestSessions.init(.{ .op_replay_max = 20 });

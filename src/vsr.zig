@@ -403,12 +403,27 @@ pub const RegisterRequest = extern struct {
     /// When command=prepare, batch_size_limit > 0 and batch_size_limit ≤ message_body_size_max.
     /// (Note that this does *not* include the `@sizeOf(Header)`.)
     batch_size_limit: u32,
-    reserved: [252]u8 = @splat(0),
+    /// Keeps `evictee` at offset 16 (aligned). Must be zero.
+    reserved_evictee: [12]u8 = @splat(0),
+    /// When command=request, evictee = 0.
+    /// When command=prepare, evictee is the client whose session the primary chose to evict if the
+    /// client table is full when this register commits, or 0 if the primary made no choice.
+    /// Always 0 in prepares from releases before this field existed.
+    /// The primary chooses using its local knowledge of client liveness, which other replicas
+    /// cannot reproduce, so the choice is recorded here and every replica follows it.
+    /// The choice is a hint: at commit, a replica falls back to `ClientSessions.evictee()` if the
+    /// evictee no longer has a session, which depends only on replicated state.
+    evictee: u128 = 0,
+    reserved: [224]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(RegisterRequest) == 256);
         assert(@sizeOf(RegisterRequest) <= constants.message_body_size_max);
         assert(stdx.no_padding(RegisterRequest));
+        // Releases before `evictee` was introduced required all bytes after `batch_size_limit` to
+        // be zero, so `evictee` must not move `batch_size_limit`.
+        assert(@offsetOf(RegisterRequest, "batch_size_limit") == 0);
+        assert(@offsetOf(RegisterRequest, "evictee") == 16);
     }
 };
 

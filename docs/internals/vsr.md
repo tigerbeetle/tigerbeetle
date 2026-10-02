@@ -234,7 +234,9 @@ In response to a `get_reply`:
 ### Protocol: Client
 
 1. Client sends `command=request operation=register` to registers with the cluster by starting a new request-reply hashchain. (See also: [Protocol: Normal](#protocol-normal)).
-2. Client receives `command=reply operation=register` from the cluster. (If the cluster is at the maximum number of clients, it evicts the oldest).
+2. Client receives `command=reply operation=register` from the cluster. (If the cluster is at the
+   maximum number of clients, it evicts a session, see
+   [sessions](../reference/sessions.md#eviction).)
 3. Repeat:
    1. Send `command=request` to cluster.
    2. If the client has been evicted, receive `command=eviction` from the cluster. (The client must re-register before sending more requests.)

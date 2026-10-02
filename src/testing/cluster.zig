@@ -1012,8 +1012,16 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
         }
 
-        fn cluster_on_eviction(cluster: *Cluster, client_id: u128) void {
-            cluster.state_checker.on_client_eviction(client_id);
+        fn cluster_on_eviction(
+            cluster: *Cluster,
+            replica_index: u8,
+            eviction: @FieldType(vsr.ReplicaEvent, "client_evicted"),
+        ) void {
+            cluster.state_checker.on_client_eviction(eviction.client);
+            cluster.state_checker.on_client_eviction_committed(replica_index, eviction.op, .{
+                .client = eviction.client,
+                .path = eviction.path,
+            });
         }
 
         fn client_on_eviction(client: *Client, eviction: *const Message.Eviction) void {
@@ -1089,7 +1097,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     },
                     else => {},
                 },
-                .client_evicted => |client_id| cluster.cluster_on_eviction(client_id),
+                .client_evicted => |eviction| {
+                    cluster.cluster_on_eviction(replica.replica, eviction);
+                },
             }
         }
 

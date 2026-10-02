@@ -77,7 +77,16 @@ pub const ReplicaEvent = union(enum) {
     /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
     checkpoint_completed,
     sync_stage_changed,
-    client_evicted: u128,
+    /// Called when committing a register evicts a session from the full client table.
+    client_evicted: struct {
+        /// The op of the register.
+        op: u64,
+        /// The client whose session was evicted.
+        client: u128,
+        /// The evictee that the primary recorded in the register (0 if none).
+        hint: u128,
+        path: ClientSessions.EvictionPath,
+    },
 };
 
 pub const CommitStage = union(enum) {
@@ -5406,6 +5415,19 @@ pub fn ReplicaType(
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.writes.available() > 0);
             assert(self.upgrade_release == null or prepare.header.operation == .upgrade);
+            // Release gating: an op whose prepare body (or operation) is new in release R is only
+            // executed by replicas whose checkpoint release is at least R, so older code never
+            // sees it. Every replica executes ops with the release of its checkpoint:
+            // - `open()` calls `release_transition()` when the checkpoint's release differs from
+            //   the binary's, and this assertion holds thereafter.
+            // - The release only advances at a checkpoint whose entire last bar is
+            //   operation=upgrade (`release_for_next_checkpoint()`), and while upgrading, the
+            //   primary ignores other requests (`ignore_request_message_upgrade()`).
+            // So take the upgrade checkpoint C: a primary running R has checkpointed C, so it
+            // only prepares ops above trigger(C), while a replica running R-1 executes ops up to
+            // trigger(C) (all of which are upgrades above C) and then restarts into R.
+            // Note that `prepare.header.release` is the client's release, so it is not a gate.
+            // See `primary_prepare_register_evictee()`.
             assert(
                 self.superblock.working.vsr_state.checkpoint.release.value == self.release.value,
             );
@@ -5573,7 +5595,7 @@ pub fn ReplicaType(
             } else {
                 switch (reply.header.operation) {
                     .root => unreachable,
-                    .register => self.client_table_entry_create(reply),
+                    .register => self.client_table_entry_create(prepare, reply),
                     .pulse, .upgrade => assert(reply.header.client == 0),
                     else => self.client_table_entry_update(reply),
                 }
@@ -5636,7 +5658,11 @@ pub fn ReplicaType(
             assert(register_request.batch_size_limit <= constants.message_body_size_max);
             assert(register_request.batch_size_limit <=
                 self.request_size_limit - @sizeOf(vsr.Header));
+            assert(stdx.zeroed(&register_request.reserved_evictee));
             assert(stdx.zeroed(&register_request.reserved));
+            // The evictee is a hint, and may have already lost its session (e.g. to another
+            // register), but it is never the registering client itself.
+            assert(register_request.evictee != prepare.header.client);
 
             result.* = .{
                 .batch_size_limit = register_request.batch_size_limit,
@@ -5746,7 +5772,15 @@ pub fn ReplicaType(
         /// Creates an entry in the client table when registering a new client session.
         /// Asserts that the new session does not yet exist.
         /// Evicts another entry deterministically, if necessary, to make space for the insert.
-        fn client_table_entry_create(self: *Replica, reply: *Message.Reply) void {
+        fn client_table_entry_create(
+            self: *Replica,
+            prepare: *const Message.Prepare,
+            reply: *Message.Reply,
+        ) void {
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation == .register);
+            assert(prepare.header.op == reply.header.op);
+            assert(prepare.header.client == reply.header.client);
             assert(reply.header.command == .reply);
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
@@ -5767,25 +5801,54 @@ pub fn ReplicaType(
             // change after initializing a cluster.
             // We also do not depend on `HashMap.valueIterator()` being deterministic here. However,
             // we do require that all entries have different commit numbers and are iterated.
-            // This ensures that we will always pick the entry with the oldest commit number.
+            // This ensures that the fallback, and ties, pick the entry with the oldest commit.
             // We also check that a client has only one entry in the hash map (or it's buggy).
+            //
+            // The primary may have recorded its choice of evictee in the prepare (see
+            // `primary_prepare_register_evictee()`), which all replicas follow. Whether the
+            // recorded evictee still has a session depends only on replicated state, so the
+            // fallback to `evictee()` is deterministic too.
             const clients = self.client_sessions.count();
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
-                const evictee = self.client_sessions.evictee();
-                self.client_sessions.remove(evictee);
+                const register_request = std.mem.bytesAsValue(
+                    vsr.RegisterRequest,
+                    prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+                );
+                const hint = register_request.evictee;
+                assert(hint != reply.header.client);
+
+                const eviction = self.client_sessions.evictee_for_register(hint);
+                switch (eviction.path) {
+                    .hint => assert(eviction.client == hint),
+                    .fallback_no_hint => assert(hint == 0),
+                    .fallback_hint_gone => {
+                        assert(hint != 0);
+                        assert(self.client_sessions.get(hint) == null);
+                    },
+                }
+                assert(eviction.client != 0);
+                assert(eviction.client != reply.header.client);
+                self.client_sessions.remove(eviction.client);
 
                 assert(self.client_sessions.count() == constants.clients_max - 1);
 
-                log.warn("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
+                log.warn("{}: client_table_entry_create: clients={}/{} evicting client={} " ++
+                    "path={s}", .{
                     self.log_prefix(),
                     clients,
                     constants.clients_max,
-                    evictee,
+                    eviction.client,
+                    @tagName(eviction.path),
                 });
 
                 if (self.event_callback) |hook| {
-                    hook(self, .{ .client_evicted = evictee });
+                    hook(self, .{ .client_evicted = .{
+                        .op = reply.header.op,
+                        .client = eviction.client,
+                        .hint = hint,
+                        .path = eviction.path,
+                    } });
                 }
             }
 
@@ -7543,11 +7606,74 @@ pub fn ReplicaType(
                 request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
             );
             assert(register_request.batch_size_limit == 0);
+            assert(stdx.zeroed(&register_request.reserved_evictee));
+            assert(register_request.evictee == 0);
             assert(stdx.zeroed(&register_request.reserved));
 
             register_request.* = .{
                 .batch_size_limit = batch_size_limit,
+                .evictee = self.primary_prepare_register_evictee(request) orelse 0,
             };
+        }
+
+        /// Chooses the session to evict if the client table is full when this register commits.
+        ///
+        /// Without a choice, `client_table_entry_create()` evicts the session that committed a
+        /// request the longest time ago. But that may be a live client which is merely idle,
+        /// while the table also holds sessions of clients that died without closing them
+        /// (e.g. SIGKILL). This replica knows which clients are still pinging, so it chooses.
+        /// The choice is best effort: it is only as good as this replica's view of the clients
+        /// (a client may reach only some replicas), and the commit falls back to `evictee()` if
+        /// the choice no longer has a session.
+        ///
+        /// Replicas cannot reproduce the choice, since liveness is replica-local, so the choice is
+        /// recorded in the prepare. Older releases require `RegisterRequest.reserved` to be zero,
+        /// but never execute this prepare (see the release gating comment in `execute_op()`).
+        fn primary_prepare_register_evictee(self: *Replica, request: *const Message.Request) ?u128 {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(request.header.operation == .register);
+            assert(self.client_sessions.get_slot_for_client(request.header.client) == null);
+            // The pipeline holds exactly the ops that are prepared but not yet committed.
+            assert(self.commit_min == self.commit_max);
+            assert(self.commit_max + self.pipeline.queue.prepare_queue.count == self.op);
+
+            // The client table when this register commits: after the prepares ahead of it.
+            var projection = ClientSessions.Projection.init(&self.client_sessions);
+            var prepares_ahead: u32 = 0;
+            var prepares = self.pipeline.queue.prepare_queue.iterator();
+            while (prepares.next_ptr()) |prepare| : (prepares_ahead += 1) {
+                const header = prepare.message.header;
+                assert(header.op == self.commit_min + prepares_ahead + 1);
+
+                const register_request: ?*const vsr.RegisterRequest =
+                    if (header.operation == .register) std.mem.bytesAsValue(
+                        vsr.RegisterRequest,
+                        prepare.message.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+                    ) else null;
+                projection.apply(header, register_request);
+            }
+            assert(prepares_ahead <= constants.pipeline_prepare_queue_max);
+            assert(self.commit_min + prepares_ahead == self.op);
+            assert(!projection.contains(request.header.client));
+
+            // The register only evicts if the table will be full.
+            if (projection.count() < constants.clients_max) return null;
+
+            const evictee = self.client_sessions.evictee_by_liveness(&self.client_liveness, .{
+                .projection = &projection,
+                .now = self.clock.monotonic(),
+            }) orelse return null;
+            assert(evictee != 0);
+            assert(evictee != request.header.client);
+            assert(projection.contains(evictee));
+
+            log.debug("{}: primary_prepare_register_evictee: client={} evictee={}", .{
+                self.log_prefix(),
+                request.header.client,
+                evictee,
+            });
+            return evictee;
         }
 
         fn primary_prepare_reconfiguration(

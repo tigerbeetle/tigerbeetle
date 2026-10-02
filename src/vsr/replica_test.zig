@@ -1813,6 +1813,398 @@ test "Cluster: client kill: late messages to a killed client are dropped" {
     try expectEqual(c0.eviction_reason(), null);
 }
 
+test "Cluster: eviction: live idle client survives dead sessions" {
+    // Clients that die without closing their sessions (e.g. SIGKILL) leave them behind, so a
+    // long-running cluster's client table is permanently full. Registering a new client evicts
+    // a session. That must be a dead session, not that of a live client which is merely idle,
+    // even though the idle client committed its latest request before any of the dead ones.
+    //
+    // Methodology:
+    // - C0 registers, and then stays idle (but alive, so it keeps pinging the replicas).
+    // - clients_max - 1 other clients register (filling the table), and then die.
+    // - clients_max - 1 new clients register, each evicting a session.
+    // - C0 must still have its session.
+    try test_eviction_live_idle_client(.{ .primary_crash = false });
+}
+
+test "Cluster: eviction: live idle client survives dead sessions (new primary)" {
+    // Same as above, but the primary crashes before the new clients register. The new primary
+    // must make the same choice, from the pings it received while it was a backup.
+    try test_eviction_live_idle_client(.{ .primary_crash = true });
+}
+
+fn test_eviction_live_idle_client(options: struct { primary_crash: bool }) !void {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = 1 + 2 * (constants.clients_max - 1),
+    });
+    defer t.deinit();
+
+    var c_idle = t.clients(.{ .index = 0, .count = 1 });
+    var c_dead = t.clients(.{ .index = 1, .count = constants.clients_max - 1 });
+    var c_new = t.clients(.{ .index = constants.clients_max, .count = constants.clients_max - 1 });
+
+    try c_idle.request(1, 1);
+    try c_dead.request(constants.clients_max - 1, constants.clients_max - 1);
+    try expectEqual(t.replica(.R_).client_sessions_count(), constants.clients_max);
+
+    // The idle client committed the oldest request, so without liveness it would be evicted
+    // first.
+    const client_idle = t.cluster.clients[0].?.id;
+    try expectEqual(t.replica(.R_).client_sessions_evictee(), client_idle);
+
+    c_dead.kill();
+    t.run(); // Let time pass: the idle client keeps pinging, the dead clients are silent.
+
+    if (options.primary_crash) {
+        const primary_old = t.replica(.A0).index();
+        t.replica(.A0).stop();
+        t.run();
+        try std.testing.expect(t.replica(.A0).index() != primary_old);
+    }
+
+    const commits_before = t.cluster.state_checker.commits.items.len;
+    try c_new.request(constants.clients_max - 1, constants.clients_max - 1);
+    try expectEqual(c_new.eviction_reason(), null);
+    try expectEqual(c_idle.eviction_reason(), null);
+
+    // Every register evicted a dead session, through the primary's choice.
+    var evictions: usize = 0;
+    for (t.cluster.state_checker.commits.items[commits_before..]) |*commit| {
+        if (commit.eviction) |eviction| {
+            evictions += 1;
+            try expectEqual(eviction.path, .hint);
+            try std.testing.expect(eviction.client != client_idle);
+        }
+    }
+    try expectEqual(evictions, constants.clients_max - 1);
+
+    // The idle client's session survived: it can still issue requests.
+    try c_idle.request(2, 2);
+    try expectEqual(c_idle.eviction_reason(), null);
+}
+
+test "Cluster: eviction: backward wall-clock step does not protect a dead client" {
+    // When the wall clock steps backwards, prepare timestamps are clamped (to the previous
+    // timestamp + 1), so cluster time stands still. Liveness must therefore be measured on the
+    // monotonic clock only: otherwise a client that died just before the step looks like it
+    // committed a moment ago, and a live idle client is evicted instead.
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    // Start the wall clock late enough that it can step backwards.
+    for (t.cluster.replica_times) |*time| {
+        assert(time.ticks == 0);
+        time.epoch = std.time.ns_per_hour;
+    }
+
+    var c_idle = t.clients(.{ .index = 0, .count = 1 });
+    var c_dead = t.clients(.{ .index = 1, .count = constants.clients_max - 1 });
+    var c_new = t.clients(.{ .index = constants.clients_max, .count = 1 });
+
+    try c_idle.request(1, 1);
+    // The dead clients register together, so their commits are close in (cluster) time.
+    try c_dead.request(constants.clients_max - 1, constants.clients_max - 1);
+    try expectEqual(t.replica(.R_).client_sessions_count(), constants.clients_max);
+
+    const client_idle = t.cluster.clients[0].?.id;
+    var clients_dead: stdx.BoundedArrayType(u128, constants.clients_max) = .{};
+    var timestamp_dead_max: u64 = 0;
+    for (c_dead.clients.const_slice()) |c| {
+        const client = t.cluster.clients[c].?.id;
+        clients_dead.push(client);
+        const entry = t.cluster.replicas[0].client_sessions.get(client).?;
+        timestamp_dead_max = @max(timestamp_dead_max, entry.header.timestamp);
+    }
+    c_dead.kill();
+    const ticks_dead = t.cluster.replica_times[0].ticks;
+
+    // Step every replica's wall clock backwards at once, so that they still agree.
+    for (t.cluster.replica_times) |*time| {
+        assert(time.ticks == ticks_dead);
+        time.offset_type = .step;
+        time.offset_coefficient_A = 10 * std.time.ns_per_min;
+        time.offset_coefficient_B = @intCast(ticks_dead);
+    }
+    t.run();
+
+    // Register shortly (but more than a second) after the idle client's latest ping.
+    while (true) {
+        _ = t.tick();
+        if (t.cluster.clients[0].?.ping_timeout.ticks == 0) break;
+    }
+    for (0..@divExact(2 * std.time.ms_per_s, constants.tick_ms)) |_| _ = t.tick();
+
+    const silence_idle = t.replica(.A0).client_liveness_silence(client_idle);
+    try std.testing.expect(silence_idle.sampled);
+    try std.testing.expect(silence_idle.ns >= std.time.ns_per_s);
+    try std.testing.expect(silence_idle.ns < 30 * std.time.ns_per_s);
+
+    const commits_before = t.cluster.state_checker.commits.items.len;
+    try c_new.request(1, 1);
+    try expectEqual(c_new.eviction_reason(), null);
+    try expectEqual(t.cluster.state_checker.commits.items.len, commits_before + 1);
+
+    // Preconditions: the clamp happened, while more than a ping interval of monotonic time
+    // passed.
+    const client_new = t.cluster.clients[constants.clients_max].?.id;
+    const timestamp_new = t.cluster.replicas[0].client_sessions.get(client_new).?.header.timestamp;
+    try std.testing.expect(timestamp_new > timestamp_dead_max);
+    try std.testing.expect(timestamp_new - timestamp_dead_max < std.time.ns_per_s);
+    const ticks_elapsed = t.cluster.replica_times[0].ticks - ticks_dead;
+    try std.testing.expect(ticks_elapsed * constants.tick_ms > 30 * std.time.ms_per_s);
+
+    const eviction = t.cluster.state_checker.commits.items[commits_before].eviction.?;
+    try expectEqual(eviction.path, .hint);
+    try std.testing.expect(std.mem.indexOfScalar(
+        u128,
+        clients_dead.const_slice(),
+        eviction.client,
+    ) != null);
+    try std.testing.expect(t.replica(.R_).client_session_exists(client_idle));
+    try expectEqual(c_idle.eviction_reason(), null);
+}
+
+test "Cluster: eviction: a ping from before the session is not a sign of life" {
+    // A client pings when it registers, before it has a session (with session=0). If such a ping
+    // arrives (or is replayed) once the session exists, it must not count as a sign of life of
+    // that session.
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = 1,
+    });
+    defer t.deinit();
+
+    // The register-time ping restarts the client's ping interval. Replay before the interval
+    // ends, so that the register-time ping is the only ping recorded.
+    const ping_interval_ticks = t.cluster.clients[0].?.ping_timeout.after;
+    var ticks_since_register: u64 = 0;
+    t.replica(.R_).record(.C0, .incoming, .ping_client);
+    t.cluster.register(0);
+
+    while (t.cluster.clients[0].?.session == 0) : (ticks_since_register += 1) {
+        assert(ticks_since_register < @divFloor(ping_interval_ticks, 4));
+        _ = t.tick();
+    }
+    const client = t.cluster.clients[0].?.id;
+
+    for (0..@divFloor(ping_interval_ticks, 2)) |_| {
+        _ = t.tick();
+        ticks_since_register += 1;
+    }
+    assert(ticks_since_register < ping_interval_ticks);
+
+    t.replica(.R_).replay_recorded();
+    for (0..@divFloor(ping_interval_ticks, 10)) |_| _ = t.tick();
+
+    // The latest sample is still the commit of the register.
+    for ([_]ProcessSelector{ .R0, .R1, .R2 }) |replica| {
+        const silence = t.replica(replica).client_liveness_silence(client);
+        try std.testing.expect(silence.sampled);
+        try std.testing.expect(silence.ns >= @divFloor(ping_interval_ticks, 2) *
+            constants.tick_ms * std.time.ns_per_ms);
+    }
+}
+
+test "Cluster: eviction: cold restart falls back, then recovers" {
+    // After every replica restarts, no replica has heard from any client yet. Until a client
+    // pings, the primary records no evictee, and the session with the oldest commit is evicted
+    // (the degraded mode). After a ping interval, the live client is protected again.
+    try test_eviction_cold_restart(.{ .ping_before_register = false });
+    try test_eviction_cold_restart(.{ .ping_before_register = true });
+}
+
+fn test_eviction_cold_restart(options: struct { ping_before_register: bool }) !void {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c_idle = t.clients(.{ .index = 0, .count = 1 });
+    var c_dead = t.clients(.{ .index = 1, .count = constants.clients_max - 1 });
+    var c_new = t.clients(.{ .index = constants.clients_max, .count = 1 });
+
+    try c_idle.request(1, 1);
+    try c_dead.request(constants.clients_max - 1, constants.clients_max - 1);
+    c_dead.kill();
+    t.run();
+
+    const client_idle = t.cluster.clients[0].?.id;
+    try expectEqual(t.replica(.R_).client_sessions_evictee(), client_idle);
+
+    // Restart right after the idle client's ping, so that its next ping is an interval away.
+    while (true) {
+        _ = t.tick();
+        if (t.cluster.clients[0].?.ping_timeout.ticks == 0) break;
+    }
+    t.replica(.R_).stop();
+    try t.replica(.R_).open();
+
+    if (options.ping_before_register) {
+        t.run();
+        try std.testing.expect(t.replica(.A0).client_liveness_sampled_count() > 0);
+    } else {
+        // Wait for a primary, but not for the idle client's next ping.
+        for (0..@divExact(10 * std.time.ms_per_s, constants.tick_ms)) |_| {
+            _ = t.tick();
+            if (t.replica(.A0).status() == .normal) break;
+        } else unreachable;
+        if (t.replica(.A0).client_liveness_sampled_count() != 0) {
+            log.err("a ping or live commit arrived before the register; " ++
+                "adjust the tick budget", .{});
+            return error.TestUnexpectedResult;
+        }
+    }
+
+    const commits_before = t.cluster.state_checker.commits.items.len;
+    try c_new.request(1, 1);
+    try expectEqual(c_new.eviction_reason(), null);
+    try expectEqual(t.cluster.state_checker.commits.items.len, commits_before + 1);
+
+    const eviction = t.cluster.state_checker.commits.items[commits_before].eviction.?;
+    if (options.ping_before_register) {
+        try expectEqual(eviction.path, .hint);
+        try std.testing.expect(eviction.client != client_idle);
+        try std.testing.expect(t.replica(.R_).client_session_exists(client_idle));
+    } else {
+        // No hint: the register evicted the session with the oldest commit.
+        try expectEqual(eviction.path, .fallback_no_hint);
+        try expectEqual(eviction.client, client_idle);
+        try std.testing.expect(!t.replica(.R_).client_session_exists(client_idle));
+    }
+}
+
+test "Cluster: eviction: pipelined registers keep their hints across a view change" {
+    // Registers that are pipelined behind each other must choose different evictees (each
+    // projects the table after the registers ahead of it), and a new primary must commit them
+    // with the recorded evictees.
+    const register_count = 3;
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + register_count,
+    });
+    defer t.deinit();
+
+    var c_idle = t.clients(.{ .index = 0, .count = 1 });
+    var c_dead = t.clients(.{ .index = 1, .count = constants.clients_max - 1 });
+
+    try c_idle.request(1, 1);
+    try c_dead.request(constants.clients_max - 1, constants.clients_max - 1);
+    const clients_dead = test_clients_ids(t, c_dead);
+    c_dead.kill();
+    t.run();
+
+    // Keep the registers in the pipeline.
+    const primary = t.replica(.A0).index();
+    t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
+    for (0..register_count) |i| {
+        t.cluster.register(constants.clients_max + i);
+        for (0..200) |_| _ = t.tick();
+    }
+    try expectEqual(t.replica(.A0).index(), primary);
+
+    const hints = t.replica(.A0).pipeline_register_evictees();
+    try expectEqual(hints.count(), register_count);
+    for (hints.const_slice(), 0..) |hint, i| {
+        try std.testing.expect(hint.evictee != 0);
+        try std.testing.expect(std.mem.indexOfScalar(
+            u128,
+            clients_dead.const_slice(),
+            hint.evictee,
+        ) != null);
+        for (hints.const_slice()[0..i]) |hint_ahead| {
+            try std.testing.expect(hint_ahead.evictee != hint.evictee);
+        }
+    }
+
+    t.replica(.A0).stop();
+    t.replica(.R_).pass(.R_, .incoming, .prepare_ok);
+    t.run();
+    try std.testing.expect(t.replica(.A0).index() != primary);
+
+    for (hints.const_slice()) |hint| {
+        const eviction = t.cluster.state_checker.commits.items[hint.op].eviction.?;
+        try expectEqual(eviction.client, hint.evictee);
+        try expectEqual(eviction.path, .hint);
+        for (0..t.cluster.options.replica_count) |r| {
+            try expectEqual(eviction.replicas.is_set(r), r != primary);
+        }
+    }
+
+    try t.cluster.replica_restart(primary);
+    t.run();
+    try std.testing.expect(t.replica(.R_).client_sessions_equal());
+    try std.testing.expect(t.replica(.R_).client_session_exists(t.cluster.clients[0].?.id));
+    try expectEqual(c_idle.eviction_reason(), null);
+}
+
+test "Cluster: eviction: recovered prepare keeps its hint" {
+    const t = try TestContext.init(.{
+        .replica_count = 3,
+        .client_count = constants.clients_max + 1,
+    });
+    defer t.deinit();
+
+    var c_idle = t.clients(.{ .index = 0, .count = 1 });
+    var c_dead = t.clients(.{ .index = 1, .count = constants.clients_max - 1 });
+
+    try c_idle.request(1, 1);
+    try c_dead.request(constants.clients_max - 1, constants.clients_max - 1);
+    c_dead.kill();
+    t.run();
+
+    t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
+    t.cluster.register(constants.clients_max);
+    for (0..200) |_| _ = t.tick();
+
+    const hints = t.replica(.A0).pipeline_register_evictees();
+    try expectEqual(hints.count(), 1);
+    const hint = hints.get(0);
+    try std.testing.expect(hint.evictee != 0);
+
+    const primary = t.replica(.A0).index();
+    const prepare_header = t.cluster.replicas[primary].journal.header_with_op(hint.op).?.*;
+
+    // The backup recovers the hinted prepare from its WAL (not by repair, so drop any prepare sent
+    // to it meanwhile), and commits it.
+    const backup = t.replica(.B1).index();
+    const backup_selector: ProcessSelector =
+        @enumFromInt(@intFromEnum(ProcessSelector.R0) + backup);
+    try std.testing.expect(t.cluster.replicas[backup].journal.has_prepare(&prepare_header));
+    t.replica(backup_selector).drop(.R_, .incoming, .prepare);
+    t.replica(backup_selector).stop();
+    try t.replica(backup_selector).open();
+    for (0..1_000) |_| {
+        _ = t.tick();
+        if (t.cluster.replicas[backup].journal.status == .recovered) break;
+    } else unreachable;
+    try std.testing.expect(t.cluster.replicas[backup].journal.has_prepare(&prepare_header));
+
+    t.replica(backup_selector).pass(.R_, .incoming, .prepare);
+    t.replica(.R_).pass(.R_, .incoming, .prepare_ok);
+    t.run();
+
+    const eviction = t.cluster.state_checker.commits.items[hint.op].eviction.?;
+    try expectEqual(eviction.client, hint.evictee);
+    try expectEqual(eviction.path, .hint);
+    try std.testing.expect(eviction.replicas.is_set(backup));
+    try std.testing.expect(t.replica(.R_).client_sessions_equal());
+    try expectEqual(c_idle.eviction_reason(), null);
+}
+
+fn test_clients_ids(
+    t: *TestContext,
+    clients: TestClients,
+) stdx.BoundedArrayType(u128, constants.clients_max) {
+    var ids: stdx.BoundedArrayType(u128, constants.clients_max) = .{};
+    for (clients.clients.const_slice()) |c| ids.push(t.cluster.clients[c].?.id);
+    return ids;
+}
+
 test "Cluster: view_change: JV header doesn't match current header in journal" {
     // It could be the case that a replica's JV headers don't match the journal's current state.
     // For example, a header could be blank in the JV but present in the journal (could happen if
@@ -2575,6 +2967,111 @@ const TestReplicas = struct {
 
     pub fn commit_max(t: *const TestReplicas) u64 {
         return t.get(.commit_max);
+    }
+
+    pub fn client_sessions_count(t: *const TestReplicas) usize {
+        var value_all: ?usize = null;
+        for (t.replicas.const_slice()) |r| {
+            const value = t.cluster.replicas[r].client_sessions.count();
+            if (value_all) |all| assert(all == value);
+            value_all = value;
+        }
+        return value_all.?;
+    }
+
+    pub fn client_sessions_evictee(t: *const TestReplicas) u128 {
+        var value_all: ?u128 = null;
+        for (t.replicas.const_slice()) |r| {
+            const value = t.cluster.replicas[r].client_sessions.evictee();
+            if (value_all) |all| assert(all == value);
+            value_all = value;
+        }
+        return value_all.?;
+    }
+
+    /// Whether the client has a session, on every replica.
+    pub fn client_session_exists(t: *const TestReplicas, client: u128) bool {
+        var value_all: ?bool = null;
+        for (t.replicas.const_slice()) |r| {
+            const value = t.cluster.replicas[r].client_sessions.get_slot_for_client(client) != null;
+            if (value_all) |all| assert(all == value);
+            value_all = value;
+        }
+        return value_all.?;
+    }
+
+    /// Whether the client tables (sessions, slots and latest replies) are identical.
+    pub fn client_sessions_equal(t: *const TestReplicas) bool {
+        const sessions_first = &t.cluster.replicas[t.replicas.get(0)].client_sessions;
+        for (t.replicas.const_slice()[1..]) |r| {
+            const sessions = &t.cluster.replicas[r].client_sessions;
+            if (!std.meta.eql(sessions.entries_present, sessions_first.entries_present)) {
+                return false;
+            }
+            for (sessions.entries, sessions_first.entries) |*entry, *entry_first| {
+                if (entry.session != entry_first.session) return false;
+                if (entry.header.checksum != entry_first.header.checksum) return false;
+            }
+        }
+        return true;
+    }
+
+    /// The number of sessions for which the replica has a liveness sample.
+    pub fn client_liveness_sampled_count(t: *const TestReplicas) usize {
+        const replica = &t.cluster.replicas[t.index()];
+        const now = replica.clock.monotonic();
+
+        var sampled: usize = 0;
+        for (replica.client_sessions.entries, 0..) |*entry, slot_index| {
+            if (entry.session == 0) continue;
+            const silence = replica.client_liveness.silence(
+                .{ .index = slot_index },
+                entry.header.client,
+                now,
+            );
+            sampled += @intFromBool(silence.sampled);
+        }
+        return sampled;
+    }
+
+    /// How long the client has been silent, according to the replica.
+    pub fn client_liveness_silence(
+        t: *const TestReplicas,
+        client: u128,
+    ) vsr.ClientLiveness.Silence {
+        const replica = &t.cluster.replicas[t.index()];
+        const slot = replica.client_sessions.get_slot_for_client(client).?;
+        return replica.client_liveness.silence(slot, client, replica.clock.monotonic());
+    }
+
+    const RegisterEvictee = struct { op: u64, client: u128, evictee: u128 };
+
+    /// The evictees recorded by the registers in the primary's pipeline, in op order.
+    pub fn pipeline_register_evictees(
+        t: *const TestReplicas,
+    ) stdx.BoundedArrayType(RegisterEvictee, constants.pipeline_prepare_queue_max) {
+        const replica = &t.cluster.replicas[t.index()];
+        assert(replica.status == .normal);
+        assert(replica.primary());
+
+        var result: stdx.BoundedArrayType(RegisterEvictee, constants.pipeline_prepare_queue_max) =
+            .{};
+        var prepares = replica.pipeline.queue.prepare_queue.iterator();
+        while (prepares.next_ptr()) |prepare| {
+            const header = prepare.message.header;
+            if (header.operation != .register) continue;
+
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                prepare.message.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            result.push(.{
+                .op = header.op,
+                .client = header.client,
+                .evictee = register_request.evictee,
+            });
+        }
+        return result;
     }
 
     pub fn state_machine_opened(t: *const TestReplicas) bool {

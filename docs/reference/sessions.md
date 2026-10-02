@@ -41,7 +41,19 @@ the cluster's concurrent client session
 by default), an existing client session must be evicted to make space for the new session.
 
 - After a session is evicted by the cluster, no future requests from that session will ever execute.
-- The evicted session is chosen as the session that committed a request the longest time ago.
+- The cluster prefers to evict the session whose client has been silent the longest. A client that
+  is alive keeps pinging the replicas (every 30 seconds) even when it is idle, so its session is
+  preferred over the sessions of clients that terminated without closing their session (for
+  example, a process that was killed).
+- This is a best-effort preference, observed by the primary replica, which records its choice in
+  the register. Ties are broken by evicting the session that committed a request the longest time
+  ago, and the cluster falls back to that choice when the primary has no preference:
+  - right after the replicas restart, until the clients' next pings arrive;
+  - if the recorded session no longer exists when the register is committed;
+  - for registers prepared by releases that predate this preference.
+- Liveness is local to each replica. A client that reaches only some replicas (asymmetric
+  connectivity) may appear silent to the primary, even though it is alive. And a client that
+  terminated within the last ping interval cannot be told apart from a live one.
 
 The cluster sends a message to notify the evicted session that it has ended. Typically the evicted
 client is no longer active (already terminated), but if it is active, the eviction message causes it
