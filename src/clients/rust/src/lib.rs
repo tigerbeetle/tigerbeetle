@@ -1006,7 +1006,7 @@ impl Drop for Client {
         struct SendClient(*mut tbc::tb_client_t);
         unsafe impl Send for SendClient {}
 
-        let client = std::mem::take(&mut self.client);
+        let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
         let client = SendClient(client);
 
         std::thread::spawn(move || {

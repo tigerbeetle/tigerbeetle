@@ -26,7 +26,7 @@ edition = "2024"
 
 [dependencies]
 tigerbeetle.path = "../.."
-futures = "0.3"
+futures = "=0.3.31"
 ```
 
 Now, create `src/main.rs` and copy this into it:
