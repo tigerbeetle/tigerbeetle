@@ -62,6 +62,7 @@ pub const Clock = @import("vsr/clock.zig").Clock;
 pub const GridType = @import("vsr/grid.zig").GridType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const ClientSessions = @import("vsr/client_sessions.zig").ClientSessions;
+pub const ClientLiveness = @import("vsr/client_sessions.zig").ClientLiveness;
 pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;

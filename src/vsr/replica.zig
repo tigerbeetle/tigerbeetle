@@ -317,6 +317,10 @@ pub fn ReplicaType(
         /// reply. This is modified between checkpoints, and is persisted on checkpoint and sync.
         client_sessions: ClientSessions,
 
+        /// When this replica last heard from the client of each session (replica-local).
+        /// Reset whenever the client table is loaded (see `client_sessions_open_callback()`).
+        client_liveness: vsr.ClientLiveness = .{},
+
         client_sessions_checkpoint: CheckpointTrailer,
 
         /// The persistent log of the latest reply per active client.
@@ -1016,6 +1020,14 @@ pub fn ReplicaType(
                     }
                 }
             }
+
+            // The slots may now belong to different sessions (state sync), and ops up to `op` are
+            // replayed from the WAL rather than committed live.
+            self.client_liveness.reset(.{
+                .now = self.clock.monotonic(),
+                .op_replay_max = self.op,
+                .commit_min = self.commit_min,
+            });
 
             self.state_machine.open(state_machine_open_callback);
         }
@@ -1786,6 +1798,8 @@ pub fn ReplicaType(
             switch (message_any) {
                 inline .ping_client, .request => |m| {
                     if (m.header.client != 0) {
+                        self.client_liveness_heard(m.header.client, m.header.session);
+
                         self.release_seen_client_min = @min(
                             message.header.release.value,
                             self.release_seen_client_min orelse message.header.release.value,
@@ -1912,6 +1926,18 @@ pub fn ReplicaType(
             self.clock.learn(message.header.replica, m0, t1, m2);
             if (self.clock.round_trip_time_median_ns()) |rtt_ns| {
                 self.prepare_timeout.set_rtt_ns(rtt_ns);
+            }
+        }
+
+        /// Records that the client of a session is alive.
+        /// The request (or ping) may yet be ignored (e.g. by a backup), but it is still a sign of
+        /// life. This includes late duplicates of the session's messages, which are delayed by at
+        /// most the network delay, which is negligible next to the ping interval.
+        fn client_liveness_heard(self: *Replica, client: u128, session: u64) void {
+            assert(client != 0);
+
+            if (self.client_sessions.get_slot_for_session(client, session)) |slot| {
+                self.client_liveness.heard(slot, client, self.clock.monotonic());
             }
         }
 
@@ -5775,6 +5801,14 @@ pub fn ReplicaType(
             const reply_slot = self.client_sessions.put(session, reply.header);
             assert(self.client_sessions.count() <= constants.clients_max);
 
+            // Protect the new session until its client's first ping arrives.
+            self.client_liveness.committed(
+                reply_slot,
+                reply.header.client,
+                reply.header.op,
+                self.clock.monotonic(),
+            );
+
             self.client_replies.write_reply(reply_slot, reply, .commit);
         }
 
@@ -5810,6 +5844,12 @@ pub fn ReplicaType(
                 entry.header = reply.header.*;
 
                 const reply_slot = self.client_sessions.get_slot_for_header(reply.header).?;
+                self.client_liveness.committed(
+                    reply_slot,
+                    reply.header.client,
+                    reply.header.op,
+                    self.clock.monotonic(),
+                );
                 if (entry.header.size == @sizeOf(Header)) {
                     self.client_replies.remove_reply(reply_slot);
                 } else {

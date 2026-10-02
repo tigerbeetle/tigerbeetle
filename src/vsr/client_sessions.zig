@@ -210,6 +210,25 @@ pub const ClientSessions = struct {
         return ReplySlot{ .index = index };
     }
 
+    /// Returns the client's slot, if the client has a session and it is `session`.
+    /// Messages from another incarnation of the client id (for example, the pings that a client
+    /// sends with session=0 before it registers) do not match.
+    pub fn get_slot_for_session(
+        client_sessions: *const ClientSessions,
+        client: u128,
+        session: u64,
+    ) ?ReplySlot {
+        assert(client != 0);
+
+        const index = client_sessions.entries_by_client.get(client) orelse return null;
+        const entry = &client_sessions.entries[index];
+        assert(entry.session != 0);
+        assert(entry.header.client == client);
+
+        if (entry.session != session) return null;
+        return ReplySlot{ .index = index };
+    }
+
     pub fn get_slot_for_header(
         client_sessions: *const ClientSessions,
         header: *const vsr.Header.Reply,
@@ -336,3 +355,262 @@ pub const ClientSessions = struct {
         return .{ .client_sessions = client_sessions };
     }
 };
+
+/// Replica-local record of when this replica last heard from the client of each session, on its
+/// monotonic clock. Indexed by `ReplySlot`, so it is bounded by `clients_max`.
+///
+/// This is neither replicated nor persisted: replicas hear different messages at different times.
+/// Therefore it must never influence the result of a commit directly. Only the primary reads it,
+/// when it chooses the evictee to record in the body of a register prepare.
+///
+/// Every replica (not only the primary) tracks liveness, since clients ping every replica: a
+/// backup that becomes primary can then choose evictees from its first prepare, rather than only
+/// after a full ping interval.
+///
+/// The samples are:
+/// - a request or a ping_client from the client, in its current session (`heard()`), and
+/// - a commit of the client's request (`committed()`), so that a client which has just registered
+///   is protected before its first ping. Ops up to `op_replay_max`, the journal head when the
+///   client table was loaded, are replayed from the WAL rather than committed live, so they are
+///   not samples: a replay of a long-dead client's requests must not make it look alive.
+///
+/// A session without a sample is treated as if its client was heard at `epoch`, the instant at
+/// which the client table was loaded (when the replica opened, or after state sync). This biases
+/// towards protecting sessions.
+///
+/// Two asymmetries are deliberate, and both only bias towards "no sample":
+/// - After state sync, ops in (sync checkpoint, op_replay_max] are committed live by
+///   `commit_journal()`, but are not samples, while ops repaired afterwards are.
+/// - `op` may advance between the sync superblock update and the reset, so a few more ops may stay
+///   without a sample.
+pub const ClientLiveness = struct {
+    entries: [constants.clients_max]Entry = @splat(.{ .client = 0, .heard = .{ .ns = 0 } }),
+    /// The instant at which the client table was loaded.
+    epoch: stdx.Instant = .{ .ns = 0 },
+    /// Commits of ops up to (and including) this op are replayed from the WAL, so they are not
+    /// signs of life.
+    op_replay_max: u64 = 0,
+
+    pub const Entry = struct {
+        /// The client that `heard` belongs to, or 0 if there is no sample in this slot.
+        /// Slots are reused by later sessions, so a sample is only valid for the same client.
+        client: u128,
+        heard: stdx.Instant,
+    };
+
+    pub const Silence = struct {
+        ns: u64,
+        /// Whether the silence is measured from a sample, rather than from `epoch`.
+        sampled: bool,
+    };
+
+    /// Called whenever the client table is loaded, since the slots may now belong to different
+    /// sessions.
+    pub fn reset(client_liveness: *ClientLiveness, options: struct {
+        now: stdx.Instant,
+        op_replay_max: u64,
+        commit_min: u64,
+    }) void {
+        assert(options.now.ns >= client_liveness.epoch.ns);
+        assert(options.op_replay_max >= options.commit_min);
+
+        client_liveness.* = .{
+            .epoch = options.now,
+            .op_replay_max = options.op_replay_max,
+        };
+    }
+
+    /// Records a message (a request or a ping_client) from the client.
+    pub fn heard(
+        client_liveness: *ClientLiveness,
+        slot: ReplySlot,
+        client: u128,
+        now: stdx.Instant,
+    ) void {
+        assert(slot.index < constants.clients_max);
+        assert(client != 0);
+        assert(now.ns >= client_liveness.epoch.ns);
+
+        const entry = &client_liveness.entries[slot.index];
+        if (entry.client == client) assert(entry.heard.ns <= now.ns);
+        entry.* = .{ .client = client, .heard = now };
+    }
+
+    /// Records the commit of the client's request (including its register) at `op`.
+    pub fn committed(
+        client_liveness: *ClientLiveness,
+        slot: ReplySlot,
+        client: u128,
+        op: u64,
+        now: stdx.Instant,
+    ) void {
+        assert(slot.index < constants.clients_max);
+        assert(client != 0);
+        assert(op > 0);
+
+        if (op <= client_liveness.op_replay_max) return; // Replayed from the WAL.
+        client_liveness.heard(slot, client, now);
+    }
+
+    /// Returns how long the client of the session in `slot` has been silent.
+    pub fn silence(
+        client_liveness: *const ClientLiveness,
+        slot: ReplySlot,
+        client: u128,
+        now: stdx.Instant,
+    ) Silence {
+        assert(slot.index < constants.clients_max);
+        assert(client != 0);
+        assert(now.ns >= client_liveness.epoch.ns);
+
+        const entry = &client_liveness.entries[slot.index];
+        if (entry.client == client) {
+            assert(entry.heard.ns >= client_liveness.epoch.ns);
+            assert(entry.heard.ns <= now.ns);
+            return .{ .ns = entry.heard.elapsed(now).ns, .sampled = true };
+        } else {
+            return .{ .ns = client_liveness.epoch.elapsed(now).ns, .sampled = false };
+        }
+    }
+};
+
+const TestSessions = struct {
+    client_sessions: ClientSessions,
+    client_liveness: ClientLiveness = .{},
+
+    // The local monotonic clock, in seconds since the client table was loaded (the epoch).
+    const epoch_s = 1_000;
+
+    fn init(options: struct { op_replay_max: u64 = 0 }) !TestSessions {
+        var t: TestSessions = .{
+            .client_sessions = try ClientSessions.init(std.testing.allocator),
+        };
+        t.client_liveness.reset(.{
+            .now = instant(0),
+            .op_replay_max = options.op_replay_max,
+            .commit_min = 0,
+        });
+        return t;
+    }
+
+    fn deinit(t: *TestSessions) void {
+        t.client_sessions.deinit(std.testing.allocator);
+    }
+
+    fn instant(since_epoch_s: u64) stdx.Instant {
+        return .{ .ns = (epoch_s + since_epoch_s) * std.time.ns_per_s };
+    }
+
+    /// Adds a session for `client`, whose latest request committed at `commit`.
+    fn session(t: *TestSessions, client: u128, commit: u64) void {
+        var header: vsr.Header.Reply = .{
+            .command = .reply,
+            .cluster = 0,
+            .view = 0,
+            .release = .{ .value = 1 },
+            .replica = 0,
+            .request_checksum = 0,
+            .client = client,
+            .op = commit,
+            .commit = commit,
+            .timestamp = commit,
+            .request = 0,
+            .operation = .register,
+        };
+        header.set_checksum();
+        _ = t.client_sessions.put(commit, &header);
+    }
+
+    fn slot(t: *const TestSessions, client: u128) ReplySlot {
+        return t.client_sessions.get_slot_for_client(client).?;
+    }
+
+    fn heard(t: *TestSessions, client: u128, since_epoch_s: u64) void {
+        t.client_liveness.heard(t.slot(client), client, instant(since_epoch_s));
+    }
+
+    fn committed(t: *TestSessions, client: u128, op: u64, since_epoch_s: u64) void {
+        t.client_liveness.committed(t.slot(client), client, op, instant(since_epoch_s));
+    }
+
+    fn silence(t: *const TestSessions, client: u128, since_epoch_s: u64) ClientLiveness.Silence {
+        return t.client_liveness.silence(t.slot(client), client, instant(since_epoch_s));
+    }
+};
+
+test "ClientLiveness: silence" {
+    var t = try TestSessions.init(.{ .op_replay_max = 20 });
+    defer t.deinit();
+
+    t.session(1, 10);
+    t.session(2, 30);
+    t.session(3, 40);
+
+    // Without a sample, a session is silent since the epoch.
+    try std.testing.expectEqual(
+        ClientLiveness.Silence{ .ns = 60 * std.time.ns_per_s, .sampled = false },
+        t.silence(1, 60),
+    );
+
+    t.heard(1, 50);
+    try std.testing.expectEqual(
+        ClientLiveness.Silence{ .ns = 10 * std.time.ns_per_s, .sampled = true },
+        t.silence(1, 60),
+    );
+
+    // A live commit is a sample, but an op replayed from the WAL is not.
+    t.committed(2, 30, 40);
+    t.committed(3, 20, 40);
+    try std.testing.expectEqual(
+        ClientLiveness.Silence{ .ns = 20 * std.time.ns_per_s, .sampled = true },
+        t.silence(2, 60),
+    );
+    try std.testing.expectEqual(
+        ClientLiveness.Silence{ .ns = 60 * std.time.ns_per_s, .sampled = false },
+        t.silence(3, 60),
+    );
+
+    // A sample of a different client in the same slot (the slot was reused) does not count.
+    t.client_sessions.remove(1);
+    t.session(4, 50);
+    try std.testing.expectEqual(t.slot(4).index, 0);
+    try std.testing.expectEqual(
+        ClientLiveness.Silence{ .ns = 60 * std.time.ns_per_s, .sampled = false },
+        t.silence(4, 60),
+    );
+}
+
+test "ClientLiveness: reset clears samples" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    t.session(1, 10);
+    t.heard(1, 50);
+    try std.testing.expect(t.silence(1, 60).sampled);
+
+    // The client table is loaded again (state sync): the slot may now hold another session of
+    // the same client id, which the sample must not carry over to.
+    t.client_liveness.reset(.{
+        .now = TestSessions.instant(60),
+        .op_replay_max = 10,
+        .commit_min = 10,
+    });
+    try std.testing.expectEqual(
+        ClientLiveness.Silence{ .ns = 10 * std.time.ns_per_s, .sampled = false },
+        t.silence(1, 70),
+    );
+}
+
+test "ClientLiveness: a message from another session is not a sample" {
+    var t = try TestSessions.init(.{});
+    defer t.deinit();
+
+    t.session(1, 10);
+    // The session number is the commit of the register.
+    try std.testing.expectEqual(t.client_sessions.get_slot_for_session(1, 10), t.slot(1));
+    // For example, a ping that the client sent with session=0 before it registered, or a late
+    // message from an older (evicted) session.
+    try std.testing.expectEqual(t.client_sessions.get_slot_for_session(1, 0), null);
+    try std.testing.expectEqual(t.client_sessions.get_slot_for_session(1, 9), null);
+    try std.testing.expectEqual(t.client_sessions.get_slot_for_session(2, 10), null);
+}
