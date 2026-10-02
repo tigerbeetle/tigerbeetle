@@ -216,6 +216,15 @@ pub fn MessageBusType(comptime IO: type) type {
             return bus.connections_used == 0;
         }
 
+        /// Whether there is an established connection to the replica. This is best effort: the
+        /// peer may have gone away without the connection having noticed yet.
+        pub fn replica_connected(bus: *const MessageBus, replica: u8) bool {
+            assert(replica < bus.replicas.len);
+
+            const connection = bus.replicas[replica] orelse return false;
+            return connection.state == .connected;
+        }
+
         pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
             bus.clients.deinit(allocator);
 

@@ -11,6 +11,11 @@ pub const ClientError = @import("tb_client/context.zig").ClientError;
 pub const ClientInterface = @import("tb_client/context.zig").ClientInterface;
 pub const CompletionError = @import("tb_client/context.zig").CompletionError;
 pub const CompletionCallback = @import("tb_client/context.zig").CompletionCallback;
+pub const deregister_timeout = @import("tb_client/context.zig").deregister_timeout;
+pub const DeregisterOutcome = @import("tb_client/context.zig").DeregisterOutcome;
+pub const DeregisterRecord = @import("tb_client/context.zig").DeregisterRecord;
+/// For tests only (builds with `config_verify`), see `context.zig`.
+pub const deregister_last = &@import("tb_client/context.zig").deregister_last;
 pub const Packet = @import("tb_client/packet.zig").Packet.Extern;
 pub const PacketStatus = @import("tb_client/packet.zig").Packet.Status;
 pub const Operation = vsr.tigerbeetle.Operation;

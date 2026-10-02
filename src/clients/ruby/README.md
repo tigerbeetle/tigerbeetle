@@ -720,3 +720,10 @@ requests are canceled and return an error to the caller. Even if an error is ret
 a request might still be processed by the TigerBeetle server.
 [Reliable transaction submission](https://docs.tigerbeetle.com/coding/reliable-transaction-submission/)
 explains how to make transfers retry-proof using IDs for end-to-end idempotency.
+
+When a Client is closed, it first asks the cluster to end its session (best effort),
+so that the session does not keep one of the cluster's session slots until it is
+evicted. Closing waits at most 1000ms for the cluster to confirm. This is skipped if
+the Client is not connected to the cluster's primary, was evicted, or had a request in
+flight. A Client that is never closed (for example, because its process crashed) leaves
+its session to be [evicted](https://docs.tigerbeetle.com/reference/sessions/#eviction).

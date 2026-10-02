@@ -18,6 +18,8 @@ const samples = @import("../clients/docs_samples.zig").samples;
 
 const Language = @import("./ci.zig").Language;
 
+const deregister_timeout_ms = @import("../clients/c/tb_client.zig").deregister_timeout.to_ms();
+
 const LanguageDocs = .{
     .go = @import("../clients/go/docs.zig").GoDocs,
     .rust = @import("../clients/rust/docs.zig").RustDocs,
@@ -492,6 +494,14 @@ fn readme_root(ctx: *Context) !void {
             \\[Reliable transaction submission](https://docs.tigerbeetle.com/coding/reliable-transaction-submission/)
             \\explains how to make transfers retry-proof using IDs for end-to-end idempotency.
         );
+        ctx.paragraph(std.fmt.comptimePrint(
+            \\When a Client is closed, it first asks the cluster to end its session (best effort),
+            \\so that the session does not keep one of the cluster's session slots until it is
+            \\evicted. Closing waits at most {d}ms for the cluster to confirm. This is skipped if
+            \\the Client is not connected to the cluster's primary, was evicted, or had a request in
+            \\flight. A Client that is never closed (for example, because its process crashed) leaves
+            \\its session to be [evicted](https://docs.tigerbeetle.com/reference/sessions/#eviction).
+        , .{deregister_timeout_ms}));
     }
 
     ctx.ensure_final_newline();

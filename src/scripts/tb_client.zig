@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const testing = std.testing;
@@ -14,6 +15,7 @@ const ClientError = tb_client.ClientError;
 const Operation = tb_client.Operation;
 
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
+const Shell = @import("stdx").Shell;
 
 pub const CLIArgs = struct {};
 
@@ -72,6 +74,7 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     try test_init(gpa, tmp_beetle.port_str);
     try test_client_status(gpa, tmp_beetle.port_str);
     try test_packet_status(gpa, tmp_beetle.port_str);
+    try test_deinit(gpa);
 }
 
 // Asserts the validation rules associated with the `init` function.
@@ -282,4 +285,193 @@ fn test_packet_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
             @sizeOf(tb_client.exports.tb_query_filter_t) * 2,
         ),
     );
+}
+
+// Closing a client (`deinit`) first tries to end its session, within `deregister_timeout`
+// (see `Context.deregister()`). These tests read how that attempt ended from
+// `tb_client.deregister_last`, which is recorded only in builds with `config_verify`
+// (`constants.verify`, on by default outside `-Drelease`), so `zig build -Drelease ci` skips them.
+// They close one client at a time, since the record is per process.
+fn test_deinit(gpa: std.mem.Allocator) !void {
+    if (!constants.verify) {
+        std.log.warn("tb_client deinit tests skipped: they need config_verify", .{});
+        return;
+    }
+
+    try test_deinit_healthy(gpa);
+    try test_deinit_never_registered(gpa);
+    try test_deinit_server_gone(gpa);
+    try test_deinit_server_stopped(gpa);
+    try test_deinit_evicted(gpa);
+}
+
+const DeinitClient = struct {
+    client: ClientInterface,
+    request: TestingContext,
+
+    fn init(deinit_client: *DeinitClient, gpa: std.mem.Allocator, addresses: []const u8) !void {
+        deinit_client.* = .{ .client = undefined, .request = .{} };
+        const cluster_id: u128 = 0;
+        try Context.init(
+            gpa,
+            &deinit_client.client,
+            cluster_id,
+            addresses,
+            0,
+            TestingContext.on_complete,
+        );
+    }
+
+    fn lookup_account(deinit_client: *DeinitClient) !PacketStatus {
+        const id: u128 = 1;
+        var packet: Packet = .{
+            .operation = @intFromEnum(Operation.lookup_accounts),
+            .user_data = &deinit_client.request,
+            .data = &id,
+            .data_size = @sizeOf(u128),
+            .user_tag = 0,
+            .status = .ok,
+        };
+        deinit_client.request.reply = null;
+        try deinit_client.client.submit(&packet);
+        deinit_client.request.wait_pending();
+        return packet.status;
+    }
+
+    /// Closes the client, and returns how its deregistration attempt ended.
+    fn deinit(deinit_client: *DeinitClient) !tb_client.DeregisterRecord {
+        tb_client.deregister_last.* = null;
+        try deinit_client.client.deinit();
+        return tb_client.deregister_last.* orelse error.DeregisterNotRecorded;
+    }
+};
+
+fn tmp_beetle_development(gpa: std.mem.Allocator) !TmpTigerBeetle {
+    return try TmpTigerBeetle.init(gpa, .{ .development = true, .prebuilt = null });
+}
+
+fn test_deinit_healthy(gpa: std.mem.Allocator) !void {
+    var tmp_beetle = try tmp_beetle_development(gpa);
+    defer tmp_beetle.deinit(gpa);
+
+    var client: DeinitClient = undefined;
+    try client.init(gpa, tmp_beetle.port_str);
+    try testing.expectEqual(PacketStatus.ok, try client.lookup_account());
+
+    const deregister = try client.deinit();
+    try testing.expectEqual(tb_client.DeregisterOutcome.done, deregister.outcome);
+    try testing.expect(deregister.duration.ns < tb_client.deregister_timeout.ns);
+}
+
+fn test_deinit_never_registered(gpa: std.mem.Allocator) !void {
+    // This assumes that nothing listens on TCP port 1, so that the register stays in flight. If
+    // something there answers the register, the outcome differs and the test fails loudly; it
+    // cannot pass falsely.
+    var client: DeinitClient = undefined;
+    try client.init(gpa, "1");
+
+    const deregister = try client.deinit();
+    try testing.expectEqual(
+        tb_client.DeregisterOutcome.skipped_never_registered,
+        deregister.outcome,
+    );
+    // A skip spends none of the budget. (Generous, for slow machines.)
+    try testing.expect(deregister.duration.ns < tb_client.deregister_timeout.ns / 2);
+}
+
+fn test_deinit_server_gone(gpa: std.mem.Allocator) !void {
+    var tmp_beetle = try tmp_beetle_development(gpa);
+    var tmp_beetle_stopped = false;
+    defer if (!tmp_beetle_stopped) tmp_beetle.deinit(gpa);
+
+    var client: DeinitClient = undefined;
+    try client.init(gpa, tmp_beetle.port_str);
+    try testing.expectEqual(PacketStatus.ok, try client.lookup_account());
+
+    tmp_beetle.deinit(gpa); // Waits until the process has exited.
+    tmp_beetle_stopped = true;
+    // The client's IO thread notices the closed connection within a tick or two. The client
+    // interface has no way to observe that, so wait generously.
+    std.time.sleep(std.time.ns_per_s);
+
+    const deregister = try client.deinit();
+    try testing.expectEqual(
+        tb_client.DeregisterOutcome.skipped_no_primary_connection,
+        deregister.outcome,
+    );
+    try testing.expect(deregister.duration.ns < tb_client.deregister_timeout.ns / 2);
+}
+
+fn test_deinit_server_stopped(gpa: std.mem.Allocator) !void {
+    if (builtin.os.tag == .windows) return;
+
+    var tmp_beetle = try tmp_beetle_development(gpa);
+    defer tmp_beetle.deinit(gpa);
+
+    var client: DeinitClient = undefined;
+    try client.init(gpa, tmp_beetle.port_str);
+    try testing.expectEqual(PacketStatus.ok, try client.lookup_account());
+
+    // The connection stays established, but the server never replies.
+    try std.posix.kill(tmp_beetle.process.id, std.posix.SIG.STOP);
+    defer std.posix.kill(tmp_beetle.process.id, std.posix.SIG.CONT) catch {};
+
+    // Only the deregistration attempt is bounded by the budget: closing the connections
+    // afterwards is not. So `deinit` as a whole only gets a generous deadline, to detect hangs.
+    const Deinit = struct {
+        client: *DeinitClient,
+        done: std.Thread.ResetEvent = .{},
+        result: anyerror!tb_client.DeregisterRecord = error.Pending,
+
+        fn run(deinit: *@This()) void {
+            deinit.result = deinit.client.deinit();
+            deinit.done.set();
+        }
+    };
+    var deinit: Deinit = .{ .client = &client };
+    const thread = try std.Thread.spawn(.{}, Deinit.run, .{&deinit});
+    deinit.done.timedWait(10 * std.time.ns_per_s) catch |err| {
+        try std.posix.kill(tmp_beetle.process.id, std.posix.SIG.CONT);
+        thread.join();
+        return err;
+    };
+    thread.join();
+
+    const deregister = try deinit.result;
+    try testing.expectEqual(tb_client.DeregisterOutcome.timed_out, deregister.outcome);
+    // The whole budget is spent, but not much more (generous, for slow machines).
+    try testing.expect(deregister.duration.ns >= tb_client.deregister_timeout.ns);
+    try testing.expect(deregister.duration.ns <= 2 * tb_client.deregister_timeout.ns);
+}
+
+fn test_deinit_evicted(gpa: std.mem.Allocator) !void {
+    const shell = try Shell.create(gpa);
+    defer shell.destroy();
+
+    var tmp_beetle = try tmp_beetle_development(gpa);
+    defer tmp_beetle.deinit(gpa);
+
+    var client: DeinitClient = undefined;
+    try client.init(gpa, tmp_beetle.port_str);
+    try testing.expectEqual(PacketStatus.ok, try client.lookup_account());
+
+    // Each `repl` process registers a session and exits without ending it (it uses `vsr.Client`
+    // directly, which never sends a deregister). The client's session is the oldest, so the
+    // last register evicts it.
+    for (0..constants.clients_max) |index| {
+        try shell.exec_options(
+            .{ .timeout = .seconds(30) },
+            "{tigerbeetle} repl --cluster=0 --addresses={addresses} --command={command}",
+            .{
+                .tigerbeetle = tmp_beetle.tigerbeetle_exe,
+                .addresses = tmp_beetle.port_str,
+                .command = try shell.fmt("create_accounts id={d} ledger=1 code=1", .{index + 1}),
+            },
+        );
+    }
+    try testing.expectEqual(PacketStatus.client_evicted, try client.lookup_account());
+
+    const deregister = try client.deinit();
+    try testing.expectEqual(tb_client.DeregisterOutcome.skipped_evicted, deregister.outcome);
+    try testing.expect(deregister.duration.ns < tb_client.deregister_timeout.ns / 2);
 }

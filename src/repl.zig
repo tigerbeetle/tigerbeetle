@@ -641,6 +641,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
 
+            // The repl uses `vsr.Client` directly and never sends a deregister, so its session
+            // remains after it exits. The Java/Rust client-eviction tests rely on this.
             const client_id = stdx.crypto_u128();
             const client = try Client.init(
                 allocator,
@@ -685,6 +687,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         pub fn deinit(repl: *Repl, allocator: std.mem.Allocator) void {
             repl.static_allocator.transition_from_static_to_deinit();
 
+            // The session is not ended (see `init()`).
             repl.client.deinit(allocator);
             repl.message_pool.deinit(allocator);
             allocator.destroy(repl.message_pool);

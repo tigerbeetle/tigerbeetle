@@ -26,6 +26,77 @@ const KiB = stdx.KiB;
 
 const io_thread_stack_size = 512 * KiB;
 
+/// The budget for ending the client's session when it is closed (`tb_client_deinit()`): the
+/// deregistration attempt waits at most this long, in elapsed time, for the cluster to confirm.
+/// One second covers a round trip and a commit, with a retry, on a healthy cluster. Closing the
+/// connections afterwards is not part of the budget.
+/// `tb_client.h` and the client READMEs (`src/scripts/client_readmes.zig`) format it from here;
+/// `docs/reference/sessions.md` states it in words.
+pub const deregister_timeout: stdx.Duration = .ms(1000);
+
+const tick_ns: u64 = constants.tick_ms * std.time.ns_per_ms;
+
+comptime {
+    assert(deregister_timeout.ns >= tick_ns);
+}
+
+/// How the deregistration attempt of a closing client ended (see `Context.deregister()`).
+pub const DeregisterOutcome = enum {
+    /// The session has ended.
+    done,
+    /// The session was evicted while the client waited (another session took its slot).
+    evicted_during_wait,
+    /// The cluster did not confirm within `deregister_timeout`.
+    timed_out,
+    /// The client learned of a newer view, whose primary it is not connected to.
+    primary_changed,
+    /// The register was in flight: there is no session to end.
+    skipped_never_registered,
+    /// A request was in flight. Its outcome is unknown, so the session's hash chain cannot be
+    /// continued.
+    skipped_request_inflight,
+    /// The session was evicted already.
+    skipped_evicted,
+    /// There was no established connection to the presumed primary.
+    skipped_no_primary_connection,
+};
+
+/// The latest deregistration attempt of any client in this process, for tests only. It is recorded
+/// only in builds with `config_verify` (`constants.verify`, on by default outside `-Drelease`).
+/// `deinit()` frees the client's context, so it is recorded here. The IO thread writes it before
+/// `deinit()` joins that thread. Clients that are deinitialized concurrently overwrite each other's
+/// record, so only tests that close one client at a time may read it.
+pub const DeregisterRecord = struct {
+    outcome: DeregisterOutcome,
+    duration: stdx.Duration,
+};
+pub var deregister_last: if (constants.verify) ?DeregisterRecord else void =
+    if (constants.verify) null else {};
+
+pub const DeregisterWait = enum { done, timed_out, primary_changed, tick_and_run, run };
+
+/// The decision of each iteration of the deregistration wait loop (see `Context.deregister()`).
+pub fn deregister_wait_next(options: struct {
+    now: stdx.Instant,
+    deadline: stdx.Instant,
+    tick_last: stdx.Instant,
+    /// Whether the session has ended.
+    done: bool,
+    /// Whether the client learned of a newer view, whose primary it is not connected to.
+    view_changed_to_unconnected: bool,
+}) DeregisterWait {
+    assert(options.tick_last.ns <= options.now.ns);
+
+    // Check this first, so that a session that ended during the last run is reported as such,
+    // even if the deadline passed meanwhile.
+    if (options.done) return .done;
+    if (options.now.ns >= options.deadline.ns) return .timed_out;
+    if (options.view_changed_to_unconnected) return .primary_changed;
+    // Tick only once per tick_ms, so that the client's timeouts keep their cadence.
+    if (options.now.ns - options.tick_last.ns >= tick_ns) return .tick_and_run;
+    return .run;
+}
+
 pub const InitParameters = extern struct {
     cluster_id: u128,
     client_id: u128,
@@ -223,7 +294,12 @@ pub fn ContextType(
         request_timer: stdx.Instant,
         request_latency: ?stdx.Duration,
 
+        /// Set once `deinit()` starts to free the context, after the IO thread has been joined.
+        /// No callback may run after that point.
+        deinit_started: bool,
+
         const Context = @This();
+
         const GPA = std.heap.GeneralPurposeAllocator(.{
             .thread_safe = true,
         });
@@ -301,6 +377,7 @@ pub fn ContextType(
                 .thread = undefined,
                 .request_timer = undefined,
                 .request_latency = null,
+                .deinit_started = false,
             };
             context.addresses_owned = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_owned);
@@ -418,6 +495,8 @@ pub fn ContextType(
         fn deinit(self: *Context) void {
             assert(thread_caller == .user);
             assert(self.signal.status() == .shutdown_completed);
+            assert(!self.deinit_started);
+            self.deinit_started = true;
             assert(self.submitted.pop() == null);
             assert(self.pending.pop() == null);
             assert(self.client.shutdown_complete());
@@ -463,6 +542,13 @@ pub fn ContextType(
                 };
             }
 
+            // A request that is still in flight has an unknown outcome, so the session's hash
+            // chain cannot be continued with a deregister: leave the session to be evicted.
+            const request_inflight_operation: ?vsr.Operation =
+                if (self.client.request_inflight) |inflight|
+                    inflight.message.header.operation
+                else
+                    null;
             self.cancel_request_inflight();
 
             while (self.pending.pop()) |packet| {
@@ -477,12 +563,139 @@ pub fn ContextType(
                 self.packet_cancel(packet);
             }
 
+            self.deregister(request_inflight_operation);
+
             // Close every connection and drain outstanding IO before tearing the
             // client down.
             self.client.shutdown();
             while (!self.client.shutdown_complete()) {
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
                     log.err("{}: IO.run() failed during shutdown: {s}", .{
+                        self.client_id,
+                        @errorName(err),
+                    });
+                    @panic("IO.run() failed");
+                };
+            }
+        }
+
+        /// Ends the client's session (best effort), so that the cluster frees the session's slot
+        /// in its client table immediately, instead of evicting the session once the table is
+        /// full. The attempt is bounded by `deregister_timeout` of elapsed time, since the
+        /// cluster may be unavailable. It is skipped when:
+        /// - a request was in flight (including the register, if the client never registered),
+        /// - the client was evicted, or
+        /// - there is no established connection to the presumed primary (of the client's view).
+        /// The wait stops early if the client learns of a newer view, whose primary it is not
+        /// connected to. Otherwise, a view change during the attempt may exhaust the budget.
+        /// Whenever the attempt does not end the session, the session is left to be evicted.
+        fn deregister(self: *Context, request_inflight_operation: ?vsr.Operation) void {
+            assert(thread_caller == .io);
+            assert(self.signal.status() == .shutdown_completed);
+            assert(self.client.request_inflight == null);
+            assert(self.submitted.empty());
+            assert(self.pending.empty());
+
+            const start = self.client.time.monotonic();
+            const outcome = self.deregister_skip(request_inflight_operation) orelse
+                self.deregister_wait(start);
+            const duration = start.elapsed(self.client.time.monotonic());
+
+            log.info("{}: deregister: {s} after {}ms", .{
+                self.client_id,
+                @tagName(outcome),
+                duration.to_ms(),
+            });
+            if (constants.verify) {
+                deregister_last = .{ .outcome = outcome, .duration = duration };
+            }
+        }
+
+        /// Returns why the deregistration is skipped, if it is.
+        fn deregister_skip(
+            self: *Context,
+            request_inflight_operation: ?vsr.Operation,
+        ) ?DeregisterOutcome {
+            assert(thread_caller == .io);
+            assert(self.client.request_inflight == null);
+
+            if (request_inflight_operation) |operation| {
+                if (operation == .register) {
+                    log.debug("{}: deregister: skipped (never registered)", .{self.client_id});
+                    return .skipped_never_registered;
+                } else {
+                    log.debug("{}: deregister: skipped (request in flight)", .{self.client_id});
+                    return .skipped_request_inflight;
+                }
+            }
+            if (self.client.evicted) {
+                log.debug("{}: deregister: skipped (evicted)", .{self.client_id});
+                return .skipped_evicted;
+            }
+            // The register was not in flight and the client was not evicted, so it registered.
+            assert(self.client.session > 0);
+            assert(self.batch_size_limit != null);
+            assert(!self.client.deregistered);
+
+            const primary: u8 = @intCast(self.client.view % self.client.replica_count);
+            if (!self.client.message_bus.replica_connected(primary)) {
+                log.debug("{}: deregister: skipped (not connected to primary={})", .{
+                    self.client_id,
+                    primary,
+                });
+                return .skipped_no_primary_connection;
+            }
+            return null;
+        }
+
+        /// Sends the deregister, then waits until the session has ended or the budget is spent.
+        fn deregister_wait(self: *Context, start: stdx.Instant) DeregisterOutcome {
+            assert(thread_caller == .io);
+            assert(self.client.request_inflight == null);
+            assert(self.client.session > 0);
+            assert(!self.client.evicted);
+            assert(!self.client.deregistered);
+
+            const replica_count = self.client.replica_count;
+            const view_start = self.client.view;
+            self.client.deregister(client_deregister_callback, @intFromPtr(self));
+
+            const deadline = start.add(deregister_timeout);
+            var tick_last = start;
+            while (true) {
+                const now = self.client.time.monotonic();
+                const view_changed_to_unconnected = self.client.view > view_start and
+                    !self.client.message_bus.replica_connected(
+                        @intCast(self.client.view % replica_count),
+                    );
+                switch (deregister_wait_next(.{
+                    .now = now,
+                    .deadline = deadline,
+                    .tick_last = tick_last,
+                    .done = self.client.deregistered or self.client.evicted,
+                    .view_changed_to_unconnected = view_changed_to_unconnected,
+                })) {
+                    .done => {
+                        // Once deregistered, the client ignores evictions.
+                        assert(self.client.deregistered != self.client.evicted);
+                        return if (self.client.deregistered) .done else .evicted_during_wait;
+                    },
+                    .timed_out => return .timed_out,
+                    .primary_changed => {
+                        log.info("{}: deregister: primary changed during deregister; " ++
+                            "leaving the session to eviction", .{self.client_id});
+                        return .primary_changed;
+                    },
+                    .tick_and_run => {
+                        tick_last = now;
+                        self.tick();
+                    },
+                    .run => {},
+                }
+
+                assert(now.ns < deadline.ns);
+                self.io.run_for_ns(@min(tick_ns, deadline.ns - now.ns)) catch |err| {
+                    log.err("{}: IO.run() failed during deregister: {s}", .{
                         self.client_id,
                         @errorName(err),
                     });
@@ -501,10 +714,14 @@ pub fn ContextType(
                 self.client.request_inflight = null;
                 self.client.release_message(inflight.message.base());
 
-                if (operation != .register) {
-                    const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
-                    packet.assert_phase(.sent);
-                    self.packet_cancel(packet);
+                switch (operation) {
+                    // These requests are made by the client itself, not by a packet.
+                    .register, .deregister => {},
+                    else => {
+                        const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                        packet.assert_phase(.sent);
+                        self.packet_cancel(packet);
+                    },
                 }
             }
         }
@@ -744,6 +961,19 @@ pub fn ContextType(
             signal_notify_callback(&self.signal);
         }
 
+        fn client_deregister_callback(client: *Client, user_data: u128) void {
+            assert(thread_caller == .io);
+
+            const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            assert(&self.client == client);
+            assert(!self.deinit_started);
+            assert(self.client.request_inflight == null);
+            assert(self.client.deregistered);
+            assert(self.signal.status() == .shutdown_completed);
+
+            log.debug("{}: client_deregister_callback: session ended", .{self.client_id});
+        }
+
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             assert(thread_caller == .io);
 
@@ -853,6 +1083,8 @@ pub fn ContextType(
             },
         ) void {
             assert(thread_caller == .io);
+            // The IO thread has not been joined yet.
+            assert(!self.deinit_started);
 
             const result = completion catch |err| {
                 packet.status = switch (err) {
@@ -1014,6 +1246,90 @@ const Locker = extern struct {
 };
 
 const testing = std.testing;
+
+test "deregister_wait_next: a session that ended during the last run is done" {
+    const start: stdx.Instant = .{ .ns = 1_000_000 };
+    const deadline = start.add(deregister_timeout);
+    // The last run returned after the deadline, and the session ended meanwhile.
+    const now = deadline.add(.ms(5));
+
+    try std.testing.expectEqual(DeregisterWait.done, deregister_wait_next(.{
+        .now = now,
+        .deadline = deadline,
+        .tick_last = start,
+        .done = true,
+        .view_changed_to_unconnected = false,
+    }));
+    try std.testing.expectEqual(DeregisterWait.timed_out, deregister_wait_next(.{
+        .now = now,
+        .deadline = deadline,
+        .tick_last = start,
+        .done = false,
+        .view_changed_to_unconnected = false,
+    }));
+}
+
+test "deregister_wait_next: the deadline holds when every run returns late" {
+    // Simulate the wait loop of `Context.deregister_attempt()`, where every run takes longer
+    // than requested.
+    const run_late: stdx.Duration = .{ .ns = 3 * tick_ns };
+    const start: stdx.Instant = .{ .ns = 1_000_000 };
+    const deadline = start.add(deregister_timeout);
+
+    var now = start;
+    var tick_last = start;
+    var ticks: u64 = 0;
+    for (0..deregister_timeout.ns / tick_ns + 2) |_| {
+        switch (deregister_wait_next(.{
+            .now = now,
+            .deadline = deadline,
+            .tick_last = tick_last,
+            .done = false,
+            .view_changed_to_unconnected = false,
+        })) {
+            .timed_out => break,
+            .tick_and_run => {
+                tick_last = now;
+                ticks += 1;
+            },
+            .run => {},
+            .done, .primary_changed => unreachable,
+        }
+        now = now.add(.{ .ns = @min(tick_ns, deadline.ns - now.ns) + run_late.ns });
+    } else return error.TestUnexpectedResult;
+
+    // The wait ends within one (late) run after the deadline, and ticks at most once per tick.
+    try std.testing.expect(now.ns >= deadline.ns);
+    try std.testing.expect(now.ns - deadline.ns <= tick_ns + run_late.ns);
+    try std.testing.expect(ticks <= @divFloor(deregister_timeout.ns, tick_ns));
+}
+
+test "deregister_wait_next: ticks on cadence, and stops when the primary changed" {
+    const start: stdx.Instant = .{ .ns = 1_000_000 };
+    const deadline = start.add(deregister_timeout);
+
+    try std.testing.expectEqual(DeregisterWait.run, deregister_wait_next(.{
+        .now = start.add(.{ .ns = tick_ns - 1 }),
+        .deadline = deadline,
+        .tick_last = start,
+        .done = false,
+        .view_changed_to_unconnected = false,
+    }));
+    try std.testing.expectEqual(DeregisterWait.tick_and_run, deregister_wait_next(.{
+        .now = start.add(.{ .ns = tick_ns }),
+        .deadline = deadline,
+        .tick_last = start,
+        .done = false,
+        .view_changed_to_unconnected = false,
+    }));
+    try std.testing.expectEqual(DeregisterWait.primary_changed, deregister_wait_next(.{
+        .now = start,
+        .deadline = deadline,
+        .tick_last = start,
+        .done = false,
+        .view_changed_to_unconnected = true,
+    }));
+}
 
 test "Locker: smoke test" {
     var locker = Locker{};

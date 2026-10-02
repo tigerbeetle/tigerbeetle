@@ -28,10 +28,34 @@ A client session begins when a client registers itself with the cluster.
 
 A client session ends when either:
 
+- the client closes the session,
 - the client session is [evicted](#eviction), or
 - the client terminates
 
 — whichever occurs first.
+
+When the application closes the client (for example `tb_client_deinit()`, or `close()` in a language
+client), the client asks the cluster to end the session, on a best-effort basis, so that the cluster
+frees the session's slot immediately instead of evicting the session later:
+
+- The client sends a special "deregister" message, which is committed by the cluster like any
+  other request, under the client's session, after the client's previous request.
+- The client skips this if it never registered, if it was evicted, if it has a request in flight
+  (the outcome of an in-flight request is unknown, so the session cannot continue past it), or if
+  it is not connected to the cluster's primary.
+- The attempt waits at most 1 second for the cluster to confirm. It stops early if the client
+  learns that the primary changed to a replica it is not connected to. Closing the connections
+  afterwards is not part of this budget.
+- If the attempt does not complete, the session is left to be evicted, as if the client had
+  terminated.
+
+A client that terminates without being closed (for example, it crashes or is killed) cannot end its
+session, so the session remains until it is evicted.
+
+Like an eviction, ending a session does not prevent the network from delivering a delayed duplicate
+of the client's original register message. Such a duplicate creates a new, unused session for the
+same client id. That session occupies a slot like any other, so it can cause the eviction of another
+session, until it is evicted itself.
 
 ## Eviction
 
@@ -42,6 +66,8 @@ by default), an existing client session must be evicted to make space for the ne
 
 - After a session is evicted by the cluster, no future requests from that session will ever execute.
 - The evicted session is chosen as the session that committed a request the longest time ago.
+- Sessions that were closed do not count towards the limit, so closing clients that are no longer
+  needed avoids evicting sessions that are still in use.
 
 The cluster sends a message to notify the evicted session that it has ended. Typically the evicted
 client is no longer active (already terminated), but if it is active, the eviction message causes it

@@ -1,11 +1,12 @@
 use std::cell::UnsafeCell;
 use std::env;
 use std::env::consts::EXE_SUFFIX;
-use std::io::{BufRead as _, BufReader};
+use std::io::{BufRead as _, BufReader, Read as _};
 use std::mem;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Barrier, Once, RwLock};
+use std::time::{Duration, Instant};
 
 use futures::executor::block_on;
 use futures::pin_mut;
@@ -46,6 +47,8 @@ struct TestDb {
     // Keep the server's stdin handle open as long as the test process is running,
     // at which point the server will terminate.
     _server: Child,
+    /// The server's stderr, if captured (see `new_development`).
+    log_path: Option<String>,
 }
 
 fn tigerbeetle_bin() -> String {
@@ -79,13 +82,17 @@ impl TestDb {
             assert!(status.success());
         }
 
-        let server = Self::start(&["--addresses=0", "--cache-grid=32MiB", database_name])?;
+        let server = Self::start(
+            &["--addresses=0", "--cache-grid=32MiB", database_name],
+            None,
+        )?;
 
         Ok(server)
     }
 
     /// Create a unique development-mode server for a specific test.
-    fn new_development(label: &str) -> Result<TestDb> {
+    /// With `capture_log`, the server's stderr goes to `<work_dir>/<label>.log`.
+    fn new_development(label: &str, capture_log: bool) -> Result<TestDb> {
         let database_name = format!("0_0.{label}.tigerbeetle");
 
         // Always start fresh for development instances.
@@ -104,12 +111,20 @@ impl TestDb {
             .status()?;
         assert!(status.success());
 
-        let server = Self::start(&["--addresses=0", "--development", &database_name])?;
+        let log_path = capture_log.then(|| format!("{}/{label}.log", work_dir()));
+        let server = Self::start(
+            &["--addresses=0", "--development", &database_name],
+            log_path,
+        )?;
 
         Ok(server)
     }
 
-    fn start(args: &[&str]) -> Result<TestDb> {
+    fn start(args: &[&str], log_path: Option<String>) -> Result<TestDb> {
+        let stderr = match &log_path {
+            Some(log_path) => Stdio::from(std::fs::File::create(log_path)?),
+            None => Stdio::inherit(),
+        };
         let mut server = Command::new(tigerbeetle_bin())
             .current_dir(work_dir())
             // magic address 0: tell us the port to use,
@@ -118,6 +133,7 @@ impl TestDb {
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(stderr)
             .spawn()?;
 
         let server_stdout = mem::take(&mut server.stdout).unwrap();
@@ -129,12 +145,85 @@ impl TestDb {
         Ok(TestDb {
             port,
             _server: server,
+            log_path,
         })
     }
 
     fn address(&self) -> String {
         format!("127.0.0.1:{}", self.port)
     }
+
+    /// The lines of the server's captured log that report an eviction (the `log.warn` in the
+    /// replica's `client_table_entry_create`).
+    fn log_evictions(&self) -> Result<Vec<String>> {
+        let log_path = self.log_path.as_ref().expect("log not captured");
+        let log = std::fs::read_to_string(log_path)?;
+        Ok(log
+            .lines()
+            .filter(|line| line.contains("client_table_entry_create:") && line.contains("evicting"))
+            .map(String::from)
+            .collect())
+    }
+}
+
+/// Starts a `tigerbeetle repl` process that registers a session, creates an account, and exits
+/// without ending its session, like a crashed process would: repl uses `vsr.Client` directly and
+/// never sends a deregister. (The eviction tests rely on this.)
+fn abandon_session_spawn(address: &str, id: usize) -> Result<Child> {
+    Ok(Command::new(tigerbeetle_bin())
+        .args([
+            "repl",
+            "--cluster=0",
+            &format!("--addresses={address}"),
+            &format!("--command=create_accounts id={id} ledger=1 code=1"),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?)
+}
+
+/// Waits for a process started by `abandon_session_spawn`, for at most 30 seconds.
+fn abandon_session_wait(mut child: Child) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            child.wait()?;
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    let mut output = String::new();
+    child.stdout.take().unwrap().read_to_string(&mut output)?;
+    child.stderr.take().unwrap().read_to_string(&mut output)?;
+    match status {
+        Some(status) if status.success() => Ok(()),
+        Some(status) => Err(format!("repl failed ({status}):\n{output}").into()),
+        None => Err(format!("repl timed out after 30s:\n{output}").into()),
+    }
+}
+
+/// Registers sessions `ids` that are never ended, in processes that run `parallel` at a time.
+fn abandon_sessions(
+    address: &str,
+    ids: std::ops::RangeInclusive<usize>,
+    parallel: usize,
+) -> Result {
+    let ids: Vec<usize> = ids.collect();
+    for chunk in ids.chunks(parallel) {
+        let children = chunk
+            .iter()
+            .map(|id| abandon_session_spawn(address, *id))
+            .collect::<Result<Vec<_>>>()?;
+        for child in children {
+            abandon_session_wait(child)?;
+        }
+    }
+    Ok(())
 }
 
 // Only one database server should run at a time. Normal tests share a read
@@ -1391,28 +1480,32 @@ fn client_evicted() -> Result<()> {
     // Hold the write lock so no other database is running concurrently.
     let _guard = DB_LOCK.write().unwrap();
 
+    // The development server accepts 8 client connections at a time.
+    const PARALLEL: usize = 7;
+
     // Use a separate server to avoid evicting the shared test client.
-    let server = TestDb::new_development("client_evicted")?;
+    let server = TestDb::new_development("client_evicted", false)?;
     let address = server.address();
 
+    // Create the client right before filling the client table, so that its session is the
+    // oldest one and it has no reason to ping in the meantime.
     let client_evict = tb::Client::new(0, &address)?;
 
     let accounts = block_on(client_evict.lookup_accounts(&[tb::id()])?)?;
     assert_eq!(accounts.len(), 0);
 
-    let mut handles = Vec::new();
-    for _ in 0..CLIENTS_MAX {
-        let address = address.clone();
-        handles.push(std::thread::spawn(move || {
-            let client = tb::Client::new(0, &address).unwrap();
-            let accounts = block_on(client.lookup_accounts(&[tb::id()]).unwrap()).unwrap();
-            assert_eq!(accounts.len(), 0);
-        }));
-    }
-
-    for handle in handles {
-        let _ = handle.join();
-    }
+    // Closing a client ends its session, which would not evict anyone. Instead, register sessions
+    // from processes that exit without ending them (like a crashed process would).
+    let fill_start = Instant::now();
+    abandon_sessions(&address, 1..=CLIENTS_MAX, PARALLEL)?;
+    let fill_duration = fill_start.elapsed();
+    // This test checks how the client reports an eviction, not the eviction policy (which is
+    // tested by the replica tests). Keep the fill within one ping interval (30s), so that the
+    // evicted client has not pinged, whatever the eviction policy (with margin for slow machines).
+    assert!(
+        fill_duration < Duration::from_secs(25),
+        "filling the client table took {fill_duration:?}; the evicted client may have pinged",
+    );
 
     // The original client should now be evicted.
     let result = block_on(client_evict.lookup_accounts(&[tb::id()])?);
@@ -1425,6 +1518,47 @@ fn client_evicted() -> Result<()> {
 
     // Closing the client.
     let result = block_on(client_evict.close());
+    assert_eq!(result, Ok(()));
+
+    Ok(())
+}
+
+#[test]
+fn client_close_ends_session() -> Result<()> {
+    const CLIENTS_MAX: usize = 64;
+
+    // Hold the write lock so no other database is running concurrently.
+    let _guard = DB_LOCK.write().unwrap();
+
+    // Use a separate server, so that the client table starts out empty.
+    let server = TestDb::new_development("client_close_ends_session", true)?;
+    let address = server.address();
+
+    // The keeper commits first, so it has the oldest session: without deregistration, the
+    // 65th register would evict it.
+    let client_keep = tb::Client::new(0, &address)?;
+
+    let accounts = block_on(client_keep.lookup_accounts(&[tb::id()])?)?;
+    assert_eq!(accounts.len(), 0);
+
+    // More clients than fit in the client table, but each ends its session when it is closed.
+    // They run one at a time, so at most two sessions are live at once, and each close must
+    // complete its deregistration.
+    for _ in 0..CLIENTS_MAX + 8 {
+        let client = tb::Client::new(0, &address)?;
+        let accounts = block_on(client.lookup_accounts(&[tb::id()])?)?;
+        assert_eq!(accounts.len(), 0);
+        assert_eq!(block_on(client.close()), Ok(()));
+    }
+
+    // So the original client was not evicted.
+    let accounts = block_on(client_keep.lookup_accounts(&[tb::id()])?)?;
+    assert_eq!(accounts.len(), 0);
+    // And no session was evicted at all, whatever the eviction policy.
+    let evictions = server.log_evictions()?;
+    assert!(evictions.is_empty(), "sessions were evicted: {evictions:?}");
+
+    let result = block_on(client_keep.close());
     assert_eq!(result, Ok(()));
 
     Ok(())

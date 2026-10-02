@@ -5879,6 +5879,8 @@ pub fn ReplicaType(
 
                 assert(self.client_sessions.count() == constants.clients_max - 1);
 
+                // The Rust client tests match this message ("client_table_entry_create:" and
+                // "evicting"), to check that closed clients do not cause evictions.
                 log.warn("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
                     self.log_prefix(),
                     clients,

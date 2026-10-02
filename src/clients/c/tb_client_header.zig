@@ -270,6 +270,9 @@ pub fn main() !void {
         \\
         \\// Closes the client, causing any previously submitted packets to be completed with
         \\// `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
+        \\// If the client is registered, has no request in flight, and is connected to the primary,
+        \\// it first asks the cluster to end its session (best effort), waiting up to {d}ms for the
+        \\// cluster to confirm. Otherwise, the session is left to be evicted.
         \\// Return value: `TB_CLIENT_SUCCESS` on success, `TB_CLIENT_NOT_INITIALIZED` if the client
         \\// interface was not initialized, or `TB_CLIENT_CLOSED` if the client has already been closed.
         \\TB_CLIENT_STATUS tb_client_deinit(
@@ -283,7 +286,7 @@ pub fn main() !void {
         \\);
         \\
         \\
-    , .{});
+    , .{vsr.tb_client.deregister_timeout.to_ms()});
 
     try buffer.writer().print(
         \\#ifdef __cplusplus

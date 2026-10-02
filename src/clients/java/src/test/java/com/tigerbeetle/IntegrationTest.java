@@ -6,11 +6,11 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -982,34 +982,40 @@ public class IntegrationTest {
     @Test
     public void testClientEvicted() throws Throwable {
         final int CLIENTS_MAX = 64;
-
-        final var barrier = new CountDownLatch(CLIENTS_MAX);
-        final var executor = Executors.newFixedThreadPool(CLIENTS_MAX);
+        // The development server accepts 8 client connections at a time.
+        final int PARALLEL = 7;
 
         // Use a separate server to avoid evicting the test's shared client.
         try (final var server = new Server("testClientEvicted")) {
 
+            // Create the client right before filling the client table, so that its session is
+            // the oldest one and it has no reason to ping in the meantime.
             try (final var client_evict =
                     new Client(clusterId, new String[] {server.getAddress()})) {
                 var accounts_first = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
                 assertTrue(accounts_first.getLength() == 0);
 
-                for (int i = 0; i < CLIENTS_MAX; i++) {
-                    executor.submit(() -> {
-                        try (final var client =
-                                new Client(clusterId, new String[] {server.getAddress()})) {
-                            var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
-                            assertTrue(accounts.getLength() == 0);
-                        } catch (InterruptedException e) {
-                            return;
-                        } finally {
-                            barrier.countDown();
-                        }
-                    });
+                // Closing a client ends its session, which would not evict anyone. Instead,
+                // register sessions from processes that exit without ending them (like a crashed
+                // process would).
+                final long fillStart = System.nanoTime();
+                for (int i = 1; i <= CLIENTS_MAX; i += PARALLEL) {
+                    final var repls = new ArrayList<Process>();
+                    for (int id = i; id < i + PARALLEL && id <= CLIENTS_MAX; id++) {
+                        repls.add(server.abandonSessionStart(id));
+                    }
+                    for (final var repl : repls) {
+                        Server.abandonSessionWait(repl);
+                    }
                 }
+                final long fillMillis = (System.nanoTime() - fillStart) / 1_000_000;
+                // This test checks how the client reports an eviction, not the eviction policy
+                // (which is tested by the replica tests). Keep the fill within one ping interval
+                // (30s), so that the evicted client has not pinged, whatever the eviction policy
+                // (with margin for slow machines).
+                assertTrue("filling the client table took " + fillMillis
+                        + "ms; the evicted client may have pinged", fillMillis < 25_000);
 
-                barrier.await();
-                executor.shutdown();
                 assertThrows(ClientEvictedException.class,
                         () -> client_evict.lookupAccounts(new IdBatch(UInt128.id())));
 
@@ -2620,6 +2626,7 @@ public class IntegrationTest {
         public static final String TB_SERVER = "../../../zig-out/bin/tigerbeetle";
 
         public final String tb_file;
+        public final String exe;
         private final Process process;
         private String address;
 
@@ -2628,7 +2635,6 @@ public class IntegrationTest {
 
             cleanUp();
 
-            String exe;
             switch (JNILoader.OS.getOS()) {
                 case windows:
                     exe = TB_SERVER + ".exe";
@@ -2655,6 +2661,30 @@ public class IntegrationTest {
             try (final var reader = new BufferedReader(new InputStreamReader(stdout))) {
                 this.address = reader.readLine().trim();
             }
+        }
+
+        /**
+         * Starts a `tigerbeetle repl` process that registers a session, creates an account, and
+         * exits without ending its session, like a crashed process would: repl uses `vsr.Client`
+         * directly and never sends a deregister. (The eviction tests rely on this.)
+         */
+        public Process abandonSessionStart(final int id) throws IOException {
+            return new ProcessBuilder()
+                    .command(new String[] {exe, "repl", "--cluster=0", "--addresses=" + address,
+                            "--command=create_accounts id=" + id + " ledger=1 code=1"})
+                    .redirectErrorStream(true).start();
+        }
+
+        /** Waits for a process started by `abandonSessionStart`, for at most 30 seconds. */
+        public static void abandonSessionWait(final Process repl) throws Exception {
+            final boolean exited = repl.waitFor(30, TimeUnit.SECONDS);
+            if (!exited) {
+                repl.destroyForcibly().waitFor();
+            }
+            final String output = new String(repl.getInputStream().readAllBytes());
+            assertTrue("repl timed out after 30s:\n" + output, exited);
+            assertTrue("repl failed (" + repl.exitValue() + "):\n" + output,
+                    repl.exitValue() == 0);
         }
 
         public String getAddress() {
