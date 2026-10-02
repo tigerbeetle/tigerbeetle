@@ -30,33 +30,36 @@ pub const ListenOptions = struct {
 
 pub const NextTickSource = enum { lsm, vsr };
 
+pub const PosixAddress = std.Io.Threaded.PosixAddress;
+
+pub fn address_to_posix(address: stdx.SocketAddress, storage: *PosixAddress) posix.socklen_t {
+    return std.Io.Threaded.addressToPosix(&address.to_std(), storage);
+}
+
+pub fn address_from_posix(address_posix: *const PosixAddress) stdx.SocketAddress {
+    return stdx.SocketAddress.from_std(std.Io.Threaded.addressFromPosix(address_posix));
+}
+
 pub fn listen(
     fd: posix.socket_t,
     address: stdx.SocketAddress,
     options: ListenOptions,
 ) !stdx.SocketAddress {
-    const address_std = address.to_raw();
     try setsockopt(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
-    try posix.bind(fd, &address_std.any, address_std.getOsSockLen());
+    var address_posix: PosixAddress = undefined;
+    var address_size = address_to_posix(address, &address_posix);
+    try posix.bind(fd, &address_posix.any, address_size);
 
     // Resolve port 0 to an actual port picked by the OS.
-    var address_resolved_std: stdx.RawAddress = .{ .any = undefined };
-    var addrlen: posix.socklen_t = @sizeOf(stdx.RawAddress);
-    try posix.getsockname(fd, &address_resolved_std.any, &addrlen);
-    assert(address_resolved_std.getOsSockLen() == addrlen);
-    assert(address_resolved_std.any.family == address_std.any.family);
+    address_size = @sizeOf(@TypeOf(address_posix));
+    try posix.getsockname(fd, &address_posix.any, &address_size);
+    const address_resolved = address_from_posix(&address_posix);
 
     try posix.listen(fd, options.backlog);
 
-    const address_resolved = stdx.SocketAddress.from_raw(address_resolved_std) catch |err|
-        switch (err) {
-            error.UnsupportedFamily => unreachable,
-        };
-
-    assert(address.ip.family() == address_resolved.ip.family());
+    assert(address_resolved.ip.family() == address.ip.family());
     assert(std.meta.eql(address.ip, address_resolved.ip));
     if (address.port != address_resolved.port) assert(address.port == 0);
-
     return address_resolved;
 }
 

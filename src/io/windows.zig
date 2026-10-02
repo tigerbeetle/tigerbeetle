@@ -240,11 +240,12 @@ pub const IO = struct {
                 overlapped: Overlapped,
                 listen_socket: socket_t,
                 client_socket: ?socket_t,
-                addr_buffer: [(@sizeOf(stdx.RawAddress) + 16) * 2]u8 align(4),
+                addr_buffer: [(@sizeOf(common.PosixAddress) + 16) * 2]u8 align(4),
             },
             connect: struct {
                 socket: socket_t,
-                address: stdx.RawAddress,
+                address: common.PosixAddress,
+                address_size: posix.socklen_t,
                 overlapped: Overlapped,
                 pending: bool,
             },
@@ -393,8 +394,8 @@ pub const IO = struct {
                             op.client_socket.?,
                             &op.addr_buffer,
                             0,
-                            @sizeOf(stdx.RawAddress) + 16,
-                            @sizeOf(stdx.RawAddress) + 16,
+                            @sizeOf(common.PosixAddress) + 16,
+                            @sizeOf(common.PosixAddress) + 16,
                             &sync_bytes_read,
                             &op.overlapped.raw,
                         );
@@ -473,6 +474,8 @@ pub const IO = struct {
         socket: socket_t,
         address: stdx.SocketAddress,
     ) void {
+        var address_posix: common.PosixAddress = undefined;
+        const address_size = common.address_to_posix(address, &address_posix);
         self.submit(
             context,
             callback,
@@ -480,7 +483,8 @@ pub const IO = struct {
             .connect,
             .{
                 .socket = socket,
-                .address = address.to_raw(),
+                .address = address_posix,
+                .address_size = address_size,
                 .overlapped = undefined,
                 .pending = false,
             },
@@ -503,14 +507,14 @@ pub const IO = struct {
 
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY).
                         const inaddr_any: [4]u8 = @splat(0);
-                        const bind_addr: stdx.RawAddress = .{ .in = .{
+                        const bind_addr: common.PosixAddress = .{ .in = .{
                             .port = 0,
                             .addr = @bitCast(inaddr_any),
                         } };
                         posix.bind(
                             op.socket,
                             &bind_addr.any,
-                            bind_addr.getOsSockLen(),
+                            @sizeOf(@FieldType(common.PosixAddress, "in")),
                         ) catch |err| switch (err) {
                             error.AccessDenied => unreachable,
                             error.SymLinkLoop => unreachable,
@@ -568,7 +572,7 @@ pub const IO = struct {
                         break :blk (connect_ex)(
                             op.socket,
                             &op.address.any,
-                            op.address.getOsSockLen(),
+                            op.address_size,
                             null,
                             0,
                             &transferred,

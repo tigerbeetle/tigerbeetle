@@ -231,7 +231,8 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: stdx.RawAddress,
+            address: common.PosixAddress,
+            address_size: posix.socklen_t,
             initiated: bool,
         },
         fsync: struct {
@@ -436,6 +437,8 @@ pub const IO = struct {
         socket: socket_t,
         address: stdx.SocketAddress,
     ) void {
+        var address_posix: common.PosixAddress = undefined;
+        const address_size = common.address_to_posix(address, &address_posix);
         self.submit(
             context,
             callback,
@@ -443,7 +446,8 @@ pub const IO = struct {
             .connect,
             .{
                 .socket = socket,
-                .address = address.to_raw(),
+                .address = address_posix,
+                .address_size = address_size,
                 .initiated = false,
             },
             struct {
@@ -455,7 +459,7 @@ pub const IO = struct {
                         else => posix.connect(
                             op.socket,
                             &op.address.any,
-                            op.address.getOsSockLen(),
+                            op.address_size,
                         ),
                     };
 

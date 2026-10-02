@@ -141,9 +141,10 @@ pub const StatsD = struct {
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
         errdefer allocator.destroy(send_buffer);
 
-        const address_raw = address.to_raw();
+        var address_posix: std.Io.Threaded.PosixAddress = undefined;
+        const address_size = std.Io.Threaded.addressToPosix(&address.to_std(), &address_posix);
         // 'Connect' the UDP socket, so we can just send() to it normally.
-        try stdx.posix.connect(socket, &address_raw.any, address_raw.getOsSockLen());
+        try stdx.posix.connect(socket, &address_posix.any, address_size);
 
         log.info("{f}: sending statsd metrics to {s}{{ .ip = {f}, .port = {} }}", .{
             process_id,
