@@ -208,7 +208,7 @@ pub fn main(
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
-        .tbid_generator = if (use_tbid) TbidGenerator.init(&prng, io.io_std) else null,
+        .tbid_generator = if (use_tbid) TBIDGenerator.init(time, &prng) else null,
         .transfer_batch_count = cli_args.transfer_batch_count,
         .transfer_batch_delay = cli_args.transfer_batch_delay,
         .transfer_count = cli_args.transfer_count,
@@ -287,38 +287,63 @@ const Generator = union(enum) {
 /// - Advancing time: new random value
 /// - Same/backward time: incrementing random
 /// - Random overflow: carry to timestamp, new random
-const TbidGenerator = struct {
+const TBIDGenerator = struct {
+    time: Time,
     prng: *stdx.PRNG,
-    epoch_ms: u128,
-    random: u80,
+    previous: u128,
 
-    fn init(prng: *stdx.PRNG, io_std: std.Io) TbidGenerator {
-        const epoch_ms: u128 = @intCast(std.Io.Timestamp.now(io_std, .real).toMilliseconds());
+    fn init(time: Time, prng: *stdx.PRNG) TBIDGenerator {
         return .{
+            .time = time,
             .prng = prng,
-            .epoch_ms = epoch_ms,
-            .random = prng.int(u80),
+            .previous = 0,
         };
     }
 
-    fn next(generator: *TbidGenerator, io_std: std.Io) u128 {
-        const now: u128 = @intCast(std.Io.Timestamp.now(io_std, .real).toMilliseconds());
+    fn next(generator: *TBIDGenerator) u128 {
+        const time_ms_new = generator.time_ms();
 
-        if (now > generator.epoch_ms) {
-            // Time advanced: use new time and new random.
-            generator.epoch_ms = now;
-            generator.random = generator.prng.int(u80);
+        if (time_ms_new > generator.previous) {
+            // Time advanced by at least a millisecond: use new time and new random.
+            generator.previous = time_ms_new | generator.entropy();
         } else {
-            // Time same or behind: keep old time, increment random.
-            generator.random = std.math.add(u80, generator.random, 1) catch blk: {
-                // Carry the overflow to the time part and reseed random (as the rust client).
-                generator.epoch_ms = std.math.add(u128, generator.epoch_ms, 1) catch
-                    @panic("tbid timestamp overflow");
-                break :blk generator.prng.int(u80);
-            };
+            // Time same or behind, increment.
+            generator.previous += 1;
         }
+        return generator.previous;
+    }
 
-        return (@as(u128, generator.epoch_ms) << 80) | @as(u128, generator.random);
+    const time_ms_mask: u128 = 0xFFFF_FFFF_FFFF_0000_0000_0000_0000_0000;
+    const entropy_mask: u128 = 0x0000_0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF;
+    comptime {
+        assert(@popCount(time_ms_mask) == 48);
+        assert(@popCount(entropy_mask) == 80);
+        assert((time_ms_mask ^ entropy_mask) == std.math.maxInt(u128));
+
+        const instant_max: stdx.InstantUnix = .{ .ns = std.math.maxInt(u64) };
+        const time_ms_max = time_ms_from_instant(instant_max);
+        assert(time_ms_max == 0x10C6_F7A0_B5ED_0000_0000_0000_0000_0000);
+        assert(time_ms_max & (~time_ms_mask) == 0);
+    }
+
+    fn time_ms(generator: *TBIDGenerator) u128 {
+        const now: stdx.InstantUnix = generator.time.realtime();
+        return time_ms_from_instant(now);
+    }
+
+    fn time_ms_from_instant(instant: stdx.InstantUnix) u128 {
+        const instant_ms = @divFloor(instant.ns, std.time.ns_per_ms);
+        const result: u128 = @as(u128, instant_ms) << 80;
+        assert(result & (~time_ms_mask) == 0); // Can't overflow!
+        return result;
+    }
+
+    fn entropy(generator: *TBIDGenerator) u128 {
+        var result: u128 = generator.prng.int(u64);
+        result <<= 16;
+        result |= generator.prng.int(u16);
+        assert(result & (~entropy_mask) == 0);
+        return result;
     }
 };
 
@@ -338,7 +363,7 @@ const Benchmark = struct {
     account_generator: Generator,
     account_generator_hot: Generator,
     transfer_id_permutation: IdPermutation,
-    tbid_generator: ?TbidGenerator,
+    tbid_generator: ?TBIDGenerator,
     transfer_batch_count: u32,
     transfer_batch_delay: Duration,
     transfer_count: u64,
@@ -936,7 +961,7 @@ const Benchmark = struct {
 
     fn next_transfer_id(b: *Benchmark) u128 {
         if (b.tbid_generator) |*gen| {
-            return gen.next(b.io.io_std);
+            return gen.next();
         } else {
             return b.transfer_id_permutation.encode(b.transfer_index + 1);
         }
