@@ -7,7 +7,7 @@ A client session may have **at most one in-flight request** — i.e. at most one
 network for which a reply has not been received. This simplifies consistency and allows the cluster
 to statically guarantee capacity in its incoming message queue. Additional requests from the
 application are queued by the client, to be dequeued and sent when their preceding request receives
-a reply.
+a reply. There is no limit on the number of queued requests.
 
 Similar to other databases, TigerBeetle has a [hard limit](#eviction) on the number of concurrent
 client sessions. To maximize throughput, users are encouraged to minimize the number of concurrent
