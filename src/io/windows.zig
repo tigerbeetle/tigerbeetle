@@ -413,12 +413,11 @@ pub const IO = struct {
                     // Return the socket if we succeed in accepting.
                     if (rc != os.windows.FALSE) {
                         // Enables getsockopt, setsockopt, getsockname, getpeername.
-                        _ = os.windows.ws2_32.setsockopt(
+                        try posix.setsockopt(
                             op.client_socket.?,
                             os.windows.ws2_32.SOL.SOCKET,
                             os.windows.ws2_32.SO.UPDATE_ACCEPT_CONTEXT,
-                            null,
-                            0,
+                            std.mem.asBytes(&op.listen_socket),
                         );
 
                         return op.client_socket.?;
