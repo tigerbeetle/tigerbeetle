@@ -39,6 +39,8 @@ fn satisfies(requirement: ast.Case.Requirement) bool {
     };
 }
 
+const ClientVariant = enum { synchronous, asynchronous };
+
 fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
     try printer.write(
         \\//////////////////////////////////////////////////////////
@@ -54,6 +56,8 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\import java.lang.ProcessBuilder.Redirect;
         \\import java.math.BigInteger;
         \\import java.time.Duration;
+        \\import java.util.concurrent.CompletableFuture;
+        \\import java.util.concurrent.ExecutionException;
         \\import java.util.stream.Collectors;
         \\
         \\import org.junit.After;
@@ -94,30 +98,51 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
         \\    }
         \\
     );
-    for (tests.suites) |suite| {
+    for (std.enums.values(ClientVariant)) |variant| {
         try printer.write_empty_line();
-        try printer.print_indented("// Suite: {s}", .{suite.name});
-        for (suite.cases) |case| {
-            const case_memory = printer.mark();
-            defer printer.release(case_memory);
-
+        try printer.write(switch (variant) {
+            .synchronous =>
+            \\    /////////////////
+            \\    // Sync client
+            \\    /////////////////
+            \\
+            ,
+            .asynchronous =>
+            \\    //////////////////
+            \\    // Async client
+            \\    //////////////////
+            \\
+            ,
+        });
+        for (tests.suites) |suite| {
             try printer.write_empty_line();
-            if (case.requirement) |requirement| {
-                if (!satisfies(requirement)) {
-                    try printer.write_omission(case);
-                    continue;
+            try printer.print_indented("// Suite: {s}", .{suite.name});
+            for (suite.cases) |case| {
+                const case_memory = printer.mark();
+                defer printer.release(case_memory);
+
+                try printer.write_empty_line();
+                if (case.requirement) |requirement| {
+                    if (!satisfies(requirement)) {
+                        try printer.write_omission(case);
+                        continue;
+                    }
                 }
+                try printer.write_indented("@Test");
+                const name = try printer.string_alloc("public void test{s}{s}{s}()", .{
+                    try printer.to_case_alloc(.PascalCase, suite.name),
+                    try printer.to_case_alloc(.PascalCase, case.description),
+                    switch (variant) {
+                        .synchronous => "",
+                        .asynchronous => "Async",
+                    },
+                });
+                try emit_signature(printer, name);
+                printer.indent();
+                try emit_case(printer, case, variant);
+                printer.dedent();
+                try printer.write_indented("}");
             }
-            try printer.write_indented("@Test");
-            const name = try printer.string_alloc("public void test{s}{s}()", .{
-                try printer.to_case_alloc(.PascalCase, suite.name),
-                try printer.to_case_alloc(.PascalCase, case.description),
-            });
-            try emit_signature(printer, name);
-            printer.indent();
-            try emit_case(printer, case);
-            printer.dedent();
-            try printer.write_indented("}");
         }
     }
     try emit_server(printer);
@@ -127,6 +152,7 @@ fn emit(printer: *Printer, tests: ast.ConformanceTests) !void {
 fn emit_case(
     printer: *Printer,
     case: ast.Case,
+    variant: ClientVariant,
 ) !void {
     var scope = Scope.init(printer);
     const consumed = try printer.arena().alloc(bool, case.steps.len);
@@ -138,7 +164,7 @@ fn emit_case(
         {
             try emit_row_group(&scope, case.steps, index, consumed);
         } else {
-            try emit_step(&scope, step);
+            try emit_step(&scope, step, variant);
         }
     }
 }
@@ -351,15 +377,15 @@ const Scope = struct {
     }
 };
 
-fn emit_step(scope: *Scope, step: ast.Step) !void {
+fn emit_step(scope: *Scope, step: ast.Step, variant: ClientVariant) !void {
     switch (step) {
-        .binding => |binding| try emit_binding(scope, binding),
-        .call => |call| try emit_call(scope, call, .{}),
-        .assertion => |assertion| try emit_assertion(scope, assertion),
+        .binding => |binding| try emit_binding(scope, binding, variant),
+        .call => |call| try emit_call(scope, call, variant, .{}),
+        .assertion => |assertion| try emit_assertion(scope, assertion, variant),
     }
 }
 
-fn emit_binding(scope: *Scope, binding: ast.Binding) !void {
+fn emit_binding(scope: *Scope, binding: ast.Binding, variant: ClientVariant) !void {
     const printer = scope.printer;
     const name = try printer.to_case_alloc(.camelCase, binding.name);
     switch (binding.value) {
@@ -408,7 +434,7 @@ fn emit_binding(scope: *Scope, binding: ast.Binding) !void {
             .TransferFlags,
             => unreachable,
         },
-        .call => |call| try emit_call(scope, call, .{ .binding = name }),
+        .call => |call| try emit_call(scope, call, variant, .{ .binding = name }),
         .integer,
         .boolean,
         .enum_literal,
@@ -446,6 +472,7 @@ fn hoist_record(
 fn emit_call(
     scope: *Scope,
     call: ast.Call,
+    variant: ClientVariant,
     options: struct {
         binding: ?[]const u8 = null,
         expect_error: bool = false,
@@ -455,6 +482,20 @@ fn emit_call(
     const printer = scope.printer;
     if (call.concurrency > 1) {
         assert(options.binding == null);
+        if (variant == .asynchronous) {
+            try printer.print_indented("final var tasks = new CompletableFuture[{d}];", .{
+                call.concurrency,
+            });
+            try printer.print_indented("for (int index = 0; index < {d}; index++) {{", .{
+                call.concurrency,
+            });
+            printer.indent();
+            try emit_invocation(scope, call, variant, .{ .task = true });
+            printer.dedent();
+            try printer.write_indented("}");
+            try printer.write_indented("CompletableFuture.allOf(tasks).join();");
+            return;
+        }
         try printer.print_indented("final var threads = new Thread[{d}];", .{call.concurrency});
         try printer.print_indented("final var exceptions = new Exception[{d}];", .{
             call.concurrency,
@@ -470,7 +511,7 @@ fn emit_call(
 
         printer.indent();
         var thread_scope = Scope.init(printer);
-        try emit_invocation(&thread_scope, call, .{});
+        try emit_invocation(&thread_scope, call, variant, .{});
         printer.dedent();
 
         try printer.write_indented("} catch (Exception exception) {");
@@ -502,7 +543,7 @@ fn emit_call(
         return;
     }
 
-    try emit_invocation(scope, call, .{
+    try emit_invocation(scope, call, variant, .{
         .binding = options.binding,
         .expect_error = options.expect_error,
         .client_error = options.client_error,
@@ -512,10 +553,12 @@ fn emit_call(
 fn emit_invocation(
     scope: *Scope,
     call: ast.Call,
+    variant: ClientVariant,
     options: struct {
         binding: ?[]const u8 = null,
         expect_error: bool = false,
         client_error: ?ast.ClientError = null,
+        task: bool = false,
     },
 ) !void {
     const printer = scope.printer;
@@ -535,7 +578,7 @@ fn emit_invocation(
     }
 
     // An unbound call uses a fixed local name for its input, so a block lets the name repeat.
-    const scoped = options.binding == null;
+    const scoped = options.binding == null and !options.task;
     if (scoped) {
         try printer.write_indented("{");
         printer.indent();
@@ -544,16 +587,46 @@ fn emit_invocation(
     // The input goes into a final local, which the `assertThrows` lambda can use.
     const argument = try emit_argument(scope, call, options.binding);
 
-    try printer.write_indent();
+    const operation = java_operation_name(call.name);
     if (options.expect_error) {
-        try printer.print("assertThrows({s}.class, () -> client.{s}({s}));\n", .{
-            if (options.client_error) |client_error| java_exception_name(client_error) else "Exception",
-            java_operation_name(call.name),
-            argument,
-        });
+        const exception = if (options.client_error) |client_error|
+            java_exception_name(client_error)
+        else
+            "Exception";
+        switch (variant) {
+            .synchronous => try printer.print_indented(
+                "assertThrows({s}.class, () -> client.{s}({s}));",
+                .{ exception, operation, argument },
+            ),
+            // A closed client throws directly. Other errors fail the future and get unwrapped.
+            .asynchronous => {
+                try printer.print_indented("assertThrows({s}.class, () -> {{", .{exception});
+                printer.indent();
+                try printer.write_indented("try {");
+                printer.indent();
+                try printer.print_indented("client.{s}Async({s}).get();", .{ operation, argument });
+                printer.dedent();
+                try printer.write_indented("} catch (ExecutionException exception) {");
+                printer.indent();
+                try printer.write_indented("throw exception.getCause();");
+                printer.dedent();
+                try printer.write_indented("}");
+                printer.dedent();
+                try printer.write_indented("});");
+            },
+        }
     } else {
+        try printer.write_indent();
         if (options.binding) |binding| try printer.print("final var {s} = ", .{binding});
-        try printer.print("client.{s}({s});\n", .{ java_operation_name(call.name), argument });
+        if (options.task) try printer.write("tasks[index] = ");
+        switch (variant) {
+            .synchronous => try printer.print("client.{s}({s});\n", .{ operation, argument }),
+            .asynchronous => try printer.print("client.{s}Async({s}){s};\n", .{
+                operation,
+                argument,
+                if (options.task) "" else ".get()",
+            }),
+        }
     }
 
     if (scoped) {
@@ -702,7 +775,7 @@ fn emit_setter(
     printer.dedent();
 }
 
-fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
+fn emit_assertion(scope: *Scope, assertion: ast.Assertion, variant: ClientVariant) !void {
     const printer = scope.printer;
     switch (assertion) {
         .equal => |equal| {
@@ -766,7 +839,7 @@ fn emit_assertion(scope: *Scope, assertion: ast.Assertion) !void {
                 ),
             });
         },
-        .fail => |failure| try emit_call(scope, failure.call, .{
+        .fail => |failure| try emit_call(scope, failure.call, variant, .{
             .expect_error = true,
             .client_error = failure.client_error,
         }),
