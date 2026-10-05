@@ -141,6 +141,7 @@ pub const Supervisor = struct {
         replica_count: u8,
         faulty: bool,
         log_debug: bool,
+        directory: []const u8,
     };
 
     pub fn create(
@@ -159,13 +160,6 @@ pub const Supervisor = struct {
         assert(dependencies.releases.len == dependencies.server_executables.len);
         assert(dependencies.releases.len == dependencies.driver_executables.len);
         assert(options.replica_count > 0);
-
-        const output_directory = try shell.create_tmp_dir();
-        errdefer {
-            shell.cwd.deleteTree(shell.io, output_directory) catch |err| {
-                log.err("error deleting tree: {}", .{err});
-            };
-        }
 
         var prng = stdx.PRNG.from_seed(options.seed);
 
@@ -186,7 +180,7 @@ pub const Supervisor = struct {
         for (replica_datafiles, 0..) |*datafile, replica_index| {
             datafile.* = try shell.fmt(
                 "{s}/{d}_{d}.tigerbeetle",
-                .{ output_directory, constants.vortex.cluster_id, replica_index },
+                .{ options.directory, constants.vortex.cluster_id, replica_index },
             );
         }
 
@@ -207,7 +201,7 @@ pub const Supervisor = struct {
 
             replica.* = try Replica.create(
                 allocator,
-                try shell.fmt("{s}/tigerbeetle-R{d:0>2}", .{ output_directory, replica_index }),
+                try shell.fmt("{s}/tigerbeetle-R{d:0>2}", .{ options.directory, replica_index }),
                 options.replica_count,
                 @intCast(replica_index),
                 replica_ports,
@@ -225,7 +219,7 @@ pub const Supervisor = struct {
             .shell = shell,
             .network = network,
             .options = options,
-            .output_directory = output_directory,
+            .output_directory = options.directory,
             .server_executables = dependencies.server_executables,
             .driver_executables = dependencies.driver_executables,
             .releases = dependencies.releases,
@@ -256,12 +250,6 @@ pub const Supervisor = struct {
         supervisor.io.deinit();
         supervisor.allocator.destroy(supervisor.io);
 
-        supervisor.shell.cwd.deleteTree(
-            supervisor.shell.io,
-            supervisor.output_directory,
-        ) catch |err| {
-            log.err("error deleting tree: {}", .{err});
-        };
         supervisor.shell.destroy();
         supervisor.allocator.destroy(supervisor);
     }
