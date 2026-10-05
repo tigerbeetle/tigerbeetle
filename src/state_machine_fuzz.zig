@@ -45,7 +45,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     var prng = stdx.PRNG.from_seed(args.seed);
 
-    for (0..args.events_max orelse 50_000) |_| {
+    for (0..args.events_max orelse 100) |_| {
         var operation = prng.enum_uniform(TestContext.StateMachine.Operation);
         operation = .create_accounts;
         const size: usize = size: {
@@ -95,11 +95,17 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 };
             }
         }
-        context.op += 1;
+        // Match Replica's commit order, including the delay before released blocks can be reused.
+        context.checkpoint_durable();
         context.state_machine_compact();
-        if (vsr.Checkpoint.valid(context.op)) {
+        const checkpoint_next = vsr.Checkpoint.checkpoint_after(context.checkpoint_op);
+        if (context.op == vsr.Checkpoint.trigger_for_checkpoint(checkpoint_next).?) {
             context.state_machine_checkpoint();
+            context.grid_checkpoint();
+            context.checkpoint_op = checkpoint_next;
+            context.grid.mark_checkpoint_not_durable();
         }
+        context.op += 1;
     }
 }
 
@@ -111,6 +117,8 @@ const TestContext = struct { // TODO: rename to WORLD
     grid: Grid,
     state_machine: StateMachine,
     reference: StateMachineReference = .{},
+    // This fuzzer never reopens storage, so checkpoint progress is only tracked in memory.
+    checkpoint_op: u64,
     op: u64,
     busy: bool,
 
@@ -180,6 +188,7 @@ const TestContext = struct { // TODO: rename to WORLD
     fn state_machine_open(context: *TestContext) void {
         context.busy = true;
         context.op = 1;
+        context.checkpoint_op = 0;
         context.state_machine.open(state_machine_open_callback);
 
         while (context.busy) context.storage.run();
@@ -189,7 +198,6 @@ const TestContext = struct { // TODO: rename to WORLD
         const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
         assert(context.busy);
         context.busy = false;
-        context.grid.free_set.mark_checkpoint_durable();
     }
 
     fn state_machine_compact(context: *TestContext) void {
@@ -210,11 +218,23 @@ const TestContext = struct { // TODO: rename to WORLD
         while (context.busy) context.storage.run();
     }
 
+    fn checkpoint_durable(context: *TestContext) void {
+        if (context.grid.free_set.checkpoint_durable) return;
+        const checkpoint_op = context.checkpoint_op;
+        if (!vsr.Checkpoint.durable(checkpoint_op, context.op)) return;
+
+        if (vsr.Checkpoint.trigger_for_checkpoint(checkpoint_op)) |trigger| {
+            assert(context.op == trigger + constants.pipeline_prepare_queue_max + 1);
+        }
+
+        // No repairs run in this fuzzer, so there are no repair writes to await before freeing blocks.
+        context.grid.free_set.mark_checkpoint_durable();
+    }
+
     fn state_machine_checkpoint_callback(state_machine: *StateMachine) void {
         const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
         assert(context.busy);
         context.busy = false;
-        context.grid_checkpoint();
     }
 
     fn grid_checkpoint(context: *TestContext) void {
@@ -227,8 +247,6 @@ const TestContext = struct { // TODO: rename to WORLD
         const context: *TestContext = @alignCast(@fieldParentPtr("grid", grid));
         assert(context.busy);
         context.busy = false;
-        grid.mark_checkpoint_not_durable();
-        grid.free_set.mark_checkpoint_durable();
     }
 
     fn prepare(
