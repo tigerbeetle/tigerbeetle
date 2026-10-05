@@ -422,10 +422,18 @@ pub const IO = struct {
                     );
                 },
                 .recv => |op| {
-                    sqe.prep_recv(op.socket, op.buffer, 0);
+                    sqe.prep_recv(
+                        op.socket,
+                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        0,
+                    );
                 },
                 .send => |op| {
-                    sqe.prep_send(op.socket, op.buffer, posix.MSG.NOSIGNAL);
+                    sqe.prep_send(
+                        op.socket,
+                        op.buffer[0..buffer_limit(op.buffer.len)],
+                        posix.MSG.NOSIGNAL,
+                    );
                 },
                 .statx => |op| {
                     sqe.prep_statx(
