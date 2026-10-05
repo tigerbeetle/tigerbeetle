@@ -626,6 +626,281 @@ pub fn StateMachineReferenceType(comptime account_count_max: usize, comptime tra
     };
 }
 
+test "state_machine reference model conformance test CreateAccountStatus" {
+    var create_account_status_map: std.EnumArray(tb.CreateAccountStatus, bool) = .initFill(false);
+    // This legacy status is no longer returned; successful creation returns .created.
+    create_account_status_map.set(.deprecated_ok, true);
+
+    const linked: tb.AccountFlags = .{ .linked = true };
+    const imported: tb.AccountFlags = .{ .imported = true };
+    // Each triplet contains overrides for two valid accounts and their expected statuses.
+    // The fresh model starts at time 100, so the two-account import cutoff is 101.
+    inline for (.{
+        .{ .{}, .{}, .{ .created, .created } },
+        .{ .{ .flags = linked }, .{ .id = 0 }, .{ .linked_event_failed, .id_must_not_be_zero } },
+        .{ .{ .flags = linked, .id = 0 }, .{}, .{ .id_must_not_be_zero, .linked_event_failed } },
+        .{ .{ .flags = linked }, .{ .flags = linked }, .{ .linked_event_failed, .linked_event_chain_open } },
+        .{ .{ .flags = imported, .timestamp = 1 }, .{}, .{ .created, .imported_event_expected } },
+        .{ .{}, .{ .flags = imported, .timestamp = 1 }, .{ .created, .imported_event_not_expected } },
+        .{ .{}, .{ .timestamp = 1 }, .{ .created, .timestamp_must_be_zero } },
+        .{ .{ .flags = imported, .timestamp = 1 }, .{ .flags = imported, .timestamp = 0 }, .{ .created, .imported_event_timestamp_out_of_range } },
+        .{ .{ .flags = imported, .timestamp = 1 }, .{ .flags = imported, .timestamp = timestamp_max }, .{ .created, .imported_event_timestamp_out_of_range } },
+        .{ .{ .flags = imported, .timestamp = 1 }, .{ .flags = imported, .timestamp = timestamp_max + 1 }, .{ .created, .imported_event_timestamp_out_of_range } },
+        .{ .{ .flags = imported, .timestamp = 1 }, .{ .flags = imported, .timestamp = 102 }, .{ .created, .imported_event_timestamp_must_not_advance } },
+        .{ .{}, .{ .reserved = 1 }, .{ .created, .reserved_field } },
+        .{ .{}, .{ .flags = tb.AccountFlags{ .padding = 1 } }, .{ .created, .reserved_flag } },
+        .{ .{}, .{ .id = 0 }, .{ .created, .id_must_not_be_zero } },
+        .{ .{}, .{ .id = account_max_id }, .{ .created, .id_must_not_be_int_max } },
+        .{ .{}, .{ .id = 1, .flags = tb.AccountFlags{ .history = true } }, .{ .created, .exists_with_different_flags } },
+        .{ .{}, .{ .id = 1, .user_data_128 = 1 }, .{ .created, .exists_with_different_user_data_128 } },
+        .{ .{}, .{ .id = 1, .user_data_64 = 1 }, .{ .created, .exists_with_different_user_data_64 } },
+        .{ .{}, .{ .id = 1, .user_data_32 = 1 }, .{ .created, .exists_with_different_user_data_32 } },
+        .{ .{}, .{ .id = 1, .ledger = 2 }, .{ .created, .exists_with_different_ledger } },
+        .{ .{}, .{ .id = 1, .code = 2 }, .{ .created, .exists_with_different_code } },
+        .{ .{}, .{ .id = 1 }, .{ .created, .exists } },
+        .{ .{}, .{ .flags = tb.AccountFlags{ .debits_must_not_exceed_credits = true, .credits_must_not_exceed_debits = true } }, .{ .created, .flags_are_mutually_exclusive } },
+        .{ .{}, .{ .debits_pending = 1 }, .{ .created, .debits_pending_must_be_zero } },
+        .{ .{}, .{ .debits_posted = 1 }, .{ .created, .debits_posted_must_be_zero } },
+        .{ .{}, .{ .credits_pending = 1 }, .{ .created, .credits_pending_must_be_zero } },
+        .{ .{}, .{ .credits_posted = 1 }, .{ .created, .credits_posted_must_be_zero } },
+        .{ .{}, .{ .ledger = 0 }, .{ .created, .ledger_must_not_be_zero } },
+        .{ .{}, .{ .code = 0 }, .{ .created, .code_must_not_be_zero } },
+        .{ .{ .flags = imported, .timestamp = 2 }, .{ .flags = imported, .timestamp = 1 }, .{ .created, .imported_event_timestamp_must_not_regress } },
+        .{ .{ .flags = imported, .timestamp = 1 }, .{ .flags = imported, .timestamp = 1 }, .{ .created, .imported_event_timestamp_must_not_regress } },
+        .{ .{ .flags = imported, .timestamp = 100 }, .{ .flags = imported, .timestamp = 101 }, .{ .created, .created } },
+    }) |triplet| {
+        var model = test_model();
+        var accounts = [2]tb.Account{ test_account(1), test_account(2) };
+        inline for (0..2) |index| {
+            const overrides = triplet[index];
+            inline for (std.meta.fields(@TypeOf(overrides))) |field| {
+                @field(accounts[index], field.name) = @field(overrides, field.name);
+            }
+        }
+        var results: [2]tb.CreateAccountResult = undefined;
+        try model.create_accounts(&accounts, &results);
+        inline for (triplet[2], 0..) |expected, index| {
+            try expectEqual(@as(tb.CreateAccountStatus, expected), results[index].status);
+            create_account_status_map.set(results[index].status, true);
+        }
+    }
+    for (std.enums.values(tb.CreateAccountStatus)) |status| {
+        if (!create_account_status_map.get(status)) {
+            std.debug.print("CreateAccountStatus not covered: {s}\n", .{@tagName(status)});
+            return error.TestExpectedEqual;
+        }
+    }
+}
+
+test "state_machine reference model conformance test CreateTransferStatus" {
+    @setEvalBranchQuota(10_000);
+    var create_transfer_status_map: std.enums.EnumFieldStruct(tb.CreateTransferStatus, bool, false) = .{};
+    // Neither legacy success nor the removed amount-must-not-be-zero error is returned.
+    create_transfer_status_map.deprecated_ok = true;
+    create_transfer_status_map.deprecated_18 = true;
+
+    const linked: tb.TransferFlags = .{ .linked = true };
+    const imported: tb.TransferFlags = .{ .imported = true };
+    const pending: tb.TransferFlags = .{ .pending = true };
+    const post: tb.TransferFlags = .{ .post_pending_transfer = true };
+    const void_pending: tb.TransferFlags = .{ .void_pending_transfer = true };
+
+    const check = struct {
+        fn pair(
+            model: *TestModel,
+            coverage: anytype,
+            transfers: [2]tb.Transfer,
+            expected: [2]tb.CreateTransferStatus,
+        ) !void {
+            var results: [2]tb.CreateTransferResult = undefined;
+            try model.create_transfers(&transfers, &results);
+            for (results, expected) |result, status_expected| {
+                try expectEqual(status_expected, result.status);
+                inline for (std.enums.values(tb.CreateTransferStatus)) |status| {
+                    if (result.status == status) @field(coverage, @tagName(status)) = true;
+                }
+            }
+        }
+    }.pair;
+
+    var base = test_model();
+    var accounts = [2]tb.Account{ test_account(1), test_account(2) };
+    for (&accounts, 0..) |*account, index| {
+        account.flags.imported = true;
+        account.timestamp = (index + 1) * 10;
+    }
+    var account_results: [2]tb.CreateAccountResult = undefined;
+    try base.create_accounts(&accounts, &account_results);
+    for (account_results) |result| try expectEqual(.created, result.status);
+
+    // Each triplet contains overrides for two valid transfers and their expected statuses.
+    // Imported accounts have timestamps 10 and 20; the normal batch's import cutoff is 103.
+    inline for (.{
+        .{ .{}, .{}, .{ .created, .created } },
+        .{ .{ .amount = 0 }, .{ .amount = 0 }, .{ .created, .created } },
+        .{ .{ .flags = linked }, .{ .id = 0 }, .{ .linked_event_failed, .id_must_not_be_zero } },
+        .{ .{ .flags = linked, .id = 0 }, .{}, .{ .id_must_not_be_zero, .linked_event_failed } },
+        .{ .{ .flags = linked }, .{ .flags = linked }, .{ .linked_event_failed, .linked_event_chain_open } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{}, .{ .created, .imported_event_expected } },
+        .{ .{}, .{ .flags = imported, .timestamp = 90 }, .{ .created, .imported_event_not_expected } },
+        .{ .{}, .{ .timestamp = 1 }, .{ .created, .timestamp_must_be_zero } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = imported }, .{ .created, .imported_event_timestamp_out_of_range } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = imported, .timestamp = timestamp_max }, .{ .created, .imported_event_timestamp_out_of_range } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = imported, .timestamp = timestamp_max + 1 }, .{ .created, .imported_event_timestamp_out_of_range } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = imported, .timestamp = 104 }, .{ .created, .imported_event_timestamp_must_not_advance } },
+        .{ .{}, .{ .flags = tb.TransferFlags{ .padding = 1 } }, .{ .created, .reserved_flag } },
+        .{ .{}, .{ .id = 0 }, .{ .created, .id_must_not_be_zero } },
+        .{ .{}, .{ .id = transfer_id_max }, .{ .created, .id_must_not_be_int_max } },
+        .{ .{}, .{ .id = 1, .flags = pending }, .{ .created, .exists_with_different_flags } },
+        .{ .{}, .{ .id = 1, .pending_id = 1 }, .{ .created, .exists_with_different_pending_id } },
+        .{ .{}, .{ .id = 1, .timeout = 1 }, .{ .created, .exists_with_different_timeout } },
+        .{ .{}, .{ .id = 1, .debit_account_id = 3 }, .{ .created, .exists_with_different_debit_account_id } },
+        .{ .{}, .{ .id = 1, .credit_account_id = 3 }, .{ .created, .exists_with_different_credit_account_id } },
+        .{ .{}, .{ .id = 1, .amount = 11 }, .{ .created, .exists_with_different_amount } },
+        .{ .{}, .{ .id = 1, .user_data_128 = 1 }, .{ .created, .exists_with_different_user_data_128 } },
+        .{ .{}, .{ .id = 1, .user_data_64 = 1 }, .{ .created, .exists_with_different_user_data_64 } },
+        .{ .{}, .{ .id = 1, .user_data_32 = 1 }, .{ .created, .exists_with_different_user_data_32 } },
+        .{ .{}, .{ .id = 1, .ledger = 2 }, .{ .created, .exists_with_different_ledger } },
+        .{ .{}, .{ .id = 1, .code = 2 }, .{ .created, .exists_with_different_code } },
+        .{ .{}, .{ .id = 1 }, .{ .created, .exists } },
+        .{ .{ .debit_account_id = 3 }, .{ .id = 1, .debit_account_id = 3 }, .{ .debit_account_not_found, .id_already_failed } },
+        .{ .{}, .{ .flags = tb.TransferFlags{ .pending = true, .post_pending_transfer = true } }, .{ .created, .flags_are_mutually_exclusive } },
+        .{ .{}, .{ .debit_account_id = 0 }, .{ .created, .debit_account_id_must_not_be_zero } },
+        .{ .{}, .{ .debit_account_id = transfer_id_max }, .{ .created, .debit_account_id_must_not_be_int_max } },
+        .{ .{}, .{ .credit_account_id = 0 }, .{ .created, .credit_account_id_must_not_be_zero } },
+        .{ .{}, .{ .credit_account_id = transfer_id_max }, .{ .created, .credit_account_id_must_not_be_int_max } },
+        .{ .{}, .{ .credit_account_id = 1 }, .{ .created, .accounts_must_be_different } },
+        .{ .{}, .{ .pending_id = 1 }, .{ .created, .pending_id_must_be_zero } },
+        .{ .{ .flags = pending }, .{ .flags = post }, .{ .created, .pending_id_must_not_be_zero } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = transfer_id_max }, .{ .created, .pending_id_must_not_be_int_max } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 2 }, .{ .created, .pending_id_must_be_different } },
+        .{ .{}, .{ .timeout = 1 }, .{ .created, .timeout_reserved_for_pending_transfer } },
+        .{ .{}, .{ .flags = tb.TransferFlags{ .closing_debit = true } }, .{ .created, .closing_transfer_must_be_pending } },
+        .{ .{}, .{ .ledger = 0 }, .{ .created, .ledger_must_not_be_zero } },
+        .{ .{}, .{ .code = 0 }, .{ .created, .code_must_not_be_zero } },
+        .{ .{}, .{ .debit_account_id = 3 }, .{ .created, .debit_account_not_found } },
+        .{ .{}, .{ .credit_account_id = 3 }, .{ .created, .credit_account_not_found } },
+        .{ .{}, .{ .ledger = 2 }, .{ .created, .transfer_must_have_the_same_ledger_as_accounts } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 3 }, .{ .created, .pending_transfer_not_found } },
+        .{ .{}, .{ .flags = post, .pending_id = 1 }, .{ .created, .pending_transfer_not_pending } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 1, .debit_account_id = 3 }, .{ .created, .pending_transfer_has_different_debit_account_id } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 1, .credit_account_id = 3 }, .{ .created, .pending_transfer_has_different_credit_account_id } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 1, .ledger = 2 }, .{ .created, .pending_transfer_has_different_ledger } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 1, .code = 2 }, .{ .created, .pending_transfer_has_different_code } },
+        .{ .{ .flags = pending }, .{ .flags = post, .pending_id = 1, .amount = 11 }, .{ .created, .exceeds_pending_transfer_amount } },
+        .{ .{ .flags = pending }, .{ .flags = void_pending, .pending_id = 1, .amount = 9 }, .{ .created, .pending_transfer_has_different_amount } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = imported, .timestamp = 89 }, .{ .created, .imported_event_timestamp_must_not_regress } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = imported, .timestamp = 90 }, .{ .created, .imported_event_timestamp_must_not_regress } },
+        .{ .{ .flags = imported, .timestamp = 10 }, .{ .flags = imported, .timestamp = 20 }, .{ .imported_event_timestamp_must_not_regress, .imported_event_timestamp_must_not_regress } },
+        .{ .{ .flags = imported, .timestamp = 5 }, .{ .flags = imported, .timestamp = 15 }, .{ .imported_event_timestamp_must_postdate_debit_account, .imported_event_timestamp_must_postdate_credit_account } },
+        .{ .{ .flags = imported, .timestamp = 90 }, .{ .flags = tb.TransferFlags{ .imported = true, .pending = true }, .timestamp = 91, .timeout = 1 }, .{ .created, .imported_event_timeout_must_be_zero } },
+        .{ .{ .flags = imported, .timestamp = 102 }, .{ .flags = imported, .timestamp = 103 }, .{ .created, .created } },
+        .{ .{ .flags = tb.TransferFlags{ .pending = true, .closing_debit = true } }, .{}, .{ .created, .debit_account_already_closed } },
+        .{ .{ .flags = tb.TransferFlags{ .pending = true, .closing_credit = true } }, .{}, .{ .created, .credit_account_already_closed } },
+        .{ .{ .flags = pending, .amount = amount_max }, .{ .flags = pending, .amount = 1 }, .{ .created, .overflows_debits_pending } },
+        .{ .{ .amount = amount_max }, .{ .amount = 1 }, .{ .created, .overflows_debits_posted } },
+        .{ .{ .flags = pending, .amount = amount_max }, .{ .amount = 1 }, .{ .created, .overflows_debits } },
+    }) |triplet| {
+        var model = base;
+        var transfers = [2]tb.Transfer{ test_transfer(1), test_transfer(2) };
+        inline for (0..2) |index| {
+            const overrides = triplet[index];
+            inline for (std.meta.fields(@TypeOf(overrides))) |field| {
+                @field(transfers[index], field.name) = @field(overrides, field.name);
+            }
+        }
+        try check(&model, &create_transfer_status_map, transfers, .{ triplet[2][0], triplet[2][1] });
+    }
+
+    // These failures depend on account configuration, which transfers cannot change.
+    {
+        var model = base;
+        model.accounts[1].ledger = 2;
+        try check(&model, &create_transfer_status_map, .{ test_transfer(1), test_transfer(2) }, .{
+            .accounts_must_have_the_same_ledger, .accounts_must_have_the_same_ledger,
+        });
+    }
+    inline for (.{
+        .{ 0, "debits_must_not_exceed_credits", .exceeds_credits },
+        .{ 1, "credits_must_not_exceed_debits", .exceeds_debits },
+    }) |case| {
+        var model = base;
+        @field(model.accounts[case[0]].flags, case[1]) = true;
+        var transfers = [2]tb.Transfer{ test_transfer(1), test_transfer(2) };
+        transfers[0].amount = 0;
+        try check(&model, &create_transfer_status_map, transfers, .{ .created, case[2] });
+    }
+
+    // Seed the credit account's opposite balances equally to isolate credit overflow
+    // from the debit overflow that would otherwise take precedence.
+    inline for (.{
+        .{ "debits_pending", "credits_pending", true, .overflows_credits_pending },
+        .{ "debits_posted", "credits_posted", false, .overflows_credits_posted },
+        .{ "debits_pending", "credits_pending", false, .overflows_credits },
+    }) |case| {
+        var model = base;
+        @field(model.accounts[1], case[0]) = amount_max - 10;
+        @field(model.accounts[1], case[1]) = amount_max - 10;
+        model.invariants();
+        var transfers = [2]tb.Transfer{ test_transfer(1), test_transfer(2) };
+        for (&transfers) |*transfer| transfer.flags.pending = case[2];
+        transfers[1].amount = 1;
+        try check(&model, &create_transfer_status_map, transfers, .{ .created, case[3] });
+    }
+
+    // Already-resolved statuses need a pending transfer before the pair of resolutions.
+    {
+        var pending_model = base;
+        var seeds = [2]tb.Transfer{ test_transfer(3), test_transfer(4) };
+        seeds[0].flags.pending = true;
+        seeds[0].timeout = 1;
+        seeds[1].amount = 0;
+        try check(&pending_model, &create_transfer_status_map, seeds, .{ .created, .created });
+
+        inline for (.{
+            .{ post, .pending_transfer_already_posted },
+            .{ void_pending, .pending_transfer_already_voided },
+        }) |case| {
+            var model = pending_model;
+            var transfers = [2]tb.Transfer{ test_transfer(1), test_transfer(2) };
+            for (&transfers) |*transfer| {
+                transfer.flags = case[0];
+                transfer.pending_id = 3;
+            }
+            try check(&model, &create_transfer_status_map, transfers, .{ .created, case[1] });
+        }
+
+        // Expiration requires advancing time between creation and resolution.
+        var model = pending_model;
+        model.now = model.transfers[0].transfer.timestamp + 1_000_000_000;
+        try expectEqual(@as(usize, 1), model.pulse(1));
+        var transfers = [2]tb.Transfer{ test_transfer(1), test_transfer(2) };
+        transfers[0].flags = post;
+        transfers[1].flags = void_pending;
+        for (&transfers) |*transfer| transfer.pending_id = 3;
+        try check(&model, &create_transfer_status_map, transfers, .{
+            .pending_transfer_expired, .pending_transfer_expired,
+        });
+    }
+
+    // A timeout overflows only when the clock is near its upper bound.
+    {
+        var model = base;
+        model.now = timestamp_max - 1_000_000_000;
+        var transfers = [2]tb.Transfer{ test_transfer(1), test_transfer(2) };
+        transfers[1].flags = pending;
+        transfers[1].timeout = 1;
+        try check(&model, &create_transfer_status_map, transfers, .{ .created, .overflows_timeout });
+    }
+
+    inline for (std.enums.values(tb.CreateTransferStatus)) |status| {
+        if (!@field(create_transfer_status_map, @tagName(status))) {
+            std.debug.print("CreateTransferStatus not covered: {s}\n", .{@tagName(status)});
+            return error.TestExpectedEqual;
+        }
+    }
+}
+
 // Keep fixtures small enough that every test can start with an independent model.
 const TestModel = StateMachineReferenceType(8, 32);
 const expectEqual = std.testing.expectEqual;
