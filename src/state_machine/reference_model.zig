@@ -129,7 +129,9 @@ pub fn StateMachineReferenceType(comptime account_count_max: usize, comptime tra
             return count;
         }
 
-        // TODO: double check this invariant and how to make it work on account balance creation..
+        // Accounts start with zero balances. Transfers and pending resolutions change
+        // total debits and credits equally, and linked rollback restores both sides.
+        // Tests that seed balances directly must preserve this equality too.
         fn invariants(self: *Self) void {
             var debits_total: u256 = 0;
             var credits_total: u256 = 0;
@@ -209,6 +211,7 @@ pub fn StateMachineReferenceType(comptime account_count_max: usize, comptime tra
             comptime Result: type,
             results: []Result,
         ) !void {
+            defer self.invariants();
             assert(events.len == results.len);
             if (events.len == 0) return;
             if (self.now + events.len >= timestamp_max) return error.InvalidTime;
@@ -348,6 +351,11 @@ pub fn StateMachineReferenceType(comptime account_count_max: usize, comptime tra
             inline for (.{ "debits_pending", "debits_posted", "credits_pending", "credits_posted" }) |field| {
                 if (@field(account, field) != 0) return @field(tb.CreateAccountStatus, field ++ "_must_be_zero");
             }
+
+            if (account.debits_pending != 0) return .debits_pending_must_be_zero;
+            if (account.debits_posted != 0) return .debits_posted_must_be_zero;
+            if (account.credits_pending != 0) return .credits_pending_must_be_zero;
+            if (account.credits_posted != 0) return .credits_posted_must_be_zero;
             if (account.ledger == 0) return .ledger_must_not_be_zero;
             if (account.code == 0) return .code_must_not_be_zero;
 
@@ -827,15 +835,19 @@ test "state_machine reference model single phase and duplicate comparisons" {
 
 test "state_machine reference model balance limits and overflow boundaries" {
     inline for (.{
-        .{ 0, "debits_pending", true, .overflows_debits_pending },
-        .{ 1, "credits_pending", true, .overflows_credits_pending },
-        .{ 0, "debits_posted", false, .overflows_debits_posted },
-        .{ 1, "credits_posted", false, .overflows_credits_posted },
-        .{ 0, "debits_pending", false, .overflows_debits },
-        .{ 1, "credits_pending", false, .overflows_credits },
+        .{ 0, "debits_pending", true, .overflows_debits_pending, "credits_pending" },
+        .{ 1, "credits_pending", true, .overflows_credits_pending, "debits_pending" },
+        .{ 0, "debits_posted", false, .overflows_debits_posted, "credits_posted" },
+        .{ 1, "credits_posted", false, .overflows_credits_posted, "debits_posted" },
+        .{ 0, "debits_pending", false, .overflows_debits, "credits_pending" },
+        .{ 1, "credits_pending", false, .overflows_credits, "debits_pending" },
     }) |case| {
         var model = try test_model_with_accounts();
         @field(model.accounts[case[0]], case[1]) = amount_max - 10;
+        // Offset the seeded balance on the same account's opposite side, which
+        // this transfer does not change, preserving overflow error precedence.
+        @field(model.accounts[case[0]], case[4]) = amount_max - 10;
+        model.invariants();
         var transfer = test_transfer(1);
         transfer.flags.pending = case[2];
         transfer.amount = 11;
@@ -848,9 +860,11 @@ test "state_machine reference model balance limits and overflow boundaries" {
         if (credit) {
             model.accounts[1].flags.credits_must_not_exceed_debits = true;
             model.accounts[1].debits_posted = 10;
+            model.accounts[0].credits_posted = 10;
         } else {
             model.accounts[0].flags.debits_must_not_exceed_credits = true;
             model.accounts[0].credits_posted = 10;
+            model.accounts[1].debits_posted = 10;
         }
         var transfer = test_transfer(1);
         transfer.amount = 11;
@@ -896,6 +910,7 @@ test "state_machine reference model balancing amounts and retries" {
     }
     var model = try test_model_with_accounts();
     model.accounts[0].debits_posted = 20;
+    model.accounts[1].credits_posted = 20;
     var transfer = test_transfer(1);
     transfer.flags = .{ .balancing_debit = true, .balancing_credit = true };
     try expectEqual(.created, (try test_submit(&model, transfer)).status);
