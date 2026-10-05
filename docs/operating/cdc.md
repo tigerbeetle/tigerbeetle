@@ -105,7 +105,7 @@ and the [account](../reference/account.md)s involved.
 
 * `timestamp`: The event timestamp.<br>
   Usually, it's the same as the transfer's timestamp,
-  except when `event_type == 'two_phase_expired'` then it's the expiry timestamp.
+  except when `event_type == 'two_phase_expired'`, in which case it's the expiry timestamp.
 
 * `ledger`: The [ledger](../coding/data-modeling.md#ledgers) code.
 
