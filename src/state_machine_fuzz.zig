@@ -47,7 +47,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     for (0..args.events_max orelse 100) |_| {
         var operation = prng.enum_uniform(World.StateMachine.Operation);
-        operation = .create_accounts;
+        // operation = .create_transfers;
         const size: usize = size: {
             if (!operation.is_multi_batch()) {
                 break :size build_batch(&prng, operation, request_buffer);
@@ -333,24 +333,17 @@ fn build_batch(
         .pulse => 0,
 
         // No payload, `create_*` require compaction to be hooked up.
-        .create_transfers,
-        => 0,
+        .create_transfers => {
+            var transfer = std.mem.zeroes(tb.Transfer);
+            const transfer_bytes: []u8 = @ptrCast(std.mem.asBytes(&transfer));
+            prng.fill(transfer_bytes);
+            stdx.copy_disjoint(.inexact, u8, buffer, std.mem.asBytes(&transfer));
+            return @sizeOf(tb.Transfer);
+        },
         .create_accounts => {
-            const account: tb.Account = .{
-                .id = prng.int(u128),
-                .debits_pending = 0,
-                .debits_posted = 0,
-                .credits_pending = 0,
-                .credits_posted = 0,
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
-                .reserved = 0,
-                .ledger = 1,
-                .code = 1,
-                .flags = .{},
-                .timestamp = 0,
-            };
+            var account: tb.Account = std.mem.zeroes(tb.Account);
+            const account_bytes: []u8 = @ptrCast(std.mem.asBytes(&account));
+            prng.fill(account_bytes);
             stdx.copy_disjoint(.inexact, u8, buffer, std.mem.asBytes(&account));
             return @sizeOf(tb.Account);
         },
