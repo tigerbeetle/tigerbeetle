@@ -25,9 +25,9 @@ const StateMachineReferenceType = @import("./state_machine/reference_model.zig")
 const MiB = stdx.MiB;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
-    var context: TestContext = undefined;
-    try context.init(gpa);
-    defer context.deinit(gpa);
+    var world: World = undefined;
+    try world.init(gpa);
+    defer world.deinit(gpa);
 
     const request_buffer = try gpa.alignedAlloc(
         u8,
@@ -46,7 +46,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
 
     for (0..args.events_max orelse 100) |_| {
-        var operation = prng.enum_uniform(TestContext.StateMachine.Operation);
+        var operation = prng.enum_uniform(World.StateMachine.Operation);
         operation = .create_accounts;
         const size: usize = size: {
             if (!operation.is_multi_batch()) {
@@ -77,10 +77,10 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             break :size body_encoder.finish();
         };
 
-        if (context.state_machine.input_valid(operation, request_buffer[0..size])) {
-            context.prepare(operation, request_buffer[0..size]);
-            const reply_size = context.execute(
-                context.op,
+        if (world.state_machine.input_valid(operation, request_buffer[0..size])) {
+            world.prepare(operation, request_buffer[0..size]);
+            const reply_size = world.execute(
+                world.op,
                 operation,
                 request_buffer[0..size],
                 @ptrCast(reply_buffer),
@@ -96,20 +96,20 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             }
         }
         // Match Replica's commit order, including the delay before released blocks can be reused.
-        context.checkpoint_durable();
-        context.state_machine_compact();
-        const checkpoint_next = vsr.Checkpoint.checkpoint_after(context.checkpoint_op);
-        if (context.op == vsr.Checkpoint.trigger_for_checkpoint(checkpoint_next).?) {
-            context.state_machine_checkpoint();
-            context.grid_checkpoint();
-            context.checkpoint_op = checkpoint_next;
-            context.grid.mark_checkpoint_not_durable();
+        world.checkpoint_durable();
+        world.state_machine_compact();
+        const checkpoint_next = vsr.Checkpoint.checkpoint_after(world.checkpoint_op);
+        if (world.op == vsr.Checkpoint.trigger_for_checkpoint(checkpoint_next).?) {
+            world.state_machine_checkpoint();
+            world.grid_checkpoint();
+            world.checkpoint_op = checkpoint_next;
+            world.grid.mark_checkpoint_not_durable();
         }
-        context.op += 1;
+        world.op += 1;
     }
 }
 
-const TestContext = struct { // TODO: rename to WORLD
+const World = struct {
     storage: Storage,
     time_sim: TimeSim,
     trace: Tracer,
@@ -125,7 +125,7 @@ const TestContext = struct { // TODO: rename to WORLD
     const StateMachineReference = StateMachineReferenceType(1000, 1000);
     const StateMachine = vsr.state_machine.StateMachineType(Storage);
 
-    fn init(ctx: *TestContext, gpa: std.mem.Allocator) !void {
+    fn init(ctx: *World, gpa: std.mem.Allocator) !void {
         ctx.storage = try fixtures.init_storage(gpa, .{ .size = 512 * MiB });
         errdefer ctx.storage.deinit(gpa);
 
@@ -176,7 +176,7 @@ const TestContext = struct { // TODO: rename to WORLD
         ctx.state_machine_open();
     }
 
-    pub fn deinit(ctx: *TestContext, allocator: std.mem.Allocator) void {
+    pub fn deinit(ctx: *World, allocator: std.mem.Allocator) void {
         ctx.state_machine.deinit(allocator);
         ctx.grid.deinit(allocator);
         ctx.superblock.deinit(allocator);
@@ -185,97 +185,97 @@ const TestContext = struct { // TODO: rename to WORLD
         ctx.* = undefined;
     }
 
-    fn state_machine_open(context: *TestContext) void {
-        context.busy = true;
-        context.op = 1;
-        context.checkpoint_op = 0;
-        context.state_machine.open(state_machine_open_callback);
+    fn state_machine_open(world: *World) void {
+        world.busy = true;
+        world.op = 1;
+        world.checkpoint_op = 0;
+        world.state_machine.open(state_machine_open_callback);
 
-        while (context.busy) context.storage.run();
+        while (world.busy) world.storage.run();
     }
 
     fn state_machine_open_callback(state_machine: *StateMachine) void {
-        const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
-        assert(context.busy);
-        context.busy = false;
+        const world: *World = @fieldParentPtr("state_machine", state_machine);
+        assert(world.busy);
+        world.busy = false;
     }
 
-    fn state_machine_compact(context: *TestContext) void {
-        context.busy = true;
-        context.state_machine.compact(state_machine_compact_callback, context.op);
-        while (context.busy) context.storage.run();
+    fn state_machine_compact(world: *World) void {
+        world.busy = true;
+        world.state_machine.compact(state_machine_compact_callback, world.op);
+        while (world.busy) world.storage.run();
     }
 
     fn state_machine_compact_callback(state_machine: *StateMachine) void {
-        const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
-        assert(context.busy);
-        context.busy = false;
+        const world: *World = @fieldParentPtr("state_machine", state_machine);
+        assert(world.busy);
+        world.busy = false;
     }
 
-    fn state_machine_checkpoint(context: *TestContext) void {
-        context.busy = true;
-        context.state_machine.checkpoint(state_machine_checkpoint_callback);
-        while (context.busy) context.storage.run();
+    fn state_machine_checkpoint(world: *World) void {
+        world.busy = true;
+        world.state_machine.checkpoint(state_machine_checkpoint_callback);
+        while (world.busy) world.storage.run();
     }
 
-    fn checkpoint_durable(context: *TestContext) void {
-        if (context.grid.free_set.checkpoint_durable) return;
-        const checkpoint_op = context.checkpoint_op;
-        if (!vsr.Checkpoint.durable(checkpoint_op, context.op)) return;
+    fn checkpoint_durable(world: *World) void {
+        if (world.grid.free_set.checkpoint_durable) return;
+        const checkpoint_op = world.checkpoint_op;
+        if (!vsr.Checkpoint.durable(checkpoint_op, world.op)) return;
 
         if (vsr.Checkpoint.trigger_for_checkpoint(checkpoint_op)) |trigger| {
-            assert(context.op == trigger + constants.pipeline_prepare_queue_max + 1);
+            assert(world.op == trigger + constants.pipeline_prepare_queue_max + 1);
         }
 
         // No repairs run in this fuzzer, so there are no repair writes to await before freeing blocks.
-        context.grid.free_set.mark_checkpoint_durable();
+        world.grid.free_set.mark_checkpoint_durable();
     }
 
     fn state_machine_checkpoint_callback(state_machine: *StateMachine) void {
-        const context: *TestContext = @fieldParentPtr("state_machine", state_machine);
-        assert(context.busy);
-        context.busy = false;
+        const world: *World = @fieldParentPtr("state_machine", state_machine);
+        assert(world.busy);
+        world.busy = false;
     }
 
-    fn grid_checkpoint(context: *TestContext) void {
-        context.busy = true;
-        context.grid.checkpoint(grid_checkpoint_callback);
-        while (context.busy) context.storage.run();
+    fn grid_checkpoint(world: *World) void {
+        world.busy = true;
+        world.grid.checkpoint(grid_checkpoint_callback);
+        while (world.busy) world.storage.run();
     }
 
     fn grid_checkpoint_callback(grid: *Grid) void {
-        const context: *TestContext = @alignCast(@fieldParentPtr("grid", grid));
-        assert(context.busy);
-        context.busy = false;
+        const world: *World = @alignCast(@fieldParentPtr("grid", grid));
+        assert(world.busy);
+        world.busy = false;
     }
 
     fn prepare(
-        context: *TestContext,
+        world: *World,
         operation: StateMachine.Operation,
         message_body_used: []align(constants.cache_line_size) const u8,
     ) void {
-        context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
-        context.state_machine.prepare_timestamp += 1;
-        context.state_machine.prepare(
+        world.state_machine.commit_timestamp = world.state_machine.prepare_timestamp;
+        world.state_machine.prepare_timestamp += 1;
+        world.state_machine.prepare(
             operation,
             message_body_used,
         );
     }
 
     fn execute(
-        context: *TestContext,
+        world: *World,
         op: u64,
         operation: StateMachine.Operation,
         message_body_used: []align(constants.cache_line_size) const u8,
         output_buffer: *align(constants.cache_line_size) [constants.message_body_size_max]u8,
     ) usize {
-        const timestamp = context.state_machine.prepare_timestamp;
-        context.busy = true;
-        context.state_machine.prefetch_timestamp = timestamp;
-        context.state_machine.prefetch(
+        const timestamp = world.state_machine.prepare_timestamp;
+        world.busy = true;
+        world.state_machine.prefetch_timestamp = timestamp;
+        world.state_machine.prefetch(
             struct {
                 fn callback(state_machine: *StateMachine) void {
-                    const ctx: *TestContext = @fieldParentPtr("state_machine", state_machine);
+                    const ctx: *World = @fieldParentPtr("state_machine", state_machine);
                     assert(ctx.busy);
                     ctx.busy = false;
                 }
@@ -285,9 +285,9 @@ const TestContext = struct { // TODO: rename to WORLD
             operation,
             message_body_used,
         );
-        while (context.busy) context.storage.run();
+        while (world.busy) world.storage.run();
 
-        return context.state_machine.commit(
+        return world.state_machine.commit(
             1,
             op,
             timestamp,
@@ -325,7 +325,7 @@ pub fn int_edge_biased(prng: *stdx.PRNG, T: anytype) T {
 
 fn build_batch(
     prng: *stdx.PRNG,
-    operation: TestContext.StateMachine.Operation,
+    operation: World.StateMachine.Operation,
     buffer: []u8,
 ) u32 {
     return switch (operation) {
