@@ -47,7 +47,7 @@ Fields used by each mode of transfer:
 - _Optional_ means zero is allowed, with the behavior described below.
 - _Inherit or match_ means zero copies the pending transfer's
   value, while a nonzero value must equal the pending transfer's value exactly.
-  For each `user_data_*` field, _inherit or new_ will either copy the old transfer's user_data field 
+  For each `user_data_*` field, _inherit or new_ will either copy the old transfer's `user_data` field 
   if set to zero, or set the provided user data field on the newly created transfer.
   The original pending transfer is immutable.
 - All values remain subject to the individual [field constraints](#fields), 
