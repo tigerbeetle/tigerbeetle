@@ -61,7 +61,7 @@ pub fn deinit(flags: *Flags, gpa: Allocator) void {
 }
 
 /// Format and print an error message to stderr, then exit with an exit code of 1.
-fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
+pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
     // NB: this status must match vsr.FatalReason.cli, but it would be wrong for flags to depend on

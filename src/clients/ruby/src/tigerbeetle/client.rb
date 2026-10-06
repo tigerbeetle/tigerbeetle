@@ -120,7 +120,7 @@ module TigerBeetle
       req = COMPLETION_DISPATCHER.submit_and_wait_for(@native, operation, payload)
 
       status, result = req.result
-      raise ClientClosedError if status == PACKET_CLIENT_SHUTDOWN
+      raise ClientClosedError if status == PACKET_CLIENT_CLOSED
       raise PacketError, status unless status == PACKET_OK
 
       result

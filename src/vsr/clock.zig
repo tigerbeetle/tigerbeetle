@@ -88,8 +88,8 @@ const log = stdx.log.scoped(.clock);
 const constants = @import("../constants.zig");
 const ratio = stdx.PRNG.ratio;
 const Instant = stdx.Instant;
-const Time = @import("../time.zig").Time;
-const TimeSim = @import("../testing/time.zig").TimeSim;
+const Time = stdx.Time;
+const TimeSim = stdx.TimeSim;
 const Tracer = @import("../trace.zig").Tracer;
 
 const clock_offset_tolerance_max: u64 = constants.clock_offset_tolerance_max.ns;
@@ -336,7 +336,7 @@ pub fn monotonic(self: *Clock) Instant {
 /// Called by `Replica.on_ping()` when responding to a ping with a pong.
 /// This should never be used by the state machine, only for measuring clock offsets.
 pub fn realtime(self: *Clock) i64 {
-    return self.time.realtime();
+    return @intCast(self.time.realtime().ns);
 }
 
 /// Called by `Replica.on_request()` when the primary wants to timestamp a batch. If the primary's
@@ -381,8 +381,6 @@ pub fn round_trip_time_median_ns(self: *const Clock) ?u64 {
 }
 
 pub fn tick(self: *Clock) void {
-    self.time.tick();
-
     if (self.synchronization_disabled) return;
     self.synchronize();
     // Expire the current epoch if successive windows failed to synchronize:
@@ -610,7 +608,6 @@ fn minimum_one_way_delay(a: ?Sample, b: ?Sample) ?Sample {
 }
 
 const testing = std.testing;
-const OffsetType = @import("../testing/time.zig").OffsetType;
 
 const ClockUnitTestContainer = struct {
     time: TimeSim,
@@ -622,7 +619,7 @@ const ClockUnitTestContainer = struct {
     pub fn init(
         self: *ClockUnitTestContainer,
         allocator: std.mem.Allocator,
-        offset_type: OffsetType,
+        offset_type: TimeSim.OffsetType,
         offset_coefficient_A: i64,
         offset_coefficient_B: i64,
     ) !void {
@@ -633,7 +630,7 @@ const ClockUnitTestContainer = struct {
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
             },
-            .clock = try Clock.init(allocator, self.time.time(), null, .{
+            .clock = try Clock.init(allocator, self.time.interface(), null, .{
                 .replica_count = 3,
                 .replica = 0,
                 .quorum = 2,
@@ -643,7 +640,7 @@ const ClockUnitTestContainer = struct {
 
     pub fn run_till_tick(self: *ClockUnitTestContainer, tick_stop: u64) void {
         while (self.time.ticks < tick_stop) {
-            self.clock.time.tick();
+            self.time.tick();
 
             if (@mod(self.time.ticks, self.learn_interval) == 0) {
                 const on_pong_time = self.clock.monotonic().ns;
@@ -737,7 +734,7 @@ test "ideal clocks get clamped to cluster time" {
     var ideal_constant_drift_clock: ClockUnitTestContainer = undefined;
     try ideal_constant_drift_clock.init(
         allocator,
-        OffsetType.linear,
+        .linear,
         std.time.ns_per_ms, // loses 1ms per tick
         0,
     );
@@ -754,7 +751,7 @@ test "ideal clocks get clamped to cluster time" {
     var ideal_periodic_drift_clock: ClockUnitTestContainer = undefined;
     try ideal_periodic_drift_clock.init(
         allocator,
-        OffsetType.periodic,
+        .periodic,
         std.time.ns_per_s, // loses up to 1s
         200, // period of 200 ticks
     );
@@ -772,7 +769,7 @@ test "ideal clocks get clamped to cluster time" {
     var ideal_jumping_clock: ClockUnitTestContainer = undefined;
     try ideal_jumping_clock.init(
         allocator,
-        OffsetType.step,
+        .step,
         -5 * std.time.ns_per_day, // jumps 5 days ahead.
         49, // after 49 ticks
     );
@@ -839,13 +836,13 @@ const ClockSimulator = struct {
                 @as(i64, @intFromFloat(std.Random.init(&prng, stdx.PRNG.fill).floatNorm(f64) * 50));
             times[replica] = .{
                 .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
-                .offset_type = OffsetType.non_ideal,
+                .offset_type = .non_ideal,
                 .offset_coefficient_A = amplitude,
                 .offset_coefficient_B = phase,
                 .offset_coefficient_C = 10,
             };
 
-            clock.* = try Clock.init(allocator, times[replica].time(), null, .{
+            clock.* = try Clock.init(allocator, times[replica].interface(), null, .{
                 .replica_count = options.clock_count,
                 .replica = @intCast(replica),
                 .quorum = @divFloor(options.clock_count, 2) + 1,
@@ -944,14 +941,7 @@ test "clock: fuzz test" {
 
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
-    const SystemTime = @import("../testing/time.zig").TimeSim;
-    var system_time = SystemTime{
-        .resolution = constants.tick_ms * std.time.ns_per_ms,
-        .offset_type = .linear,
-        .offset_coefficient_A = 0,
-        .offset_coefficient_B = 0,
-    };
-    const seed: u64 = @intCast(system_time.time().realtime());
+    const seed: u64 = std.testing.random_seed;
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;

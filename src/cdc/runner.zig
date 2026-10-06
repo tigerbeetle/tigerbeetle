@@ -8,7 +8,7 @@ const maybe = vsr.stdx.maybe;
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const IO = vsr.io.IO;
-const Time = vsr.time.Time;
+const Time = stdx.Time;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusType(IO);
 const Operation = vsr.tigerbeetle.Operation;
@@ -255,7 +255,7 @@ pub const Runner = struct {
             time,
             &self.message_pool,
             .{
-                .id = stdx.unique_u128(),
+                .id = stdx.crypto_u128(),
                 .cluster = options.cluster_id,
                 .replica_count = @intCast(options.addresses.len),
                 .aof_recovery = false,
@@ -987,10 +987,10 @@ pub const RateLimit = struct {
     };
 
     count: u32,
-    timer: vsr.time.Timer,
+    timer: stdx.Timer,
     options: Options,
 
-    pub fn init(time: vsr.time.Time, options: Options) RateLimit {
+    pub fn init(time: stdx.Time, options: Options) RateLimit {
         assert(options.limit > 0);
         assert(options.period.ns > 0);
 
@@ -1043,7 +1043,7 @@ pub const RateLimit = struct {
 /// though the current method of shipping the metrics is a temporary solution.
 const Metrics = struct {
     const TimingSummary = struct {
-        timer: vsr.time.Timer,
+        timer: stdx.Timer,
 
         duration_min: ?stdx.Duration = null,
         duration_max: ?stdx.Duration = null,
@@ -1119,7 +1119,7 @@ const Metrics = struct {
                     summary.event_count,
                     event_rate,
                     timestamp_last,
-                    stdx.InstantUnix{ .ns = timestamp_last },
+                    (stdx.InstantUnix{ .ns = timestamp_last }).date_time(),
                 });
             }
             summary.* = .{
@@ -1498,7 +1498,7 @@ test "amqp: RateLimit" {
     // to force an uneven ratio of 3.333 requests per second.
     const resolution: u64 = 300 * std.time.ns_per_ms;
     var time_sim = fixtures.init_time(.{ .resolution = resolution });
-    const time = time_sim.time();
+    const time = time_sim.interface();
     var rate_limit = RateLimit.init(
         time,
         .{
@@ -1508,10 +1508,10 @@ test "amqp: RateLimit" {
     );
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
     try switch (rate_limit.attempt()) {
@@ -1522,7 +1522,7 @@ test "amqp: RateLimit" {
             duration.ns,
         ),
     };
-    time.tick();
+    time_sim.tick();
 
     try switch (rate_limit.attempt()) {
         .ok => testing.expect(false),
@@ -1532,16 +1532,16 @@ test "amqp: RateLimit" {
             duration.ns,
         ),
     };
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .ok);
-    time.tick();
+    time_sim.tick();
 
     try testing.expect(rate_limit.attempt() == .wait);
 }
@@ -1681,7 +1681,7 @@ test "amqp: JSON message" {
 test "amqp: metrics" {
     var time_sim = fixtures.init_time(.{});
     var summary: Metrics.TimingSummary = .{
-        .timer = .init(time_sim.time()),
+        .timer = .init(time_sim.interface()),
     };
 
     try testing.expectEqual(@as(u64, 0), summary.count);

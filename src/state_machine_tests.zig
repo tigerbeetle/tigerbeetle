@@ -32,7 +32,7 @@ const MultiBatchEncoder = @import("./vsr/multi_batch.zig").MultiBatchEncoder;
 const Packet = @import("./clients/c/tb_client/packet.zig").Packet;
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
-const TimeSim = @import("testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("testing/storage.zig").Storage;
 const Tracer = Storage.Tracer;
 const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
@@ -1109,7 +1109,7 @@ fn RunnerType(comptime options: Options) type {
                 .{
                     .target = &context.pending,
                     .batch_size_limit = context.state_machine.batch_size_limit,
-                    .time = context.time_sim.time(),
+                    .time = context.time_sim.interface(),
                 },
             );
         }
@@ -1242,7 +1242,7 @@ const TestContext = struct {
         context.time_sim = fixtures.init_time(.{});
         context.time_sim.ticks = 1;
 
-        context.trace = try fixtures.init_tracer(arena, context.time_sim.time(), .{});
+        context.trace = try fixtures.init_tracer(arena, context.time_sim.interface(), .{});
 
         context.superblock = try fixtures.init_superblock(arena, &context.storage, .{
             .storage_size_limit = data_file_size_min,
@@ -1256,7 +1256,7 @@ const TestContext = struct {
 
         try context.state_machine.init(
             arena,
-            context.time_sim.time(),
+            context.time_sim.interface(),
             &context.grid,
             .{
                 .batch_size_limit = constants.message_body_size_max,

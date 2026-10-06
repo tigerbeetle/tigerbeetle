@@ -10,6 +10,7 @@ const Packet = tb_client.Packet;
 const PacketStatus = tb_client.PacketStatus;
 const InitError = tb_client.InitError;
 const ClientInterface = tb_client.ClientInterface;
+const ClientError = tb_client.ClientError;
 const Operation = tb_client.Operation;
 
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
@@ -64,6 +65,7 @@ pub fn main(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
         .development = false,
+        .prebuilt = null,
     });
     defer tmp_beetle.deinit(gpa);
 
@@ -127,9 +129,9 @@ fn test_client_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
         .status = .ok,
     };
 
-    // An uninitialized client must return `ClientInvalid`.
+    // An uninitialized client must return `NotInitialized`.
     var client: ClientInterface = undefined;
-    try testing.expectError(ClientInterface.Error.ClientInvalid, client.submit(&packet));
+    try testing.expectError(ClientError.NotInitialized, client.submit(&packet));
 
     // Initializing the client.
     const cluster_id: u128 = 0;
@@ -142,7 +144,8 @@ fn test_client_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
         TestingContext.on_complete,
     );
     errdefer client.deinit() catch |err| switch (err) {
-        error.ClientInvalid => {},
+        ClientError.Closed => {},
+        ClientError.NotInitialized => unreachable,
     };
 
     // Sanity test to verify that the client is working.
@@ -153,10 +156,10 @@ fn test_client_status(gpa: std.mem.Allocator, addresses: []const u8) !void {
     try client.deinit();
 
     // Cannot submit after deinit.
-    try testing.expectError(ClientInterface.Error.ClientInvalid, client.submit(&packet));
+    try testing.expectError(ClientError.Closed, client.submit(&packet));
 
     // Multiple deinit calls are safe.
-    try testing.expectError(ClientInterface.Error.ClientInvalid, client.deinit());
+    try testing.expectError(ClientError.Closed, client.deinit());
 }
 
 // Asserts the validation rules associated with the "PacketStatus" enum.

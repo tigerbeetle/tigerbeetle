@@ -46,8 +46,6 @@ comptime {
     _ = @import("testing/marks.zig");
     _ = @import("testing/table.zig");
     _ = @import("testing/vortex/supervisor.zig");
-    _ = @import("tidy.zig");
-    _ = @import("time.zig");
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
     _ = @import("vsr/checksum.zig");

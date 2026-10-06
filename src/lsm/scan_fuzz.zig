@@ -12,7 +12,7 @@ const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_scan_fuzz);
 
-const TimeSim = @import("../testing/time.zig").TimeSim;
+const TimeSim = stdx.TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
 const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
@@ -542,7 +542,7 @@ const Environment = struct {
         prng: *stdx.PRNG,
     ) !void {
         env.time_sim = fixtures.init_time(.{});
-        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.interface(), .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{

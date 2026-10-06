@@ -5,7 +5,9 @@ const assert = std.debug.assert;
 const Shell = @import("stdx").Shell;
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
-pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+pub fn tests(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    tigerbeetle: []const u8,
+}) !void {
     try shell.exec_zig("build clients:rust -Drelease", .{});
     try shell.exec("cargo test --all", .{});
     try shell.exec("cargo fmt --check", .{});
@@ -24,6 +26,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
+            .prebuilt = options.tigerbeetle,
         });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();

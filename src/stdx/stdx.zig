@@ -34,6 +34,11 @@ pub const Instant = @import("time_units.zig").Instant;
 pub const Duration = @import("time_units.zig").Duration;
 pub const InstantUnix = @import("time_units.zig").InstantUnix;
 
+pub const Time = @import("time.zig").Time;
+pub const TimeOS = @import("time.zig").TimeOS;
+pub const TimeSim = @import("time.zig").TimeSim;
+pub const Timer = @import("time.zig").Timer;
+
 const net = @import("./net.zig");
 pub const IPAddress = net.IPAddress;
 pub const SocketAddress = net.SocketAddress;
@@ -187,20 +192,32 @@ test "disjoint_slices" {
     const b = try std.testing.allocator.alloc(u32, 8);
     defer std.testing.allocator.free(b);
 
-    try std.testing.expectEqual(true, disjoint_slices(u8, u32, a, b));
-    try std.testing.expectEqual(true, disjoint_slices(u32, u8, b, a));
+    try std.testing.expect(disjoint_slices(u8, u32, a, b));
+    try std.testing.expect(disjoint_slices(u32, u8, b, a));
 
-    try std.testing.expectEqual(true, disjoint_slices(u8, u8, a, a[0..0]));
-    try std.testing.expectEqual(true, disjoint_slices(u32, u32, b, b[0..0]));
+    try std.testing.expect(disjoint_slices(u8, u8, a, a[0..0]));
+    try std.testing.expect(disjoint_slices(u32, u32, b, b[0..0]));
 
-    try std.testing.expectEqual(false, disjoint_slices(u8, u8, a, a[0..1]));
-    try std.testing.expectEqual(false, disjoint_slices(u8, u8, a, a[a.len - 1 .. a.len]));
+    try std.testing.expect(!disjoint_slices(u8, u8, a, a[0..1]));
+    try std.testing.expect(!disjoint_slices(u8, u8, a, a[a.len - 1 .. a.len]));
 
-    try std.testing.expectEqual(false, disjoint_slices(u32, u32, b, b[0..1]));
-    try std.testing.expectEqual(false, disjoint_slices(u32, u32, b, b[b.len - 1 .. b.len]));
+    try std.testing.expect(!disjoint_slices(u32, u32, b, b[0..1]));
+    try std.testing.expect(!disjoint_slices(u32, u32, b, b[b.len - 1 .. b.len]));
 
-    try std.testing.expectEqual(false, disjoint_slices(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
-    try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
+    try std.testing.expect(!disjoint_slices(u8, u32, a, std.mem.bytesAsSlice(u32, a)));
+    try std.testing.expect(!disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
+
+    // Adjacent slices are disjoint in either order, including different element sizes.
+    const prefix = std.mem.bytesAsSlice(u32, a[0 .. 4 * @sizeOf(u32)]);
+    const suffix = a[4 * @sizeOf(u32) ..];
+
+    try std.testing.expect(disjoint_slices(u32, u8, prefix, suffix));
+    try std.testing.expect(disjoint_slices(u8, u32, suffix, prefix));
+
+    const overlapping = a[4 * @sizeOf(u32) - 1 ..];
+
+    try std.testing.expect(!disjoint_slices(u32, u8, prefix, overlapping));
+    try std.testing.expect(!disjoint_slices(u8, u32, overlapping, prefix));
 }
 
 /// Checks that a byteslice is zeroed.
@@ -388,17 +405,17 @@ pub fn log_with_timestamp(
 ) void {
     const level_text = comptime message_level.asText();
     const scope_prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const instant_unix = InstantUnix.now();
 
     const stderr = std.io.getStdErr().writer();
     var buffered_writer = std.io.bufferedWriter(stderr);
     const writer = buffered_writer.writer();
 
-    nosuspend {
-        instant_unix.format("", .{}, writer) catch return;
-        writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
-        buffered_writer.flush() catch return;
-    }
+    var log_time: TimeOS = .{};
+    const date_time = log_time.realtime().date_time();
+    date_time.format("", .{}, writer) catch return;
+
+    writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+    buffered_writer.flush() catch return;
 }
 
 /// Compare two values by directly comparing the underlying memory.
@@ -1017,7 +1034,7 @@ pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.Un
     return error.Unexpected;
 }
 
-pub fn unique_u128() u128 {
+pub fn crypto_u128() u128 {
     const value = std.crypto.random.int(u128);
 
     // Broken CSPRNG is the likeliest explanation for zero or all ones.
@@ -1273,6 +1290,7 @@ comptime {
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
     _ = @import("testing/snaptest.zig");
+    _ = @import("time.zig");
     _ = @import("time_units.zig");
     _ = @import("unshare.zig");
     _ = @import("vendored/aegis.zig");

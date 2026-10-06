@@ -16,8 +16,8 @@ const cli = @import("cli.zig");
 const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
-const Time = vsr.time.Time;
-const TimeOS = vsr.time.TimeOS;
+const Time = stdx.Time;
+const TimeOS = stdx.TimeOS;
 const Tracer = vsr.trace.Tracer;
 pub const Storage = vsr.storage.StorageType(IO);
 const AOF = vsr.aof.AOFType(IO);
@@ -104,7 +104,7 @@ pub fn main() !void {
     defer io.deinit();
 
     var time_os: TimeOS = .{};
-    const time = time_os.time();
+    const time = time_os.interface();
 
     var trace_file: ?std.fs.File = null;
     defer if (trace_file) |file| file.close();
@@ -303,7 +303,7 @@ fn command_start(
         });
     }
 
-    const random_nonce = stdx.unique_u128();
+    const random_nonce = stdx.crypto_u128();
 
     var self_exe_path: ?[:0]const u8 = null;
     defer if (self_exe_path) |path| gpa.free(path);
@@ -543,7 +543,7 @@ fn command_reformat(
         time,
         &message_pool,
         .{
-            .id = stdx.unique_u128(),
+            .id = stdx.crypto_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
             .aof_recovery = false,

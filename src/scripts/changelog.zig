@@ -16,7 +16,9 @@ const changelog_bytes_max = 10 * MiB;
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;
 
-    const date_time = stdx.InstantUnix.now().date_time();
+    var time: stdx.TimeOS = .{};
+
+    const date_time = time.realtime().date_time();
     const today = try shell.fmt(
         "{:0>4}-{:0>2}-{:0>2}",
         .{ date_time.year, date_time.month, date_time.day },

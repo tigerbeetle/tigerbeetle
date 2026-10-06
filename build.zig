@@ -69,13 +69,13 @@ comptime {
     }
 }
 
-pub const AbiOptions = struct {
+pub const ABIOptions = struct {
     vsr_module: *std.Build.Module,
     stdx_module: *std.Build.Module,
 };
 
-pub const TigerBeetleAbi = struct {
-    pub fn build_module(_: *const @This(), b: *std.Build, _: AbiOptions) *std.Build.Module {
+pub const TigerBeetleABI = struct {
+    pub fn build_module(_: *const @This(), b: *std.Build, _: ABIOptions) *std.Build.Module {
         return b.createModule(.{ .root_source_file = b.path("src/abi.zig") });
     }
 };
@@ -95,9 +95,10 @@ pub fn build(b: *std.Build) !void {
     );
     const target = try resolve_target(b, target_option);
 
-    const abi_builder: TigerBeetleAbi = .{};
+    const abi_builder: TigerBeetleABI = .{};
 
     try build_with_options(b, &abi_builder, .{
+        .ci = b.option(bool, "ci", "Enable full test suite") orelse false,
         .mode = mode,
         .target = target,
         .install_options = .{
@@ -111,6 +112,7 @@ pub fn build_with_options(
     b: *std.Build,
     abi_builder: anytype,
     options: struct {
+        ci: bool,
         mode: std.builtin.OptimizeMode,
         target: std.Build.ResolvedTarget,
         install_options: InstallOptions,
@@ -345,6 +347,16 @@ pub fn build_with_options(
         .vortex_driver_zig = vortex_driver_zig,
     });
 
+    // zig build scripts -- ci --language=java
+    const scripts = build_scripts(b, .{
+        .scripts = build_steps.scripts,
+        .scripts_build = build_steps.scripts_build,
+    }, .{
+        .stdx_module = stdx_module,
+        .vsr_options = vsr_options,
+        .target = options.target,
+    });
+
     // zig build test -- "test filter"
     try build_test(b, abi_builder, .{
         .test_unit = build_steps.test_unit,
@@ -354,6 +366,8 @@ pub fn build_with_options(
         .test_fmt = build_steps.test_fmt,
         .@"test" = build_steps.@"test",
     }, .{
+        .ci = options.ci,
+        .scripts = scripts,
         .stdx_module = stdx_module,
         .llvm_objcopy = build_options.llvm_objcopy,
         .tb_client_header = tb_client.header,
@@ -396,16 +410,6 @@ pub fn build_with_options(
         .target = options.target,
         .mode = options.mode,
         .print_exe = build_options.print_exe,
-    });
-
-    // zig build scripts -- ci --language=java
-    const scripts = build_scripts(b, .{
-        .scripts = build_steps.scripts,
-        .scripts_build = build_steps.scripts_build,
-    }, .{
-        .stdx_module = stdx_module,
-        .vsr_options = vsr_options,
-        .target = options.target,
     });
 
     // zig build vortex -- --replica-count=3 --test-duration=1m
@@ -548,15 +552,6 @@ fn build_ci(
         @"test", // Main test suite + VOPR + fuzzers, excluding clients.
         aof, // Dedicated test for AOF, which is somewhat slow to run.
 
-        clients, // Tests for all language clients below.
-        dotnet,
-        go,
-        rust,
-        java,
-        node,
-        python,
-        ruby,
-
         devhub, // Things that run on known-good commit on main branch after merge.
         @"devhub-dry-run",
         amqp,
@@ -620,19 +615,6 @@ fn build_ci(
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
         hide_stderr(aof);
         step_ci.dependOn(&aof.step);
-    }
-    inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python, .ruby }) |language| {
-        if (default or mode == .clients or mode == language) {
-            // Client tests expect vortex to exist.
-            build_ci_step(b, step_ci, .{"vortex:build"}, .{});
-            build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)}, .{});
-        }
-        if (all or mode == .clients or mode == language) {
-            build_ci_script(b, step_ci, options.scripts, &.{
-                "ci",
-                "--language=" ++ @tagName(language),
-            });
-        }
     }
 
     if (all or mode == .@"devhub-dry-run") {
@@ -949,6 +931,8 @@ fn build_test(
         @"test": *std.Build.Step,
     },
     options: struct {
+        ci: bool,
+        scripts: *std.Build.Step.Compile,
         llvm_objcopy: ?[]const u8,
         stdx_module: *std.Build.Module,
         tb_client_header: std.Build.LazyPath,
@@ -1029,6 +1013,65 @@ fn build_test(
     if (b.args == null) {
         steps.@"test".dependOn(steps.test_integration);
         steps.@"test".dependOn(steps.test_fmt);
+    }
+
+    if (options.ci and @TypeOf(abi_builder) == *const TigerBeetleABI) {
+        const language_matrix: []const []const u8 = &.{
+            "dotnet@8.0",
+            "go@1.21",
+            "rust@1.71",
+            "java@temurin-11",
+            "node@18.0",
+            "python@3.10",
+            "ruby@3.3",
+        };
+        const test_filters: []const []const u8 = if (b.args) |args| args else &.{};
+
+        inline for (language_matrix) |language_version| {
+            const at_offset = comptime std.mem.indexOfScalar(u8, language_version, '@').?;
+            const language = comptime language_version[0..at_offset];
+
+            const enabled = if (test_filters.len == 0)
+                true
+            else for (test_filters) |filter| {
+                if (std.mem.eql(u8, language, filter)) break true;
+            } else false;
+            if (enabled) {
+                const step_name = "test client " ++ language_version;
+                const script_run = std.Build.Step.Run.create(b, step_name);
+
+                const tools = comptime if (std.mem.eql(u8, language, "java"))
+                    .{"maven@3.5"}
+                else
+                    .{};
+                script_run.addArgs(&(.{ "mise", "exec", language_version } ++ tools ++ .{"--"}));
+                script_run.addArtifactArg(options.scripts);
+                script_run.addArgs(&.{ "ci", "--language=" ++ language });
+                script_run.addPrefixedFileArg("--tigerbeetle=", options.tigerbeetle_test);
+                script_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+                script_run.setEnvironmentVariable("MISE_FETCH_REMOTE_VERSIONS_TIMEOUT", "20s");
+                script_run.step.max_rss = 4 * GiB;
+                hide_stderr(script_run);
+
+                if (std.mem.eql(u8, language, "python")) {
+                    const install_dependencies = b.addSystemCommand(&.{
+                        "mise", "exec", language_version, "--",
+                        "pip",    "install",      "--quiet", //
+                        "pytest", "mypy<=1.18.2",
+                    });
+                    hide_stderr(install_dependencies);
+                    script_run.step.dependOn(&install_dependencies.step);
+                }
+                if (std.mem.eql(u8, language, "java")) {
+                    const install_dependencies = b.addSystemCommand(
+                        &.{ "mise", "plugin", "install", "maven" },
+                    );
+                    hide_stderr(install_dependencies);
+                    script_run.step.dependOn(&install_dependencies.step);
+                }
+                steps.@"test".dependOn(&script_run.step);
+            }
+        }
     }
 }
 
@@ -1126,38 +1169,47 @@ fn build_test_jni(
 
     tests.linkSystemLibrary("jvm");
     tests.addLibraryPath(.{ .cwd_relative = libjvm_path });
-    if (builtin.os.tag == .linux) {
-        // On Linux, detects the abi by calling `ldd` to check if
-        // the libjvm.so is linked against libc or musl.
-        // It's reasonable to assume that ldd will be present.
-        var exit_code: u8 = undefined;
-        const stderr_behavior = .Ignore;
-        const ldd_result = try b.runAllowFail(
-            &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
-            &exit_code,
-            stderr_behavior,
-        );
-
-        if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
-            tests.root_module.resolved_target.?.query.abi = .musl;
-            tests.root_module.resolved_target.?.result.abi = .musl;
-        } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
-            tests.root_module.resolved_target.?.query.abi = .gnu;
-            tests.root_module.resolved_target.?.result.abi = .gnu;
-        } else {
-            std.log.err("{s}", .{ldd_result});
-            return error.JavaAbiUnrecognized;
-        }
-    }
 
     switch (builtin.os.tag) {
         .windows => set_windows_dll(b.allocator, java_home),
         .macos => try b.graph.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
-        .linux => try b.graph.env_map.put("LD_LIBRARY_PATH", libjvm_path),
+        .linux => {
+            try set_linux_abi(b, tests, libjvm_path);
+            try b.graph.env_map.put("LD_LIBRARY_PATH", libjvm_path);
+        },
         else => unreachable,
     }
 
     step_test_jni.dependOn(&b.addRunArtifact(tests).step);
+}
+
+fn set_linux_abi(
+    b: *std.Build,
+    tests: *std.Build.Step.Compile,
+    libjvm_path: []const u8,
+) !void {
+    assert(builtin.os.tag == .linux);
+    // On Linux, detects the abi by calling `ldd` to check if
+    // the libjvm.so is linked against libc or musl.
+    // It's reasonable to assume that ldd will be present.
+    var exit_code: u8 = undefined;
+    const stderr_behavior = .Ignore;
+    const ldd_result = try b.runAllowFail(
+        &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
+        &exit_code,
+        stderr_behavior,
+    );
+
+    if (std.mem.indexOf(u8, ldd_result, "musl") != null) {
+        tests.root_module.resolved_target.?.query.abi = .musl;
+        tests.root_module.resolved_target.?.result.abi = .musl;
+    } else if (std.mem.indexOf(u8, ldd_result, "libc") != null) {
+        tests.root_module.resolved_target.?.query.abi = .gnu;
+        tests.root_module.resolved_target.?.result.abi = .gnu;
+    } else {
+        std.log.err("{s}", .{ldd_result});
+        return error.JavaAbiUnrecognized;
+    }
 }
 
 fn build_vopr(
@@ -1749,6 +1801,7 @@ fn build_go_client(
             assert(std.mem.count(u8, lib.out_lib_filename, ".") == 1);
             var it = std.mem.splitScalar(u8, lib.out_lib_filename, '.');
             defer assert(it.next() == null);
+
             break :cut .{ it.next().?, it.next().? };
         };
 

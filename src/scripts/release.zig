@@ -1001,14 +1001,62 @@ fn publish_python(shell: *Shell, info: VersionInfo) !void {
 
     if (try is_already_published(shell, ci_python, info)) return;
 
-    _ = try shell.env_get("TWINE_USERNAME");
-    _ = try shell.env_get("TWINE_PASSWORD");
+    const arena = shell.arena.allocator();
 
-    try shell.exec("python3 -m twine upload {package}", .{
-        .package = try shell.fmt("zig-out/dist/python/tigerbeetle-{s}-py3-none-any.whl", .{
-            info.tag,
-        }),
-    });
+    const wheel_name = try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{info.tag});
+    const wheel = try std.fs.cwd().readFileAlloc(arena, try shell.fmt("zig-out/dist/python/{s}", .{
+        wheel_name,
+    }), 10 * stdx.MiB);
+
+    const sha256 = b: {
+        var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+        hasher.update(wheel);
+
+        break :b std.fmt.bytesToHex(hasher.finalResult(), .lower);
+    };
+
+    const metadata = @import("../clients/python/wheel.zig").metadata;
+    const MultipartField = Shell.HttpOptions.MultipartField;
+    var metadata_fields: [metadata("0").len]MultipartField = undefined;
+
+    for (metadata(info.tag), &metadata_fields) |metadata_kv, *metadata_field| {
+        assert(std.mem.indexOf(u8, metadata_kv.name_http, "-") == null);
+        metadata_field.* = .{
+            .name = metadata_kv.name_http,
+            .value = metadata_kv.value,
+        };
+    }
+
+    // See https://docs.pypi.org/api/upload/ for details.
+    // Use https://test.pypi.org/legacy/ for testing.
+    _ = try shell.http_post_multipart(
+        "https://upload.pypi.org/legacy/",
+        &([_]MultipartField{
+            .{ .name = ":action", .value = "file_upload" },
+            .{ .name = "protocol_version", .value = "1" },
+            .{ .name = "filetype", .value = "bdist_wheel" },
+            .{ .name = "pyversion", .value = "py3" },
+            .{ .name = "sha256_digest", .value = &sha256 },
+            .{
+                .name = "content",
+                .value = wheel,
+                .content_type = "application/octet-stream",
+                .filename = wheel_name,
+            },
+        } ++ metadata_fields),
+        .{
+            .authorization = .{
+                .basic = .{
+                    .username = try shell.env_get("TWINE_USERNAME"),
+                    .password = try shell.env_get("TWINE_PASSWORD"),
+                },
+            },
+            .content_type = .{ .multipart = .{
+                .boundary = "1337b3371e1337b3371e1337b3371e1337b3371e",
+            } },
+            .log_errors = false,
+        },
+    );
 }
 
 fn publish_ruby(shell: *Shell, info: VersionInfo) !void {
@@ -1036,7 +1084,7 @@ fn publish_ruby_trusted_publishing_token(shell: *Shell) ![]const u8 {
             std.Uri.Component{ .raw = "rubygems.org" },
         }),
         .{
-            .authorization = try shell.fmt("bearer {s}", .{trusted_publishing_token}),
+            .authorization = .{ .raw = try shell.fmt("bearer {s}", .{trusted_publishing_token}) },
         },
     );
     const oidc = try std.json.parseFromSliceLeaky(

@@ -48,6 +48,7 @@ pub const MessageBuffer = struct {
         header_cluster,
         body_checksum,
         misdirected,
+        evicted,
     };
 
     fn invariants(buffer: *MessageBuffer) void {

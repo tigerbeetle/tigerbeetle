@@ -70,7 +70,7 @@ pub fn command_inspect_integrity(
         // If no seed was given, use a random seed for better coverage.
         const seed: u64 = seed_from_arg: {
             const seed_argument = args.seed orelse
-                break :seed_from_arg @truncate(stdx.unique_u128());
+                break :seed_from_arg @truncate(stdx.crypto_u128());
             break :seed_from_arg vsr.testing.parse_seed(seed_argument);
         };
 
@@ -410,7 +410,7 @@ fn check_grid(integrity: *Integrity, seed: u64) !u64 {
     });
     defer parent_progress_node.end();
 
-    var time: vsr.time.TimeOS = .{};
+    var time: stdx.TimeOS = .{};
     const timer = time.monotonic();
 
     while (true) {

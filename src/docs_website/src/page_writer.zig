@@ -13,15 +13,14 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
     const args = try std.process.argsAlloc(allocator);
-    assert(args.len == 9);
+    assert(args.len == 8);
     const title = args[1];
     const author = args[2];
     const url_prefix = args[3];
     const page_path = args[4];
-    const include_search = std.mem.eql(u8, args[5], "true");
-    const nav = args[6];
-    const source_file_path = args[7];
-    const target_file_path = args[8];
+    const nav = args[5];
+    const source_file_path = args[6];
+    const target_file_path = args[7];
 
     var script = try Html.create(allocator);
     try script.write(page_script, .{ .url_prefix = url_prefix });
@@ -41,11 +40,9 @@ pub fn main() !void {
     var search_box = try html.child();
     var search_results = try html.child();
     var search_script = try html.child();
-    if (include_search) {
-        try search_box.write(search_box_template, .{});
-        try search_results.write(search_results_template, .{ .url_prefix = url_prefix });
-        try search_script.write(search_script_template, .{ .url_prefix = url_prefix });
-    }
+    try search_box.write(search_box_template, .{});
+    try search_results.write(search_results_template, .{ .url_prefix = url_prefix });
+    try search_script.write(search_script_template, .{ .url_prefix = url_prefix });
     try html.write(page_template, .{
         .page_script_hash = script_hash_b64,
         .title = title,

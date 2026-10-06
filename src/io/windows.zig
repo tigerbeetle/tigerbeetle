@@ -8,7 +8,7 @@ const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 
 const QueueType = @import("../queue.zig").QueueType;
-const TimeOS = @import("../time.zig").TimeOS;
+const TimeOS = stdx.TimeOS;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 

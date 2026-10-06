@@ -42,7 +42,7 @@ class PacketStatus(enum.IntEnum):
     CLIENT_EVICTED = 2
     CLIENT_RELEASE_TOO_LOW = 3
     CLIENT_RELEASE_TOO_HIGH = 4
-    CLIENT_SHUTDOWN = 5
+    CLIENT_CLOSED = 5
     INVALID_OPERATION = 6
     INVALID_DATA_SIZE = 7
 
@@ -58,8 +58,9 @@ class InitStatus(enum.IntEnum):
 
 
 class ClientStatus(enum.IntEnum):
-    OK = 0
-    INVALID = 1
+    SUCCESS = 0
+    CLOSED = 1
+    NOT_INITIALIZED = 2
 
 
 class LogLevel(enum.IntEnum):
@@ -667,7 +668,7 @@ tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),
                                       ctypes.POINTER(InitParameters)]
 
 # Closes the client, causing any previously submitted packets to be completed with
-# `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
+# `TB_PACKET_CLIENT_CLOSED` before freeing any allocated client resources from init.
 # It is undefined behavior to use any functions on the client once deinit is called.
 tb_client_deinit = tbclient.tb_client_deinit
 tb_client_deinit.restype = ClientStatus
