@@ -567,12 +567,19 @@ pub fn ContextType(
 
         fn packet_enqueue(self: *Context, packet: *Packet) void {
             assert(thread_caller == .io);
-            assert(self.batch_size_limit != null);
             packet.assert_phase(.submitted);
+            maybe(self.batch_size_limit == null);
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
                 assert(self.pending.empty());
+
+                if (self.batch_size_limit == null) {
+                    // Evicted during registration.
+                    assert(self.client.evicted);
+                    assert(self.eviction_reason != null);
+                    return self.packet_cancel(packet);
+                }
 
                 // The client might have been evicted, but we don't return early,
                 // so that batch validation errors are surfaced first.
@@ -593,10 +600,10 @@ pub fn ContextType(
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
                 packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
-                self.packet_send(packet);
-                return;
+                return self.packet_send(packet);
             }
             assert(self.client.request_inflight != null);
+            assert(self.batch_size_limit != null);
             // Upon eviction, `request_inflight` is cleaned up.
             assert(self.eviction_reason == null);
             maybe(self.pending.empty());
@@ -681,14 +688,25 @@ pub fn ContextType(
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
             switch (self.signal.status()) {
                 .running => if (self.batch_size_limit == null) {
-                    // Don't send any requests until registration completes.
-                    assert(self.client.request_inflight != null);
-                    assert(self.client.request_inflight.?.message.header.operation == .register);
-                    return;
+                    if (self.client.request_inflight) |request_inflight| {
+                        // Don't send any requests until registration completes.
+                        assert(request_inflight.message.header.operation == .register);
+                        assert(!self.client.evicted);
+                        assert(self.eviction_reason == null);
+                        return;
+                    }
+
+                    // Evicted during registration (e.g., `client_release_too_{low,high}`).
+                    // N.B. Don't assert the exact eviction reason here to avoid coupling
+                    // too tightly with the cluster logic.
+                    assert(self.client.request_inflight == null);
+                    assert(self.client.evicted);
+                    assert(self.eviction_reason != null);
                 },
                 // Shutdown flushes pending requests.
                 .shutdown_completed, .shutdown_requested => return,
             }
+            maybe(self.batch_size_limit == null);
 
             // Prevents IO thread starvation under heavy client load.
             // Process only the minimal number of packets for the next pending request.
