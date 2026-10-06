@@ -35,6 +35,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         vsr.constants.message_body_size_max,
     );
     defer gpa.free(request_buffer);
+    const request_body = request_buffer[0..world.state_machine.batch_size_limit];
 
     const reply_buffer = try gpa.alignedAlloc(
         u8,
@@ -44,24 +45,63 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     defer gpa.free(reply_buffer);
 
     var prng = stdx.PRNG.from_seed(args.seed);
+    const options = options_swarm(&prng);
+
+    // TODO: extend the options swarm to time and queries.
+    // - think about which constallations would provoke some of the findings
+    // - max u64 as filter.
+    // - too strict assertion: failed transfer (orphaned id) + posting/voiding the failed one.
+    // - state machine missing CDC, how can we detect this ... only with minimal state?
+    //   - but we should make it so that the case can happen:
+    //    \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
+    //    \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _    _  _  _ _   _ _  0 created
+    //    \\ commit create_accounts
+    //    \\
+    //    // T1 will expire in 1 second.
+    //    \\ transfer T1 A1 A2 10  _ _ _ _ 1 L1 C1 _ PEN _   _   _ _ _ _ _ _ _ created
+    //    \\ commit create_transfers
+    //    \\
+    //    \\ tick 900 milliseconds
+    //    \\
+    //    // T1 hasn't expired yet.
+    //    \\ transfer T2 A1 A2  20  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 10 created
+    //    \\ commit create_transfers
+    //    \\
+    //    \\ tick 100 milliseconds
+    //    \\
+    //    // T1's expiry timestamp is later than the imported timestamp.
+    //    \\ transfer T3 A1 A2  30  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 20 imported_event_timestamp_must_not_regress
+    //    \\ commit create_transfers
+    //    \\
+    //    // T1's expiry timestamp is earlier than the imported timestamp.
+    //    \\ transfer T4 A1 A2  40  _ _ _ _ 0 L1 C1 _   _ _   _   _ _ IMP _ _ _ 1000000035 created
+    //    \\ commit create_transfers
+    //    - how to advance time?
+    //    - tick is just:
+    //     context.state_machine.prepare_timestamp += if (ticks.value > 0)
+    //         interval_ns
+    //     else
+    //         TimestampRange.timestamp_max - interval_ns;
+    //     context.commit_timestamp_expected = context.state_machine.prepare_timestamp;
+    //     // Pulse is executed when the cluster is idle.
+    //     context.pulse();
 
     for (0..args.events_max orelse 100) |_| {
-        var operation = prng.enum_uniform(World.StateMachine.Operation);
-        // operation = .create_transfers;
+        const operation = prng.enum_weighted(World.StateMachine.Operation, options.operation_weights);
         const size: usize = size: {
             if (!operation.is_multi_batch()) {
-                break :size build_batch(&prng, operation, request_buffer);
+                break :size build_batch(&prng, &options, operation, request_body);
             }
             assert(operation.is_multi_batch());
 
-            var body_encoder: MultiBatchEncoder = .init(request_buffer, .{
+            var body_encoder: MultiBatchEncoder = .init(request_body, .{
                 .element_size = operation.event_size(),
             });
 
             const batch_count = prng.enum_uniform(enum { one, random, max });
             while (body_encoder.writable()) |writable| {
                 if (writable.len == 0) break;
-                const bytes_written: u32 = build_batch(&prng, operation, writable);
+                const bytes_written: u32 = build_batch(&prng, &options, operation, writable);
                 body_encoder.add(bytes_written);
                 switch (batch_count) {
                     .one => {
@@ -94,6 +134,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                     error.MultiBatchInvalid => unreachable,
                 };
             }
+            // TODO: add tracking how many return codes we got back.
         }
         // Match Replica's commit order, including the delay before released blocks can be reused.
         world.checkpoint_durable();
@@ -323,8 +364,108 @@ pub fn int_edge_biased(prng: *stdx.PRNG, T: anytype) T {
     }
 }
 
+const Options = struct {
+    operation_weights: stdx.PRNG.EnumWeightsType(World.StateMachine.Operation),
+    account_id_max: u128,
+    transfer_id_max: u128,
+    account_mutation_probability: MutationProbability(tb.Account),
+    transfer_mutation_probability: MutationProbability(tb.Transfer),
+};
+
+fn options_swarm(prng: *stdx.PRNG) Options {
+    var operation_weights = fuzz.random_enum_weights(prng, World.StateMachine.Operation);
+    // Keep both creates enabled while swarming the surrounding operations.
+    operation_weights.create_accounts = prng.range_inclusive(u64, 100, 1000);
+    operation_weights.create_transfers = prng.range_inclusive(u64, 100, 1000);
+    return .{
+        .operation_weights = operation_weights,
+        .account_id_max = prng.range_inclusive(u128, 1, 256),
+        .transfer_id_max = prng.range_inclusive(u128, 1, 256),
+        .account_mutation_probability = mutation_probability_swarm(prng, tb.Account),
+        .transfer_mutation_probability = mutation_probability_swarm(prng, tb.Transfer),
+    };
+}
+
+fn MutationProbability(comptime Event: type) type {
+    return std.enums.EnumFieldStruct(std.meta.FieldEnum(Event), stdx.PRNG.Ratio, null);
+}
+
+fn mutation_probability_swarm(prng: *stdx.PRNG, comptime Event: type) MutationProbability(Event) {
+    var probability: MutationProbability(Event) = undefined;
+    inline for (comptime std.meta.fieldNames(Event)) |field| {
+        @field(probability, field) = .{
+            .numerator = prng.int_inclusive(u8, 30),
+            .denominator = 100,
+        };
+    }
+    return probability;
+}
+
+fn mutate_event(
+    prng: *stdx.PRNG,
+    comptime Event: type,
+    probability: MutationProbability(Event),
+    event: *Event,
+) void {
+    inline for (std.meta.fields(Event)) |field| {
+        if (comptime std.mem.eql(u8, field.name, "flags")) {
+            inline for (std.meta.fields(field.type)) |flag| {
+                // if (comptime std.mem.eql(u8, flag.name, "imported")) continue;
+                if (prng.chance(probability.flags)) {
+                    @field(event.flags, flag.name) = if (flag.type == bool)
+                        prng.boolean()
+                    else
+                        int_edge_biased(prng, flag.type);
+                }
+            }
+        } else if (prng.chance(@field(probability, field.name))) {
+            @field(event, field.name) = if (prng.boolean())
+                (if (prng.boolean()) 0 else std.math.maxInt(field.type))
+            else
+                int_edge_biased(prng, field.type);
+        }
+    }
+}
+
+fn build_create_accounts(prng: *stdx.PRNG, options: *const Options, buffer: []u8) u32 {
+    const accounts = stdx.bytes_as_slice(.inexact, tb.Account, buffer);
+    const count = prng.int_inclusive(u32, @intCast(accounts.len));
+    for (accounts[0..count]) |*account| {
+        // Common defaults and a small ID pool allow independent events to collide and retry.
+        // Field mutations also introduce IDs outside the pool. No account is guaranteed valid.
+        account.* = std.mem.zeroes(tb.Account);
+        account.id = prng.range_inclusive(u128, 1, options.account_id_max);
+        account.ledger = 1;
+        account.code = 1;
+        mutate_event(prng, tb.Account, options.account_mutation_probability, account);
+    }
+    return count * @sizeOf(tb.Account);
+}
+
+fn build_create_transfers(prng: *stdx.PRNG, options: *const Options, buffer: []u8) u32 {
+    const transfers = stdx.bytes_as_slice(.inexact, tb.Transfer, buffer);
+    const count = prng.int_inclusive(u32, @intCast(transfers.len));
+    for (transfers[0..count]) |*transfer| {
+        transfer.* = std.mem.zeroes(tb.Transfer);
+        transfer.id = prng.range_inclusive(u128, 1, options.transfer_id_max);
+        transfer.debit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
+        transfer.credit_account_id = prng.range_inclusive(u128, 1, options.account_id_max);
+        // References are independent of flags and of whether the referenced event exists.
+        transfer.pending_id = if (prng.boolean())
+            0
+        else
+            prng.range_inclusive(u128, 1, options.transfer_id_max);
+        transfer.amount = 1;
+        transfer.ledger = 1;
+        transfer.code = 1;
+        mutate_event(prng, tb.Transfer, options.transfer_mutation_probability, transfer);
+    }
+    return count * @sizeOf(tb.Transfer);
+}
+
 fn build_batch(
     prng: *stdx.PRNG,
+    options: *const Options,
     operation: World.StateMachine.Operation,
     buffer: []u8,
 ) u32 {
@@ -332,21 +473,8 @@ fn build_batch(
         // No payload, so not very interesting yet.
         .pulse => 0,
 
-        // No payload, `create_*` require compaction to be hooked up.
-        .create_transfers => {
-            var transfer = std.mem.zeroes(tb.Transfer);
-            const transfer_bytes: []u8 = @ptrCast(std.mem.asBytes(&transfer));
-            prng.fill(transfer_bytes);
-            stdx.copy_disjoint(.inexact, u8, buffer, std.mem.asBytes(&transfer));
-            return @sizeOf(tb.Transfer);
-        },
-        .create_accounts => {
-            var account: tb.Account = std.mem.zeroes(tb.Account);
-            const account_bytes: []u8 = @ptrCast(std.mem.asBytes(&account));
-            prng.fill(account_bytes);
-            stdx.copy_disjoint(.inexact, u8, buffer, std.mem.asBytes(&account));
-            return @sizeOf(tb.Account);
-        },
+        .create_transfers => build_create_transfers(prng, options, buffer),
+        .create_accounts => build_create_accounts(prng, options, buffer),
 
         .deprecated_create_accounts_sparse,
         .deprecated_create_transfers_sparse,
@@ -509,4 +637,189 @@ test "int_edge_biased" {
     }
 
     assert(std.mem.allEqual(bool, &found_max_int, true));
+}
+
+test "create_accounts options swarm coverage" {
+    var covered = std.EnumArray(tb.CreateAccountStatus, bool).initFill(false);
+    for (0..100) |seed| {
+        var prng = stdx.PRNG.from_seed(seed);
+        const options = options_swarm(&prng);
+        var model: StateMachineReferenceType(800, 1) = .{};
+        for (0..100) |_| {
+            var accounts: [8]tb.Account = undefined;
+            const size = build_create_accounts(&prng, &options, std.mem.asBytes(&accounts));
+            const count = @divExact(size, @sizeOf(tb.Account));
+            var results: [8]tb.CreateAccountResult = undefined;
+            try model.create_accounts(accounts[0..count], results[0..count]);
+            for (results[0..count]) |result| covered.set(result.status, true);
+        }
+    }
+
+    inline for (@typeInfo(tb.CreateAccountStatus).@"enum".fields) |field| {
+        const status: tb.CreateAccountStatus = @enumFromInt(field.value);
+        // Those are the ones we ignore for now.
+        switch (status) {
+            .deprecated_ok => continue,
+            .imported_event_not_expected => continue,
+            .imported_event_timestamp_must_not_advance => continue,
+            .imported_event_timestamp_must_not_regress => continue,
+            else => {},
+        }
+        try std.testing.expect(covered.get(status));
+    }
+}
+
+// Let account and transfer history accumulate without constructing prerequisites for events.
+test "create_transfers options swarm" {
+    @setEvalBranchQuota(100_000);
+    var covered = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(false);
+
+    for (0..100) |seed| {
+        var prng = stdx.PRNG.from_seed(seed);
+        const options = options_swarm(&prng);
+        var model: StateMachineReferenceType(400, 400) = .{};
+        for (0..100) |_| {
+            var accounts: [4]tb.Account = undefined;
+            const accounts_size = build_create_accounts(&prng, &options, std.mem.asBytes(&accounts));
+            const accounts_count = @divExact(accounts_size, @sizeOf(tb.Account));
+            var account_results: [4]tb.CreateAccountResult = undefined;
+            try model.create_accounts(accounts[0..accounts_count], account_results[0..accounts_count]);
+
+            var transfers: [4]tb.Transfer = undefined;
+            const transfers_size = build_create_transfers(&prng, &options, std.mem.asBytes(&transfers));
+            const transfers_count = @divExact(transfers_size, @sizeOf(tb.Transfer));
+            var transfer_results: [4]tb.CreateTransferResult = undefined;
+            try model.create_transfers(transfers[0..transfers_count], transfer_results[0..transfers_count]);
+            for (transfer_results[0..transfers_count]) |result| {
+                covered.set(result.status.to_ordered(), true);
+            }
+        }
+    }
+
+    inline for (@typeInfo(tb.CreateTransferStatus.Ordered).@"enum".fields) |field| {
+        const status: tb.CreateTransferStatus.Ordered = @enumFromInt(field.value);
+        std.debug.print("{s} \n", .{field.name});
+        // Those are the ones we don't hit currently.
+        // TODO: need to tweak the swarm.
+        switch (status) {
+            .deprecated_18 => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .deprecated_ok => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exceeds_pending_transfer_amount => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists_with_different_amount => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists_with_different_code => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists_with_different_ledger => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists_with_different_user_data_128 => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists_with_different_user_data_32 => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .exists_with_different_user_data_64 => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .imported_event_timeout_must_be_zero => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .imported_event_timestamp_must_not_regress => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .imported_event_timestamp_must_postdate_credit_account => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .imported_event_timestamp_must_postdate_debit_account => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .overflows_credits => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .overflows_credits_pending => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .overflows_credits_posted => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .overflows_debits => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .overflows_debits_pending => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .overflows_timeout => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_already_posted => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_already_voided => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_expired => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_has_different_amount => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_has_different_code => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_has_different_credit_account_id => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_has_different_debit_account_id => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_has_different_ledger => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            .pending_transfer_not_pending => {
+                assert(covered.get(status) == false);
+                continue;
+            },
+            else => {},
+        }
+        try std.testing.expect(covered.get(status));
+    }
 }
