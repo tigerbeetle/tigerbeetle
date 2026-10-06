@@ -390,6 +390,7 @@ pub fn build_with_options(
         .test_integration = build_steps.test_integration,
         .test_integration_build = build_steps.test_integration_build,
         .test_fmt = build_steps.test_fmt,
+        .test_docs = build_steps.docs,
         .@"test" = build_steps.@"test",
     }, .{
         .ci = options.ci,
@@ -956,6 +957,7 @@ fn build_test(
         test_integration: *std.Build.Step,
         test_integration_build: *std.Build.Step,
         test_fmt: *std.Build.Step,
+        test_docs: *std.Build.Step,
         @"test": *std.Build.Step,
     },
     options: struct {
@@ -1103,6 +1105,10 @@ fn build_test(
                 }
                 steps.@"test".dependOn(&script_run.step);
             }
+        }
+
+        if (test_filters.len == 0) {
+            steps.@"test".dependOn(steps.test_docs);
         }
     }
 }
