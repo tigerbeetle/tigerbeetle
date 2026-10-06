@@ -249,10 +249,13 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address.to_raw(),
+                    .address = undefined,
+                    .address_size = undefined,
                 },
             },
         };
+        completion.operation.connect.address_size =
+            common.address_to_posix(address, &completion.operation.connect.address);
         self.enqueue(completion);
     }
 
@@ -555,7 +558,7 @@ pub const IO = struct {
         for (0..10_000) |_| {
             const return_code = linux.accept4(
                 operation.socket,
-                @ptrCast(&operation.address),
+                &operation.address.any,
                 &operation.address_size,
                 linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             );
@@ -602,8 +605,8 @@ pub const IO = struct {
         const operation = completion.operation.connect;
         const return_code = linux.connect(
             operation.socket,
-            @ptrCast(&operation.address.any),
-            operation.address.getOsSockLen(),
+            &operation.address.any,
+            operation.address_size,
         );
         switch (linux.errno(return_code)) {
             .SUCCESS => {
@@ -860,7 +863,7 @@ pub const IO = struct {
         for (0..10_000) |_| {
             const return_code = linux.accept4(
                 operation.socket,
-                @ptrCast(&operation.address),
+                &operation.address.any,
                 &operation.address_size,
                 linux.SOCK.CLOEXEC | linux.SOCK.NONBLOCK,
             );
@@ -1373,15 +1376,16 @@ pub const IO = struct {
     const Operation = union(enum) {
         accept: struct {
             socket: socket_t,
-            address: posix.sockaddr = undefined,
-            address_size: posix.socklen_t = @sizeOf(posix.sockaddr),
+            address: common.PosixAddress,
+            address_size: posix.socklen_t,
         },
         close: struct {
             fd: fd_t,
         },
         connect: struct {
             socket: socket_t,
-            address: stdx.RawAddress,
+            address: common.PosixAddress,
+            address_size: posix.socklen_t,
         },
         eventfd_read: struct {
             fd: fd_t,
