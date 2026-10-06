@@ -263,6 +263,7 @@ class ClientSync(Client, bindings.StateMachineMixin):
     def close(self) -> None:
         tb_assert(self._client is not None)
         client_state = bindings.tb_client_deinit(ctypes.byref(self._client))
+        tb_assert(client_state != bindings.ClientStatus.NOT_INITIALIZED)
         if client_state == bindings.ClientStatus.CLOSED:
             return
 
@@ -326,6 +327,7 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
     async def close(self) -> None:
         tb_assert(self._client is not None)
         client_state = bindings.tb_client_deinit(ctypes.byref(self._client))
+        tb_assert(client_state != bindings.ClientStatus.NOT_INITIALIZED)
         if client_state == bindings.ClientStatus.CLOSED:
             return
 
