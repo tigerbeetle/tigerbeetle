@@ -68,8 +68,8 @@ Constraints:
 ### `timestamp_min`
 
 The minimum [`Account.timestamp`](account.md#timestamp) or
-[`Transfer.timestamp`](transfer.md#timestamp) from which results will be returned,
-inclusive range.
+[`Transfer.timestamp`](transfer.md#timestamp) for which results will be returned
+(inclusive).
 Optional; set to zero to disable the lower-bound filter.
 
 Constraints:
@@ -80,8 +80,8 @@ Constraints:
 ### `timestamp_max`
 
 The maximum [`Account.timestamp`](account.md#timestamp) or
-[`Transfer.timestamp`](transfer.md#timestamp) from which results will be returned,
-inclusive range.
+[`Transfer.timestamp`](transfer.md#timestamp) for which results will be returned
+(inclusive).
 Optional; set to zero to disable the upper-bound filter.
 
 Constraints:

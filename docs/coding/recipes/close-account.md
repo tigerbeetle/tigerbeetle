@@ -44,9 +44,9 @@ succeed or fail atomically.
 
 - `T2` and `T4` are _closing transfers_ that will cause the respective account to be closed.
 
-  The closing transfer must be also a _pending transfer_ so the action can be reversible.
+  The closing transfer must also be a _pending transfer_ so the action can be reversible.
 
-After committing these transfers, `A` and `B` are closed with net balance zero, and will reject any
+After committing these transfers, `A` and `B` are closed with a net balance of zero, and will reject any
 further transfers.
 
 | Account | Debits Pending | Debits Posted | Credits Pending | Credits Posted | Flags             |

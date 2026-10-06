@@ -30,11 +30,11 @@ Financial transactions require physical time for multiple reasons, including:
 - **Compliance and Auditing** - For regulatory and security purposes, it is useful to have a
   specific idea of when (in terms of wall clock time) transfers took place.
 
-TigerBeetle uses two-layered approach to physical time. On the basic layer, each replica asks the
-underling operating system about the current time. Then, timing information from several replicas is
+TigerBeetle uses a two-layered approach to physical time. On the basic layer, each replica asks the
+underlying operating system about the current time. Then, timing information from several replicas is
 aggregated to make sure that the replicas roughly agree on the time, to prevent a replica with a bad
 clock from issuing incorrect timestamps. Additionally, this "cluster time" is made strictly
-monotonic, for end user's convenience.
+monotonic, for the end user's convenience.
 
 ## Why TigerBeetle Manages Timestamps
 
