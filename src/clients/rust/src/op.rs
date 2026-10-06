@@ -14,7 +14,7 @@ use std::{
 use crate::{
     oneshot::CompletionCell,
     tb_client::{self as tbc, Operation},
-    AccountFilter, Client, Completion, PacketError, Transfer,
+    AccountFilter, Client, Completion, Error, Transfer,
 };
 
 type OpOutput<Op> = Result<
@@ -23,7 +23,7 @@ type OpOutput<Op> = Result<
         <Op as Operation>::OpSource,
         Vec<<Op as Operation>::OutputItem>,
     ),
-    PacketError,
+    Error,
 >;
 
 struct OpAwaiting<Operation>(Option<Arc<OpState>>, PhantomData<fn() -> Operation>)
@@ -76,7 +76,7 @@ impl Client {
                 }
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => {
                     drop(Arc::from_raw(remote_arc));
-                    shared.cancel(PacketError::ClientClosed);
+                    shared.cancel(Error::ClientClosed);
                 }
                 tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
                     unreachable!("Client interface not initialized")
@@ -93,7 +93,7 @@ impl Client {
     pub(crate) fn execute_allocating<Operation>(
         &self,
         source: Operation::OpSource,
-    ) -> impl Future<Output = Result<Vec<Operation::OutputItem>, PacketError>>
+    ) -> impl Future<Output = Result<Vec<Operation::OutputItem>, Error>>
     where
         Operation: tbc::Operation,
     {
@@ -114,7 +114,7 @@ const PAYLOAD_BYTES_MAX: usize = {
 
 type Target<Operation> = Vec<<Operation as tbc::Operation>::OutputItem>;
 type OperationResult<Operation> =
-    Result<(<Operation as tbc::Operation>::OpSource, Target<Operation>), PacketError>;
+    Result<(<Operation as tbc::Operation>::OpSource, Target<Operation>), Error>;
 
 #[repr(C)]
 struct PayloadTyped<Operation: tbc::Operation> {
@@ -219,7 +219,7 @@ impl Drop for PayloadOwner {
 #[repr(C)]
 pub(crate) struct OpState {
     // Fields drop in declaration order: destroy the payload owner before its backing storage.
-    payload: CompletionCell<PayloadOwner, Result<PayloadOwner, PacketError>>,
+    payload: CompletionCell<PayloadOwner, Result<PayloadOwner, Error>>,
     storage: UnsafeCell<PayloadBytes>,
     packet: UnsafeCell<tbc::tb_packet_t>,
 }
@@ -295,7 +295,7 @@ impl OpState {
         })
     }
 
-    fn cancel(&self, error: PacketError) {
+    fn cancel(&self, error: Error) {
         self.payload.complete_with(|_owner| Err(error));
     }
 }

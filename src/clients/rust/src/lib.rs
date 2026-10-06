@@ -93,7 +93,7 @@
 //!
 //! In TigerBeetle's standard build-time configuration **the maximum number of
 //! events per batch is 8189**. If the events in a request exceed this number
-//! its future will return [`PacketError::TooMuchData`].
+//! its future will return [`Error::TooMuchData`].
 //!
 //!
 //! # Memory Management
@@ -109,7 +109,7 @@
 //!
 //! ```no_run
 //! # use tigerbeetle as tb;
-//! # async fn example(client: &tb::Client, accounts: Vec<tb::Account>) -> Result<(), tb::PacketError> {
+//! # async fn example(client: &tb::Client, accounts: Vec<tb::Account>) -> Result<(), tb::Error> {
 //! let completion = tb::Completion::new();
 //! let results = Vec::with_capacity(accounts.len());
 //! let (completion, mut accounts, mut results) = client
@@ -127,8 +127,8 @@
 //! # }
 //! ```
 //!
-//! Each reusable method returns `Result<(Completion, Source, Vec<OutputItem>), PacketError>`,
-//! where `Source` is an input vector or a single query filter. On [`PacketError`], all three
+//! Each reusable method returns `Result<(Completion, Source, Vec<OutputItem>), Error>`,
+//! where `Source` is an input vector or a single query filter. On [`Error`], all three
 //! are dropped. Requests are queued before the method returns and may thus be executed, even
 //! if the returned future is never polled; dropping the future does not cancel the operation.
 //!
@@ -161,7 +161,7 @@
 //! fn get_account_transfers_paged(
 //!     client: &tb::Client,
 //!     event: tb::AccountFilter,
-//! ) -> impl Stream<Item = std::result::Result<Vec<tb::Transfer>, tb::PacketError>> + '_ {
+//! ) -> impl Stream<Item = std::result::Result<Vec<tb::Transfer>, tb::Error>> + '_ {
 //!     assert!(
 //!         event.limit > 1,
 //!         "paged queries should use an explicit limit"
@@ -241,7 +241,7 @@
 //! the request method is called and will be executed even if the future is dropped.
 //!
 //! It is possible to drop a `Client` while request futures are still outstanding.
-//! In this case any pending requests will be completed with [`PacketError::ClientClosed`].
+//! In this case any pending requests will be completed with [`Error::ClientClosed`].
 //! Request futures may resolve to successful results even after the client is closed.
 //!
 //! When `Client` is dropped without calling [`close`], it will shutdown correctly,
@@ -417,7 +417,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// The results of events are represented individually. There are two
@@ -477,7 +477,7 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the length of the `events` argument exceeds the maximum batch size, the future returns
-    /// [`PacketError::TooMuchData`]. In TigerBeetle's standard
+    /// [`Error::TooMuchData`]. In TigerBeetle's standard
     /// build-time configuration the maximum batch size is 8189.
     ///
     /// # Protocol reference
@@ -486,7 +486,7 @@ impl Client {
     pub fn create_accounts(
         &self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, Error>> {
         self.execute_allocating::<tbc::CreateAccounts>(events.to_vec())
     }
 
@@ -500,7 +500,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// The results of events are represented individually. There are two related event result
@@ -553,7 +553,7 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the number of events exceeds the maximum batch size, the future returns
-    /// [`PacketError::TooMuchData`]. In TigerBeetle's standard
+    /// [`Error::TooMuchData`]. In TigerBeetle's standard
     /// build-time configuration the maximum batch size is 8189.
     ///
     /// # Protocol reference
@@ -562,7 +562,7 @@ impl Client {
     pub fn create_transfers(
         &self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, Error>> {
         self.execute_allocating::<tbc::CreateTransfers>(events.to_vec())
     }
 
@@ -573,7 +573,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// On success, the output contains found accounts in request order, but omits IDs that were not
@@ -628,7 +628,7 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the number of IDs exceeds the maximum batch size, the future returns
-    /// [`PacketError::TooMuchData`]. In TigerBeetle's standard
+    /// [`Error::TooMuchData`]. In TigerBeetle's standard
     /// build-time configuration the maximum batch size is 8189.
     ///
     /// # Protocol reference
@@ -637,7 +637,7 @@ impl Client {
     pub fn lookup_accounts(
         &self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Account>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<Account>, Error>> {
         self.execute_allocating::<tbc::LookupAccounts>(events.to_vec())
     }
 
@@ -648,7 +648,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// On success, the output contains found transfers in request order, but omits IDs that were
@@ -703,7 +703,7 @@ impl Client {
     /// # Maximum batch size
     ///
     /// If the number of IDs exceeds the maximum batch size, the future returns
-    /// [`PacketError::TooMuchData`]. In TigerBeetle's standard
+    /// [`Error::TooMuchData`]. In TigerBeetle's standard
     /// build-time configuration the maximum batch size is 8189.
     ///
     /// # Protocol reference
@@ -712,7 +712,7 @@ impl Client {
     pub fn lookup_transfers(
         &self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, Error>> {
         self.execute_allocating::<tbc::LookupTransfers>(events.to_vec())
     }
 
@@ -726,7 +726,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// On success, it returns the matching transfers.
@@ -737,7 +737,7 @@ impl Client {
     pub fn get_account_transfers(
         &self,
         filter: AccountFilter,
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, Error>> {
         self.execute_allocating::<tbc::GetAccountTransfers>(filter)
     }
 
@@ -751,7 +751,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// On success, it returns the matching balances.
@@ -762,7 +762,7 @@ impl Client {
     pub fn get_account_balances(
         &self,
         filter: AccountFilter,
-    ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<AccountBalance>, Error>> {
         self.execute_allocating::<tbc::GetAccountBalances>(filter)
     }
 
@@ -776,7 +776,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// On success, it returns the matching accounts.
@@ -787,7 +787,7 @@ impl Client {
     pub fn query_accounts(
         &self,
         filter: QueryFilter,
-    ) -> impl Future<Output = Result<Vec<Account>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<Account>, Error>> {
         self.execute_allocating::<tbc::QueryAccounts>(filter)
     }
 
@@ -801,7 +801,7 @@ impl Client {
     ///
     /// # Interpreting the return value
     ///
-    /// If the operation returns a [`PacketError`], you can assume that none of the events
+    /// If the operation returns a [`Error`], you can assume that none of the events
     /// were processed.
     ///
     /// On success, it returns the matching transfers.
@@ -812,7 +812,7 @@ impl Client {
     pub fn query_transfers(
         &self,
         filter: QueryFilter,
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketError>> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, Error>> {
         self.execute_allocating::<tbc::QueryTransfers>(filter)
     }
 
@@ -829,7 +829,7 @@ impl Client {
         completion: Completion,
         accounts: Vec<Account>,
         results: Vec<CreateAccountResult>,
-    ) -> impl Future<Output = Result<(Completion, Vec<Account>, Vec<CreateAccountResult>), PacketError>>
+    ) -> impl Future<Output = Result<(Completion, Vec<Account>, Vec<CreateAccountResult>), Error>>
     {
         self.execute::<tbc::CreateAccounts>(completion, accounts, results)
     }
@@ -847,7 +847,7 @@ impl Client {
         completion: Completion,
         transfers: Vec<Transfer>,
         results: Vec<CreateTransferResult>,
-    ) -> impl Future<Output = Result<(Completion, Vec<Transfer>, Vec<CreateTransferResult>), PacketError>>
+    ) -> impl Future<Output = Result<(Completion, Vec<Transfer>, Vec<CreateTransferResult>), Error>>
     {
         self.execute::<tbc::CreateTransfers>(completion, transfers, results)
     }
@@ -865,7 +865,7 @@ impl Client {
         completion: Completion,
         ids: Vec<u128>,
         results: Vec<Account>,
-    ) -> impl Future<Output = Result<(Completion, Vec<u128>, Vec<Account>), PacketError>> {
+    ) -> impl Future<Output = Result<(Completion, Vec<u128>, Vec<Account>), Error>> {
         self.execute::<tbc::LookupAccounts>(completion, ids, results)
     }
 
@@ -882,7 +882,7 @@ impl Client {
         completion: Completion,
         ids: Vec<u128>,
         results: Vec<Transfer>,
-    ) -> impl Future<Output = Result<(Completion, Vec<u128>, Vec<Transfer>), PacketError>> {
+    ) -> impl Future<Output = Result<(Completion, Vec<u128>, Vec<Transfer>), Error>> {
         self.execute::<tbc::LookupTransfers>(completion, ids, results)
     }
 
@@ -899,7 +899,7 @@ impl Client {
         completion: Completion,
         filter: AccountFilter,
         results: Vec<Transfer>,
-    ) -> impl Future<Output = Result<(Completion, AccountFilter, Vec<Transfer>), PacketError>> {
+    ) -> impl Future<Output = Result<(Completion, AccountFilter, Vec<Transfer>), Error>> {
         self.execute::<tbc::GetAccountTransfers>(completion, filter, results)
     }
 
@@ -916,8 +916,7 @@ impl Client {
         completion: Completion,
         filter: AccountFilter,
         results: Vec<AccountBalance>,
-    ) -> impl Future<Output = Result<(Completion, AccountFilter, Vec<AccountBalance>), PacketError>>
-    {
+    ) -> impl Future<Output = Result<(Completion, AccountFilter, Vec<AccountBalance>), Error>> {
         self.execute::<tbc::GetAccountBalances>(completion, filter, results)
     }
 
@@ -934,7 +933,7 @@ impl Client {
         completion: Completion,
         filter: QueryFilter,
         results: Vec<Account>,
-    ) -> impl Future<Output = Result<(Completion, QueryFilter, Vec<Account>), PacketError>> {
+    ) -> impl Future<Output = Result<(Completion, QueryFilter, Vec<Account>), Error>> {
         self.execute::<tbc::QueryAccounts>(completion, filter, results)
     }
 
@@ -951,25 +950,25 @@ impl Client {
         completion: Completion,
         filter: QueryFilter,
         results: Vec<Transfer>,
-    ) -> impl Future<Output = Result<(Completion, QueryFilter, Vec<Transfer>), PacketError>> {
+    ) -> impl Future<Output = Result<(Completion, QueryFilter, Vec<Transfer>), Error>> {
         self.execute::<tbc::QueryTransfers>(completion, filter, results)
     }
 
     /// Close the client and asynchronously wait for completion.
     ///
-    /// The returned future resolves to `Err(PacketError::ClientClosed)` if the client
+    /// The returned future resolves to `Err(Error::ClientClosed)` if the client
     /// was already invalidated by eviction.
     ///
     /// Calling `close` will cancel any pending requests. This is only possible
     /// if the futures for those requests were dropped without awaiting them.
-    pub fn close(mut self) -> impl Future<Output = Result<(), PacketError>> {
+    pub fn close(mut self) -> impl Future<Output = Result<(), Error>> {
         struct SendClient(*mut tbc::tb_client_t);
         unsafe impl Send for SendClient {}
 
         let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
         let client = SendClient(client);
 
-        let (tx, rx) = oneshot::channel::<Result<(), PacketError>>();
+        let (tx, rx) = oneshot::channel::<Result<(), Error>>();
 
         std::thread::spawn(move || {
             let client = client;
@@ -980,14 +979,14 @@ impl Client {
         rx
     }
 
-    unsafe fn deinit_raw(client: *mut tbc::tb_client_t) -> Result<(), PacketError> {
+    unsafe fn deinit_raw(client: *mut tbc::tb_client_t) -> Result<(), Error> {
         // This is a blocking function, so callers should run it off-thread.
         let status = tbc::tb_client_deinit(client);
         drop(Box::from_raw(client));
 
         match status {
             tbc::TB_CLIENT_STATUS_TB_CLIENT_SUCCESS => Ok(()),
-            tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => Err(PacketError::ClientClosed),
+            tbc::TB_CLIENT_STATUS_TB_CLIENT_CLOSED => Err(Error::ClientClosed),
             tbc::TB_CLIENT_STATUS_TB_CLIENT_NOT_INITIALIZED => {
                 unreachable!("Client interface not initialized")
             }
@@ -1206,7 +1205,7 @@ impl core::fmt::Display for InitError {
 /// then all operations in the request can be assumed to have not been processed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum PacketError {
+pub enum Error {
     /// Too many events were submitted to a multi-event request.
     TooMuchData,
     /// The client was evicted by the server.
@@ -1227,8 +1226,8 @@ pub enum PacketError {
     InvalidDataSize,
 }
 
-impl std::error::Error for PacketError {}
-impl core::fmt::Display for PacketError {
+impl std::error::Error for Error {}
+impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::TooMuchData => f.write_str("too much data"),
