@@ -674,7 +674,7 @@ test "create_transfers options swarm" {
     @setEvalBranchQuota(100_000);
     var covered = std.EnumArray(tb.CreateTransferStatus.Ordered, bool).initFill(false);
 
-    for (0..100) |seed| {
+    for (0..1_000) |seed| {
         var prng = stdx.PRNG.from_seed(seed);
         const options = options_swarm(&prng);
         var model: StateMachineReferenceType(400, 400) = .{};
@@ -730,14 +730,6 @@ test "create_transfers options swarm" {
                 assert(covered.get(status) == false);
                 continue;
             },
-            .exists_with_different_user_data_128 => {
-                assert(covered.get(status) == false);
-                continue;
-            },
-            .exists_with_different_user_data_32 => {
-                assert(covered.get(status) == false);
-                continue;
-            },
             .exists_with_different_user_data_64 => {
                 assert(covered.get(status) == false);
                 continue;
@@ -763,10 +755,6 @@ test "create_transfers options swarm" {
                 continue;
             },
             .overflows_credits_pending => {
-                assert(covered.get(status) == false);
-                continue;
-            },
-            .overflows_credits_posted => {
                 assert(covered.get(status) == false);
                 continue;
             },
@@ -811,10 +799,6 @@ test "create_transfers options swarm" {
                 continue;
             },
             .pending_transfer_has_different_ledger => {
-                assert(covered.get(status) == false);
-                continue;
-            },
-            .pending_transfer_not_pending => {
                 assert(covered.get(status) == false);
                 continue;
             },
